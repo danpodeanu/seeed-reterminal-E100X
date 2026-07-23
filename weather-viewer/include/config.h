@@ -34,7 +34,16 @@ constexpr int ui(int e1001Pixels) {
          UI_SCALE_DENOMINATOR;
 }
 
-constexpr uint64_t SLEEP_SECONDS = 15ULL * 60ULL;
+// Edit these values for the forecast location.
+constexpr char LOCATION_NAME[] = "Suzhou";
+constexpr double LATITUDE = 31.2989;
+constexpr double LONGITUDE = 120.5853;
+
+constexpr uint8_t FORECAST_DAYS = 3;
+constexpr uint8_t RAIN_FORECAST_HOURS = 48;
+constexpr float RAIN_START_THRESHOLD_MM = 0.1f;
+constexpr uint8_t RAIN_PROBABILITY_THRESHOLD = 30;
+constexpr uint64_t SLEEP_SECONDS = 30ULL * 60ULL;
 constexpr uint32_t WIFI_TIMEOUT_MS = 30000;
 constexpr uint32_t HTTP_TIMEOUT_MS = 25000;
 // POSIX TZ notation uses the opposite sign: CST-8 means UTC+8.
@@ -42,32 +51,11 @@ constexpr char TIMEZONE[] = "CST-8";
 constexpr char NTP_SERVER_PRIMARY[] = "pool.ntp.org";
 constexpr char NTP_SERVER_SECONDARY[] = "time.cloudflare.com";
 constexpr uint32_t NTP_SYNC_TIMEOUT_MS = 10000;
-constexpr uint32_t DOWNLOAD_IDLE_TIMEOUT_MS = 10000;
 constexpr uint8_t SENSOR_READ_ATTEMPTS = 4;
 constexpr uint32_t SENSOR_RETRY_DELAY_MS = 75;
 constexpr uint32_t SCREENSHOT_LONG_PRESS_MS = 1500;
 constexpr uint32_t BUTTON_RELEASE_DEBOUNCE_MS = 40;
-constexpr size_t MAX_IMAGE_BYTES = 6U * 1024U * 1024U;
-constexpr size_t MAX_LIVE_IMAGE_BYTES = 2U * 1024U * 1024U;
-constexpr uint8_t MAX_COMIC_ATTEMPTS = 8;
-constexpr uint32_t LATEST_CHECK_CYCLES = 24;  // 24 x 15 minutes = 6 hours
-
-// Preserve the previous server's rule: do not make a comic illegible merely
-// to squeeze it onto the panel.
-constexpr float MIN_DISPLAY_SCALE = 0.65f;
-// Extremely narrow results can still be illegible on high-resolution panels
-// even when little or no downscaling is required.
-constexpr int MIN_RENDERED_WIDTH = PANEL_WIDTH / 4;
-constexpr float DITHER_GAMMA = 1.0f;
-
-constexpr int CONTENT_MARGIN_X = ui(10);
-constexpr int CONTENT_TOP = ui(50);
-constexpr int FOOTER_BOTTOM = PANEL_HEIGHT - ui(12);
-constexpr int FOOTER_MAX_LINES = 3;
-constexpr int FOOTER_LINE_HEIGHT = ui(22);
-
-constexpr char CACHE_DIR[] = "/xkcd";
-constexpr char LATEST_CACHE[] = "/xkcd/latest.json";
-constexpr char XKCD_LATEST_URL[] = "https://xkcd.com/info.0.json";
+constexpr char CACHE_DIR[] = "/weather";
+constexpr char FORECAST_CACHE[] = "/weather/forecast.json";
 
 }  // namespace config
