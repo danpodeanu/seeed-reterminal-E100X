@@ -1,4 +1,4 @@
-name: Build firmware
+name: Build XKCD Viewer firmware
 
 on:
   push:
