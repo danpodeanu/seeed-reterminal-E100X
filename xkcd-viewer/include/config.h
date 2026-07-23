@@ -41,7 +41,9 @@ constexpr uint32_t HTTP_TIMEOUT_MS = 25000;
 constexpr char TIMEZONE[] = "CST-8";
 constexpr char NTP_SERVER_PRIMARY[] = "pool.ntp.org";
 constexpr char NTP_SERVER_SECONDARY[] = "time.cloudflare.com";
+constexpr uint32_t NTP_DHCP_TIMEOUT_MS = 4000;
 constexpr uint32_t NTP_SYNC_TIMEOUT_MS = 10000;
+constexpr uint32_t NTP_REFRESH_SECONDS = 24UL * 60UL * 60UL;
 constexpr uint32_t DOWNLOAD_IDLE_TIMEOUT_MS = 10000;
 constexpr uint8_t SENSOR_READ_ATTEMPTS = 4;
 constexpr uint32_t SENSOR_RETRY_DELAY_MS = 75;
@@ -50,7 +52,20 @@ constexpr uint32_t BUTTON_RELEASE_DEBOUNCE_MS = 40;
 constexpr size_t MAX_IMAGE_BYTES = 6U * 1024U * 1024U;
 constexpr size_t MAX_LIVE_IMAGE_BYTES = 2U * 1024U * 1024U;
 constexpr uint8_t MAX_COMIC_ATTEMPTS = 8;
-constexpr uint32_t LATEST_CHECK_CYCLES = 24;  // 24 x 15 minutes = 6 hours
+constexpr uint32_t ARCHIVE_REFRESH_SECONDS = 6UL * 60UL * 60UL;
+constexpr uint8_t ARCHIVE_OLD_COMICS_PER_REFRESH = 10;
+
+// Suppress automatic and right-button refreshes overnight. A green-button
+// wake still refreshes immediately, then sleeps until the configured end.
+constexpr bool QUIET_HOURS_ENABLED = true;
+constexpr uint8_t QUIET_START_HOUR = 1;
+constexpr uint8_t QUIET_START_MINUTE = 0;
+constexpr uint8_t QUIET_END_HOUR = 7;
+constexpr uint8_t QUIET_END_MINUTE = 0;
+static_assert(QUIET_START_HOUR < 24 && QUIET_END_HOUR < 24,
+              "Quiet-hour values must be between 0 and 23");
+static_assert(QUIET_START_MINUTE < 60 && QUIET_END_MINUTE < 60,
+              "Quiet-minute values must be between 0 and 59");
 
 // Preserve the previous server's rule: do not make a comic illegible merely
 // to squeeze it onto the panel.
