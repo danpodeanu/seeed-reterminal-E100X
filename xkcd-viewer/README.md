@@ -112,8 +112,9 @@ PIO_PYTHON="$(head -n 1 "$(command -v pio)" | sed 's/^#!//')"
 
 ## Operation
 
-- A cold boot displays the device Wi-Fi MAC address above
-  `Connecting to <SSID>` before joining Wi-Fi.
+- A cold boot or reset displays the device Wi-Fi MAC address above
+  `Connecting to <SSID>` before joining Wi-Fi. Button and automatic timer
+  wakes skip this extra panel refresh to conserve battery power.
 - Every refresh selects a random XKCD. The default sleep interval is 15
   minutes.
 - The green GPIO3 button and right GPIO4 button wake the device and request a

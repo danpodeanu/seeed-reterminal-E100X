@@ -302,27 +302,29 @@ void drawBadges() {
   selectStatusFont();
 
   const int statusCenterY = config::ui(24);
+  const int edgeInset = config::ui(6);
   epaper.fillRect(0, config::ui(5), config::ui(190), config::ui(36), PANEL_WHITE);
   epaper.setTextDatum(ML_DATUM);
   String climate = "--.-C  --%";
   if (climateValid) {
     climate = String(temperatureC, 1) + "C  " + String(humidityPct, 0) + "%";
   }
-  epaper.drawString(climate, config::ui(3), statusCenterY, 1);
+  epaper.drawString(climate, edgeInset, statusCenterY, 1);
 
   epaper.fillRect(config::PANEL_WIDTH - config::ui(150), config::ui(5),
                   config::ui(150), config::ui(36), PANEL_WHITE);
   String percent = batteryPct >= 0 ? String(batteryPct) + "%" : "--%";
 
-  // Nudge the gauge below the mathematical text center so it aligns with the
-  // percentage's visible glyphs. Its terminal reaches the panel's right edge.
-  const int x = config::PANEL_WIDTH - config::ui(27);
+  // Keep the whole battery group clear of the bezel. A fixed two-pixel optical
+  // offset aligns the gauge with the percentage on the high-DPI E1003 without
+  // over-scaling that adjustment.
   const int w = config::ui(22);
   const int h = config::ui(12);
-  const int gaugeCenterY = statusCenterY + config::ui(2);
+  const int terminalWidth = max(3, config::ui(5));
+  const int x = config::PANEL_WIDTH - edgeInset - terminalWidth - w;
+  const int gaugeCenterY = statusCenterY + 2;
   const int y = gaugeCenterY - h / 2;
   const int outline = max(1, config::ui(1));
-  const int terminalWidth = config::PANEL_WIDTH - (x + w);
   const int terminalHeight = max(3, config::ui(5));
 
   epaper.setTextDatum(MR_DATUM);
@@ -1336,20 +1338,33 @@ void setup() {
   readSensors();
 
   epaper.begin();
+  const bool showConnectionStatus =
+      wakeCause == ESP_SLEEP_WAKEUP_UNDEFINED;
+  const String stationMac = wifiStationMacAddress();
+  LOG.printf("[wifi] station MAC=%s\n", stationMac.c_str());
+
 #if RETERMINAL_MODEL == 1001
+  // UC8179 Gray4 initialization expects a native 1-bit update first. Rendering
+  // the cold-boot status before switching modes makes that screen the required
+  // first update instead of having the first Gray4 frame disappear.
+  if (showConnectionStatus) {
+    LOG.println("[display] showing Wi-Fi connection status");
+    renderStatus("Connecting to " + String(WIFI_SSID), "",
+                 stationMac);
+  }
   epaper.initGrayMode(GRAY_LEVEL4);
 #elif RETERMINAL_MODEL == 1003
   epaper.initGrayMode(GRAY_LEVEL16);
 #endif
   epaper.fillSprite(PANEL_WHITE);
 
-  const bool coldBoot = wakeCause == ESP_SLEEP_WAKEUP_UNDEFINED;
-  const String stationMac = wifiStationMacAddress();
-  LOG.printf("[wifi] station MAC=%s\n", stationMac.c_str());
-  if (coldBoot) {
+#if RETERMINAL_MODEL != 1001
+  if (showConnectionStatus) {
+    LOG.println("[display] showing Wi-Fi connection status");
     renderStatus("Connecting to " + String(WIFI_SSID), "",
-                 "MAC: " + stationMac);
+                 stationMac);
   }
+#endif
 
   sdReady = mountSd();
   if (screenshotRequested && !sdReady) {
