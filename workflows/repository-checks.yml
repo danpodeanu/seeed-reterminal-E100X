@@ -1,0 +1,50 @@
+name: Repository checks
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  repository:
+    name: Check repository contents
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Check required project files
+        shell: bash
+        run: |
+          set -euo pipefail
+          for project in xkcd-viewer weather-viewer; do
+            test -f "$project/README.md"
+            test -f "$project/platformio.ini"
+            test -f "$project/include/secrets.h.example"
+          done
+          test -f xkcd-viewer/assets/e1003-xkcd-screenshot.png
+          test -f weather-viewer/assets/e1003-weather-screenshot.png
+
+      - name: Ensure private and generated files are not tracked
+        shell: bash
+        run: |
+          set -euo pipefail
+          forbidden="$(
+            git ls-files |
+              grep -E '(^|/)secrets\.h$|(^|/)\.pio/|(^|/)firmware\.(bin|elf|map)$' ||
+              true
+          )"
+          if [[ -n "$forbidden" ]]; then
+            echo "Private or generated files must not be committed:"
+            echo "$forbidden"
+            exit 1
+          fi
