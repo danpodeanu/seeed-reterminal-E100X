@@ -2,6 +2,7 @@
 
 [![XKCD Viewer build](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/xkcd-viewer-build.yml/badge.svg?branch=main&event=push)](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/xkcd-viewer-build.yml)
 [![Weather Viewer build](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/weather-viewer-build.yml/badge.svg?branch=main&event=push)](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/weather-viewer-build.yml)
+[![Photo Viewer build](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/photo-viewer-build.yml/badge.svg?branch=main&event=push)](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/photo-viewer-build.yml)
 [![Repository checks](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/repository-checks.yml/badge.svg?branch=main&event=push)](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/repository-checks.yml)
 [![CodeQL](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/codeql.yml/badge.svg?branch=main&event=push)](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/codeql.yml)
 
@@ -19,6 +20,7 @@ details.
 | --- | --- | --- |
 | [XKCD Viewer](xkcd-viewer/) | A battery-powered random XKCD display with model-aware scaling, optional SD caching, environmental readings, and deep sleep. | Available |
 | [Weather Viewer](weather-viewer/) | A low-power current-conditions and three-day forecast display using Open-Meteo, local environmental readings, and deep sleep. | Available |
+| [Photo Viewer](photo-viewer/) | A private, SD-card photo frame with panel-native preprocessing, full model-specific color, quiet hours, daily time sync, and deep sleep. | Available |
 
 ## XKCD Viewer example
 
@@ -42,7 +44,6 @@ Possible additions include:
 - A low-power clock and calendar.
 - A household information dashboard.
 - RSS, news, transit, or status displays.
-- Photo, artwork, and rotating information frames.
 
 These are ideas rather than committed features. New applications can use a
 different framework or architecture where that better suits their use case.
@@ -54,6 +55,7 @@ different framework or architecture where that better suits their use case.
 ├── .github/workflows/    # Repository-level build checks
 ├── xkcd-viewer/          # Standalone XKCD display firmware
 ├── weather-viewer/       # Standalone weather display firmware
+├── photo-viewer/         # SD-card photo-frame firmware and preparation tool
 └── README.md             # This project index
 ```
 

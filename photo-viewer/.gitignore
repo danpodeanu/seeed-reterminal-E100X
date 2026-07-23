@@ -1,0 +1,25 @@
+# PlatformIO build products and generated tooling files
+.pio/
+compile_commands.json
+.cache/
+.clangd/
+
+# Local credentials (commit include/secrets.h.example instead)
+include/secrets.h
+
+# Local Python environments
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+
+# Editors and operating systems
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Local logs
+*.log
