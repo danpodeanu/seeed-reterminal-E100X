@@ -92,7 +92,9 @@ float temperatureC = NAN;
 float humidityPct = NAN;
 float batteryVoltage = NAN;
 int batteryPct = -1;
-RTC_DATA_ATTR uint32_t cyclesSinceLatestCheck = config::LATEST_CHECK_CYCLES;
+RTC_DATA_ATTR time_t lastNtpSyncEpoch = 0;
+RTC_DATA_ATTR time_t lastArchiveRefreshEpoch = 0;
+bool quietSleepNotice = false;
 
 struct Comic {
   int number = 0;
@@ -114,6 +116,87 @@ struct ImageLayout {
 };
 
 void updatePanel();
+
+bool clockIsValid() {
+  return time(nullptr) >= 1700000000;
+}
+
+void configureLocalTimezone() {
+  setenv("TZ", config::TIMEZONE, 1);
+  tzset();
+}
+
+bool localClock(struct tm& localTime) {
+  const time_t now = time(nullptr);
+  return clockIsValid() && localtime_r(&now, &localTime) != nullptr;
+}
+
+int secondsOfDay(const struct tm& localTime) {
+  return localTime.tm_hour * 3600 + localTime.tm_min * 60 +
+         localTime.tm_sec;
+}
+
+int quietStartSecond() {
+  return config::QUIET_START_HOUR * 3600 +
+         config::QUIET_START_MINUTE * 60;
+}
+
+int quietEndSecond() {
+  return config::QUIET_END_HOUR * 3600 +
+         config::QUIET_END_MINUTE * 60;
+}
+
+bool quietHoursActive(const struct tm& localTime) {
+  if (!config::QUIET_HOURS_ENABLED) return false;
+  const int now = secondsOfDay(localTime);
+  const int start = quietStartSecond();
+  const int end = quietEndSecond();
+  if (start == end) return true;
+  if (start < end) return now >= start && now < end;
+  return now >= start || now < end;
+}
+
+uint64_t secondsUntilTimeOfDay(int targetSecond,
+                               const struct tm& localTime) {
+  int delta = targetSecond - secondsOfDay(localTime);
+  if (delta <= 0) delta += 24 * 60 * 60;
+  return static_cast<uint64_t>(delta);
+}
+
+uint64_t secondsUntilQuietEnd(const struct tm& localTime) {
+  return secondsUntilTimeOfDay(quietEndSecond(), localTime);
+}
+
+bool nextWakeFallsInQuietHours(const struct tm& localTime,
+                               uint64_t normalSleepSeconds) {
+  if (!config::QUIET_HOURS_ENABLED || quietHoursActive(localTime))
+    return false;
+  return secondsUntilTimeOfDay(quietStartSecond(), localTime) <=
+         normalSleepSeconds;
+}
+
+String quietEndLabel() {
+  char label[6] = {};
+  snprintf(label, sizeof(label), "%02u:%02u", config::QUIET_END_HOUR,
+           config::QUIET_END_MINUTE);
+  return String(label);
+}
+
+bool ntpRefreshDue(bool coldBoot) {
+  if (coldBoot || !clockIsValid() || lastNtpSyncEpoch <= 0) return true;
+  const time_t now = time(nullptr);
+  return now < lastNtpSyncEpoch ||
+         static_cast<uint64_t>(now - lastNtpSyncEpoch) >=
+             config::NTP_REFRESH_SECONDS;
+}
+
+bool archiveRefreshDue() {
+  if (!clockIsValid() || lastArchiveRefreshEpoch <= 0) return true;
+  const time_t now = time(nullptr);
+  return now < lastArchiveRefreshEpoch ||
+         static_cast<uint64_t>(now - lastArchiveRefreshEpoch) >=
+             config::ARCHIVE_REFRESH_SECONDS;
+}
 
 void logMemory(const char* label) {
   LOG.printf("[mem] %-20s heap=%luK psram=%lu/%luK\n", label,
@@ -416,11 +499,13 @@ bool mountSd() {
   spi.begin(PIN_SD_SCK, PIN_SD_MISO, PIN_SD_MOSI, -1);
   if (!SD.begin(PIN_SD_CS, spi)) {
     LOG.println("[sd] mount failed; insert a FAT32/exFAT card");
+    digitalWrite(PIN_SD_ENABLE, LOW);
     return false;
   }
   if (!SD.exists(config::CACHE_DIR) && !SD.mkdir(config::CACHE_DIR)) {
     LOG.println("[sd] could not create /xkcd");
     SD.end();
+    digitalWrite(PIN_SD_ENABLE, LOW);
     return false;
   }
   LOG.printf("[sd] mounted, card=%lluMB\n",
@@ -838,6 +923,52 @@ String imageExtension(const String& url) {
   return "";
 }
 
+bool comicFullyCached(int number) {
+  if (!sdReady || number <= 0 || number == 404) return false;
+  String json;
+  Comic comic;
+  if (!readFile(metadataPath(number), json) || !parseComic(json, comic))
+    return false;
+  const String extension = imageExtension(comic.imageUrl);
+  if (extension.isEmpty()) return false;
+  return SD.exists(String(config::CACHE_DIR) + "/" + number + extension);
+}
+
+uint32_t countCachedComics() {
+  if (!sdReady) return 0;
+  File directory = SD.open(config::CACHE_DIR);
+  if (!directory || !directory.isDirectory()) return 0;
+  uint32_t count = 0;
+  File entry = directory.openNextFile();
+  while (entry) {
+    if (!entry.isDirectory()) {
+      String name = entry.name();
+      const int slash = name.lastIndexOf('/');
+      if (slash >= 0) name = name.substring(slash + 1);
+      const int dot = name.lastIndexOf('.');
+      if (dot > 0) {
+        String extension = name.substring(dot);
+        extension.toLowerCase();
+        if (extension == ".png" || extension == ".jpg" ||
+            extension == ".jpeg" || extension == ".bmp") {
+          String numberText = name.substring(0, dot);
+          bool numeric = !numberText.isEmpty();
+          for (size_t i = 0; i < numberText.length(); ++i)
+            numeric &= isDigit(numberText[i]);
+          if (numeric &&
+              SD.exists(metadataPath(numberText.toInt()))) {
+            ++count;
+          }
+        }
+      }
+    }
+    entry.close();
+    entry = directory.openNextFile();
+  }
+  directory.close();
+  return count;
+}
+
 bool getComic(int number, bool networkAvailable, Comic& comic) {
   const String metaPath = metadataPath(number);
   String json;
@@ -882,19 +1013,15 @@ bool getComic(int number, bool networkAvailable, Comic& comic) {
   return true;
 }
 
-bool getLatestNumber(bool networkAvailable, int& latest) {
+bool getLatestNumber(bool networkAvailable, int& latest,
+                     bool refreshOnline = false) {
   String json;
   Comic comic;
   const bool shouldCheckOnline = networkAvailable &&
-      (!SD.exists(config::LATEST_CACHE) ||
-       cyclesSinceLatestCheck >= config::LATEST_CHECK_CYCLES);
+      (refreshOnline || !SD.exists(config::LATEST_CACHE));
   if (shouldCheckOnline) {
-    // Whether this succeeds or falls back to the saved value, avoid hitting
-    // xkcd every 15 minutes. A missing cache is retried on the next wake.
-    if (SD.exists(config::LATEST_CACHE)) cyclesSinceLatestCheck = 0;
     if (httpGetString(config::XKCD_LATEST_URL, json) && parseComic(json, comic)) {
       latest = comic.number;
-      cyclesSinceLatestCheck = 0;
       if (!writeFileAtomically(config::LATEST_CACHE, json)) {
         sdCacheWritable = false;
         LOG.println("[cache] latest metadata not stored; using live value");
@@ -911,14 +1038,55 @@ bool getLatestNumber(bool networkAvailable, int& latest) {
   }
   if (readFile(config::LATEST_CACHE, json) && parseComic(json, comic)) {
     latest = comic.number;
-    LOG.printf("[xkcd] cached latest is #%d (online check in %lu cycles)\n", latest,
-               static_cast<unsigned long>(
-                   cyclesSinceLatestCheck >= config::LATEST_CHECK_CYCLES
-                       ? 0
-                       : config::LATEST_CHECK_CYCLES - cyclesSinceLatestCheck));
+    LOG.printf("[xkcd] cached latest is #%d\n", latest);
     return true;
   }
   return false;
+}
+
+void refreshArchiveCache() {
+  if (!sdReady || WiFi.status() != WL_CONNECTED) return;
+
+  int previousLatest = 0;
+  getLatestNumber(false, previousLatest);
+  int latest = 0;
+  if (!getLatestNumber(true, latest, true)) {
+    LOG.println("[precache] latest XKCD lookup failed");
+    return;
+  }
+
+  uint8_t latestAdded = 0;
+  if ((latest > previousLatest || !comicFullyCached(latest)) &&
+      latest != 404) {
+    Comic newest;
+    if (getComic(latest, true, newest) && comicFullyCached(latest)) {
+      latestAdded = 1;
+      LOG.printf("[precache] cached newest comic #%d\n", latest);
+    }
+  }
+
+  uint8_t oldAdded = 0;
+  uint16_t attempts = 0;
+  const uint16_t requestedAttempts =
+      static_cast<uint16_t>(config::ARCHIVE_OLD_COMICS_PER_REFRESH) * 20U;
+  const uint16_t maxAttempts =
+      requestedAttempts > 80U ? requestedAttempts : 80U;
+  while (oldAdded < config::ARCHIVE_OLD_COMICS_PER_REFRESH &&
+         attempts++ < maxAttempts && latest > 1 && sdCacheWritable) {
+    const int number = random(1, latest);
+    if (number == 404 || comicFullyCached(number)) continue;
+    Comic historical;
+    if (getComic(number, true, historical) && comicFullyCached(number)) {
+      ++oldAdded;
+      LOG.printf("[precache] cached historical comic %u/%u: #%d\n",
+                 oldAdded, config::ARCHIVE_OLD_COMICS_PER_REFRESH, number);
+    }
+  }
+
+  LOG.printf("[precache] refill complete: %u newest, %u historical, "
+             "%lu total cached\n",
+             latestAdded, oldAdded,
+             static_cast<unsigned long>(countCachedComics()));
 }
 
 bool getLatestNumberWithoutSd(bool networkAvailable, int& latest) {
@@ -962,13 +1130,25 @@ int pickRandomCachedNumber() {
       String name = entry.name();
       const int slash = name.lastIndexOf('/');
       if (slash >= 0) name = name.substring(slash + 1);
-      if (name.endsWith(".json") && name != "latest.json") {
-        name.remove(name.length() - 5);
-        bool numeric = !name.isEmpty();
-        for (size_t i = 0; i < name.length(); ++i) numeric &= isDigit(name[i]);
-        if (numeric) {
+      const int dot = name.lastIndexOf('.');
+      if (dot > 0) {
+        String extension = name.substring(dot);
+        extension.toLowerCase();
+        if (extension == ".png" || extension == ".jpg" ||
+            extension == ".jpeg" || extension == ".bmp") {
+          const String numberText = name.substring(0, dot);
+          bool numeric = !numberText.isEmpty();
+          for (size_t i = 0; i < numberText.length(); ++i)
+            numeric &= isDigit(numberText[i]);
+          const int number = numeric ? numberText.toInt() : 0;
+          if (!numeric || number <= 0 || number == 404 ||
+              !SD.exists(metadataPath(number))) {
+            entry.close();
+            entry = directory.openNextFile();
+            continue;
+          }
           ++seen;
-          if (random(static_cast<long>(seen)) == 0) selected = name.toInt();
+          if (random(static_cast<long>(seen)) == 0) selected = number;
         }
       }
     }
@@ -1056,8 +1236,14 @@ bool loadUsableComic(int number, bool networkAvailable, Comic& comic,
   }
 
   if (!decoded) {
-    LOG.printf("[comic] #%d could not be decoded from cache or live data\n",
-               number);
+    if (!sdImageReady && !networkAvailable) {
+      LOG.printf("[comic] #%d is not fully cached\n", number);
+    } else if (comic.number <= 0 || comic.imageUrl.isEmpty()) {
+      LOG.printf("[comic] #%d metadata or image is unavailable\n", number);
+    } else {
+      LOG.printf("[comic] #%d could not be decoded from cache or live data\n",
+                 number);
+    }
     return false;
   }
   layout = calculateLayout(comic, image.width, image.height);
@@ -1073,21 +1259,27 @@ bool loadUsableComic(int number, bool networkAvailable, Comic& comic,
 
 bool acquireComic(bool networkAvailable, Comic& comic, RgbImage& image,
                   ImageLayout& layout) {
-  int latest = 0;
-  if (getLatestNumber(networkAvailable, latest)) {
-    for (uint8_t attempt = 0; attempt < config::MAX_COMIC_ATTEMPTS; ++attempt) {
-      int number = random(1, latest + 1);
-      if (number == 404) continue;
-      LOG.printf("[comic] random attempt %u: #%d\n", attempt + 1, number);
-      if (loadUsableComic(number, networkAvailable, comic, image, layout)) return true;
-      image_free(&image);
+  if (networkAvailable) {
+    int latest = 0;
+    if (getLatestNumber(true, latest)) {
+      for (uint8_t attempt = 0; attempt < config::MAX_COMIC_ATTEMPTS;
+           ++attempt) {
+        int number = random(1, latest + 1);
+        if (number == 404) continue;
+        LOG.printf("[comic] random attempt %u: #%d\n", attempt + 1, number);
+        if (loadUsableComic(number, true, comic, image, layout)) return true;
+        image_free(&image);
+      }
     }
+    LOG.println("[comic] live selection failed; trying the local SD cache");
+  } else {
+    LOG.println("[comic] offline wake; selecting from the local SD cache");
   }
 
-  LOG.println("[comic] trying the local SD cache");
   for (uint8_t attempt = 0; attempt < config::MAX_COMIC_ATTEMPTS; ++attempt) {
     const int number = pickRandomCachedNumber();
     if (number <= 0 || number == 404) continue;
+    LOG.printf("[cache] random local attempt %u: #%d\n", attempt + 1, number);
     if (loadUsableComic(number, false, comic, image, layout)) return true;
     image_free(&image);
   }
@@ -1190,7 +1382,11 @@ bool renderComic(const Comic& comic, RgbImage& image, ImageLayout layout) {
 
   epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, true);
   epaper.setTextDatum(MC_DATUM);
-  const String heading = "XKCD #" + String(comic.number) + " - " + comic.title;
+  const String heading =
+      quietSleepNotice
+          ? "XKCD #" + String(comic.number) + " - sleeping until " +
+                quietEndLabel()
+          : "XKCD #" + String(comic.number) + " - " + comic.title;
   selectTitleFont();
   epaper.drawString(ellipsize(heading, config::PANEL_WIDTH - config::ui(380), 1),
                     config::PANEL_WIDTH / 2, config::ui(24), 1);
@@ -1227,6 +1423,15 @@ bool connectWifi() {
   WiFi.persistent(false);
   WiFi.setSleep(true);
   WiFi.mode(WIFI_STA);
+#if LWIP_DHCP_GET_NTP_SRV
+  // DHCP option 42 is accepted only when enabled before the lease is
+  // acquired. Clear any server names left by an earlier fallback attempt so
+  // synchronizeClock() can reliably tell whether DHCP supplied a server.
+  if (esp_sntp_enabled()) esp_sntp_stop();
+  for (uint8_t index = 0; index < SNTP_MAX_SERVERS; ++index)
+    esp_sntp_setservername(index, nullptr);
+  esp_sntp_servermode_dhcp(true);
+#endif
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   const uint32_t started = millis();
   while (WiFi.status() != WL_CONNECTED && millis() - started < config::WIFI_TIMEOUT_MS) {
@@ -1241,22 +1446,62 @@ bool connectWifi() {
   return true;
 }
 
+void disableWifi() {
+  if (WiFi.getMode() == WIFI_MODE_NULL) return;
+  WiFi.disconnect(true, false);
+  WiFi.mode(WIFI_OFF);
+  LOG.println("[wifi] powered down");
+}
+
 void onNtpTimeSync(struct timeval*) {
   ntpSyncCompleted = true;
+}
+
+bool waitForNtpSync(uint32_t timeoutMs) {
+  const uint32_t started = millis();
+  while (!ntpSyncCompleted && millis() - started < timeoutMs) delay(50);
+  return ntpSyncCompleted;
+}
+
+bool startDhcpNtpIfAvailable() {
+#if LWIP_DHCP_GET_NTP_SRV
+  const ip_addr_t* server = esp_sntp_getserver(0);
+  if (server == nullptr || ip_addr_isany(server)) return false;
+
+  char address[48] = {};
+  ipaddr_ntoa_r(server, address, sizeof(address));
+  LOG.printf("[ntp] trying DHCP server %s\n", address);
+  ntpSyncCompleted = false;
+  if (esp_sntp_enabled()) esp_sntp_stop();
+  esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
+  esp_sntp_init();
+  if (waitForNtpSync(config::NTP_DHCP_TIMEOUT_MS)) return true;
+  LOG.println("[ntp] DHCP server timed out; trying configured servers");
+  return false;
+#else
+  return false;
+#endif
 }
 
 bool synchronizeClock() {
   ntpSyncCompleted = false;
   sntp_set_time_sync_notification_cb(onNtpTimeSync);
-  configTzTime(config::TIMEZONE, config::NTP_SERVER_PRIMARY,
-               config::NTP_SERVER_SECONDARY);
-
-  const uint32_t started = millis();
-  while (!ntpSyncCompleted &&
-         millis() - started < config::NTP_SYNC_TIMEOUT_MS) {
-    delay(50);
+  bool synchronized = startDhcpNtpIfAvailable();
+  if (!synchronized) {
+#if LWIP_DHCP_GET_NTP_SRV
+    const ip_addr_t* dhcpServer = esp_sntp_getserver(0);
+    if (dhcpServer == nullptr || ip_addr_isany(dhcpServer)) {
+      LOG.println("[ntp] DHCP supplied no NTP server; using configured servers");
+    }
+#else
+    LOG.println("[ntp] DHCP NTP is unavailable; using configured servers");
+#endif
+    ntpSyncCompleted = false;
+    configTzTime(config::TIMEZONE, config::NTP_SERVER_PRIMARY,
+                 config::NTP_SERVER_SECONDARY);
+    synchronized = waitForNtpSync(config::NTP_SYNC_TIMEOUT_MS);
   }
-  if (!ntpSyncCompleted) {
+  if (!synchronized) {
     LOG.println("[ntp] synchronization timed out; continuing");
     return false;
   }
@@ -1270,19 +1515,18 @@ bool synchronizeClock() {
   char formatted[40] = {};
   strftime(formatted, sizeof(formatted), "%Y-%m-%d %H:%M:%S %Z",
            &localTime);
+  lastNtpSyncEpoch = now;
   LOG.printf("[ntp] synchronized: %s\n", formatted);
   return true;
 }
 
-void powerDownAndSleep() {
-  WiFi.disconnect(true, false);
-  WiFi.mode(WIFI_OFF);
+void powerDownAndSleep(uint64_t sleepSeconds = config::SLEEP_SECONDS) {
+  disableWifi();
   if (sdReady) SD.end();
+  pinMode(PIN_SD_ENABLE, OUTPUT);
   digitalWrite(PIN_SD_ENABLE, LOW);
+  pinMode(PIN_BATTERY_ENABLE, OUTPUT);
   digitalWrite(PIN_BATTERY_ENABLE, LOW);
-  if (cyclesSinceLatestCheck < config::LATEST_CHECK_CYCLES) {
-    ++cyclesSinceLatestCheck;
-  }
 
   pinMode(PIN_BUTTON_GREEN, INPUT_PULLUP);
   pinMode(PIN_BUTTON_RIGHT, INPUT_PULLUP);
@@ -1303,9 +1547,9 @@ void powerDownAndSleep() {
 
   const uint64_t wakeMask = (1ULL << PIN_BUTTON_GREEN) | (1ULL << PIN_BUTTON_RIGHT);
   esp_sleep_enable_ext1_wakeup(wakeMask, ESP_EXT1_WAKEUP_ANY_LOW);
-  esp_sleep_enable_timer_wakeup(config::SLEEP_SECONDS * 1000000ULL);
+  esp_sleep_enable_timer_wakeup(sleepSeconds * 1000000ULL);
   LOG.printf("[sleep] %llu seconds; GPIO3/GPIO4 wake enabled\n",
-             static_cast<unsigned long long>(config::SLEEP_SECONDS));
+             static_cast<unsigned long long>(sleepSeconds));
   LOG.flush();
   delay(50);
   esp_deep_sleep_start();
@@ -1370,12 +1614,51 @@ void setup() {
     beep();
   }
 
+  const bool coldBoot = wakeCause == ESP_SLEEP_WAKEUP_UNDEFINED;
+  const bool buttonWake = wakeCause == ESP_SLEEP_WAKEUP_EXT1;
+  const bool timerWake = wakeCause == ESP_SLEEP_WAKEUP_TIMER;
+  configureLocalTimezone();
+  const bool ntpDue = ntpRefreshDue(coldBoot);
+  struct tm localTime = {};
+  if (!ntpDue && localClock(localTime) && quietHoursActive(localTime) &&
+      !greenWokeDevice) {
+    const uint64_t quietSleepSeconds = secondsUntilQuietEnd(localTime);
+    LOG.printf("[quiet] refresh suppressed; sleeping until %s\n",
+               quietEndLabel().c_str());
+    powerDownAndSleep(quietSleepSeconds);
+    return;
+  }
+
   randomSeed(esp_random());
   readSensors();
 
   epaper.begin();
-  const bool showConnectionStatus =
-      wakeCause == ESP_SLEEP_WAKEUP_UNDEFINED;
+  sdReady = mountSd();
+  if (screenshotRequested && !sdReady) {
+    LOG.println("[screenshot] request ignored: SD card is unavailable");
+    screenshotRequested = false;
+  }
+
+  // Archive maintenance is deliberately limited to normal timer wakes. Cold
+  // boots only report cache progress, and button wakes stay responsive.
+  const bool archiveDue = sdReady && timerWake && archiveRefreshDue();
+  const bool networkPlanned = !sdReady || buttonWake || ntpDue;
+  const uint32_t cachedComicCount =
+      sdReady && coldBoot ? countCachedComics() : 0;
+  if (sdReady && coldBoot) {
+    LOG.printf("[cache] %lu complete comics available\n",
+               static_cast<unsigned long>(cachedComicCount));
+  }
+  String connectionDetail;
+  if (sdReady) {
+    connectionDetail = String(cachedComicCount) + " comics cached";
+    if (buttonWake) connectionDetail += " - downloading live";
+    else if (ntpDue) connectionDetail += " - synchronizing clock";
+  } else {
+    connectionDetail = "No SD cache - downloading live";
+  }
+
+  const bool showConnectionStatus = coldBoot && networkPlanned;
   const String stationMac = wifiStationMacAddress();
   LOG.printf("[wifi] station MAC=%s\n", stationMac.c_str());
 
@@ -1385,7 +1668,7 @@ void setup() {
   // first update instead of having the first Gray4 frame disappear.
   if (showConnectionStatus) {
     LOG.println("[display] showing Wi-Fi connection status");
-    renderStatus("Connecting to " + String(WIFI_SSID), "",
+    renderStatus("Connecting to " + String(WIFI_SSID), connectionDetail,
                  stationMac);
   }
   epaper.initGrayMode(GRAY_LEVEL4);
@@ -1397,26 +1680,73 @@ void setup() {
 #if RETERMINAL_MODEL != 1001
   if (showConnectionStatus) {
     LOG.println("[display] showing Wi-Fi connection status");
-    renderStatus("Connecting to " + String(WIFI_SSID), "",
+    renderStatus("Connecting to " + String(WIFI_SSID), connectionDetail,
                  stationMac);
   }
 #endif
 
-  sdReady = mountSd();
-  if (screenshotRequested && !sdReady) {
-    LOG.println("[screenshot] request ignored: SD card is unavailable");
-    screenshotRequested = false;
+  bool networkAvailable = false;
+  if (networkPlanned) {
+    networkAvailable = connectWifi();
+  } else {
+    LOG.println("[wifi] skipped; using the local XKCD cache");
   }
-  const bool networkAvailable = connectWifi();
-  if (networkAvailable) synchronizeClock();
+  if (networkAvailable && ntpDue) synchronizeClock();
+  configureLocalTimezone();
+
+  // Treat a restart as the beginning of a new six-hour maintenance interval.
+  // It may show the cache count, but it must not refill the archive before the
+  // first comic frame is displayed.
+  if (coldBoot && clockIsValid()) {
+    lastArchiveRefreshEpoch = time(nullptr);
+    LOG.println("[cache] archive maintenance scheduled in six hours");
+  }
+
+  if (localClock(localTime) && quietHoursActive(localTime) &&
+      !greenWokeDevice) {
+    const uint64_t quietSleepSeconds = secondsUntilQuietEnd(localTime);
+    LOG.printf("[quiet] refresh suppressed after clock sync; sleeping until %s\n",
+               quietEndLabel().c_str());
+    disableWifi();
+    powerDownAndSleep(quietSleepSeconds);
+    return;
+  }
 
   Comic comic;
   RgbImage image;
   ImageLayout layout;
   bool displayed = false;
-  const bool acquired = sdReady
-                            ? acquireComic(networkAvailable, comic, image, layout)
-                            : acquireComicWithoutSd(networkAvailable, comic, image, layout);
+  bool acquired =
+      sdReady
+          ? acquireComic(buttonWake && networkAvailable, comic, image, layout)
+          : acquireComicWithoutSd(networkAvailable, comic, image, layout);
+
+  // A replaced/empty/corrupt card may have no usable local comic even when
+  // the six-hour maintenance interval has not elapsed. Recover live once.
+  if (!acquired && sdReady && !networkAvailable) {
+    LOG.println("[cache] no usable local comic; trying one live refresh");
+    networkAvailable = connectWifi();
+    if (networkAvailable) {
+      if (ntpRefreshDue(coldBoot)) synchronizeClock();
+      acquired = acquireComic(true, comic, image, layout);
+    }
+  }
+
+  // PNG decoding is complete at this point. Keep the radio off during
+  // dithering and the comparatively slow e-paper update.
+  disableWifi();
+
+  uint64_t nextSleepSeconds = config::SLEEP_SECONDS;
+  if (localClock(localTime)) {
+    if (quietHoursActive(localTime) ||
+        nextWakeFallsInQuietHours(localTime, config::SLEEP_SECONDS)) {
+      quietSleepNotice = true;
+      nextSleepSeconds = secondsUntilQuietEnd(localTime);
+      LOG.printf("[quiet] this is the final refresh; sleeping until %s\n",
+                 quietEndLabel().c_str());
+    }
+  }
+
   if (acquired) {
     displayed = renderComic(comic, image, layout);
   }
@@ -1429,7 +1759,20 @@ void setup() {
     renderStatus("XKCD refresh failed", reason);
   }
 
-  powerDownAndSleep();
+  // The panel retains the newly rendered frame without power. Do scheduled
+  // cache maintenance only now, so downloads never delay or replace the UI.
+  if (archiveDue) {
+    LOG.println("[cache] starting scheduled maintenance after panel refresh");
+    if (connectWifi()) {
+      refreshArchiveCache();
+      if (clockIsValid()) lastArchiveRefreshEpoch = time(nullptr);
+    } else {
+      LOG.println("[cache] scheduled maintenance deferred: Wi-Fi unavailable");
+    }
+    disableWifi();
+  }
+
+  powerDownAndSleep(nextSleepSeconds);
 }
 
 void loop() {

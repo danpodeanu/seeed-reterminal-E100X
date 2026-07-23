@@ -26,7 +26,7 @@ export.
 - Cold-boot screen with Wi-Fi SSID and station MAC address.
 - Clearly labeled forecast date/time so stale data is easy to identify.
 - Optional SD cache of the last successful forecast.
-- Deep sleep between updates; either button wakes and refreshes immediately.
+- Deep sleep between updates, with a configurable overnight quiet period.
 - No API key, server, Docker container, or SD card required.
 
 ## Supported models
@@ -64,7 +64,12 @@ the POSIX timezone and NTP servers in the same file:
 constexpr char TIMEZONE[] = "GMT0BST,M3.5.0/1,M10.5.0";
 constexpr char NTP_SERVER_PRIMARY[] = "pool.ntp.org";
 constexpr char NTP_SERVER_SECONDARY[] = "time.cloudflare.com";
+constexpr uint32_t NTP_DHCP_TIMEOUT_MS = 4000;
 ```
+
+The firmware requests NTP servers through DHCP option 42 before acquiring its
+Wi-Fi lease. If DHCP supplies no server, or that server does not respond within
+the configured DHCP timeout, it falls back to the two servers above.
 
 The London rule uses GMT in winter and BST from the last Sunday in March until
 the last Sunday in October. The centered `Weather at` timestamp still comes
@@ -73,6 +78,16 @@ NTP request time.
 
 The default refresh interval is 30 minutes. Change `SLEEP_SECONDS` in the same
 file if needed.
+
+Automatic refreshes are suppressed overnight by default:
+
+```cpp
+constexpr bool QUIET_HOURS_ENABLED = true;
+constexpr uint8_t QUIET_START_HOUR = 1;
+constexpr uint8_t QUIET_START_MINUTE = 0;
+constexpr uint8_t QUIET_END_HOUR = 7;
+constexpr uint8_t QUIET_END_MINUTE = 0;
+```
 
 Rain timing examines the next 48 hourly intervals and selects the first with
 at least 0.1 mm of forecast liquid precipitation and, when probability data
@@ -122,20 +137,27 @@ Logging uses UART1 on GPIO43/GPIO44, matching the carrier USB-to-UART bridge.
 
 - Cold boot/reset displays the station MAC above `Connecting to <SSID>`.
 - Timer wakes update every 30 minutes without an intermediate status refresh.
-- GPIO3 and GPIO4 wake the device, beep once, and force an immediate live API
-  update that bypasses HTTP caches.
+- Outside quiet hours, GPIO3 and GPIO4 wake the device, beep once, and force
+  an immediate live API update that bypasses HTTP caches.
 - Hold the green GPIO3 button while the device is sleeping. Keep holding it
   through the first beep until a second beep confirms screenshot mode. With an
   SD card mounted, the newly rendered weather frame is written as an indexed
   BMP to `/screenshot.bmp`, replacing the previous screenshot. Remove the card
   and open that file on a computer to retrieve it.
-- After joining Wi-Fi, the system clock synchronizes from the configured NTP
-  servers. NTP failure is logged but does not block the weather request.
+- NTP runs on cold boot and at most once daily. DHCP-provided NTP is tried
+  first, followed by the configured public servers. NTP failure is logged but
+  does not block the weather request.
+- From 01:00 until 07:00 by default, timer and right-button wakes return
+  directly to sleep. The final scheduled refresh before 01:00 changes its
+  title to `sleeping until 07:00`. The green button overrides quiet hours,
+  refreshes once, and then sleeps until 07:00.
 - If a background update fails, an SD-cached forecast is used when available;
   otherwise the previous e-paper forecast remains visible.
 - On a cold boot where no forecast has yet been shown, an error screen explains
   whether Wi-Fi or forecast download failed.
-- Wi-Fi and the battery measurement circuit are switched off during sleep.
+- Wi-Fi is switched off as soon as the Open-Meteo response is parsed, before
+  cache writing, frame composition, and panel refresh. The battery measurement
+  circuit is switched off during sleep.
 
 ## Weather data
 

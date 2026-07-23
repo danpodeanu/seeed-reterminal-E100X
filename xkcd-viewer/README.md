@@ -27,6 +27,7 @@ feature. Comic: [XKCD #699 — Trimester](https://xkcd.com/699/).
 - Model-aware image filtering and aspect-ratio-preserving scaling, including
   enlargement of small comics on high-resolution panels.
 - Optional SD cache that stores original images and metadata indefinitely.
+- Cache-first timer wakes that avoid Wi-Fi between six-hour archive refills.
 - Live operation without an SD card using PSRAM only.
 - Temperature and humidity from the built-in SHT4x sensor, plus battery
   percentage and gauge.
@@ -64,18 +65,37 @@ Edit `include/secrets.h` and set `WIFI_SSID` and `WIFI_PASSWORD`. The real file
 is excluded by `.gitignore`; only the placeholder example belongs in version
 control.
 
-The clock synchronizes after Wi-Fi connects. Time settings are in
-`include/config.h`:
+The clock synchronizes on cold boot and then at most once daily. Time settings
+are in `include/config.h`:
 
 ```cpp
 constexpr char TIMEZONE[] = "GMT0BST,M3.5.0/1,M10.5.0";
 constexpr char NTP_SERVER_PRIMARY[] = "pool.ntp.org";
 constexpr char NTP_SERVER_SECONDARY[] = "time.cloudflare.com";
+constexpr uint32_t NTP_DHCP_TIMEOUT_MS = 4000;
 ```
+
+The firmware requests NTP servers through DHCP option 42 before acquiring its
+Wi-Fi lease. If DHCP supplies no server, or that server does not respond within
+the configured DHCP timeout, it falls back to the two servers above.
 
 This example uses London time: GMT in winter and BST from the last Sunday in
 March until the last Sunday in October. Change the POSIX `TIMEZONE` rule when
 deploying the device elsewhere.
+
+The normal interval, archive refill, and overnight quiet period are configured
+in the same file:
+
+```cpp
+constexpr uint64_t SLEEP_SECONDS = 15ULL * 60ULL;
+constexpr uint32_t ARCHIVE_REFRESH_SECONDS = 6UL * 60UL * 60UL;
+constexpr uint8_t ARCHIVE_OLD_COMICS_PER_REFRESH = 10;
+constexpr bool QUIET_HOURS_ENABLED = true;
+constexpr uint8_t QUIET_START_HOUR = 1;
+constexpr uint8_t QUIET_START_MINUTE = 0;
+constexpr uint8_t QUIET_END_HOUR = 7;
+constexpr uint8_t QUIET_END_MINUTE = 0;
+```
 
 An SD card may be empty. The firmware creates `/xkcd` on first use. Without a
 card, each comic is downloaded into PSRAM, displayed, and discarded without
@@ -130,26 +150,37 @@ PIO_PYTHON="$(head -n 1 "$(command -v pio)" | sed 's/^#!//')"
   wakes skip this extra panel refresh to conserve battery power.
 - Every refresh selects a random XKCD. The default sleep interval is 15
   minutes.
-- The green GPIO3 button and right GPIO4 button wake the device and request a
-  new comic. A short GPIO45 beep acknowledges a button wake.
-- After joining Wi-Fi, the device synchronizes its clock using the configured
-  NTP servers. A failed NTP request is logged but does not prevent a comic
-  refresh.
+- With an SD card, ordinary timer wakes select a cached comic without powering
+  Wi-Fi. Every six hours, after a normal timer refresh has already updated the
+  panel, the device checks for a newly published XKCD, caches it when
+  available, and adds ten uncached historical comics. Cold boots only report
+  cache progress and start a new six-hour maintenance interval; they do not
+  refill the archive.
+- Outside quiet hours, either button wakes the device and requests a live
+  comic. A short GPIO45 beep acknowledges a button wake.
+- NTP runs on cold boot and at most once daily. DHCP-provided NTP is tried
+  first, followed by the configured public servers. A failed NTP request is
+  logged but does not prevent a comic refresh.
+- From 01:00 until 07:00 by default, timer and right-button wakes return
+  directly to sleep. The final scheduled refresh before 01:00 changes its
+  title to `sleeping until 07:00`. The green button overrides quiet hours,
+  refreshes once, and then sleeps until 07:00.
 - Hold the green button while the device is sleeping. Keep holding it through
   the first beep until a second beep confirms screenshot mode. When an SD card is
   mounted, the fully composed frame is written as an indexed BMP to
   `/screenshot.bmp`, replacing the previous screenshot. Remove the card and
   open that file on a computer to retrieve it.
-- With an SD card, cached files are preferred and remain available when XKCD
-  or the network cannot be reached. The latest comic number is checked at most
-  once every six hours, and the cache is never pruned.
+- The cold-boot Wi-Fi screen reports the number of complete comics in the SD
+  cache. Cached files remain available when XKCD or the network cannot be
+  reached, and the cache is never pruned.
 - If the SD card is full or a cache write fails, the firmware logs the failure
   and downloads the selected comic into PSRAM for that refresh without
   caching it. Existing cache entries are left intact.
 - Without an SD card, the latest number and comic are downloaded on every
   refresh and retained only for the current wake cycle.
-- Wi-Fi and SD power are switched off before deep sleep. The e-paper panel
-  retains its image while asleep.
+- Wi-Fi is switched off as soon as downloading and decoding finish, before
+  dithering and the panel refresh. SD power is switched off before deep sleep,
+  and the e-paper panel retains its image while asleep.
 
 ## Image selection and rendering
 

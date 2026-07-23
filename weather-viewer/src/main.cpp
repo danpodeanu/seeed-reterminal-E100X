@@ -110,6 +110,8 @@ float indoorHumidityPct = NAN;
 float batteryVoltage = NAN;
 int batteryPct = -1;
 volatile bool ntpSyncCompleted = false;
+RTC_DATA_ATTR time_t lastNtpSyncEpoch = 0;
+bool quietSleepNotice = false;
 
 struct DailyForecast {
   String date;
@@ -137,6 +139,79 @@ struct WeatherData {
   bool isDay = true;
   DailyForecast days[config::FORECAST_DAYS];
 };
+
+bool clockIsValid() {
+  return time(nullptr) >= 1700000000;
+}
+
+void configureLocalTimezone() {
+  setenv("TZ", config::TIMEZONE, 1);
+  tzset();
+}
+
+bool localClock(struct tm& localTime) {
+  const time_t now = time(nullptr);
+  return clockIsValid() && localtime_r(&now, &localTime) != nullptr;
+}
+
+int secondsOfDay(const struct tm& localTime) {
+  return localTime.tm_hour * 3600 + localTime.tm_min * 60 +
+         localTime.tm_sec;
+}
+
+int quietStartSecond() {
+  return config::QUIET_START_HOUR * 3600 +
+         config::QUIET_START_MINUTE * 60;
+}
+
+int quietEndSecond() {
+  return config::QUIET_END_HOUR * 3600 +
+         config::QUIET_END_MINUTE * 60;
+}
+
+bool quietHoursActive(const struct tm& localTime) {
+  if (!config::QUIET_HOURS_ENABLED) return false;
+  const int now = secondsOfDay(localTime);
+  const int start = quietStartSecond();
+  const int end = quietEndSecond();
+  if (start == end) return true;
+  if (start < end) return now >= start && now < end;
+  return now >= start || now < end;
+}
+
+uint64_t secondsUntilTimeOfDay(int targetSecond,
+                               const struct tm& localTime) {
+  int delta = targetSecond - secondsOfDay(localTime);
+  if (delta <= 0) delta += 24 * 60 * 60;
+  return static_cast<uint64_t>(delta);
+}
+
+uint64_t secondsUntilQuietEnd(const struct tm& localTime) {
+  return secondsUntilTimeOfDay(quietEndSecond(), localTime);
+}
+
+bool nextWakeFallsInQuietHours(const struct tm& localTime,
+                               uint64_t normalSleepSeconds) {
+  if (!config::QUIET_HOURS_ENABLED || quietHoursActive(localTime))
+    return false;
+  return secondsUntilTimeOfDay(quietStartSecond(), localTime) <=
+         normalSleepSeconds;
+}
+
+String quietEndLabel() {
+  char label[6] = {};
+  snprintf(label, sizeof(label), "%02u:%02u", config::QUIET_END_HOUR,
+           config::QUIET_END_MINUTE);
+  return String(label);
+}
+
+bool ntpRefreshDue(bool coldBoot) {
+  if (coldBoot || !clockIsValid() || lastNtpSyncEpoch <= 0) return true;
+  const time_t now = time(nullptr);
+  return now < lastNtpSyncEpoch ||
+         static_cast<uint64_t>(now - lastNtpSyncEpoch) >=
+             config::NTP_REFRESH_SECONDS;
+}
 
 bool writeLittleEndian16(File& file, uint16_t value) {
   const uint8_t bytes[] = {
@@ -551,6 +626,15 @@ bool connectWifi() {
   WiFi.persistent(false);
   WiFi.setSleep(true);
   WiFi.mode(WIFI_STA);
+#if LWIP_DHCP_GET_NTP_SRV
+  // DHCP option 42 must be enabled before the station acquires its lease.
+  // Remove any configured fallback servers left by a prior attempt so a
+  // populated slot below unambiguously came from DHCP.
+  if (esp_sntp_enabled()) esp_sntp_stop();
+  for (uint8_t index = 0; index < SNTP_MAX_SERVERS; ++index)
+    esp_sntp_setservername(index, nullptr);
+  esp_sntp_servermode_dhcp(true);
+#endif
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   const uint32_t started = millis();
   while (WiFi.status() != WL_CONNECTED &&
@@ -566,22 +650,62 @@ bool connectWifi() {
   return true;
 }
 
+void disableWifi() {
+  if (WiFi.getMode() == WIFI_MODE_NULL) return;
+  WiFi.disconnect(true, false);
+  WiFi.mode(WIFI_OFF);
+  LOG.println("[wifi] powered down");
+}
+
 void onNtpTimeSync(struct timeval*) {
   ntpSyncCompleted = true;
+}
+
+bool waitForNtpSync(uint32_t timeoutMs) {
+  const uint32_t started = millis();
+  while (!ntpSyncCompleted && millis() - started < timeoutMs) delay(50);
+  return ntpSyncCompleted;
+}
+
+bool startDhcpNtpIfAvailable() {
+#if LWIP_DHCP_GET_NTP_SRV
+  const ip_addr_t* server = esp_sntp_getserver(0);
+  if (server == nullptr || ip_addr_isany(server)) return false;
+
+  char address[48] = {};
+  ipaddr_ntoa_r(server, address, sizeof(address));
+  LOG.printf("[ntp] trying DHCP server %s\n", address);
+  ntpSyncCompleted = false;
+  if (esp_sntp_enabled()) esp_sntp_stop();
+  esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
+  esp_sntp_init();
+  if (waitForNtpSync(config::NTP_DHCP_TIMEOUT_MS)) return true;
+  LOG.println("[ntp] DHCP server timed out; trying configured servers");
+  return false;
+#else
+  return false;
+#endif
 }
 
 bool synchronizeClock() {
   ntpSyncCompleted = false;
   sntp_set_time_sync_notification_cb(onNtpTimeSync);
-  configTzTime(config::TIMEZONE, config::NTP_SERVER_PRIMARY,
-               config::NTP_SERVER_SECONDARY);
-
-  const uint32_t started = millis();
-  while (!ntpSyncCompleted &&
-         millis() - started < config::NTP_SYNC_TIMEOUT_MS) {
-    delay(50);
+  bool synchronized = startDhcpNtpIfAvailable();
+  if (!synchronized) {
+#if LWIP_DHCP_GET_NTP_SRV
+    const ip_addr_t* dhcpServer = esp_sntp_getserver(0);
+    if (dhcpServer == nullptr || ip_addr_isany(dhcpServer)) {
+      LOG.println("[ntp] DHCP supplied no NTP server; using configured servers");
+    }
+#else
+    LOG.println("[ntp] DHCP NTP is unavailable; using configured servers");
+#endif
+    ntpSyncCompleted = false;
+    configTzTime(config::TIMEZONE, config::NTP_SERVER_PRIMARY,
+                 config::NTP_SERVER_SECONDARY);
+    synchronized = waitForNtpSync(config::NTP_SYNC_TIMEOUT_MS);
   }
-  if (!ntpSyncCompleted) {
+  if (!synchronized) {
     LOG.println("[ntp] synchronization timed out; continuing");
     return false;
   }
@@ -595,6 +719,7 @@ bool synchronizeClock() {
   char formatted[40] = {};
   strftime(formatted, sizeof(formatted), "%Y-%m-%d %H:%M:%S %Z",
            &localTime);
+  lastNtpSyncEpoch = now;
   LOG.printf("[ntp] synchronized: %s\n", formatted);
   return true;
 }
@@ -1026,6 +1151,9 @@ void drawHeader(const WeatherData& weather) {
   } else {
     heading = "Weather";
   }
+  if (quietSleepNotice) {
+    heading = "Weather - sleeping until " + quietEndLabel();
+  }
   epaper.drawString(
       ellipsize(heading, config::PANEL_WIDTH - config::ui(380)),
       config::PANEL_WIDTH / 2, config::ui(24), 1);
@@ -1245,11 +1373,12 @@ void renderWeather(const WeatherData& weather) {
   LOG.println("[render] complete");
 }
 
-void powerDownAndSleep() {
-  WiFi.disconnect(true, false);
-  WiFi.mode(WIFI_OFF);
+void powerDownAndSleep(uint64_t sleepSeconds = config::SLEEP_SECONDS) {
+  disableWifi();
   if (sdReady) SD.end();
+  pinMode(PIN_SD_ENABLE, OUTPUT);
   digitalWrite(PIN_SD_ENABLE, LOW);
+  pinMode(PIN_BATTERY_ENABLE, OUTPUT);
   digitalWrite(PIN_BATTERY_ENABLE, LOW);
 
   pinMode(PIN_BUTTON_GREEN, INPUT_PULLUP);
@@ -1275,9 +1404,9 @@ void powerDownAndSleep() {
   const uint64_t wakeMask =
       (1ULL << PIN_BUTTON_GREEN) | (1ULL << PIN_BUTTON_RIGHT);
   esp_sleep_enable_ext1_wakeup(wakeMask, ESP_EXT1_WAKEUP_ANY_LOW);
-  esp_sleep_enable_timer_wakeup(config::SLEEP_SECONDS * 1000000ULL);
+  esp_sleep_enable_timer_wakeup(sleepSeconds * 1000000ULL);
   LOG.printf("[sleep] %llu seconds; GPIO3/GPIO4 wake enabled\n",
-             static_cast<unsigned long long>(config::SLEEP_SECONDS));
+             static_cast<unsigned long long>(sleepSeconds));
   LOG.flush();
   delay(50);
   esp_deep_sleep_start();
@@ -1346,17 +1475,42 @@ void setup() {
     beep();
   }
 
+  const bool coldBoot = wakeCause == ESP_SLEEP_WAKEUP_UNDEFINED;
+  configureLocalTimezone();
+  const bool ntpDue = ntpRefreshDue(coldBoot);
+  struct tm localTime = {};
+  if (!ntpDue && localClock(localTime) && quietHoursActive(localTime) &&
+      !greenWokeDevice) {
+    const uint64_t quietSleepSeconds = secondsUntilQuietEnd(localTime);
+    LOG.printf("[quiet] refresh suppressed; sleeping until %s\n",
+               quietEndLabel().c_str());
+    powerDownAndSleep(quietSleepSeconds);
+    return;
+  }
+
   readSensors();
   epaper.begin();
-  const bool showConnectionStatus =
-      wakeCause == ESP_SLEEP_WAKEUP_UNDEFINED;
+  sdReady = mountSd();
+  if (screenshotRequested && !sdReady) {
+    LOG.println("[screenshot] request ignored: SD card is unavailable");
+    screenshotRequested = false;
+  }
+
+  const bool showConnectionStatus = coldBoot;
+  const String connectionDetail =
+      sdReady
+          ? (SD.exists(config::FORECAST_CACHE)
+                 ? "Saved forecast available"
+                 : "SD cache ready for the first forecast")
+          : "No SD cache - using live weather";
   const String stationMac = wifiStationMacAddress();
   LOG.printf("[wifi] station MAC=%s\n", stationMac.c_str());
 
 #if RETERMINAL_MODEL == 1001
   if (showConnectionStatus) {
     LOG.println("[display] showing Wi-Fi connection status");
-    renderStatus("Connecting to " + String(WIFI_SSID), "", stationMac);
+    renderStatus("Connecting to " + String(WIFI_SSID), connectionDetail,
+                 stationMac);
   }
   epaper.initGrayMode(GRAY_LEVEL4);
 #elif RETERMINAL_MODEL == 1003
@@ -1367,22 +1521,34 @@ void setup() {
 #if RETERMINAL_MODEL != 1001
   if (showConnectionStatus) {
     LOG.println("[display] showing Wi-Fi connection status");
-    renderStatus("Connecting to " + String(WIFI_SSID), "", stationMac);
+    renderStatus("Connecting to " + String(WIFI_SSID), connectionDetail,
+                 stationMac);
   }
 #endif
 
-  sdReady = mountSd();
-  if (screenshotRequested && !sdReady) {
-    LOG.println("[screenshot] request ignored: SD card is unavailable");
-    screenshotRequested = false;
-  }
   WeatherData weather;
   const bool networkAvailable = connectWifi();
-  if (networkAvailable) synchronizeClock();
+  if (networkAvailable && ntpDue) synchronizeClock();
+  configureLocalTimezone();
+
+  if (localClock(localTime) && quietHoursActive(localTime) &&
+      !greenWokeDevice) {
+    const uint64_t quietSleepSeconds = secondsUntilQuietEnd(localTime);
+    LOG.printf("[quiet] refresh suppressed after clock sync; sleeping until %s\n",
+               quietEndLabel().c_str());
+    disableWifi();
+    powerDownAndSleep(quietSleepSeconds);
+    return;
+  }
+
   String liveResponse;
   const bool liveUpdated =
       networkAvailable &&
       fetchWeather(weather, liveResponse, buttonWake);
+  // The response has already been parsed. Do not keep the radio associated
+  // while writing the cache, composing the frame, or refreshing the panel.
+  disableWifi();
+
   if (liveUpdated && sdReady) {
     if (writeFileAtomically(config::FORECAST_CACHE, liveResponse)) {
       LOG.println("[cache] saved latest forecast");
@@ -1391,6 +1557,17 @@ void setup() {
     }
   }
   const bool haveWeather = liveUpdated || loadCachedWeather(weather);
+  uint64_t nextSleepSeconds = config::SLEEP_SECONDS;
+  if (localClock(localTime)) {
+    if (quietHoursActive(localTime) ||
+        nextWakeFallsInQuietHours(localTime, config::SLEEP_SECONDS)) {
+      quietSleepNotice = true;
+      nextSleepSeconds = secondsUntilQuietEnd(localTime);
+      LOG.printf("[quiet] this is the final refresh; sleeping until %s\n",
+                 quietEndLabel().c_str());
+    }
+  }
+
   if (haveWeather) {
     renderWeather(weather);
   } else if (showConnectionStatus) {
@@ -1405,7 +1582,7 @@ void setup() {
     }
   }
 
-  powerDownAndSleep();
+  powerDownAndSleep(nextSleepSeconds);
 }
 
 void loop() {

@@ -50,11 +50,26 @@ constexpr uint32_t HTTP_TIMEOUT_MS = 25000;
 constexpr char TIMEZONE[] = "CST-8";
 constexpr char NTP_SERVER_PRIMARY[] = "pool.ntp.org";
 constexpr char NTP_SERVER_SECONDARY[] = "time.cloudflare.com";
+constexpr uint32_t NTP_DHCP_TIMEOUT_MS = 4000;
 constexpr uint32_t NTP_SYNC_TIMEOUT_MS = 10000;
+constexpr uint32_t NTP_REFRESH_SECONDS = 24UL * 60UL * 60UL;
 constexpr uint8_t SENSOR_READ_ATTEMPTS = 4;
 constexpr uint32_t SENSOR_RETRY_DELAY_MS = 75;
 constexpr uint32_t SCREENSHOT_LONG_PRESS_MS = 1500;
 constexpr uint32_t BUTTON_RELEASE_DEBOUNCE_MS = 40;
+
+// Suppress automatic and right-button refreshes overnight. A green-button
+// wake still refreshes immediately, then sleeps until the configured end.
+constexpr bool QUIET_HOURS_ENABLED = true;
+constexpr uint8_t QUIET_START_HOUR = 1;
+constexpr uint8_t QUIET_START_MINUTE = 0;
+constexpr uint8_t QUIET_END_HOUR = 7;
+constexpr uint8_t QUIET_END_MINUTE = 0;
+static_assert(QUIET_START_HOUR < 24 && QUIET_END_HOUR < 24,
+              "Quiet-hour values must be between 0 and 23");
+static_assert(QUIET_START_MINUTE < 60 && QUIET_END_MINUTE < 60,
+              "Quiet-minute values must be between 0 and 59");
+
 constexpr char CACHE_DIR[] = "/weather";
 constexpr char FORECAST_CACHE[] = "/weather/forecast.json";
 
