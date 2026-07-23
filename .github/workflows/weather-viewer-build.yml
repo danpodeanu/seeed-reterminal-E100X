@@ -1,4 +1,4 @@
-name: Build Weather Viewer firmware
+name: Weather Viewer build
 
 on:
   push:
