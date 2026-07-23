@@ -1,0 +1,50 @@
+name: Build firmware
+
+on:
+  push:
+    paths:
+      - "xkcd-viewer/**"
+      - ".github/workflows/xkcd-viewer-build.yml"
+  pull_request:
+    paths:
+      - "xkcd-viewer/**"
+      - ".github/workflows/xkcd-viewer-build.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    working-directory: xkcd-viewer
+
+jobs:
+  build:
+    name: ${{ matrix.environment }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        environment:
+          - reterminal_e1001
+          - reterminal_e1002
+          - reterminal_e1003
+          - reterminal_e1004
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install PlatformIO
+        run: python -m pip install --upgrade platformio intelhex
+
+      - name: Create placeholder credentials
+        run: cp include/secrets.h.example include/secrets.h
+
+      - name: Build
+        run: pio run -e "${{ matrix.environment }}"
