@@ -11,7 +11,9 @@
 #include <driver/rtc_io.h>
 #include <esp_mac.h>
 #include <esp_sleep.h>
+#include <esp_sntp.h>
 #include <esp32-hal-psram.h>
+#include <time.h>
 
 #include "config.h"
 #include "secrets.h"
@@ -85,6 +87,7 @@ bool sdReady = false;
 bool sdCacheWritable = true;
 bool screenshotRequested = false;
 bool climateValid = false;
+volatile bool ntpSyncCompleted = false;
 float temperatureC = NAN;
 float humidityPct = NAN;
 float batteryVoltage = NAN;
@@ -1238,6 +1241,39 @@ bool connectWifi() {
   return true;
 }
 
+void onNtpTimeSync(struct timeval*) {
+  ntpSyncCompleted = true;
+}
+
+bool synchronizeClock() {
+  ntpSyncCompleted = false;
+  sntp_set_time_sync_notification_cb(onNtpTimeSync);
+  configTzTime(config::TIMEZONE, config::NTP_SERVER_PRIMARY,
+               config::NTP_SERVER_SECONDARY);
+
+  const uint32_t started = millis();
+  while (!ntpSyncCompleted &&
+         millis() - started < config::NTP_SYNC_TIMEOUT_MS) {
+    delay(50);
+  }
+  if (!ntpSyncCompleted) {
+    LOG.println("[ntp] synchronization timed out; continuing");
+    return false;
+  }
+
+  const time_t now = time(nullptr);
+  struct tm localTime = {};
+  if (now <= 0 || localtime_r(&now, &localTime) == nullptr) {
+    LOG.println("[ntp] synchronized but local time conversion failed");
+    return false;
+  }
+  char formatted[40] = {};
+  strftime(formatted, sizeof(formatted), "%Y-%m-%d %H:%M:%S %Z",
+           &localTime);
+  LOG.printf("[ntp] synchronized: %s\n", formatted);
+  return true;
+}
+
 void powerDownAndSleep() {
   WiFi.disconnect(true, false);
   WiFi.mode(WIFI_OFF);
@@ -1372,6 +1408,7 @@ void setup() {
     screenshotRequested = false;
   }
   const bool networkAvailable = connectWifi();
+  if (networkAvailable) synchronizeClock();
 
   Comic comic;
   RgbImage image;

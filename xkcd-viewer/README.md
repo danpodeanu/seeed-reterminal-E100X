@@ -64,6 +64,19 @@ Edit `include/secrets.h` and set `WIFI_SSID` and `WIFI_PASSWORD`. The real file
 is excluded by `.gitignore`; only the placeholder example belongs in version
 control.
 
+The clock synchronizes after Wi-Fi connects. Time settings are in
+`include/config.h`:
+
+```cpp
+constexpr char TIMEZONE[] = "GMT0BST,M3.5.0/1,M10.5.0";
+constexpr char NTP_SERVER_PRIMARY[] = "pool.ntp.org";
+constexpr char NTP_SERVER_SECONDARY[] = "time.cloudflare.com";
+```
+
+This example uses London time: GMT in winter and BST from the last Sunday in
+March until the last Sunday in October. Change the POSIX `TIMEZONE` rule when
+deploying the device elsewhere.
+
 An SD card may be empty. The firmware creates `/xkcd` on first use. Without a
 card, each comic is downloaded into PSRAM, displayed, and discarded without
 writing to internal flash.
@@ -119,6 +132,9 @@ PIO_PYTHON="$(head -n 1 "$(command -v pio)" | sed 's/^#!//')"
   minutes.
 - The green GPIO3 button and right GPIO4 button wake the device and request a
   new comic. A short GPIO45 beep acknowledges a button wake.
+- After joining Wi-Fi, the device synchronizes its clock using the configured
+  NTP servers. A failed NTP request is logged but does not prevent a comic
+  refresh.
 - Hold the green button while the device is sleeping. Keep holding it through
   the first beep until a second beep confirms screenshot mode. When an SD card is
   mounted, the fully composed frame is written as an indexed BMP to

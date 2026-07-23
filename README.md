@@ -13,6 +13,7 @@ details.
 | Application | Description | Status |
 | --- | --- | --- |
 | [XKCD Viewer](xkcd-viewer/) | A battery-powered random XKCD display with model-aware scaling, optional SD caching, environmental readings, and deep sleep. | Available |
+| [Weather Viewer](weather-viewer/) | A low-power current-conditions and three-day forecast display using Open-Meteo, local environmental readings, and deep sleep. | Available |
 
 ## XKCD Viewer example
 
@@ -22,11 +23,17 @@ This frame was captured directly from a reTerminal E1003 running the
 [XKCD Viewer](xkcd-viewer/). Comic:
 [XKCD #699 — Trimester](https://xkcd.com/699/).
 
+## Weather Viewer example
+
+![Weather Viewer showing current conditions and a three-day forecast on a reTerminal E1003](weather-viewer/assets/e1003-weather-screenshot.png)
+
+This frame was captured directly from a reTerminal E1003 running the
+[Weather Viewer](weather-viewer/).
+
 ## Future ideas
 
 Possible additions include:
 
-- A weather forecast and current-conditions display.
 - A low-power clock and calendar.
 - A household information dashboard.
 - RSS, news, transit, or status displays.
@@ -41,6 +48,7 @@ different framework or architecture where that better suits their use case.
 .
 ├── .github/workflows/    # Repository-level build checks
 ├── xkcd-viewer/          # Standalone XKCD display firmware
+├── weather-viewer/       # Standalone weather display firmware
 └── README.md             # This project index
 ```
 
