@@ -9,6 +9,7 @@
 #include <Adafruit_SHT4x.h>
 #include <TFT_eSPI.h>
 #include <driver/rtc_io.h>
+#include <esp_mac.h>
 #include <esp_sleep.h>
 #include <esp32-hal-psram.h>
 
@@ -81,6 +82,8 @@ EPaper epaper;
 Adafruit_SHT4x sht4;
 
 bool sdReady = false;
+bool sdCacheWritable = true;
+bool screenshotRequested = false;
 bool climateValid = false;
 float temperatureC = NAN;
 float humidityPct = NAN;
@@ -106,6 +109,8 @@ struct ImageLayout {
   String footerLines[config::FOOTER_MAX_LINES];
   float scale = 0.0f;
 };
+
+void updatePanel();
 
 void logMemory(const char* label) {
   LOG.printf("[mem] %-20s heap=%luK psram=%lu/%luK\n", label,
@@ -343,10 +348,30 @@ void drawBadges() {
   epaper.setTextFont(2);
 }
 
-void renderStatus(const String& message, const String& detail = "") {
+String wifiStationMacAddress() {
+  uint8_t mac[6] = {};
+  if (esp_read_mac(mac, ESP_MAC_WIFI_STA) != ESP_OK) {
+    return "unavailable";
+  }
+  char formatted[18];
+  snprintf(formatted, sizeof(formatted),
+           "%02X:%02X:%02X:%02X:%02X:%02X",
+           mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+  return String(formatted);
+}
+
+void renderStatus(const String& message, const String& detail = "",
+                  const String& lineAbove = "") {
   epaper.fillSprite(PANEL_WHITE);
   epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, true);
   epaper.setTextDatum(MC_DATUM);
+  if (!lineAbove.isEmpty()) {
+    selectFooterFont();
+    epaper.drawString(ellipsize(displayText(lineAbove),
+                                config::PANEL_WIDTH - config::ui(60), 1),
+                      config::PANEL_WIDTH / 2,
+                      config::PANEL_HEIGHT / 2 - config::ui(55), 1);
+  }
   selectTitleFont();
   epaper.drawString(ellipsize(displayText(message),
                               config::PANEL_WIDTH - config::ui(60), 1),
@@ -362,7 +387,7 @@ void renderStatus(const String& message, const String& detail = "") {
   epaper.setFreeFont(nullptr);
   epaper.setTextFont(2);
   drawBadges();
-  epaper.update();
+  updatePanel();
 }
 
 void beep() {
@@ -426,6 +451,140 @@ bool writeFileAtomically(const String& path, const String& contents) {
   return true;
 }
 
+bool writeLittleEndian16(File& file, uint16_t value) {
+  const uint8_t bytes[] = {
+      static_cast<uint8_t>(value),
+      static_cast<uint8_t>(value >> 8),
+  };
+  return file.write(bytes, sizeof(bytes)) == sizeof(bytes);
+}
+
+bool writeLittleEndian32(File& file, uint32_t value) {
+  const uint8_t bytes[] = {
+      static_cast<uint8_t>(value),
+      static_cast<uint8_t>(value >> 8),
+      static_cast<uint8_t>(value >> 16),
+      static_cast<uint8_t>(value >> 24),
+  };
+  return file.write(bytes, sizeof(bytes)) == sizeof(bytes);
+}
+
+void screenshotPaletteColor(uint8_t index, uint8_t& red, uint8_t& green,
+                            uint8_t& blue) {
+#if RETERMINAL_MODEL == 1001
+  const uint8_t gray = index <= 3 ? static_cast<uint8_t>(index * 85) : 255;
+  red = green = blue = gray;
+#elif RETERMINAL_MODEL == 1003
+  const uint8_t gray = index <= 15 ? static_cast<uint8_t>(index * 17) : 255;
+  red = green = blue = gray;
+#else
+  red = green = blue = 255;
+  switch (index) {
+    case 0x0: red = 255; green = 255; blue = 255; break;
+    case 0x2: red = 29;  green = 185; blue = 84;  break;
+    case 0x6: red = 229; green = 57;  blue = 53;  break;
+    case 0xB: red = 255; green = 216; blue = 0;   break;
+    case 0xD: red = 0;   green = 76;  blue = 255; break;
+    case 0xF: red = 0;   green = 0;   blue = 0;   break;
+  }
+#endif
+}
+
+bool saveScreenshotBmp() {
+  constexpr char screenshotPath[] = "/screenshot.bmp";
+  constexpr char temporaryPath[] = "/screenshot.bmp.part";
+  constexpr uint32_t fileHeaderSize = 14;
+  constexpr uint32_t dibHeaderSize = 40;
+  constexpr uint32_t paletteSize = 256 * 4;
+  constexpr uint32_t pixelOffset = fileHeaderSize + dibHeaderSize + paletteSize;
+
+  const uint32_t width = config::PANEL_WIDTH;
+  const uint32_t height = config::PANEL_HEIGHT;
+  const uint32_t rowSize = (width + 3U) & ~3U;
+  const uint32_t pixelBytes = rowSize * height;
+  const uint32_t fileSize = pixelOffset + pixelBytes;
+
+  uint8_t* row = static_cast<uint8_t*>(malloc(rowSize));
+  if (!row) {
+    LOG.println("[screenshot] could not allocate BMP row buffer");
+    return false;
+  }
+
+  SD.remove(temporaryPath);
+  File file = SD.open(temporaryPath, FILE_WRITE);
+  if (!file) {
+    LOG.println("[screenshot] could not create temporary BMP");
+    free(row);
+    return false;
+  }
+
+  bool ok = file.write(static_cast<uint8_t>('B')) == 1 &&
+            file.write(static_cast<uint8_t>('M')) == 1 &&
+            writeLittleEndian32(file, fileSize) &&
+            writeLittleEndian32(file, 0) &&
+            writeLittleEndian32(file, pixelOffset) &&
+            writeLittleEndian32(file, dibHeaderSize) &&
+            writeLittleEndian32(file, width) &&
+            writeLittleEndian32(file, height) &&
+            writeLittleEndian16(file, 1) &&
+            writeLittleEndian16(file, 8) &&
+            writeLittleEndian32(file, 0) &&
+            writeLittleEndian32(file, pixelBytes) &&
+            writeLittleEndian32(file, 2835) &&
+            writeLittleEndian32(file, 2835) &&
+            writeLittleEndian32(file, 256) &&
+            writeLittleEndian32(file, 16);
+
+  for (uint16_t index = 0; ok && index < 256; ++index) {
+    uint8_t red;
+    uint8_t green;
+    uint8_t blue;
+    screenshotPaletteColor(static_cast<uint8_t>(index), red, green, blue);
+    const uint8_t entry[] = {blue, green, red, 0};
+    ok = file.write(entry, sizeof(entry)) == sizeof(entry);
+  }
+
+  memset(row, 0, rowSize);
+  // A positive BMP height stores rows bottom-up. readPixelValue() returns the
+  // raw Gray4, Gray16, or E6 palette index from the composed panel sprite.
+  for (int32_t y = static_cast<int32_t>(height) - 1; ok && y >= 0; --y) {
+    for (uint32_t x = 0; x < width; ++x) {
+      row[x] = static_cast<uint8_t>(epaper.readPixelValue(x, y));
+    }
+    ok = file.write(row, rowSize) == rowSize;
+    if ((y & 31) == 0) delay(1);
+  }
+
+  file.flush();
+  file.close();
+  free(row);
+
+  if (!ok) {
+    LOG.println("[screenshot] BMP write failed");
+    SD.remove(temporaryPath);
+    return false;
+  }
+
+  SD.remove(screenshotPath);
+  if (!SD.rename(temporaryPath, screenshotPath)) {
+    LOG.println("[screenshot] could not install /screenshot.bmp");
+    SD.remove(temporaryPath);
+    return false;
+  }
+
+  LOG.printf("[screenshot] saved %s (%lu bytes)\n", screenshotPath,
+             static_cast<unsigned long>(fileSize));
+  return true;
+}
+
+void updatePanel() {
+  if (screenshotRequested && sdReady) {
+    saveScreenshotBmp();
+    screenshotRequested = false;
+  }
+  epaper.update();
+}
+
 bool httpGetString(const String& url, String& body) {
   WiFiClientSecure client;
   client.setInsecure();
@@ -473,6 +632,7 @@ bool downloadToSd(const String& url, const String& destination) {
   SD.remove(temporary);
   File file = SD.open(temporary, FILE_WRITE);
   if (!file) {
+    LOG.printf("[cache] could not create %s\n", temporary.c_str());
     http.end();
     return false;
   }
@@ -526,11 +686,14 @@ bool downloadToSd(const String& url, const String& destination) {
   http.end();
 
   if (!ok || total == 0) {
+    LOG.printf("[cache] write/download failed for %s after %lu bytes\n",
+               destination.c_str(), static_cast<unsigned long>(total));
     SD.remove(temporary);
     return false;
   }
   SD.remove(destination);
   if (!SD.rename(temporary, destination)) {
+    LOG.printf("[cache] could not install %s\n", destination.c_str());
     SD.remove(temporary);
     return false;
   }
@@ -679,8 +842,13 @@ bool getComic(int number, bool networkAvailable, Comic& comic) {
     if (!networkAvailable || number == 404) return false;
     const String url = "https://xkcd.com/" + String(number) + "/info.0.json";
     if (!httpGetString(url, json) || !parseComic(json, comic)) return false;
-    writeFileAtomically(metaPath, json);
-    LOG.printf("[cache] saved metadata #%d\n", number);
+    if (writeFileAtomically(metaPath, json)) {
+      LOG.printf("[cache] saved metadata #%d\n", number);
+    } else {
+      sdCacheWritable = false;
+      LOG.printf("[cache] metadata #%d not stored; continuing without it\n",
+                 number);
+    }
   }
 
   const String extension = imageExtension(comic.imageUrl);
@@ -691,8 +859,18 @@ bool getComic(int number, bool networkAvailable, Comic& comic) {
   comic.imagePath = String(config::CACHE_DIR) + "/" + comic.number + extension;
   if (!SD.exists(comic.imagePath)) {
     if (!networkAvailable) return false;
+    if (!sdCacheWritable) {
+      LOG.printf("[cache] skipping image write for #%d after an SD write failure\n",
+                 comic.number);
+      return false;
+    }
     LOG.printf("[comic] downloading #%d from %s\n", comic.number, comic.imageUrl.c_str());
-    if (!downloadToSd(comic.imageUrl, comic.imagePath)) return false;
+    if (!downloadToSd(comic.imageUrl, comic.imagePath)) {
+      sdCacheWritable = false;
+      LOG.printf("[cache] image #%d not stored; PSRAM fallback available\n",
+                 comic.number);
+      return false;
+    }
   } else {
     LOG.printf("[cache] using %s\n", comic.imagePath.c_str());
   }
@@ -712,8 +890,16 @@ bool getLatestNumber(bool networkAvailable, int& latest) {
     if (httpGetString(config::XKCD_LATEST_URL, json) && parseComic(json, comic)) {
       latest = comic.number;
       cyclesSinceLatestCheck = 0;
-      writeFileAtomically(config::LATEST_CACHE, json);
-      writeFileAtomically(metadataPath(latest), json);
+      if (!writeFileAtomically(config::LATEST_CACHE, json)) {
+        sdCacheWritable = false;
+        LOG.println("[cache] latest metadata not stored; using live value");
+      }
+      if (sdCacheWritable &&
+          !writeFileAtomically(metadataPath(latest), json)) {
+        sdCacheWritable = false;
+        LOG.printf("[cache] metadata #%d not stored; using live value\n",
+                   latest);
+      }
       LOG.printf("[xkcd] latest is #%d\n", latest);
       return true;
     }
@@ -819,21 +1005,61 @@ ImageLayout calculateLayout(const Comic& comic, int sourceWidth, int sourceHeigh
   return layout;
 }
 
+bool layoutIsSuitable(const ImageLayout& layout, int comicNumber) {
+  if (layout.scale < config::MIN_DISPLAY_SCALE) {
+    LOG.printf("[comic] #%d skipped: it needs reduction below %.0f%%\n",
+               comicNumber, config::MIN_DISPLAY_SCALE * 100.0f);
+    return false;
+  }
+  if (layout.width < config::MIN_RENDERED_WIDTH) {
+    LOG.printf("[comic] #%d skipped: rendered width %d is below the "
+               "%d-pixel minimum for this panel\n",
+               comicNumber, layout.width, config::MIN_RENDERED_WIDTH);
+    return false;
+  }
+  return true;
+}
+
 bool loadUsableComic(int number, bool networkAvailable, Comic& comic,
                      RgbImage& image, ImageLayout& layout) {
-  if (!getComic(number, networkAvailable, comic)) return false;
-  logMemory("before decode");
-  if (!load_image_from_sd(comic.imagePath.c_str(), 0, 0, &image)) {
-    LOG.printf("[comic] #%d could not be decoded\n", number);
+  comic = Comic{};
+  const bool sdImageReady = getComic(number, networkAvailable, comic);
+  bool decoded = false;
+
+  if (sdImageReady) {
+    logMemory("before decode");
+    decoded = load_image_from_sd(comic.imagePath.c_str(), 0, 0, &image);
+    if (!decoded) {
+      LOG.printf("[comic] cached #%d could not be decoded\n", number);
+      image_free(&image);
+    }
+  }
+
+  // A mounted SD card can still be read-only, full, or have a failed/corrupt
+  // cache entry. Keep the live PSRAM path available instead of making the
+  // mounted-card path an all-or-nothing choice.
+  if (!decoded && networkAvailable && comic.number > 0 &&
+      !comic.imageUrl.isEmpty() && !imageExtension(comic.imageUrl).isEmpty()) {
+    LOG.printf("[comic] loading #%d live into PSRAM without caching\n", number);
+    uint8_t* compressed = nullptr;
+    size_t compressedLength = 0;
+    if (downloadToMemory(comic.imageUrl, compressed, compressedLength)) {
+      decoded = load_image_from_memory(
+          compressed, compressedLength, comic.imageUrl.c_str(), 0, 0, &image);
+      free(compressed);
+    }
+  }
+
+  if (!decoded) {
+    LOG.printf("[comic] #%d could not be decoded from cache or live data\n",
+               number);
     return false;
   }
   layout = calculateLayout(comic, image.width, image.height);
   LOG.printf("[layout] #%d source=%dx%d target=%dx%d scale=%.3f\n",
              comic.number, image.width, image.height, layout.width, layout.height,
              layout.scale);
-  if (layout.scale < config::MIN_DISPLAY_SCALE) {
-    LOG.printf("[comic] #%d skipped: it needs reduction below %.0f%%\n",
-               comic.number, config::MIN_DISPLAY_SCALE * 100.0f);
+  if (!layoutIsSuitable(layout, comic.number)) {
     image_free(&image);
     return false;
   }
@@ -890,10 +1116,7 @@ bool acquireComicWithoutSd(bool networkAvailable, Comic& comic, RgbImage& image,
     LOG.printf("[layout] live #%d source=%dx%d target=%dx%d scale=%.3f\n",
                comic.number, image.width, image.height, layout.width, layout.height,
                layout.scale);
-    if (layout.scale >= config::MIN_DISPLAY_SCALE) return true;
-
-    LOG.printf("[comic] live #%d skipped: it needs reduction below %.0f%%\n",
-               comic.number, config::MIN_DISPLAY_SCALE * 100.0f);
+    if (layoutIsSuitable(layout, comic.number)) return true;
     image_free(&image);
   }
   return false;
@@ -986,7 +1209,7 @@ bool renderComic(const Comic& comic, RgbImage& image, ImageLayout layout) {
   drawBadges();
 
   LOG.println("[render] refreshing panel");
-  epaper.update();
+  updatePanel();
   LOG.println("[render] complete");
   return true;
 }
@@ -1053,19 +1276,61 @@ void powerDownAndSleep() {
 }  // namespace
 
 void setup() {
+  const esp_sleep_wakeup_cause_t wakeCause = esp_sleep_get_wakeup_cause();
+  const uint64_t wakePins = wakeCause == ESP_SLEEP_WAKEUP_EXT1
+                                ? esp_sleep_get_ext1_wakeup_status()
+                                : 0;
+  pinMode(PIN_BUTTON_GREEN, INPUT_PULLUP);
+  pinMode(PIN_BUTTON_RIGHT, INPUT_PULLUP);
+  const bool greenWokeDevice =
+      (wakePins & (1ULL << PIN_BUTTON_GREEN)) != 0;
+  const bool rightWokeDevice =
+      (wakePins & (1ULL << PIN_BUTTON_RIGHT)) != 0;
+
   LOG.begin(115200, SERIAL_8N1, PIN_LOG_RX, PIN_LOG_TX);
-  delay(500);
+  if (wakeCause == ESP_SLEEP_WAKEUP_EXT1) {
+    // Acknowledge the wake immediately. Holding the green button through this
+    // beep and for the interval below requests a screenshot.
+    beep();
+  }
+
+  bool greenHeldLongEnough = false;
+  if (greenWokeDevice) {
+    const uint32_t holdStarted = millis();
+    uint32_t releaseStarted = 0;
+    while (millis() - holdStarted < config::SCREENSHOT_LONG_PRESS_MS) {
+      if (!digitalRead(PIN_BUTTON_GREEN)) {
+        releaseStarted = 0;
+      } else if (releaseStarted == 0) {
+        releaseStarted = millis();
+      } else if (millis() - releaseStarted >=
+                 config::BUTTON_RELEASE_DEBOUNCE_MS) {
+        break;
+      }
+      delay(5);
+    }
+    greenHeldLongEnough =
+        millis() - holdStarted >= config::SCREENSHOT_LONG_PRESS_MS;
+  }
+  screenshotRequested = greenHeldLongEnough;
   LOG.println();
   LOG.println("============================================");
   LOG.printf(" reTerminal %s standalone XKCD / %s\n", MODEL_NAME, COLOR_MODE_NAME);
   LOG.println("============================================");
 
-  pinMode(PIN_BUTTON_GREEN, INPUT_PULLUP);
-  pinMode(PIN_BUTTON_RIGHT, INPUT_PULLUP);
-  const esp_sleep_wakeup_cause_t wakeCause = esp_sleep_get_wakeup_cause();
-  LOG.printf("[boot] wake cause=%d, PSRAM=%luK\n", wakeCause,
-             static_cast<unsigned long>(ESP.getPsramSize() / 1024));
-  if (wakeCause == ESP_SLEEP_WAKEUP_EXT1) beep();
+  LOG.printf("[boot] wake cause=%d pins=0x%llx, PSRAM=%luK, "
+             "GPIO3=%s GPIO4=%s\n",
+             wakeCause, static_cast<unsigned long long>(wakePins),
+             static_cast<unsigned long>(ESP.getPsramSize() / 1024),
+             greenWokeDevice
+                 ? (greenHeldLongEnough ? "long-press" : "short-press")
+                 : "idle",
+             rightWokeDevice ? "wake" : "idle");
+  if (screenshotRequested) {
+    LOG.println("[screenshot] green-button long press requested export");
+    delay(80);
+    beep();
+  }
 
   randomSeed(esp_random());
   readSensors();
@@ -1079,9 +1344,18 @@ void setup() {
   epaper.fillSprite(PANEL_WHITE);
 
   const bool coldBoot = wakeCause == ESP_SLEEP_WAKEUP_UNDEFINED;
-  if (coldBoot) renderStatus("Connecting to " + String(WIFI_SSID));
+  const String stationMac = wifiStationMacAddress();
+  LOG.printf("[wifi] station MAC=%s\n", stationMac.c_str());
+  if (coldBoot) {
+    renderStatus("Connecting to " + String(WIFI_SSID), "",
+                 "MAC: " + stationMac);
+  }
 
   sdReady = mountSd();
+  if (screenshotRequested && !sdReady) {
+    LOG.println("[screenshot] request ignored: SD card is unavailable");
+    screenshotRequested = false;
+  }
   const bool networkAvailable = connectWifi();
 
   Comic comic;
