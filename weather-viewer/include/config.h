@@ -36,8 +36,8 @@ constexpr int ui(int e1001Pixels) {
 
 // Edit these values for the forecast location.
 constexpr char LOCATION_NAME[] = "Suzhou";
-constexpr double LATITUDE = 31.2989;
-constexpr double LONGITUDE = 120.5853;
+constexpr double LATITUDE = 31.31361;
+constexpr double LONGITUDE = 120.69167;
 
 constexpr uint8_t FORECAST_DAYS = 3;
 constexpr uint8_t RAIN_FORECAST_HOURS = 48;
