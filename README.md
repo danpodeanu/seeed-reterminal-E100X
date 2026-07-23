@@ -14,6 +14,14 @@ details.
 | --- | --- | --- |
 | [XKCD Viewer](xkcd-viewer/) | A battery-powered random XKCD display with model-aware scaling, optional SD caching, environmental readings, and deep sleep. | Available |
 
+## XKCD Viewer example
+
+![XKCD Viewer displaying XKCD 699, Trimester, on a reTerminal E1003](xkcd-viewer/assets/e1003-xkcd-screenshot.png)
+
+This frame was captured directly from a reTerminal E1003 running the
+[XKCD Viewer](xkcd-viewer/). Comic:
+[XKCD #699 — Trimester](https://xkcd.com/699/).
+
 ## Future ideas
 
 Possible additions include:

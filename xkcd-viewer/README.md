@@ -11,6 +11,13 @@ temperature, humidity, and battery status. It is intended for a desk, shelf,
 or wall where a new readable XKCD can appear automatically throughout the day.
 Only Wi-Fi access to XKCD is required.
 
+## Example output
+
+![XKCD Viewer displaying XKCD 699, Trimester, on a reTerminal E1003](assets/e1003-xkcd-screenshot.png)
+
+Frame captured directly from a reTerminal E1003 using the built-in screenshot
+feature. Comic: [XKCD #699 — Trimester](https://xkcd.com/699/).
+
 ## Features
 
 - One Arduino/PlatformIO source tree for reTerminal E1001, E1002, E1003, and
@@ -105,14 +112,23 @@ PIO_PYTHON="$(head -n 1 "$(command -v pio)" | sed 's/^#!//')"
 
 ## Operation
 
-- A cold boot displays `Connecting to <SSID>` before joining Wi-Fi.
+- A cold boot displays the device Wi-Fi MAC address above
+  `Connecting to <SSID>` before joining Wi-Fi.
 - Every refresh selects a random XKCD. The default sleep interval is 15
   minutes.
 - The green GPIO3 button and right GPIO4 button wake the device and request a
   new comic. A short GPIO45 beep acknowledges a button wake.
+- Hold the green button while the device is sleeping. Keep holding it through
+  the first beep until a second beep confirms screenshot mode. When an SD card is
+  mounted, the fully composed frame is written as an indexed BMP to
+  `/screenshot.bmp`, replacing the previous screenshot. Remove the card and
+  open that file on a computer to retrieve it.
 - With an SD card, cached files are preferred and remain available when XKCD
   or the network cannot be reached. The latest comic number is checked at most
   once every six hours, and the cache is never pruned.
+- If the SD card is full or a cache write fails, the firmware logs the failure
+  and downloads the selected comic into PSRAM for that refresh without
+  caching it. Existing cache entries are left intact.
 - Without an SD card, the latest number and comic are downloaded on every
   refresh and retained only for the current wake cycle.
 - Wi-Fi and SD power are switched off before deep sleep. The e-paper panel
@@ -122,7 +138,9 @@ PIO_PYTHON="$(head -n 1 "$(command -v pio)" | sed 's/^#!//')"
 
 PNG, baseline JPEG, and supported BMP images can be displayed. GIFs,
 progressive JPEGs, corrupt files, and images requiring reduction below 65% are
-skipped. Up to eight random candidates are tried before an error is shown.
+skipped. Results narrower than one quarter of the selected panel are also
+skipped so extreme portrait comics remain readable. Up to eight random
+candidates are tried before an error is shown.
 
 Suitability is calculated from the selected model's native resolution and its
 actual header/footer area. Small comics are enlarged to fill the available

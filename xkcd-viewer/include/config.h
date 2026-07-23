@@ -40,6 +40,8 @@ constexpr uint32_t HTTP_TIMEOUT_MS = 25000;
 constexpr uint32_t DOWNLOAD_IDLE_TIMEOUT_MS = 10000;
 constexpr uint8_t SENSOR_READ_ATTEMPTS = 4;
 constexpr uint32_t SENSOR_RETRY_DELAY_MS = 75;
+constexpr uint32_t SCREENSHOT_LONG_PRESS_MS = 1500;
+constexpr uint32_t BUTTON_RELEASE_DEBOUNCE_MS = 40;
 constexpr size_t MAX_IMAGE_BYTES = 6U * 1024U * 1024U;
 constexpr size_t MAX_LIVE_IMAGE_BYTES = 2U * 1024U * 1024U;
 constexpr uint8_t MAX_COMIC_ATTEMPTS = 8;
@@ -48,6 +50,9 @@ constexpr uint32_t LATEST_CHECK_CYCLES = 24;  // 24 x 15 minutes = 6 hours
 // Preserve the previous server's rule: do not make a comic illegible merely
 // to squeeze it onto the panel.
 constexpr float MIN_DISPLAY_SCALE = 0.65f;
+// Extremely narrow results can still be illegible on high-resolution panels
+// even when little or no downscaling is required.
+constexpr int MIN_RENDERED_WIDTH = PANEL_WIDTH / 4;
 constexpr float DITHER_GAMMA = 1.0f;
 
 constexpr int CONTENT_MARGIN_X = ui(10);
