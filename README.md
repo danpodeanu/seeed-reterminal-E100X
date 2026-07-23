@@ -1,9 +1,9 @@
 # Seeed reTerminal E100X projects
 
-[![XKCD Viewer build](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/xkcd-viewer-build.yml/badge.svg?branch=main)](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/xkcd-viewer-build.yml)
-[![Weather Viewer build](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/weather-viewer-build.yml/badge.svg?branch=main)](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/weather-viewer-build.yml)
-[![Repository checks](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/repository-checks.yml/badge.svg?branch=main)](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/repository-checks.yml)
-[![CodeQL](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/codeql.yml/badge.svg?branch=main)](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/codeql.yml)
+[![XKCD Viewer build](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/xkcd-viewer-build.yml/badge.svg?branch=main&event=push)](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/xkcd-viewer-build.yml)
+[![Weather Viewer build](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/weather-viewer-build.yml/badge.svg?branch=main&event=push)](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/weather-viewer-build.yml)
+[![Repository checks](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/repository-checks.yml/badge.svg?branch=main&event=push)](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/repository-checks.yml)
+[![CodeQL](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/codeql.yml/badge.svg?branch=main&event=push)](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/codeql.yml)
 
 A collection of applications for the Seeed Studio reTerminal E1001, E1002,
 E1003, and E1004 e-paper displays.
