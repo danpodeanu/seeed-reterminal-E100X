@@ -1007,7 +1007,7 @@ String rainSummary(const WeatherData& weather) {
     const String when = nextRainWhen(weather);
     if (when.startsWith("tomorrow "))
       return "Rain tomorrow " + when.substring(9);
-    String summary = "Rain around " + when;
+    String summary = "Rain " + when;
     if (weather.nextRainProbability >= 0) {
       summary += " (" + String(weather.nextRainProbability) + "%)";
     }
