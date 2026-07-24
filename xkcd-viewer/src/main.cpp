@@ -20,6 +20,8 @@
 #include "app_logic.h"
 #include "dither.h"
 #include "image_loader.h"
+#include "pcf8563_utc.h"
+#include "timestamped_logger.h"
 
 // HTTPS, HTTPClient and the SD filesystem have a fairly deep combined call
 // chain. E1003 exposed the default 8 KiB Arduino loop stack limit when the SD
@@ -54,29 +56,50 @@ constexpr int PIN_I2C_SCL = 20;
 constexpr int PIN_LOG_RX = 44;
 constexpr int PIN_LOG_TX = 43;
 
-#define LOG Serial1
+TimestampedLogger appLog(Serial1);
+#define LOG appLog
 
 #if RETERMINAL_MODEL == 1001
 constexpr uint32_t PANEL_WHITE = TFT_GRAY_3;
 constexpr uint32_t PANEL_BLACK = TFT_GRAY_0;
+constexpr uint32_t PANEL_STATUS_BACKGROUND = TFT_GRAY_2;
+constexpr bool PANEL_STATUS_DITHERED = false;
+constexpr uint32_t PANEL_STATUS_DITHER_COLOR = TFT_GRAY_2;
+constexpr uint8_t PANEL_STATUS_DITHER_THRESHOLD = 0;
+constexpr uint32_t PANEL_CACHE_STATS_COLOR = TFT_GRAY_1;
 constexpr DitherPalette PANEL_PALETTE = PAL_GRAY4;
 constexpr char MODEL_NAME[] = "E1001";
 constexpr char COLOR_MODE_NAME[] = "Gray4";
 #elif RETERMINAL_MODEL == 1002
 constexpr uint32_t PANEL_WHITE = TFT_WHITE;
 constexpr uint32_t PANEL_BLACK = TFT_BLACK;
+constexpr uint32_t PANEL_STATUS_BACKGROUND = TFT_WHITE;
+constexpr bool PANEL_STATUS_DITHERED = true;
+constexpr uint32_t PANEL_STATUS_DITHER_COLOR = TFT_BLACK;
+constexpr uint8_t PANEL_STATUS_DITHER_THRESHOLD = 4;
+constexpr uint32_t PANEL_CACHE_STATS_COLOR = TFT_DARKGREY;
 constexpr DitherPalette PANEL_PALETTE = PAL_E6;
 constexpr char MODEL_NAME[] = "E1002";
 constexpr char COLOR_MODE_NAME[] = "six-color";
 #elif RETERMINAL_MODEL == 1003
 constexpr uint32_t PANEL_WHITE = TFT_GRAY_15;
 constexpr uint32_t PANEL_BLACK = TFT_GRAY_0;
+constexpr uint32_t PANEL_STATUS_BACKGROUND = TFT_GRAY_13;
+constexpr bool PANEL_STATUS_DITHERED = false;
+constexpr uint32_t PANEL_STATUS_DITHER_COLOR = TFT_GRAY_13;
+constexpr uint8_t PANEL_STATUS_DITHER_THRESHOLD = 0;
+constexpr uint32_t PANEL_CACHE_STATS_COLOR = TFT_GRAY_5;
 constexpr DitherPalette PANEL_PALETTE = PAL_GRAY16;
 constexpr char MODEL_NAME[] = "E1003";
 constexpr char COLOR_MODE_NAME[] = "Gray16";
 #elif RETERMINAL_MODEL == 1004
 constexpr uint32_t PANEL_WHITE = TFT_WHITE;
 constexpr uint32_t PANEL_BLACK = TFT_BLACK;
+constexpr uint32_t PANEL_STATUS_BACKGROUND = TFT_WHITE;
+constexpr bool PANEL_STATUS_DITHERED = true;
+constexpr uint32_t PANEL_STATUS_DITHER_COLOR = TFT_BLACK;
+constexpr uint8_t PANEL_STATUS_DITHER_THRESHOLD = 4;
+constexpr uint32_t PANEL_CACHE_STATS_COLOR = TFT_DARKGREY;
 constexpr DitherPalette PANEL_PALETTE = PAL_E6;
 constexpr char MODEL_NAME[] = "E1004";
 constexpr char COLOR_MODE_NAME[] = "six-color";
@@ -89,11 +112,15 @@ bool sdReady = false;
 bool sdCacheWritable = true;
 bool screenshotRequested = false;
 bool climateValid = false;
+bool i2cReady = false;
 volatile bool ntpSyncCompleted = false;
 float temperatureC = NAN;
 float humidityPct = NAN;
 float batteryVoltage = NAN;
 int batteryPct = -1;
+bool cacheStatsAvailable = false;
+uint32_t cachedComicCountForDisplay = 0;
+uint32_t totalComicCountForDisplay = 0;
 RTC_DATA_ATTR time_t lastNtpSyncEpoch = 0;
 RTC_DATA_ATTR time_t lastArchiveRefreshEpoch = 0;
 bool quietSleepNotice = false;
@@ -438,9 +465,10 @@ void readSensors() {
       // A sensor left powered across deep sleep can occasionally miss the
       // first transaction. Reset the ESP32 I2C peripheral before retrying.
       Wire.end();
+      i2cReady = false;
       delay(config::SENSOR_RETRY_DELAY_MS);
     }
-    Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
+    i2cReady = Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
     Wire.setClock(100000);
 
     if (sht4.begin(&Wire)) {
@@ -463,6 +491,56 @@ void readSensors() {
   if (!climateValid) LOG.println("[sensor] SHT4x unavailable after retries");
 }
 
+bool ensureI2cBus() {
+  if (i2cReady) return true;
+  i2cReady = Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
+  if (!i2cReady) {
+    LOG.println("[rtc] could not initialize the I2C bus");
+    return false;
+  }
+  Wire.setClock(100000);
+  return true;
+}
+
+bool readAndLogHardwareRtc(pcf8563::Reading& stored) {
+  if (!ensureI2cBus()) return false;
+  String error;
+  if (!pcf8563::readUtc(Wire, stored, error)) {
+    LOG.printf("[rtc] PCF8563 read failed: %s\n", error.c_str());
+    return false;
+  }
+  LOG.printf("[rtc] PCF8563 stored UTC=%s, %s\n",
+             pcf8563::format(stored).c_str(),
+             stored.voltageLow ? "VL set - stored time is unreliable"
+                               : "VL clear - stored time is valid");
+  return true;
+}
+
+void saveNtpTimeToHardwareRtc(time_t now) {
+  if (!ensureI2cBus()) return;
+  String error;
+  if (!pcf8563::writeUtc(Wire, now, error)) {
+    LOG.printf("[rtc] PCF8563 NTP update failed: %s\n", error.c_str());
+    return;
+  }
+  LOG.println("[rtc] PCF8563 updated from NTP");
+  pcf8563::Reading verified;
+  readAndLogHardwareRtc(verified);
+}
+
+bool restoreClockFromHardwareRtc() {
+  pcf8563::Reading stored;
+  if (!readAndLogHardwareRtc(stored)) return false;
+  String error;
+  if (!pcf8563::setSystemClock(stored, error)) {
+    LOG.printf("[rtc] PCF8563 fallback rejected: %s\n", error.c_str());
+    return false;
+  }
+  LOG.printf("[rtc] restored ESP32 clock from PCF8563 UTC=%s\n",
+             pcf8563::format(stored).c_str());
+  return true;
+}
+
 void selectStatusFont() {
 #if RETERMINAL_MODEL == 1003
   epaper.setFreeFont(&FreeSansBold18pt7b);
@@ -470,6 +548,17 @@ void selectStatusFont() {
   epaper.setFreeFont(&FreeSansBold12pt7b);
 #else
   epaper.setFreeFont(&FreeSansBold9pt7b);
+#endif
+}
+
+void selectCacheStatsFont() {
+#if RETERMINAL_MODEL == 1003
+  epaper.setFreeFont(&FreeSans9pt7b);
+#elif RETERMINAL_MODEL == 1004
+  epaper.setFreeFont(&FreeSans9pt7b);
+#else
+  epaper.setFreeFont(nullptr);
+  epaper.setTextFont(2);
 #endif
 }
 
@@ -493,13 +582,33 @@ void selectFooterFont() {
 #endif
 }
 
-void drawBadges() {
-  epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, true);
+void fillStatusBackground(int top, int height) {
+  epaper.fillRect(0, top, config::PANEL_WIDTH, height,
+                  PANEL_STATUS_BACKGROUND);
+  if (!PANEL_STATUS_DITHERED) return;
+
+  static constexpr uint8_t bayer4[4][4] = {
+      {0, 8, 2, 10},
+      {12, 4, 14, 6},
+      {3, 11, 1, 9},
+      {15, 7, 13, 5},
+  };
+  const int bottom = min(config::PANEL_HEIGHT, top + height);
+  for (int y = max(0, top); y < bottom; ++y) {
+    for (int x = 0; x < config::PANEL_WIDTH; ++x) {
+      if (bayer4[y & 3][x & 3] < PANEL_STATUS_DITHER_THRESHOLD)
+        epaper.drawPixel(x, y, PANEL_STATUS_DITHER_COLOR);
+    }
+  }
+}
+
+void drawBadges(uint32_t background = PANEL_WHITE,
+                bool fillTextBackground = true) {
+  epaper.setTextColor(PANEL_BLACK, background, fillTextBackground);
   selectStatusFont();
 
   const int statusCenterY = config::ui(24);
   const int edgeInset = config::ui(6);
-  epaper.fillRect(0, config::ui(5), config::ui(190), config::ui(36), PANEL_WHITE);
   epaper.setTextDatum(ML_DATUM);
   String climate = "--.-C  --%";
   if (climateValid) {
@@ -507,8 +616,6 @@ void drawBadges() {
   }
   epaper.drawString(climate, edgeInset, statusCenterY, 1);
 
-  epaper.fillRect(config::PANEL_WIDTH - config::ui(150), config::ui(5),
-                  config::ui(150), config::ui(36), PANEL_WHITE);
   String percent = batteryPct >= 0 ? String(batteryPct) + "%" : "--%";
 
   // Keep the whole battery group clear of the bezel. A fixed two-pixel optical
@@ -524,7 +631,22 @@ void drawBadges() {
   const int terminalHeight = max(3, config::ui(5));
 
   epaper.setTextDatum(MR_DATUM);
-  epaper.drawString(percent, x - config::ui(9), statusCenterY, 1);
+  const int percentRightX = x - config::ui(9);
+  epaper.drawString(percent, percentRightX, statusCenterY, 1);
+  if (cacheStatsAvailable) {
+    const int statsRightX =
+        percentRightX - epaper.textWidth(percent, 1) - config::ui(10);
+    const int statsOffsetY = config::ui(10);
+    selectCacheStatsFont();
+    epaper.setTextColor(PANEL_CACHE_STATS_COLOR, background,
+                        fillTextBackground);
+    epaper.drawString(String(cachedComicCountForDisplay), statsRightX,
+                      statusCenterY - statsOffsetY, 1);
+    epaper.drawString(totalComicCountForDisplay > 0
+                          ? String(totalComicCountForDisplay)
+                          : "--",
+                      statsRightX, statusCenterY + statsOffsetY, 1);
+  }
   for (int inset = 0; inset < outline; ++inset) {
     epaper.drawRect(x + inset, y + inset, w - 2 * inset, h - 2 * inset,
                     PANEL_BLACK);
@@ -1161,11 +1283,15 @@ bool getLatestNumber(bool networkAvailable, int& latest,
                    latest);
       }
       LOG.printf("[xkcd] latest is #%d\n", latest);
+      totalComicCountForDisplay =
+          app_logic::publishedComicCount(latest);
       return true;
     }
   }
   if (readFile(config::LATEST_CACHE, json) && parseComic(json, comic)) {
     latest = comic.number;
+    totalComicCountForDisplay =
+        app_logic::publishedComicCount(latest);
     LOG.printf("[xkcd] cached latest is #%d\n", latest);
     return true;
   }
@@ -1309,9 +1435,10 @@ ImageLayout calculateLayout(const Comic& comic, int sourceWidth, int sourceHeigh
                                     config::PANEL_WIDTH - config::ui(24), 1);
   epaper.setFreeFont(nullptr);
   epaper.setTextFont(2);
-  layout.footerDividerY = config::FOOTER_BOTTOM -
-                          layout.footerLineCount * config::FOOTER_LINE_HEIGHT -
-                          config::ui(5);
+  layout.footerDividerY =
+      config::FOOTER_BOTTOM -
+      layout.footerLineCount * config::FOOTER_LINE_HEIGHT -
+      2 * config::FOOTER_VERTICAL_PADDING;
   const int maxWidth = config::PANEL_WIDTH - 2 * config::CONTENT_MARGIN_X;
   const int maxHeight = layout.footerDividerY - config::CONTENT_TOP - config::ui(6);
   // Contain the comic in this model's actual content rectangle. Unlike the
@@ -1521,6 +1648,9 @@ bool renderComic(const Comic& comic, RgbImage& image, ImageLayout layout) {
                    reinterpret_cast<uint16_t*>(indices));
   free(indices);
 
+  epaper.fillRect(0, 0, config::PANEL_WIDTH, config::ui(44), PANEL_WHITE);
+  fillStatusBackground(layout.footerDividerY,
+                       config::PANEL_HEIGHT - layout.footerDividerY);
   epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, true);
   epaper.setTextDatum(MC_DATUM);
   const String heading =
@@ -1540,15 +1670,19 @@ bool renderComic(const Comic& comic, RgbImage& image, ImageLayout layout) {
                        PANEL_BLACK);
 
   selectFooterFont();
-  epaper.setTextDatum(TC_DATUM);
-  int footerY = layout.footerDividerY + config::ui(5);
+  epaper.setTextColor(PANEL_BLACK, PANEL_STATUS_BACKGROUND,
+                      !PANEL_STATUS_DITHERED);
+  epaper.setTextDatum(MC_DATUM);
+  int footerY =
+      (layout.footerDividerY + config::FOOTER_BOTTOM) / 2 -
+      (layout.footerLineCount - 1) * config::FOOTER_LINE_HEIGHT / 2;
   for (int i = 0; i < layout.footerLineCount; ++i) {
     epaper.drawString(layout.footerLines[i], config::PANEL_WIDTH / 2, footerY, 1);
     footerY += config::FOOTER_LINE_HEIGHT;
   }
   epaper.setFreeFont(nullptr);
   epaper.setTextFont(2);
-  drawBadges();
+  drawBadges(PANEL_WHITE, true);
 
   LOG.println("[render] refreshing panel");
   updatePanel();
@@ -1664,6 +1798,7 @@ bool synchronizeClock() {
            &localTime);
   lastNtpSyncEpoch = now;
   LOG.printf("[ntp] synchronized: %s\n", formatted);
+  saveNtpTimeToHardwareRtc(now);
   return true;
 }
 
@@ -1747,6 +1882,7 @@ void setup() {
   const bool buttonWake = wakeCause == ESP_SLEEP_WAKEUP_EXT1;
   const bool timerWake = wakeCause == ESP_SLEEP_WAKEUP_TIMER;
 
+  configureLocalTimezone();
   LOG.begin(115200, SERIAL_8N1, PIN_LOG_RX, PIN_LOG_TX);
   if (app_logic::startupBeepRequired(coldBoot, buttonWake)) {
     // Acknowledge cold boots and button wakes immediately. Holding the green
@@ -1793,7 +1929,19 @@ void setup() {
     beep();
   }
 
-  configureLocalTimezone();
+  const time_t startupTime = time(nullptr);
+  const bool schedulingClockSuspicious =
+      !clockIsValid() ||
+      (lastNtpSyncEpoch > 0 && startupTime < lastNtpSyncEpoch) ||
+      (lastArchiveRefreshEpoch > 0 &&
+       startupTime < lastArchiveRefreshEpoch);
+  const bool hardwareRtcCheckedEarly = schedulingClockSuspicious;
+  if (schedulingClockSuspicious) {
+    LOG.println("[rtc] schedule clock is invalid or behind retained state; "
+                "trying PCF8563");
+    restoreClockFromHardwareRtc();
+  }
+
   bool wakeEventLogged = logWakeEvent(wakeCause, wakePins, false);
   const bool ntpDue = ntpRefreshDue(coldBoot);
   struct tm localTime = {};
@@ -1809,6 +1957,11 @@ void setup() {
   randomSeed(esp_random());
   readSensors();
 
+  if (coldBoot && !hardwareRtcCheckedEarly) {
+    pcf8563::Reading storedRtc;
+    readAndLogHardwareRtc(storedRtc);
+  }
+
   epaper.begin();
   sdReady = mountSd();
   if (screenshotRequested && !sdReady) {
@@ -1817,14 +1970,18 @@ void setup() {
   }
 
   const uint32_t cachedComicCount = sdReady ? countCachedComics() : 0;
+  cacheStatsAvailable = sdReady;
+  cachedComicCountForDisplay = cachedComicCount;
+  if (sdReady) {
+    int cachedLatest = 0;
+    getLatestNumber(false, cachedLatest);
+  }
   const bool cacheOnly = app_logic::cacheOnly(
       sdReady, cachedComicCount, config::MIN_COMICS_FOR_CACHE_ONLY);
 
   // Archive maintenance is deliberately limited to normal timer wakes. Cold
   // boots only report cache progress. Once the cache has a useful local pool,
   // every kind of wake selects from it and button wakes do not start Wi-Fi.
-  const bool archiveDue = app_logic::archiveMaintenanceDue(
-      sdReady, timerWake, archiveRefreshDue());
   const bool networkPlanned =
       app_logic::networkPlanned(cacheOnly, ntpDue);
   if (sdReady && coldBoot) {
@@ -1877,19 +2034,30 @@ void setup() {
   } else {
     LOG.println("[wifi] skipped; using the local XKCD cache");
   }
-  if (networkAvailable && ntpDue) synchronizeClock();
+  const bool ntpSynchronized =
+      networkAvailable && ntpDue && synchronizeClock();
+  if (ntpDue && !ntpSynchronized && !coldBoot) {
+    LOG.println("[ntp] using PCF8563 fallback after synchronization failure");
+    restoreClockFromHardwareRtc();
+  }
   configureLocalTimezone();
   if (!wakeEventLogged) {
     logWakeEvent(wakeCause, wakePins, true);
   }
 
-  // Treat a restart as the beginning of a new six-hour maintenance interval.
-  // It may show the cache count, but it must not refill the archive before the
-  // first comic frame is displayed.
-  if (coldBoot && clockIsValid()) {
-    lastArchiveRefreshEpoch = time(nullptr);
+  // Establish or repair the six-hour baseline only after NTP/PCF recovery.
+  // This prevents an invalid pre-sync clock from latching maintenance due.
+  const time_t scheduleTime = time(nullptr);
+  const time_t normalizedArchiveBaseline =
+      static_cast<time_t>(app_logic::normalizeRefreshBaseline(
+          coldBoot, clockIsValid(), scheduleTime,
+          lastArchiveRefreshEpoch));
+  if (normalizedArchiveBaseline != lastArchiveRefreshEpoch) {
+    lastArchiveRefreshEpoch = normalizedArchiveBaseline;
     LOG.println("[cache] archive maintenance scheduled in six hours");
   }
+  const bool archiveDue = app_logic::archiveMaintenanceDue(
+      sdReady, timerWake, clockIsValid() && archiveRefreshDue());
 
   if (!coldBoot && !buttonWake && localClock(localTime) &&
       quietHoursActive(localTime)) {
@@ -1910,6 +2078,10 @@ void setup() {
           ? acquireComic(cacheOnly ? false : networkAvailable,
                          comic, image, layout)
           : acquireComicWithoutSd(networkAvailable, comic, image, layout);
+
+  if (sdReady && networkAvailable) {
+    cachedComicCountForDisplay = countCachedComics();
+  }
 
   // A replaced/empty/corrupt card may have no usable local comic even when
   // the six-hour maintenance interval has not elapsed. Recover live once only

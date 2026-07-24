@@ -44,6 +44,22 @@ constexpr bool refreshDue(bool coldBoot, bool clockValid, int64_t now,
          static_cast<uint64_t>(now - lastRefresh) >= intervalSeconds;
 }
 
+constexpr int64_t normalizeRefreshBaseline(bool resetInterval,
+                                           bool clockValid, int64_t now,
+                                           int64_t lastRefresh) {
+  return clockValid &&
+                 (resetInterval || lastRefresh <= 0 || now < lastRefresh)
+             ? now
+             : lastRefresh;
+}
+
+constexpr uint32_t publishedComicCount(int latestNumber) {
+  if (latestNumber <= 0) return 0;
+  // XKCD deliberately has no comic #404.
+  return static_cast<uint32_t>(
+      latestNumber > 404 ? latestNumber - 1 : latestNumber);
+}
+
 constexpr bool cacheOnly(bool sdReady, uint32_t cachedComics,
                          uint32_t minimumComics) {
   return sdReady && cachedComics >= minimumComics;

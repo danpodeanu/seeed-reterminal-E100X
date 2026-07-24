@@ -15,7 +15,9 @@
 #include "config.h"
 #include "app_logic.h"
 #include "image_loader.h"
+#include "pcf8563_utc.h"
 #include "secrets.h"
+#include "timestamped_logger.h"
 
 SET_LOOP_TASK_STACK_SIZE(16U * 1024U);
 
@@ -47,7 +49,8 @@ constexpr int PIN_I2C_SCL = 20;
 constexpr int PIN_LOG_RX = 44;
 constexpr int PIN_LOG_TX = 43;
 
-#define LOG Serial1
+TimestampedLogger appLog(Serial1);
+#define LOG appLog
 
 #if RETERMINAL_MODEL == 1001
 constexpr uint32_t PANEL_WHITE = TFT_GRAY_3;
@@ -99,6 +102,7 @@ Adafruit_SHT4x sht4;
 
 bool sdReady = false;
 bool climateValid = false;
+bool i2cReady = false;
 volatile bool ntpSyncCompleted = false;
 float temperatureC = NAN;
 float humidityPct = NAN;
@@ -325,9 +329,10 @@ void readSensors() {
        attempt < config::SENSOR_READ_ATTEMPTS && !climateValid; ++attempt) {
     if (attempt > 0) {
       Wire.end();
+      i2cReady = false;
       delay(config::SENSOR_RETRY_DELAY_MS);
     }
-    Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
+    i2cReady = Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
     Wire.setClock(100000);
     if (sht4.begin(&Wire)) {
       sht4.setPrecision(SHT4X_HIGH_PRECISION);
@@ -343,6 +348,56 @@ void readSensors() {
     }
   }
   if (!climateValid) LOG.println("[sensor] SHT4x unavailable");
+}
+
+bool ensureI2cBus() {
+  if (i2cReady) return true;
+  i2cReady = Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
+  if (!i2cReady) {
+    LOG.println("[rtc] could not initialize the I2C bus");
+    return false;
+  }
+  Wire.setClock(100000);
+  return true;
+}
+
+bool readAndLogHardwareRtc(pcf8563::Reading& stored) {
+  if (!ensureI2cBus()) return false;
+  String error;
+  if (!pcf8563::readUtc(Wire, stored, error)) {
+    LOG.printf("[rtc] PCF8563 read failed: %s\n", error.c_str());
+    return false;
+  }
+  LOG.printf("[rtc] PCF8563 stored UTC=%s, %s\n",
+             pcf8563::format(stored).c_str(),
+             stored.voltageLow ? "VL set - stored time is unreliable"
+                               : "VL clear - stored time is valid");
+  return true;
+}
+
+void saveNtpTimeToHardwareRtc(time_t now) {
+  if (!ensureI2cBus()) return;
+  String error;
+  if (!pcf8563::writeUtc(Wire, now, error)) {
+    LOG.printf("[rtc] PCF8563 NTP update failed: %s\n", error.c_str());
+    return;
+  }
+  LOG.println("[rtc] PCF8563 updated from NTP");
+  pcf8563::Reading verified;
+  readAndLogHardwareRtc(verified);
+}
+
+bool restoreClockFromHardwareRtc() {
+  pcf8563::Reading stored;
+  if (!readAndLogHardwareRtc(stored)) return false;
+  String error;
+  if (!pcf8563::setSystemClock(stored, error)) {
+    LOG.printf("[rtc] PCF8563 fallback rejected: %s\n", error.c_str());
+    return false;
+  }
+  LOG.printf("[rtc] restored ESP32 clock from PCF8563 UTC=%s\n",
+             pcf8563::format(stored).c_str());
+  return true;
 }
 
 void selectStatusFont() {
@@ -809,6 +864,7 @@ bool synchronizeClock() {
            &localTime);
   lastNtpSyncEpoch = now;
   LOG.printf("[ntp] synchronized: %s\n", formatted);
+  saveNtpTimeToHardwareRtc(now);
   return true;
 }
 
@@ -874,6 +930,7 @@ void powerDownAndSleep(uint64_t sleepSeconds = config::SLEEP_SECONDS) {
 }  // namespace
 
 void setup() {
+  configureLocalTimezone();
   LOG.begin(115200, SERIAL_8N1, PIN_LOG_RX, PIN_LOG_TX);
   delay(250);
 
@@ -902,7 +959,6 @@ void setup() {
              key1Wake ? "wake" : "idle",
              key2Wake ? "wake" : "idle");
 
-  configureLocalTimezone();
   bool wakeEventLogged = logWakeEvent(wakeCause, wakePins, false);
   const bool ntpDue = ntpRefreshDue(coldBoot);
   struct tm localTime = {};
@@ -914,7 +970,11 @@ void setup() {
     return;
   }
 
-  if (coldBoot) readSensors();
+  if (coldBoot) {
+    readSensors();
+    pcf8563::Reading storedRtc;
+    readAndLogHardwareRtc(storedRtc);
+  }
   epaper.begin();
   sdReady = mountSd();
   const uint32_t photoCount = countPhotos();
@@ -952,8 +1012,13 @@ void setup() {
   }
 #endif
 
+  bool ntpSynchronized = false;
   if (ntpDue) {
-    if (connectWifi()) synchronizeClock();
+    if (connectWifi()) ntpSynchronized = synchronizeClock();
+    if (!ntpSynchronized && !coldBoot) {
+      LOG.println("[ntp] using PCF8563 fallback after synchronization failure");
+      restoreClockFromHardwareRtc();
+    }
     disableWifi();
   } else {
     LOG.println("[wifi] skipped; daily clock sync is not due");

@@ -45,6 +45,33 @@ void test_refresh_due_handles_boundaries_and_clock_rollback() {
       app_logic::refreshDue(false, true, last - 1, last, interval));
 }
 
+void test_refresh_baseline_is_repaired_before_due_check() {
+  constexpr int64_t now = 100000;
+  constexpr int64_t previous = 90000;
+
+  TEST_ASSERT_EQUAL_INT64(
+      previous,
+      app_logic::normalizeRefreshBaseline(false, true, now, previous));
+  TEST_ASSERT_EQUAL_INT64(
+      now, app_logic::normalizeRefreshBaseline(true, true, now, previous));
+  TEST_ASSERT_EQUAL_INT64(
+      now, app_logic::normalizeRefreshBaseline(false, true, now, 0));
+  TEST_ASSERT_EQUAL_INT64(
+      now,
+      app_logic::normalizeRefreshBaseline(false, true, now, now + 1));
+  TEST_ASSERT_EQUAL_INT64(
+      0, app_logic::normalizeRefreshBaseline(false, false, now, 0));
+  TEST_ASSERT_FALSE(
+      app_logic::refreshDue(false, true, now, now, 6 * 60 * 60));
+}
+
+void test_published_comic_count_excludes_missing_404() {
+  TEST_ASSERT_EQUAL_UINT32(0, app_logic::publishedComicCount(0));
+  TEST_ASSERT_EQUAL_UINT32(404, app_logic::publishedComicCount(404));
+  TEST_ASSERT_EQUAL_UINT32(404, app_logic::publishedComicCount(405));
+  TEST_ASSERT_EQUAL_UINT32(3274, app_logic::publishedComicCount(3275));
+}
+
 void test_cache_only_threshold_controls_network() {
   TEST_ASSERT_FALSE(app_logic::cacheOnly(false, 100, 10));
   TEST_ASSERT_FALSE(app_logic::cacheOnly(true, 9, 10));
@@ -74,6 +101,8 @@ int main(int, char**) {
   RUN_TEST(test_quiet_hours_boundaries);
   RUN_TEST(test_quiet_hours_can_wrap_midnight);
   RUN_TEST(test_refresh_due_handles_boundaries_and_clock_rollback);
+  RUN_TEST(test_refresh_baseline_is_repaired_before_due_check);
+  RUN_TEST(test_published_comic_count_excludes_missing_404);
   RUN_TEST(test_cache_only_threshold_controls_network);
   RUN_TEST(test_archive_maintenance_requires_timer_and_sd);
   RUN_TEST(test_deadline_comparison_survives_millis_wrap);

@@ -30,6 +30,10 @@ not match.
 - It synchronizes the clock on cold boot and once every 24 hours. DHCP-provided
   NTP is tried first, followed by `pool.ntp.org` and
   `time.cloudflare.com`.
+- Successful NTP synchronization stores UTC in the onboard PCF8563. On a later
+  deep-sleep wake, a failed NTP synchronization falls back to that clock only
+  when its voltage-low (`VL`) flag is clear. Cold boots log its stored UTC and
+  `VL` state. A CR1220 is needed to retain it across physical power-off.
 - Wi-Fi is disabled immediately after time synchronization. Ordinary photo
   changes do not start the radio.
 - Automatic changes occur every six hours by default. Any hardware button
@@ -43,8 +47,9 @@ not match.
 - The SD card and battery measurement circuit are powered down before deep
   sleep.
 
-The RTC keeps the current photo position and last NTP-sync time across deep
-sleep. A complete power loss starts again from the first directory entry.
+ESP32 RTC memory keeps the current photo position and last NTP-sync time across
+deep sleep. A complete power loss starts again from the first directory entry;
+this is separate from the PCF8563 hardware clock described above.
 
 ## Prepare the SD card
 
@@ -124,6 +129,9 @@ pio device monitor --port /dev/ttyUSB0 --baud 115200
 ```
 
 Use `/dev/cu.usbserial-*` on macOS when that is the device's serial port.
+Every application log line starts with local time in
+`[YYYY-MM-DD HH:MM:SS.mmm]` format. Before the clock is synchronized, the
+same format intentionally shows a 1970 date.
 
 Run the native unit tests:
 

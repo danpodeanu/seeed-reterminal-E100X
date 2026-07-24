@@ -43,7 +43,7 @@ constexpr uint8_t FORECAST_DAYS = 3;
 constexpr uint8_t RAIN_FORECAST_HOURS = 48;
 constexpr float RAIN_START_THRESHOLD_MM = 0.1f;
 constexpr uint8_t RAIN_PROBABILITY_THRESHOLD = 30;
-constexpr uint64_t SLEEP_SECONDS = 30ULL * 60ULL;
+constexpr uint64_t SLEEP_SECONDS = 15ULL * 60ULL;
 constexpr uint32_t WIFI_TIMEOUT_MS = 30000;
 constexpr uint32_t HTTP_TIMEOUT_MS = 25000;
 // POSIX TZ notation uses the opposite sign: CST-8 means UTC+8.
