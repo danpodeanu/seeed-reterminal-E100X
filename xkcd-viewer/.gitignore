@@ -10,6 +10,8 @@ include/secrets.h
 # Local Python environments
 .venv/
 venv/
+__pycache__/
+*.py[cod]
 
 # Editors and operating systems
 .vscode/

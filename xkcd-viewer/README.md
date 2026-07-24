@@ -210,6 +210,31 @@ With an SD card, originals and metadata are stored as `/xkcd/<number>.<ext>`
 and `/xkcd/<number>.json`. Without a card, compressed originals above 2 MiB
 are skipped to preserve enough PSRAM for decoding and rendering.
 
+### Pre-populate an SD card
+
+`tools/preload_sd.py` can download the complete historical archive directly
+to a mounted SD card. It uses only the Python standard library and can be
+rerun safely: valid existing entries are skipped and incomplete entries are
+retried.
+
+On macOS:
+
+```bash
+python3 tools/preload_sd.py /Volumes/XKCD
+```
+
+On Linux:
+
+```bash
+python3 tools/preload_sd.py /media/$USER/XKCD
+```
+
+The argument is the SD-card root; the script creates its `xkcd` directory.
+XKCD #404 is intentionally absent and is skipped. Four downloads run in
+parallel by default; use `--workers 1` for a slower, strictly sequential
+download. Run with `--help` for range, retry, timeout, and force-download
+options. Safely eject the card after the script reports completion.
+
 ## Configuration
 
 Timing, download limits, retry counts, minimum display scale, and layout
@@ -235,12 +260,13 @@ Run the native unit tests:
 
 ```bash
 pio test -c platformio-test.ini -e native_test
+python3 -m unittest discover -s tools/tests
 ```
 
 The tests exercise the production scheduling, cache policy, archive
-eligibility, and deadline helpers. The GitHub Actions workflow runs them and
-builds every device target using `include/secrets.h.example`, never local
-credentials.
+eligibility, deadline helpers, and SD preloader cache compatibility. The
+GitHub Actions workflow runs both test suites and builds every device target
+using `include/secrets.h.example`, never local credentials.
 
 The PNG/JPEG/BMP decoder and dithering code originates from Seeed Studio's
 official reTerminal SD-card examples. Exact upstream revision and attribution
