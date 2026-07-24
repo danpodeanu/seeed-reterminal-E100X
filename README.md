@@ -77,6 +77,18 @@ Choose an application from the table above and follow the instructions in its
 README. Do not assume that firmware built for one E100X model is suitable for
 another; select the exact device target during compilation.
 
+## Testing
+
+Each application has native unit tests for its production decision logic:
+
+```bash
+cd xkcd-viewer
+pio test -c platformio-test.ini -e native_test
+```
+
+Use the same command inside `weather-viewer` or `photo-viewer`. Their GitHub
+Actions workflows run these tests on every relevant push and pull request.
+
 ## Contributing
 
 Keep applications self-contained and avoid committing credentials, generated

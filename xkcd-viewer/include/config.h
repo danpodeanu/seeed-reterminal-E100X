@@ -52,10 +52,13 @@ constexpr uint32_t BUTTON_RELEASE_DEBOUNCE_MS = 40;
 constexpr size_t MAX_IMAGE_BYTES = 6U * 1024U * 1024U;
 constexpr size_t MAX_LIVE_IMAGE_BYTES = 2U * 1024U * 1024U;
 constexpr uint8_t MAX_COMIC_ATTEMPTS = 8;
+constexpr uint8_t MIN_COMICS_FOR_CACHE_ONLY = 10;
 constexpr uint32_t ARCHIVE_REFRESH_SECONDS = 6UL * 60UL * 60UL;
 constexpr uint8_t ARCHIVE_OLD_COMICS_PER_REFRESH = 10;
+constexpr uint32_t ARCHIVE_MAINTENANCE_DEADLINE_MS = 5UL * 60UL * 1000UL;
+constexpr uint32_t ARCHIVE_CANCEL_POLL_TIMEOUT_MS = 2000;
 
-// Suppress automatic and right-button refreshes overnight. A green-button
+// Suppress automatic refreshes overnight. A cold boot or any front-button
 // wake still refreshes immediately, then sleeps until the configured end.
 constexpr bool QUIET_HOURS_ENABLED = true;
 constexpr uint8_t QUIET_START_HOUR = 1;

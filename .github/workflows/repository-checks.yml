@@ -29,6 +29,9 @@ jobs:
           for project in xkcd-viewer weather-viewer photo-viewer; do
             test -f "$project/README.md"
             test -f "$project/platformio.ini"
+            test -f "$project/platformio-test.ini"
+            test -f "$project/include/app_logic.h"
+            test -f "$project/test/test_app_logic/test_main.cpp"
             test -f "$project/include/secrets.h.example"
           done
           test -f photo-viewer/tools/prepare_photos.py

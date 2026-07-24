@@ -13,6 +13,7 @@
 #include <time.h>
 
 #include "config.h"
+#include "app_logic.h"
 #include "image_loader.h"
 #include "secrets.h"
 
@@ -191,8 +192,8 @@ bool localClock(struct tm& localTime) {
 }
 
 int secondsOfDay(const struct tm& localTime) {
-  return localTime.tm_hour * 3600 + localTime.tm_min * 60 +
-         localTime.tm_sec;
+  return app_logic::secondsOfDay(
+      localTime.tm_hour, localTime.tm_min, localTime.tm_sec);
 }
 
 int quietStartSecond() {
@@ -206,20 +207,15 @@ int quietEndSecond() {
 }
 
 bool quietHoursActive(const struct tm& localTime) {
-  if (!config::QUIET_HOURS_ENABLED) return false;
-  const int now = secondsOfDay(localTime);
-  const int start = quietStartSecond();
-  const int end = quietEndSecond();
-  if (start == end) return true;
-  if (start < end) return now >= start && now < end;
-  return now >= start || now < end;
+  return app_logic::quietHoursActive(
+      config::QUIET_HOURS_ENABLED, secondsOfDay(localTime),
+      quietStartSecond(), quietEndSecond());
 }
 
 uint64_t secondsUntilTimeOfDay(int targetSecond,
                                const struct tm& localTime) {
-  int delta = targetSecond - secondsOfDay(localTime);
-  if (delta <= 0) delta += 24 * 60 * 60;
-  return static_cast<uint64_t>(delta);
+  return app_logic::secondsUntilTimeOfDay(
+      targetSecond, secondsOfDay(localTime));
 }
 
 uint64_t secondsUntilQuietEnd(const struct tm& localTime) {
@@ -228,10 +224,9 @@ uint64_t secondsUntilQuietEnd(const struct tm& localTime) {
 
 bool nextWakeFallsInQuietHours(const struct tm& localTime,
                                uint64_t normalSleepSeconds) {
-  if (!config::QUIET_HOURS_ENABLED || quietHoursActive(localTime))
-    return false;
-  return secondsUntilTimeOfDay(quietStartSecond(), localTime) <=
-         normalSleepSeconds;
+  return app_logic::nextWakeFallsInQuietHours(
+      config::QUIET_HOURS_ENABLED, secondsOfDay(localTime),
+      quietStartSecond(), quietEndSecond(), normalSleepSeconds);
 }
 
 String quietEndLabel() {
@@ -241,12 +236,48 @@ String quietEndLabel() {
   return String(label);
 }
 
+String wakeReason(esp_sleep_wakeup_cause_t cause, uint64_t wakePins) {
+  if (cause == ESP_SLEEP_WAKEUP_UNDEFINED) return "cold boot/reset";
+  if (cause == ESP_SLEEP_WAKEUP_TIMER) return "scheduled timer";
+  if (cause != ESP_SLEEP_WAKEUP_EXT1) {
+    return "wake cause " + String(static_cast<int>(cause));
+  }
+
+  String buttons;
+  if (wakePins & (1ULL << PIN_KEY0)) buttons += "GPIO3";
+  if (wakePins & (1ULL << PIN_KEY1)) {
+    if (!buttons.isEmpty()) buttons += "+";
+    buttons += "GPIO4";
+  }
+  if (wakePins & (1ULL << PIN_KEY2)) {
+    if (!buttons.isEmpty()) buttons += "+";
+    buttons += "GPIO5";
+  }
+  return buttons.isEmpty() ? "front button" : "front button " + buttons;
+}
+
+bool logWakeEvent(esp_sleep_wakeup_cause_t cause, uint64_t wakePins,
+                  bool logUnsynchronized) {
+  const String reason = wakeReason(cause, wakePins);
+  struct tm localTime = {};
+  if (!localClock(localTime)) {
+    if (logUnsynchronized) {
+      LOG.printf("[wake] time=unavailable reason=%s\n", reason.c_str());
+    }
+    return false;
+  }
+  char formatted[40] = {};
+  strftime(formatted, sizeof(formatted), "%Y-%m-%d %H:%M:%S %Z",
+           &localTime);
+  LOG.printf("[wake] time=%s reason=%s\n", formatted, reason.c_str());
+  return true;
+}
+
 bool ntpRefreshDue(bool coldBoot) {
-  if (coldBoot || !clockIsValid() || lastNtpSyncEpoch <= 0) return true;
   const time_t now = time(nullptr);
-  return now < lastNtpSyncEpoch ||
-         static_cast<uint64_t>(now - lastNtpSyncEpoch) >=
-             config::NTP_REFRESH_SECONDS;
+  return app_logic::refreshDue(
+      coldBoot, clockIsValid(), now, lastNtpSyncEpoch,
+      config::NTP_REFRESH_SECONDS);
 }
 
 float batteryPercentForVoltage(float voltage) {
@@ -781,13 +812,14 @@ bool synchronizeClock() {
   return true;
 }
 
-void prepareWakePin(int pin) {
+bool prepareWakePin(int pin) {
   pinMode(pin, INPUT_PULLUP);
-  rtc_gpio_init(static_cast<gpio_num_t>(pin));
-  rtc_gpio_set_direction(static_cast<gpio_num_t>(pin),
-                         RTC_GPIO_MODE_INPUT_ONLY);
-  rtc_gpio_pullup_en(static_cast<gpio_num_t>(pin));
-  rtc_gpio_pulldown_dis(static_cast<gpio_num_t>(pin));
+  const gpio_num_t gpio = static_cast<gpio_num_t>(pin);
+  rtc_gpio_hold_dis(gpio);
+  return rtc_gpio_init(gpio) == ESP_OK &&
+         rtc_gpio_set_direction(gpio, RTC_GPIO_MODE_INPUT_ONLY) == ESP_OK &&
+         rtc_gpio_pullup_en(gpio) == ESP_OK &&
+         rtc_gpio_pulldown_dis(gpio) == ESP_OK;
 }
 
 void powerDownAndSleep(uint64_t sleepSeconds = config::SLEEP_SECONDS) {
@@ -807,16 +839,33 @@ void powerDownAndSleep(uint64_t sleepSeconds = config::SLEEP_SECONDS) {
          millis() - releaseStarted < 2000) {
     delay(10);
   }
-  prepareWakePin(PIN_KEY0);
-  prepareWakePin(PIN_KEY1);
-  prepareWakePin(PIN_KEY2);
+  bool rtcPinsReady = true;
+  rtcPinsReady = prepareWakePin(PIN_KEY0) && rtcPinsReady;
+  rtcPinsReady = prepareWakePin(PIN_KEY1) && rtcPinsReady;
+  rtcPinsReady = prepareWakePin(PIN_KEY2) && rtcPinsReady;
 
   const uint64_t wakeMask =
       (1ULL << PIN_KEY0) | (1ULL << PIN_KEY1) | (1ULL << PIN_KEY2);
-  esp_sleep_enable_ext1_wakeup(wakeMask, ESP_EXT1_WAKEUP_ANY_LOW);
-  esp_sleep_enable_timer_wakeup(sleepSeconds * 1000000ULL);
+  const esp_err_t buttonWakeResult =
+      rtcPinsReady
+          ? esp_sleep_enable_ext1_wakeup(wakeMask, ESP_EXT1_WAKEUP_ANY_LOW)
+          : ESP_FAIL;
+  const esp_err_t timerWakeResult =
+      esp_sleep_enable_timer_wakeup(sleepSeconds * 1000000ULL);
+  LOG.printf("[sleep] wake config: buttons=%s timer=%s levels=%d/%d/%d\n",
+             esp_err_to_name(buttonWakeResult),
+             esp_err_to_name(timerWakeResult),
+             digitalRead(PIN_KEY0),
+             digitalRead(PIN_KEY1),
+             digitalRead(PIN_KEY2));
   LOG.printf("[sleep] %llu seconds; GPIO3/GPIO4/GPIO5 wake enabled\n",
              static_cast<unsigned long long>(sleepSeconds));
+  if (buttonWakeResult != ESP_OK && timerWakeResult != ESP_OK) {
+    LOG.println("[sleep] no wake source could be configured; restarting");
+    LOG.flush();
+    delay(250);
+    ESP.restart();
+  }
   LOG.flush();
   delay(50);
   esp_deep_sleep_start();
@@ -854,6 +903,7 @@ void setup() {
              key2Wake ? "wake" : "idle");
 
   configureLocalTimezone();
+  bool wakeEventLogged = logWakeEvent(wakeCause, wakePins, false);
   const bool ntpDue = ntpRefreshDue(coldBoot);
   struct tm localTime = {};
   if (!ntpDue && !coldBoot && !buttonWake && localClock(localTime) &&
@@ -909,6 +959,9 @@ void setup() {
     LOG.println("[wifi] skipped; daily clock sync is not due");
   }
   configureLocalTimezone();
+  if (!wakeEventLogged) {
+    logWakeEvent(wakeCause, wakePins, true);
+  }
 
   // A cold boot always replaces its temporary startup screen with a photo.
   // Automatic timer wakes inside quiet hours otherwise preserve the photo
@@ -924,16 +977,15 @@ void setup() {
 
   bool displayed = false;
   if (sdReady && photoCount > 0) {
-    int direction = key1Wake ? -1 : 1;
+    const int direction = app_logic::photoDirection(key1Wake);
     if (currentPhotoIndex < 0) currentPhotoIndex = 0;
     else currentPhotoIndex += direction;
 
     for (uint8_t attempt = 0;
          attempt < config::MAX_PHOTO_ATTEMPTS && attempt < photoCount;
          ++attempt) {
-      int32_t normalized =
-          currentPhotoIndex % static_cast<int32_t>(photoCount);
-      if (normalized < 0) normalized += static_cast<int32_t>(photoCount);
+      const int32_t normalized =
+          app_logic::normalizePhotoIndex(currentPhotoIndex, photoCount);
       currentPhotoIndex = normalized;
       String path;
       if (photoPathAt(static_cast<uint32_t>(normalized), path)) {

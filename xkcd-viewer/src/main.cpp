@@ -17,6 +17,7 @@
 
 #include "config.h"
 #include "secrets.h"
+#include "app_logic.h"
 #include "dither.h"
 #include "image_loader.h"
 
@@ -45,6 +46,7 @@ constexpr int PIN_BATTERY_ENABLE = 21;
 #endif
 constexpr int PIN_BUTTON_GREEN = 3;
 constexpr int PIN_BUTTON_RIGHT = 4;
+constexpr int PIN_BUTTON_LEFT = 5;
 constexpr int PIN_BUZZER = 45;
 constexpr int PIN_BATTERY_ADC = 1;
 constexpr int PIN_I2C_SDA = 19;
@@ -95,6 +97,13 @@ int batteryPct = -1;
 RTC_DATA_ATTR time_t lastNtpSyncEpoch = 0;
 RTC_DATA_ATTR time_t lastArchiveRefreshEpoch = 0;
 bool quietSleepNotice = false;
+uint32_t networkOperationDeadlineMs = 0;
+volatile uint8_t maintenanceButtonInterruptMask = 0;
+bool maintenanceCancelled = false;
+
+constexpr uint8_t MAINTENANCE_BUTTON_GREEN = 1U << 0;
+constexpr uint8_t MAINTENANCE_BUTTON_RIGHT = 1U << 1;
+constexpr uint8_t MAINTENANCE_BUTTON_LEFT = 1U << 2;
 
 struct Comic {
   int number = 0;
@@ -117,6 +126,78 @@ struct ImageLayout {
 
 void updatePanel();
 
+void IRAM_ATTR onMaintenanceGreenButton() {
+  maintenanceButtonInterruptMask |= MAINTENANCE_BUTTON_GREEN;
+}
+
+void IRAM_ATTR onMaintenanceRightButton() {
+  maintenanceButtonInterruptMask |= MAINTENANCE_BUTTON_RIGHT;
+}
+
+void IRAM_ATTR onMaintenanceLeftButton() {
+  maintenanceButtonInterruptMask |= MAINTENANCE_BUTTON_LEFT;
+}
+
+void armMaintenanceButtonCancellation() {
+  maintenanceButtonInterruptMask = 0;
+  maintenanceCancelled = false;
+  pinMode(PIN_BUTTON_GREEN, INPUT_PULLUP);
+  pinMode(PIN_BUTTON_RIGHT, INPUT_PULLUP);
+  pinMode(PIN_BUTTON_LEFT, INPUT_PULLUP);
+  attachInterrupt(digitalPinToInterrupt(PIN_BUTTON_GREEN),
+                  onMaintenanceGreenButton, FALLING);
+  attachInterrupt(digitalPinToInterrupt(PIN_BUTTON_RIGHT),
+                  onMaintenanceRightButton, FALLING);
+  attachInterrupt(digitalPinToInterrupt(PIN_BUTTON_LEFT),
+                  onMaintenanceLeftButton, FALLING);
+  if (!digitalRead(PIN_BUTTON_GREEN)) {
+    maintenanceButtonInterruptMask |= MAINTENANCE_BUTTON_GREEN;
+  }
+  if (!digitalRead(PIN_BUTTON_RIGHT)) {
+    maintenanceButtonInterruptMask |= MAINTENANCE_BUTTON_RIGHT;
+  }
+  if (!digitalRead(PIN_BUTTON_LEFT)) {
+    maintenanceButtonInterruptMask |= MAINTENANCE_BUTTON_LEFT;
+  }
+}
+
+void disarmMaintenanceButtonCancellation() {
+  detachInterrupt(digitalPinToInterrupt(PIN_BUTTON_GREEN));
+  detachInterrupt(digitalPinToInterrupt(PIN_BUTTON_RIGHT));
+  detachInterrupt(digitalPinToInterrupt(PIN_BUTTON_LEFT));
+}
+
+bool maintenanceCancellationRequested() {
+  if (networkOperationDeadlineMs == 0) return false;
+  if (!maintenanceCancelled && maintenanceButtonInterruptMask != 0) {
+    maintenanceCancelled = true;
+    LOG.printf("[precache] button press detected (mask=0x%x); "
+               "cancelling maintenance\n",
+               maintenanceButtonInterruptMask);
+  }
+  return maintenanceCancelled;
+}
+
+bool networkDeadlineReached() {
+  return app_logic::deadlineReached(millis(), networkOperationDeadlineMs);
+}
+
+bool networkOperationShouldStop() {
+  return maintenanceCancellationRequested() || networkDeadlineReached();
+}
+
+uint32_t boundedNetworkTimeout(uint32_t normalTimeoutMs) {
+  if (networkOperationDeadlineMs == 0) return normalTimeoutMs;
+  if (normalTimeoutMs > config::ARCHIVE_CANCEL_POLL_TIMEOUT_MS) {
+    normalTimeoutMs = config::ARCHIVE_CANCEL_POLL_TIMEOUT_MS;
+  }
+  const int32_t remaining =
+      static_cast<int32_t>(networkOperationDeadlineMs - millis());
+  if (remaining <= 0) return 1;
+  const uint32_t remainingMs = static_cast<uint32_t>(remaining);
+  return remainingMs < normalTimeoutMs ? remainingMs : normalTimeoutMs;
+}
+
 bool clockIsValid() {
   return time(nullptr) >= 1700000000;
 }
@@ -132,8 +213,8 @@ bool localClock(struct tm& localTime) {
 }
 
 int secondsOfDay(const struct tm& localTime) {
-  return localTime.tm_hour * 3600 + localTime.tm_min * 60 +
-         localTime.tm_sec;
+  return app_logic::secondsOfDay(
+      localTime.tm_hour, localTime.tm_min, localTime.tm_sec);
 }
 
 int quietStartSecond() {
@@ -147,20 +228,15 @@ int quietEndSecond() {
 }
 
 bool quietHoursActive(const struct tm& localTime) {
-  if (!config::QUIET_HOURS_ENABLED) return false;
-  const int now = secondsOfDay(localTime);
-  const int start = quietStartSecond();
-  const int end = quietEndSecond();
-  if (start == end) return true;
-  if (start < end) return now >= start && now < end;
-  return now >= start || now < end;
+  return app_logic::quietHoursActive(
+      config::QUIET_HOURS_ENABLED, secondsOfDay(localTime),
+      quietStartSecond(), quietEndSecond());
 }
 
 uint64_t secondsUntilTimeOfDay(int targetSecond,
                                const struct tm& localTime) {
-  int delta = targetSecond - secondsOfDay(localTime);
-  if (delta <= 0) delta += 24 * 60 * 60;
-  return static_cast<uint64_t>(delta);
+  return app_logic::secondsUntilTimeOfDay(
+      targetSecond, secondsOfDay(localTime));
 }
 
 uint64_t secondsUntilQuietEnd(const struct tm& localTime) {
@@ -169,10 +245,9 @@ uint64_t secondsUntilQuietEnd(const struct tm& localTime) {
 
 bool nextWakeFallsInQuietHours(const struct tm& localTime,
                                uint64_t normalSleepSeconds) {
-  if (!config::QUIET_HOURS_ENABLED || quietHoursActive(localTime))
-    return false;
-  return secondsUntilTimeOfDay(quietStartSecond(), localTime) <=
-         normalSleepSeconds;
+  return app_logic::nextWakeFallsInQuietHours(
+      config::QUIET_HOURS_ENABLED, secondsOfDay(localTime),
+      quietStartSecond(), quietEndSecond(), normalSleepSeconds);
 }
 
 String quietEndLabel() {
@@ -182,20 +257,55 @@ String quietEndLabel() {
   return String(label);
 }
 
+String wakeReason(esp_sleep_wakeup_cause_t cause, uint64_t wakePins) {
+  if (cause == ESP_SLEEP_WAKEUP_UNDEFINED) return "cold boot/reset";
+  if (cause == ESP_SLEEP_WAKEUP_TIMER) return "scheduled timer";
+  if (cause != ESP_SLEEP_WAKEUP_EXT1) {
+    return "wake cause " + String(static_cast<int>(cause));
+  }
+
+  String buttons;
+  if (wakePins & (1ULL << PIN_BUTTON_GREEN)) buttons += "GPIO3";
+  if (wakePins & (1ULL << PIN_BUTTON_RIGHT)) {
+    if (!buttons.isEmpty()) buttons += "+";
+    buttons += "GPIO4";
+  }
+  if (wakePins & (1ULL << PIN_BUTTON_LEFT)) {
+    if (!buttons.isEmpty()) buttons += "+";
+    buttons += "GPIO5";
+  }
+  return buttons.isEmpty() ? "front button" : "front button " + buttons;
+}
+
+bool logWakeEvent(esp_sleep_wakeup_cause_t cause, uint64_t wakePins,
+                  bool logUnsynchronized) {
+  const String reason = wakeReason(cause, wakePins);
+  struct tm localTime = {};
+  if (!localClock(localTime)) {
+    if (logUnsynchronized) {
+      LOG.printf("[wake] time=unavailable reason=%s\n", reason.c_str());
+    }
+    return false;
+  }
+  char formatted[40] = {};
+  strftime(formatted, sizeof(formatted), "%Y-%m-%d %H:%M:%S %Z",
+           &localTime);
+  LOG.printf("[wake] time=%s reason=%s\n", formatted, reason.c_str());
+  return true;
+}
+
 bool ntpRefreshDue(bool coldBoot) {
-  if (coldBoot || !clockIsValid() || lastNtpSyncEpoch <= 0) return true;
   const time_t now = time(nullptr);
-  return now < lastNtpSyncEpoch ||
-         static_cast<uint64_t>(now - lastNtpSyncEpoch) >=
-             config::NTP_REFRESH_SECONDS;
+  return app_logic::refreshDue(
+      coldBoot, clockIsValid(), now, lastNtpSyncEpoch,
+      config::NTP_REFRESH_SECONDS);
 }
 
 bool archiveRefreshDue() {
-  if (!clockIsValid() || lastArchiveRefreshEpoch <= 0) return true;
   const time_t now = time(nullptr);
-  return now < lastArchiveRefreshEpoch ||
-         static_cast<uint64_t>(now - lastArchiveRefreshEpoch) >=
-             config::ARCHIVE_REFRESH_SECONDS;
+  return app_logic::refreshDue(
+      false, clockIsValid(), now, lastArchiveRefreshEpoch,
+      config::ARCHIVE_REFRESH_SECONDS);
 }
 
 void logMemory(const char* label) {
@@ -676,32 +786,39 @@ void updatePanel() {
 }
 
 bool httpGetString(const String& url, String& body) {
+  if (networkOperationShouldStop()) return false;
   WiFiClientSecure client;
   client.setInsecure();
-  client.setTimeout(config::HTTP_TIMEOUT_MS);
+  client.setTimeout(boundedNetworkTimeout(config::HTTP_TIMEOUT_MS));
   HTTPClient http;
-  http.setConnectTimeout(config::HTTP_TIMEOUT_MS);
-  http.setTimeout(config::HTTP_TIMEOUT_MS);
+  http.setConnectTimeout(boundedNetworkTimeout(config::HTTP_TIMEOUT_MS));
+  http.setTimeout(boundedNetworkTimeout(config::HTTP_TIMEOUT_MS));
   http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
   if (!http.begin(client, url)) return false;
   const int status = http.GET();
+  if (networkOperationShouldStop()) {
+    http.end();
+    return false;
+  }
   if (status != HTTP_CODE_OK) {
     LOG.printf("[http] GET %s -> %d\n", url.c_str(), status);
     http.end();
     return false;
   }
+  client.setTimeout(boundedNetworkTimeout(config::HTTP_TIMEOUT_MS));
   body = http.getString();
   http.end();
-  return !body.isEmpty();
+  return !networkOperationShouldStop() && !body.isEmpty();
 }
 
 bool downloadToSd(const String& url, const String& destination) {
+  if (networkOperationShouldStop()) return false;
   WiFiClientSecure client;
   client.setInsecure();
-  client.setTimeout(config::DOWNLOAD_IDLE_TIMEOUT_MS);
+  client.setTimeout(boundedNetworkTimeout(config::DOWNLOAD_IDLE_TIMEOUT_MS));
   HTTPClient http;
-  http.setConnectTimeout(config::HTTP_TIMEOUT_MS);
-  http.setTimeout(config::DOWNLOAD_IDLE_TIMEOUT_MS);
+  http.setConnectTimeout(boundedNetworkTimeout(config::HTTP_TIMEOUT_MS));
+  http.setTimeout(boundedNetworkTimeout(config::DOWNLOAD_IDLE_TIMEOUT_MS));
   http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
   if (!http.begin(client, url)) return false;
 
@@ -741,10 +858,14 @@ bool downloadToSd(const String& url, const String& destination) {
   uint32_t lastDataAt = millis();
   bool ok = true;
 
-  while (http.connected() && (declaredSize < 0 || total < static_cast<size_t>(declaredSize))) {
+  while (!networkOperationShouldStop() && http.connected() &&
+         (declaredSize < 0 ||
+          total < static_cast<size_t>(declaredSize))) {
     const size_t available = stream->available();
     if (available > 0) {
       const size_t wanted = available < bufferSize ? available : bufferSize;
+      stream->setTimeout(
+          boundedNetworkTimeout(config::DOWNLOAD_IDLE_TIMEOUT_MS));
       const int received = stream->readBytes(buffer, wanted);
       if (received <= 0 || file.write(buffer, received) != static_cast<size_t>(received)) {
         ok = false;
@@ -769,6 +890,7 @@ bool downloadToSd(const String& url, const String& destination) {
       delay(5);
     }
   }
+  if (networkOperationShouldStop()) ok = false;
   if (declaredSize >= 0 && total != static_cast<size_t>(declaredSize)) ok = false;
   free(buffer);
   file.flush();
@@ -795,13 +917,14 @@ bool downloadToSd(const String& url, const String& destination) {
 bool downloadToMemory(const String& url, uint8_t*& output, size_t& outputLength) {
   output = nullptr;
   outputLength = 0;
+  if (networkOperationShouldStop()) return false;
 
   WiFiClientSecure client;
   client.setInsecure();
-  client.setTimeout(config::DOWNLOAD_IDLE_TIMEOUT_MS);
+  client.setTimeout(boundedNetworkTimeout(config::DOWNLOAD_IDLE_TIMEOUT_MS));
   HTTPClient http;
-  http.setConnectTimeout(config::HTTP_TIMEOUT_MS);
-  http.setTimeout(config::DOWNLOAD_IDLE_TIMEOUT_MS);
+  http.setConnectTimeout(boundedNetworkTimeout(config::HTTP_TIMEOUT_MS));
+  http.setTimeout(boundedNetworkTimeout(config::DOWNLOAD_IDLE_TIMEOUT_MS));
   http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
   if (!http.begin(client, url)) return false;
 
@@ -833,7 +956,9 @@ bool downloadToMemory(const String& url, uint8_t*& output, size_t& outputLength)
   uint32_t lastDataAt = millis();
   bool ok = true;
 
-  while (http.connected() && (declaredSize < 0 || total < static_cast<size_t>(declaredSize))) {
+  while (!networkOperationShouldStop() && http.connected() &&
+         (declaredSize < 0 ||
+          total < static_cast<size_t>(declaredSize))) {
     size_t available = stream->available();
     if (available > 0) {
       if (total + available > config::MAX_LIVE_IMAGE_BYTES) {
@@ -855,6 +980,8 @@ bool downloadToMemory(const String& url, uint8_t*& output, size_t& outputLength)
         capacity = expanded;
       }
       const size_t wanted = available < 4096 ? available : 4096;
+      stream->setTimeout(
+          boundedNetworkTimeout(config::DOWNLOAD_IDLE_TIMEOUT_MS));
       const int received = stream->readBytes(data + total, wanted);
       if (received <= 0) {
         ok = false;
@@ -871,6 +998,7 @@ bool downloadToMemory(const String& url, uint8_t*& output, size_t& outputLength)
       delay(5);
     }
   }
+  if (networkOperationShouldStop()) ok = false;
   if (declaredSize >= 0 && total != static_cast<size_t>(declaredSize)) ok = false;
   http.end();
 
@@ -1051,7 +1179,13 @@ void refreshArchiveCache() {
   getLatestNumber(false, previousLatest);
   int latest = 0;
   if (!getLatestNumber(true, latest, true)) {
-    LOG.println("[precache] latest XKCD lookup failed");
+    if (maintenanceCancellationRequested()) {
+      LOG.println("[precache] maintenance cancelled by button");
+    } else if (networkDeadlineReached()) {
+      LOG.println("[precache] five-minute maintenance deadline reached");
+    } else {
+      LOG.println("[precache] latest XKCD lookup failed");
+    }
     return;
   }
 
@@ -1072,7 +1206,8 @@ void refreshArchiveCache() {
   const uint16_t maxAttempts =
       requestedAttempts > 80U ? requestedAttempts : 80U;
   while (oldAdded < config::ARCHIVE_OLD_COMICS_PER_REFRESH &&
-         attempts++ < maxAttempts && latest > 1 && sdCacheWritable) {
+         attempts++ < maxAttempts && latest > 1 && sdCacheWritable &&
+         !networkOperationShouldStop()) {
     const int number = random(1, latest);
     if (number == 404 || comicFullyCached(number)) continue;
     Comic historical;
@@ -1083,6 +1218,12 @@ void refreshArchiveCache() {
     }
   }
 
+  if (maintenanceCancellationRequested()) {
+    LOG.println("[precache] maintenance cancelled; remaining downloads deferred");
+  } else if (networkDeadlineReached()) {
+    LOG.println("[precache] five-minute maintenance deadline reached; "
+                "remaining downloads deferred");
+  }
   LOG.printf("[precache] refill complete: %u newest, %u historical, "
              "%lu total cached\n",
              latestAdded, oldAdded,
@@ -1434,8 +1575,14 @@ bool connectWifi() {
 #endif
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   const uint32_t started = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - started < config::WIFI_TIMEOUT_MS) {
+  while (WiFi.status() != WL_CONNECTED &&
+         millis() - started < config::WIFI_TIMEOUT_MS &&
+         !networkOperationShouldStop()) {
     delay(250);
+  }
+  if (networkOperationShouldStop()) {
+    LOG.println("[wifi] connection cancelled");
+    return false;
   }
   if (WiFi.status() != WL_CONNECTED) {
     LOG.println("[wifi] connection timed out");
@@ -1530,26 +1677,51 @@ void powerDownAndSleep(uint64_t sleepSeconds = config::SLEEP_SECONDS) {
 
   pinMode(PIN_BUTTON_GREEN, INPUT_PULLUP);
   pinMode(PIN_BUTTON_RIGHT, INPUT_PULLUP);
+  pinMode(PIN_BUTTON_LEFT, INPUT_PULLUP);
   const uint32_t releaseStarted = millis();
-  while ((!digitalRead(PIN_BUTTON_GREEN) || !digitalRead(PIN_BUTTON_RIGHT)) &&
+  while ((!digitalRead(PIN_BUTTON_GREEN) || !digitalRead(PIN_BUTTON_RIGHT) ||
+          !digitalRead(PIN_BUTTON_LEFT)) &&
          millis() - releaseStarted < 2000) {
     delay(10);
   }
 
-  rtc_gpio_init(static_cast<gpio_num_t>(PIN_BUTTON_GREEN));
-  rtc_gpio_set_direction(static_cast<gpio_num_t>(PIN_BUTTON_GREEN), RTC_GPIO_MODE_INPUT_ONLY);
-  rtc_gpio_pullup_en(static_cast<gpio_num_t>(PIN_BUTTON_GREEN));
-  rtc_gpio_pulldown_dis(static_cast<gpio_num_t>(PIN_BUTTON_GREEN));
-  rtc_gpio_init(static_cast<gpio_num_t>(PIN_BUTTON_RIGHT));
-  rtc_gpio_set_direction(static_cast<gpio_num_t>(PIN_BUTTON_RIGHT), RTC_GPIO_MODE_INPUT_ONLY);
-  rtc_gpio_pullup_en(static_cast<gpio_num_t>(PIN_BUTTON_RIGHT));
-  rtc_gpio_pulldown_dis(static_cast<gpio_num_t>(PIN_BUTTON_RIGHT));
+  const int wakePins[] = {
+      PIN_BUTTON_GREEN, PIN_BUTTON_RIGHT, PIN_BUTTON_LEFT};
+  bool rtcPinsReady = true;
+  for (const int pin : wakePins) {
+    const gpio_num_t gpio = static_cast<gpio_num_t>(pin);
+    rtc_gpio_hold_dis(gpio);
+    rtcPinsReady =
+        rtc_gpio_init(gpio) == ESP_OK &&
+        rtc_gpio_set_direction(gpio, RTC_GPIO_MODE_INPUT_ONLY) == ESP_OK &&
+        rtc_gpio_pullup_en(gpio) == ESP_OK &&
+        rtc_gpio_pulldown_dis(gpio) == ESP_OK &&
+        rtcPinsReady;
+  }
 
-  const uint64_t wakeMask = (1ULL << PIN_BUTTON_GREEN) | (1ULL << PIN_BUTTON_RIGHT);
-  esp_sleep_enable_ext1_wakeup(wakeMask, ESP_EXT1_WAKEUP_ANY_LOW);
-  esp_sleep_enable_timer_wakeup(sleepSeconds * 1000000ULL);
-  LOG.printf("[sleep] %llu seconds; GPIO3/GPIO4 wake enabled\n",
+  const uint64_t wakeMask =
+      (1ULL << PIN_BUTTON_GREEN) | (1ULL << PIN_BUTTON_RIGHT) |
+      (1ULL << PIN_BUTTON_LEFT);
+  const esp_err_t buttonWakeResult =
+      rtcPinsReady
+          ? esp_sleep_enable_ext1_wakeup(wakeMask, ESP_EXT1_WAKEUP_ANY_LOW)
+          : ESP_FAIL;
+  const esp_err_t timerWakeResult =
+      esp_sleep_enable_timer_wakeup(sleepSeconds * 1000000ULL);
+  LOG.printf("[sleep] wake config: buttons=%s timer=%s levels=%d/%d/%d\n",
+             esp_err_to_name(buttonWakeResult),
+             esp_err_to_name(timerWakeResult),
+             digitalRead(PIN_BUTTON_GREEN),
+             digitalRead(PIN_BUTTON_RIGHT),
+             digitalRead(PIN_BUTTON_LEFT));
+  LOG.printf("[sleep] %llu seconds; GPIO3/GPIO4/GPIO5 wake enabled\n",
              static_cast<unsigned long long>(sleepSeconds));
+  if (buttonWakeResult != ESP_OK && timerWakeResult != ESP_OK) {
+    LOG.println("[sleep] no wake source could be configured; restarting");
+    LOG.flush();
+    delay(250);
+    ESP.restart();
+  }
   LOG.flush();
   delay(50);
   esp_deep_sleep_start();
@@ -1564,10 +1736,13 @@ void setup() {
                                 : 0;
   pinMode(PIN_BUTTON_GREEN, INPUT_PULLUP);
   pinMode(PIN_BUTTON_RIGHT, INPUT_PULLUP);
+  pinMode(PIN_BUTTON_LEFT, INPUT_PULLUP);
   const bool greenWokeDevice =
       (wakePins & (1ULL << PIN_BUTTON_GREEN)) != 0;
   const bool rightWokeDevice =
       (wakePins & (1ULL << PIN_BUTTON_RIGHT)) != 0;
+  const bool leftWokeDevice =
+      (wakePins & (1ULL << PIN_BUTTON_LEFT)) != 0;
 
   LOG.begin(115200, SERIAL_8N1, PIN_LOG_RX, PIN_LOG_TX);
   if (wakeCause == ESP_SLEEP_WAKEUP_EXT1) {
@@ -1601,13 +1776,14 @@ void setup() {
   LOG.println("============================================");
 
   LOG.printf("[boot] wake cause=%d pins=0x%llx, PSRAM=%luK, "
-             "GPIO3=%s GPIO4=%s\n",
+             "GPIO3=%s GPIO4=%s GPIO5=%s\n",
              wakeCause, static_cast<unsigned long long>(wakePins),
              static_cast<unsigned long>(ESP.getPsramSize() / 1024),
              greenWokeDevice
                  ? (greenHeldLongEnough ? "long-press" : "short-press")
                  : "idle",
-             rightWokeDevice ? "wake" : "idle");
+             rightWokeDevice ? "wake" : "idle",
+             leftWokeDevice ? "wake" : "idle");
   if (screenshotRequested) {
     LOG.println("[screenshot] green-button long press requested export");
     delay(80);
@@ -1618,10 +1794,11 @@ void setup() {
   const bool buttonWake = wakeCause == ESP_SLEEP_WAKEUP_EXT1;
   const bool timerWake = wakeCause == ESP_SLEEP_WAKEUP_TIMER;
   configureLocalTimezone();
+  bool wakeEventLogged = logWakeEvent(wakeCause, wakePins, false);
   const bool ntpDue = ntpRefreshDue(coldBoot);
   struct tm localTime = {};
-  if (!ntpDue && localClock(localTime) && quietHoursActive(localTime) &&
-      !greenWokeDevice) {
+  if (!coldBoot && !ntpDue && !buttonWake && localClock(localTime) &&
+      quietHoursActive(localTime)) {
     const uint64_t quietSleepSeconds = secondsUntilQuietEnd(localTime);
     LOG.printf("[quiet] refresh suppressed; sleeping until %s\n",
                quietEndLabel().c_str());
@@ -1639,21 +1816,30 @@ void setup() {
     screenshotRequested = false;
   }
 
+  const uint32_t cachedComicCount = sdReady ? countCachedComics() : 0;
+  const bool cacheOnly = app_logic::cacheOnly(
+      sdReady, cachedComicCount, config::MIN_COMICS_FOR_CACHE_ONLY);
+
   // Archive maintenance is deliberately limited to normal timer wakes. Cold
-  // boots only report cache progress, and button wakes stay responsive.
-  const bool archiveDue = sdReady && timerWake && archiveRefreshDue();
-  const bool networkPlanned = !sdReady || buttonWake || ntpDue;
-  const uint32_t cachedComicCount =
-      sdReady && coldBoot ? countCachedComics() : 0;
+  // boots only report cache progress. Once the cache has a useful local pool,
+  // every kind of wake selects from it and button wakes do not start Wi-Fi.
+  const bool archiveDue = app_logic::archiveMaintenanceDue(
+      sdReady, timerWake, archiveRefreshDue());
+  const bool networkPlanned =
+      app_logic::networkPlanned(cacheOnly, ntpDue);
   if (sdReady && coldBoot) {
-    LOG.printf("[cache] %lu complete comics available\n",
-               static_cast<unsigned long>(cachedComicCount));
+    LOG.printf("[cache] %lu complete comics available; display mode=%s\n",
+               static_cast<unsigned long>(cachedComicCount),
+               cacheOnly ? "local only" : "live until cache reaches threshold");
   }
   String connectionDetail;
   if (sdReady) {
     connectionDetail = String(cachedComicCount) + " comics cached";
-    if (buttonWake) connectionDetail += " - downloading live";
-    else if (ntpDue) connectionDetail += " - synchronizing clock";
+    if (ntpDue) {
+      connectionDetail += " - synchronizing clock";
+    } else if (!cacheOnly) {
+      connectionDetail += " - building local cache";
+    }
   } else {
     connectionDetail = "No SD cache - downloading live";
   }
@@ -1693,6 +1879,9 @@ void setup() {
   }
   if (networkAvailable && ntpDue) synchronizeClock();
   configureLocalTimezone();
+  if (!wakeEventLogged) {
+    logWakeEvent(wakeCause, wakePins, true);
+  }
 
   // Treat a restart as the beginning of a new six-hour maintenance interval.
   // It may show the cache count, but it must not refill the archive before the
@@ -1702,8 +1891,8 @@ void setup() {
     LOG.println("[cache] archive maintenance scheduled in six hours");
   }
 
-  if (localClock(localTime) && quietHoursActive(localTime) &&
-      !greenWokeDevice) {
+  if (!coldBoot && !buttonWake && localClock(localTime) &&
+      quietHoursActive(localTime)) {
     const uint64_t quietSleepSeconds = secondsUntilQuietEnd(localTime);
     LOG.printf("[quiet] refresh suppressed after clock sync; sleeping until %s\n",
                quietEndLabel().c_str());
@@ -1718,12 +1907,14 @@ void setup() {
   bool displayed = false;
   bool acquired =
       sdReady
-          ? acquireComic(buttonWake && networkAvailable, comic, image, layout)
+          ? acquireComic(cacheOnly ? false : networkAvailable,
+                         comic, image, layout)
           : acquireComicWithoutSd(networkAvailable, comic, image, layout);
 
   // A replaced/empty/corrupt card may have no usable local comic even when
-  // the six-hour maintenance interval has not elapsed. Recover live once.
-  if (!acquired && sdReady && !networkAvailable) {
+  // the six-hour maintenance interval has not elapsed. Recover live once only
+  // while the card is still below the cache-only threshold.
+  if (!acquired && sdReady && !cacheOnly && !networkAvailable) {
     LOG.println("[cache] no usable local comic; trying one live refresh");
     networkAvailable = connectWifi();
     if (networkAvailable) {
@@ -1763,13 +1954,42 @@ void setup() {
   // cache maintenance only now, so downloads never delay or replace the UI.
   if (archiveDue) {
     LOG.println("[cache] starting scheduled maintenance after panel refresh");
+    armMaintenanceButtonCancellation();
+    networkOperationDeadlineMs =
+        millis() + config::ARCHIVE_MAINTENANCE_DEADLINE_MS;
     if (connectWifi()) {
       refreshArchiveCache();
       if (clockIsValid()) lastArchiveRefreshEpoch = time(nullptr);
+    } else if (maintenanceCancellationRequested()) {
+      LOG.println("[cache] scheduled maintenance cancelled by button");
     } else {
       LOG.println("[cache] scheduled maintenance deferred: Wi-Fi unavailable");
     }
+    const bool maintenanceWasCancelled = maintenanceCancellationRequested();
+    if (maintenanceWasCancelled && clockIsValid()) {
+      // A user cancellation is intentional; do not retry maintenance on every
+      // 15-minute timer wake.
+      lastArchiveRefreshEpoch = time(nullptr);
+    }
+    disarmMaintenanceButtonCancellation();
     disableWifi();
+    networkOperationDeadlineMs = 0;
+
+    if (maintenanceWasCancelled) {
+      LOG.println("[button] maintenance stopped; displaying another cached comic");
+      beep();
+      Comic replacement;
+      RgbImage replacementImage;
+      ImageLayout replacementLayout;
+      if (acquireComic(false, replacement, replacementImage,
+                       replacementLayout)) {
+        renderComic(replacement, replacementImage, replacementLayout);
+      } else {
+        LOG.println("[button] no replacement cached comic was usable; "
+                    "keeping the current frame");
+      }
+      image_free(&replacementImage);
+    }
   }
 
   powerDownAndSleep(nextSleepSeconds);
