@@ -51,6 +51,15 @@ constexpr bool cachedDataFresh(bool clockValid, int64_t now,
          static_cast<uint64_t>(now - dataTimestamp) <= maximumAgeSeconds;
 }
 
+constexpr int64_t roundedAgeMinutes(int64_t now, int64_t dataTimestamp) {
+  if (dataTimestamp <= 0 || now < dataTimestamp) return -1;
+  constexpr int64_t FIVE_MINUTES_SECONDS = 5 * 60;
+  constexpr int64_t HALF_FIVE_MINUTES_SECONDS = FIVE_MINUTES_SECONDS / 2;
+  return ((now - dataTimestamp + HALF_FIVE_MINUTES_SECONDS) /
+          FIVE_MINUTES_SECONDS) *
+         5;
+}
+
 constexpr bool suppressForQuietHours(bool coldBoot, bool buttonWake,
                                      bool ntpDue, bool clockValid,
                                      bool quietActive) {

@@ -73,6 +73,38 @@ class PreloadSdTests(unittest.TestCase):
 
             self.assertEqual(result.status, "skipped")
 
+    def test_cache_index_contains_only_complete_valid_comics(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            cache_dir = Path(temporary)
+            complete = {
+                "num": 2,
+                "img": "https://imgs.xkcd.com/comics/example.png",
+            }
+            missing_image = {
+                "num": 3,
+                "img": "https://imgs.xkcd.com/comics/missing.png",
+            }
+            (cache_dir / "2.json").write_text(json.dumps(complete))
+            (cache_dir / "2.png").write_bytes(b"\x89PNG\r\n\x1a\nvalid")
+            (cache_dir / "3.json").write_text(json.dumps(missing_image))
+            (cache_dir / "404.json").write_text(
+                json.dumps({"num": 404, "img": "https://example.com/404.png"})
+            )
+
+            numbers = preload_sd.write_cache_index(cache_dir)
+
+            self.assertEqual(numbers, [2])
+            self.assertEqual(
+                (cache_dir / preload_sd.CACHE_INDEX_NAME).read_text(),
+                "XKCD_CACHE_INDEX_V1\n1\n2\n",
+            )
+
+    def test_cache_index_encoding_is_sorted_and_unique(self):
+        self.assertEqual(
+            preload_sd.encode_cache_index([7, 1, 7, 3]),
+            b"XKCD_CACHE_INDEX_V1\n3\n1\n3\n7\n",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

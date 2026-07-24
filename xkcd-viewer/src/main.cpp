@@ -15,6 +15,9 @@
 #include <esp32-hal-psram.h>
 #include <time.h>
 
+#include <algorithm>
+#include <vector>
+
 #include "config.h"
 #include "secrets.h"
 #include "app_logic.h"
@@ -127,6 +130,8 @@ bool quietSleepNotice = false;
 uint32_t networkOperationDeadlineMs = 0;
 volatile uint8_t maintenanceButtonInterruptMask = 0;
 bool maintenanceCancelled = false;
+bool cacheIndexReady = false;
+std::vector<int> cachedComicNumbers;
 
 constexpr uint8_t MAINTENANCE_BUTTON_GREEN = 1U << 0;
 constexpr uint8_t MAINTENANCE_BUTTON_RIGHT = 1U << 1;
@@ -1186,13 +1191,125 @@ bool comicFullyCached(int number) {
   return SD.exists(String(config::CACHE_DIR) + "/" + number + extension);
 }
 
-uint32_t countCachedComics() {
-  if (!sdReady) return 0;
+bool parseIndexUnsignedLine(String line, uint32_t& value,
+                            bool allowZero = false) {
+  line.trim();
+  if (line.isEmpty() || line.length() > 10) return false;
+  uint64_t parsed = 0;
+  for (size_t i = 0; i < line.length(); ++i) {
+    if (!isDigit(line[i])) return false;
+    parsed = parsed * 10U + static_cast<uint8_t>(line[i] - '0');
+    if (parsed > 100000U) return false;
+  }
+  if (!allowZero && parsed == 0) return false;
+  value = static_cast<uint32_t>(parsed);
+  return true;
+}
+
+bool writeCacheIndexFile(const std::vector<int>& numbers) {
+  const String temporary = String(config::CACHE_INDEX) + ".part";
+  SD.remove(temporary);
+  File file = SD.open(temporary, FILE_WRITE);
+  if (!file) return false;
+
+  bool written = file.println(config::CACHE_INDEX_MAGIC) > 0 &&
+                 file.println(numbers.size()) > 0;
+  for (const int number : numbers) {
+    if (!written || file.println(number) == 0) {
+      written = false;
+      break;
+    }
+  }
+  file.flush();
+  file.close();
+  if (!written) {
+    SD.remove(temporary);
+    return false;
+  }
+
+  SD.remove(config::CACHE_INDEX);
+  if (!SD.rename(temporary, config::CACHE_INDEX)) {
+    SD.remove(temporary);
+    return false;
+  }
+  return true;
+}
+
+bool loadCacheIndex() {
+  cacheIndexReady = false;
+  cachedComicNumbers.clear();
+  if (!SD.exists(config::CACHE_INDEX)) {
+    LOG.println("[cache] comic index is missing");
+    return false;
+  }
+
+  File file = SD.open(config::CACHE_INDEX, FILE_READ);
+  if (!file) {
+    LOG.println("[cache] comic index could not be opened");
+    return false;
+  }
+
+  String magic = file.readStringUntil('\n');
+  magic.trim();
+  uint32_t expectedCount = 0;
+  const bool headerValid =
+      magic == config::CACHE_INDEX_MAGIC &&
+      parseIndexUnsignedLine(file.readStringUntil('\n'), expectedCount, true) &&
+      expectedCount <= config::MAX_CACHE_INDEX_ENTRIES;
+  if (!headerValid) {
+    file.close();
+    LOG.println("[cache] comic index has an invalid header");
+    return false;
+  }
+
+  std::vector<int> loaded;
+  loaded.reserve(expectedCount);
+  int previous = 0;
+  for (uint32_t i = 0; i < expectedCount; ++i) {
+    uint32_t number = 0;
+    if (!file.available() ||
+        !parseIndexUnsignedLine(file.readStringUntil('\n'), number) ||
+        number == 404 || static_cast<int>(number) <= previous) {
+      file.close();
+      LOG.println("[cache] comic index has invalid or unsorted entries");
+      return false;
+    }
+    loaded.push_back(static_cast<int>(number));
+    previous = static_cast<int>(number);
+  }
+
+  while (file.available()) {
+    const char trailing = static_cast<char>(file.read());
+    if (trailing != '\r' && trailing != '\n' &&
+        trailing != ' ' && trailing != '\t') {
+      file.close();
+      LOG.println("[cache] comic index contains unexpected trailing data");
+      return false;
+    }
+  }
+  file.close();
+
+  cachedComicNumbers.swap(loaded);
+  cacheIndexReady = true;
+  LOG.printf("[cache] loaded comic index with %lu entries\n",
+             static_cast<unsigned long>(cachedComicNumbers.size()));
+  return true;
+}
+
+bool rebuildCacheIndex(bool cancellable = false) {
+  if (!sdReady) return false;
+  LOG.println("[cache] rebuilding comic index from SD");
+
   File directory = SD.open(config::CACHE_DIR);
-  if (!directory || !directory.isDirectory()) return 0;
-  uint32_t count = 0;
+  if (!directory || !directory.isDirectory()) {
+    LOG.println("[cache] comic index rebuild failed: cache directory unavailable");
+    return false;
+  }
+
+  std::vector<int> rebuilt;
   File entry = directory.openNextFile();
   while (entry) {
+    int candidate = 0;
     if (!entry.isDirectory()) {
       String name = entry.name();
       const int slash = name.lastIndexOf('/');
@@ -1203,22 +1320,58 @@ uint32_t countCachedComics() {
         extension.toLowerCase();
         if (extension == ".png" || extension == ".jpg" ||
             extension == ".jpeg" || extension == ".bmp") {
-          String numberText = name.substring(0, dot);
+          const String numberText = name.substring(0, dot);
           bool numeric = !numberText.isEmpty();
           for (size_t i = 0; i < numberText.length(); ++i)
             numeric &= isDigit(numberText[i]);
-          if (numeric &&
-              SD.exists(metadataPath(numberText.toInt()))) {
-            ++count;
-          }
+          candidate = numeric ? numberText.toInt() : 0;
         }
       }
     }
     entry.close();
+
+    if (candidate > 0 && candidate != 404 &&
+        comicFullyCached(candidate)) {
+      rebuilt.push_back(candidate);
+    }
+    if (cancellable && networkOperationShouldStop()) {
+      directory.close();
+      LOG.println("[cache] comic index rebuild cancelled; keeping previous index");
+      return false;
+    }
     entry = directory.openNextFile();
   }
   directory.close();
-  return count;
+
+  std::sort(rebuilt.begin(), rebuilt.end());
+  rebuilt.erase(std::unique(rebuilt.begin(), rebuilt.end()), rebuilt.end());
+  const bool stored = writeCacheIndexFile(rebuilt);
+  cachedComicNumbers.swap(rebuilt);
+  cacheIndexReady = true;
+  if (stored) {
+    LOG.printf("[cache] comic index rebuilt with %lu complete comics\n",
+               static_cast<unsigned long>(cachedComicNumbers.size()));
+  } else {
+    LOG.printf("[cache] comic index contains %lu comics in memory, "
+               "but could not be stored\n",
+               static_cast<unsigned long>(cachedComicNumbers.size()));
+  }
+  return true;
+}
+
+uint32_t countCachedComics() {
+  return cacheIndexReady
+             ? static_cast<uint32_t>(cachedComicNumbers.size())
+             : 0;
+}
+
+void addCurrentCacheIndexEntry(int number) {
+  if (!cacheIndexReady || number <= 0 || number == 404) return;
+  const auto position = std::lower_bound(
+      cachedComicNumbers.begin(), cachedComicNumbers.end(), number);
+  if (position == cachedComicNumbers.end() || *position != number) {
+    cachedComicNumbers.insert(position, number);
+  }
 }
 
 bool getComic(int number, bool networkAvailable, Comic& comic) {
@@ -1303,6 +1456,18 @@ bool getLatestNumber(bool networkAvailable, int& latest,
 void refreshArchiveCache() {
   if (!sdReady || WiFi.status() != WL_CONNECTED) return;
 
+  // Maintenance is the authoritative integrity pass. Validate the complete
+  // directory before downloads, then add successful downloads to the clean
+  // in-memory index and persist it without a second directory scan.
+  if (!rebuildCacheIndex(true)) {
+    if (maintenanceCancellationRequested()) {
+      LOG.println("[precache] index maintenance cancelled by button");
+    } else if (networkDeadlineReached()) {
+      LOG.println("[precache] index maintenance reached the five-minute deadline");
+    }
+    return;
+  }
+
   int previousLatest = 0;
   getLatestNumber(false, previousLatest);
   int latest = 0;
@@ -1323,6 +1488,7 @@ void refreshArchiveCache() {
     Comic newest;
     if (getComic(latest, true, newest) && comicFullyCached(latest)) {
       latestAdded = 1;
+      addCurrentCacheIndexEntry(latest);
       LOG.printf("[precache] cached newest comic #%d\n", latest);
     }
   }
@@ -1341,6 +1507,7 @@ void refreshArchiveCache() {
     Comic historical;
     if (getComic(number, true, historical) && comicFullyCached(number)) {
       ++oldAdded;
+      addCurrentCacheIndexEntry(number);
       LOG.printf("[precache] cached historical comic %u/%u: #%d\n",
                  oldAdded, config::ARCHIVE_OLD_COMICS_PER_REFRESH, number);
     }
@@ -1351,6 +1518,9 @@ void refreshArchiveCache() {
   } else if (networkDeadlineReached()) {
     LOG.println("[precache] five-minute maintenance deadline reached; "
                 "remaining downloads deferred");
+  }
+  if (!writeCacheIndexFile(cachedComicNumbers)) {
+    LOG.println("[cache] updated comic index could not be stored");
   }
   LOG.printf("[precache] refill complete: %u newest, %u historical, "
              "%lu total cached\n",
@@ -1389,42 +1559,22 @@ bool getComicWithoutSd(int number, Comic& comic, uint8_t*& compressed,
 }
 
 int pickRandomCachedNumber() {
-  File directory = SD.open(config::CACHE_DIR);
-  if (!directory || !directory.isDirectory()) return 0;
-  int selected = 0;
-  uint32_t seen = 0;
-  File entry = directory.openNextFile();
-  while (entry) {
-    if (!entry.isDirectory()) {
-      String name = entry.name();
-      const int slash = name.lastIndexOf('/');
-      if (slash >= 0) name = name.substring(slash + 1);
-      const int dot = name.lastIndexOf('.');
-      if (dot > 0) {
-        String extension = name.substring(dot);
-        extension.toLowerCase();
-        if (extension == ".png" || extension == ".jpg" ||
-            extension == ".jpeg" || extension == ".bmp") {
-          const String numberText = name.substring(0, dot);
-          bool numeric = !numberText.isEmpty();
-          for (size_t i = 0; i < numberText.length(); ++i)
-            numeric &= isDigit(numberText[i]);
-          const int number = numeric ? numberText.toInt() : 0;
-          if (!numeric || number <= 0 || number == 404 ||
-              !SD.exists(metadataPath(number))) {
-            entry.close();
-            entry = directory.openNextFile();
-            continue;
-          }
-          ++seen;
-          if (random(static_cast<long>(seen)) == 0) selected = number;
-        }
-      }
-    }
-    entry.close();
-    entry = directory.openNextFile();
+  if (!cacheIndexReady || cachedComicNumbers.empty()) return 0;
+
+  int selected =
+      cachedComicNumbers[random(static_cast<long>(cachedComicNumbers.size()))];
+  if (comicFullyCached(selected)) return selected;
+
+  LOG.printf("[cache] index entry #%d is no longer complete; rebuilding index\n",
+             selected);
+  if (!rebuildCacheIndex() || cachedComicNumbers.empty()) return 0;
+
+  selected =
+      cachedComicNumbers[random(static_cast<long>(cachedComicNumbers.size()))];
+  if (!comicFullyCached(selected)) {
+    LOG.printf("[cache] rebuilt index entry #%d failed validation\n", selected);
+    return 0;
   }
-  directory.close();
   return selected;
 }
 
@@ -1971,6 +2121,12 @@ void setup() {
     screenshotRequested = false;
   }
 
+  if (sdReady && !loadCacheIndex()) {
+    LOG.printf("[cache] %s; creating a fresh comic index\n",
+               coldBoot ? "cold boot found no usable index"
+                        : "wake found no usable index");
+    rebuildCacheIndex();
+  }
   const uint32_t cachedComicCount = sdReady ? countCachedComics() : 0;
   cacheStatsAvailable = sdReady;
   cachedComicCountForDisplay = cachedComicCount;
@@ -2081,7 +2237,11 @@ void setup() {
                          comic, image, layout)
           : acquireComicWithoutSd(networkAvailable, comic, image, layout);
 
-  if (sdReady && networkAvailable) {
+  if (sdReady && networkAvailable && !cacheOnly) {
+    // Before the local-only threshold is reached, live display downloads can
+    // add cache entries outside scheduled maintenance. The archive is still
+    // small here, so rebuild immediately to make those comics selectable.
+    rebuildCacheIndex();
     cachedComicCountForDisplay = countCachedComics();
   }
 

@@ -225,8 +225,12 @@ content rectangle while preserving their aspect ratio. Large comics accepted
 on E1003 or E1004 may still be skipped on the smaller E1001 or E1002 panels.
 
 With an SD card, originals and metadata are stored as `/xkcd/<number>.<ext>`
-and `/xkcd/<number>.json`. Without a card, compressed originals above 2 MiB
-are skipped to preserve enough PSRAM for decoding and rendering.
+and `/xkcd/<number>.json`. `/xkcd/index.txt` records complete cache entries so
+normal wakes can count and select comics without scanning the entire archive.
+The firmware creates a missing index on cold boot, rebuilds it when a selected
+entry no longer exists, and regenerates it during scheduled cache maintenance.
+Without a card, compressed originals above 2 MiB are skipped to preserve enough
+PSRAM for decoding and rendering.
 
 ### Pre-populate an SD card
 
@@ -251,7 +255,8 @@ The argument is the SD-card root; the script creates its `xkcd` directory.
 XKCD #404 is intentionally absent and is skipped. Four downloads run in
 parallel by default; use `--workers 1` for a slower, strictly sequential
 download. Run with `--help` for range, retry, timeout, and force-download
-options. Safely eject the card after the script reports completion.
+options. The script regenerates `xkcd/index.txt` from all complete entries
+before it exits. Safely eject the card after the script reports completion.
 
 ## Configuration
 
