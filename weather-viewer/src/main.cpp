@@ -565,6 +565,15 @@ void selectSmallFont() {
 #endif
 }
 
+void selectUpdateTimeFont() {
+#if RETERMINAL_MODEL == 1003 || RETERMINAL_MODEL == 1004
+  epaper.setFreeFont(&FreeSans9pt7b);
+#else
+  epaper.setFreeFont(nullptr);
+  epaper.setTextFont(2);
+#endif
+}
+
 void selectMediumFont() {
   epaper.setTextSize(1);
 #if RETERMINAL_MODEL == 1003
@@ -623,7 +632,8 @@ void fillStatusBackground(int top, int height) {
 }
 
 void drawBadges(uint32_t background = PANEL_WHITE,
-                bool fillTextBackground = true) {
+                bool fillTextBackground = true,
+                const String* weatherUpdateTime = nullptr) {
   epaper.setTextColor(PANEL_BLACK, background, fillTextBackground);
   selectSmallFont();
 
@@ -648,7 +658,26 @@ void drawBadges(uint32_t background = PANEL_WHITE,
   const int terminalHeight = max(3, config::ui(5));
 
   epaper.setTextDatum(MR_DATUM);
-  epaper.drawString(percent, x - config::ui(9), statusCenterY, 1);
+  const int percentRightX = x - config::ui(9);
+  epaper.drawString(percent, percentRightX, statusCenterY, 1);
+  if (weatherUpdateTime != nullptr && !weatherUpdateTime->isEmpty()) {
+    const int separator = weatherUpdateTime->indexOf('T');
+    if (separator >= 10 &&
+        weatherUpdateTime->length() >= static_cast<size_t>(separator + 6)) {
+      const String updateDate = weatherUpdateTime->substring(5, 10);
+      const String updateClock =
+          weatherUpdateTime->substring(separator + 1, separator + 6);
+      const int updateRightX =
+          percentRightX - epaper.textWidth(percent, 1) - config::ui(10);
+      selectUpdateTimeFont();
+      epaper.setTextColor(PANEL_BLACK, background, fillTextBackground);
+      const int lineCenterDistance = epaper.fontHeight(1) + 1;
+      const int dateY = statusCenterY - lineCenterDistance / 2;
+      const int timeY = dateY + lineCenterDistance;
+      epaper.drawString(updateDate, updateRightX, dateY, 1);
+      epaper.drawString(updateClock, updateRightX, timeY, 1);
+    }
+  }
   for (int inset = 0; inset < outline; ++inset) {
     epaper.drawRect(x + inset, y + inset, w - 2 * inset, h - 2 * inset,
                     PANEL_BLACK);
@@ -1378,7 +1407,7 @@ void drawLargeTemperature(float temperature, int cx, int cy) {
 void drawHeader(const WeatherData& weather) {
   const int height = config::ui(45);
   epaper.fillRect(0, 0, config::PANEL_WIDTH, height, PANEL_WHITE);
-  drawBadges(PANEL_WHITE, true);
+  drawBadges(PANEL_WHITE, true, &weather.updateTime);
   epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, true);
   epaper.setTextDatum(MC_DATUM);
   selectSmallFont();
@@ -1794,13 +1823,22 @@ void setup() {
     screenshotRequested = false;
   }
 
+  WeatherData weather;
+  String liveFailureReason;
+  String cacheFailureReason;
+  bool cacheChecked = false;
+  bool cacheLoaded = false;
+
+  // Validate the cache before composing the cold-boot screen. File existence
+  // alone does not mean the saved forecast is recent enough to use.
+  if (!buttonWake && clockIsValid()) {
+    cacheChecked = true;
+    cacheLoaded = loadCachedWeather(weather, cacheFailureReason);
+  }
+
   const bool showConnectionStatus = coldBoot;
   const String connectionDetail =
-      sdReady
-          ? (SD.exists(config::FORECAST_CACHE)
-                 ? "Saved forecast available"
-                 : "SD cache ready for the first forecast")
-          : "No SD cache - using live weather";
+      cacheLoaded ? "Live update not required" : "Live update required";
   const String stationMac = wifiStationMacAddress();
   LOG.printf("[wifi] station MAC=%s\n", stationMac.c_str());
 
@@ -1823,19 +1861,6 @@ void setup() {
                  stationMac);
   }
 #endif
-
-  WeatherData weather;
-  String liveFailureReason;
-  String cacheFailureReason;
-  bool cacheChecked = false;
-  bool cacheLoaded = false;
-
-  // A normal wake can render a forecast already obtained within the current
-  // refresh interval. Button wakes remain an explicit request for live data.
-  if (!buttonWake && clockIsValid()) {
-    cacheChecked = true;
-    cacheLoaded = loadCachedWeather(weather, cacheFailureReason);
-  }
 
   const bool networkRequired = buttonWake || ntpDue || !cacheLoaded;
   const bool networkAvailable =
