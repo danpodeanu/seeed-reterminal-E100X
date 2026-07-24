@@ -887,7 +887,7 @@ void setup() {
   const bool key0Wake = (wakePins & (1ULL << PIN_KEY0)) != 0;
   const bool key1Wake = (wakePins & (1ULL << PIN_KEY1)) != 0;
   const bool key2Wake = (wakePins & (1ULL << PIN_KEY2)) != 0;
-  if (buttonWake) beep();
+  if (app_logic::startupBeepRequired(coldBoot, buttonWake)) beep();
 
   LOG.println();
   LOG.println("============================================");

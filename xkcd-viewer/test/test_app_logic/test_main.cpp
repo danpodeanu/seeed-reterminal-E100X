@@ -5,6 +5,12 @@
 void setUp() {}
 void tearDown() {}
 
+void test_startup_beep_only_for_cold_boot_and_button_wake() {
+  TEST_ASSERT_TRUE(app_logic::startupBeepRequired(true, false));
+  TEST_ASSERT_TRUE(app_logic::startupBeepRequired(false, true));
+  TEST_ASSERT_FALSE(app_logic::startupBeepRequired(false, false));
+}
+
 void test_quiet_hours_boundaries() {
   const int start = app_logic::secondsOfDay(1, 0, 0);
   const int end = app_logic::secondsOfDay(7, 0, 0);
@@ -64,6 +70,7 @@ void test_deadline_comparison_survives_millis_wrap() {
 
 int main(int, char**) {
   UNITY_BEGIN();
+  RUN_TEST(test_startup_beep_only_for_cold_boot_and_button_wake);
   RUN_TEST(test_quiet_hours_boundaries);
   RUN_TEST(test_quiet_hours_can_wrap_midnight);
   RUN_TEST(test_refresh_due_handles_boundaries_and_clock_rollback);
