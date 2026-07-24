@@ -6,8 +6,9 @@
 [![Repository checks](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/repository-checks.yml/badge.svg?branch=main&event=push)](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/repository-checks.yml)
 [![CodeQL](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/codeql.yml/badge.svg?branch=main&event=push)](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/codeql.yml)
 
-A collection of applications for the Seeed Studio reTerminal E1001, E1002,
-E1003, and E1004 e-paper displays.
+A collection of applications for the
+[Seeed Studio reTerminal E Series](https://wiki.seeedstudio.com/reterminal_e10xx_main_page/)
+E1001, E1002, E1003, and E1004 e-paper displays.
 
 These projects explore the E100X family as low-power, always-visible displays
 for information that changes occasionally. Each application lives in its own
