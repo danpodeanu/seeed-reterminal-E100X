@@ -34,6 +34,8 @@ not match.
   changes do not start the radio.
 - Automatic changes occur every six hours by default. Any hardware button
   wakes the device and changes the photo.
+- Every startup logs a `[wake]` line with the local time and whether it was a
+  cold boot/reset, scheduled timer, or front-button wake.
 - Between 01:00 and 07:00 by default, timer-driven changes are suppressed and
   the existing e-paper image remains unchanged. A button still changes it.
   Unlike the information viewers, the photo itself is never modified with a
@@ -122,6 +124,16 @@ pio device monitor --port /dev/ttyUSB0 --baud 115200
 ```
 
 Use `/dev/cu.usbserial-*` on macOS when that is the device's serial port.
+
+Run the native unit tests:
+
+```bash
+pio test -c platformio-test.ini -e native_test
+```
+
+The tests cover quiet-hour timing, daily NTP scheduling, button direction,
+and photo-index wrapping. GitHub Actions runs them alongside all four
+firmware builds.
 
 ## Settings
 

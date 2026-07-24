@@ -201,13 +201,13 @@ def remap_indices(image: Image.Image, mapping: tuple[int, ...]) -> Image.Image:
     return image.point(lookup)
 
 
-def warm_tone_mask(image: Image.Image) -> tuple[Image.Image, Image.Image]:
-    """Return masks for warm pixels and their brighter subset.
+def warm_tone_mask(image: Image.Image) -> Image.Image:
+    """Return a mask selecting visible, meaningfully saturated warm pixels.
 
     A normal RGB error diffuser sometimes uses green ink to correct the error
     left by a red skin-tone dot. That may be mathematically reasonable but is
     conspicuous on a sparse six-color e-paper palette. Restrict warm hues to
-    warm inks, and omit black from brighter skin/highlight regions.
+    white, red, yellow, and black inks.
     """
     hue, saturation, value = image.convert("HSV").split()
     hue_mask = hue.point(
@@ -219,13 +219,9 @@ def warm_tone_mask(image: Image.Image) -> tuple[Image.Image, Image.Image]:
     visible_mask = value.point(
         [255 if channel >= 35 else 0 for channel in range(256)]
     )
-    warm = ImageChops.multiply(
+    return ImageChops.multiply(
         ImageChops.multiply(hue_mask, saturation_mask), visible_mask
     )
-    bright = value.point(
-        [255 if channel >= 120 else 0 for channel in range(256)]
-    )
-    return warm, ImageChops.multiply(warm, bright)
 
 
 def quantize_six_color_photo(
@@ -243,16 +239,11 @@ def quantize_six_color_photo(
         E6_COLORS[3],  # yellow
         E6_COLORS[5],  # black
     )
-    bright_warm_colors = warm_colors[:3]
     warm = quantize_for_panel(image, warm_colors, dither)
-    bright_warm = quantize_for_panel(image, bright_warm_colors, dither)
 
     # Convert the temporary palette positions to the canonical E6 positions.
     warm = remap_indices(warm, (0, 2, 3, 5))
-    bright_warm = remap_indices(bright_warm, (0, 2, 3))
-    warm_mask, bright_warm_mask = warm_tone_mask(image)
-    full.paste(warm, mask=warm_mask)
-    full.paste(bright_warm, mask=bright_warm_mask)
+    full.paste(warm, mask=warm_tone_mask(image))
     full.putpalette(fixed_palette_image(E6_COLORS).getpalette())
     return full
 

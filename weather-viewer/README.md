@@ -136,9 +136,11 @@ Logging uses UART1 on GPIO43/GPIO44, matching the carrier USB-to-UART bridge.
 ## Operation
 
 - Cold boot/reset displays the station MAC above `Connecting to <SSID>`.
+- Every startup logs a `[wake]` line with the local time and whether it was a
+  cold boot/reset, scheduled timer, or front-button wake.
 - Timer wakes update every 30 minutes without an intermediate status refresh.
-- Outside quiet hours, GPIO3 and GPIO4 wake the device, beep once, and force
-  an immediate live API update that bypasses HTTP caches.
+- Any front button wakes the device, beeps once, and forces an immediate live
+  API update that bypasses HTTP caches.
 - Hold the green GPIO3 button while the device is sleeping. Keep holding it
   through the first beep until a second beep confirms screenshot mode. With an
   SD card mounted, the newly rendered weather frame is written as an indexed
@@ -147,10 +149,10 @@ Logging uses UART1 on GPIO43/GPIO44, matching the carrier USB-to-UART bridge.
 - NTP runs on cold boot and at most once daily. DHCP-provided NTP is tried
   first, followed by the configured public servers. NTP failure is logged but
   does not block the weather request.
-- From 01:00 until 07:00 by default, timer and right-button wakes return
-  directly to sleep. The final scheduled refresh before 01:00 changes its
-  title to `sleeping until 07:00`. The green button overrides quiet hours,
-  refreshes once, and then sleeps until 07:00.
+- From 01:00 until 07:00 by default, timer wakes return directly to sleep. The
+  final scheduled refresh before 01:00 changes its title to
+  `sleeping until 07:00`. A cold boot or any front-button wake overrides quiet
+  hours, refreshes once, and then sleeps until 07:00.
 - If a background update fails, an SD-cached forecast is used when available;
   otherwise the previous e-paper forecast remains visible.
 - On a cold boot where no forecast has yet been shown, an error screen explains
@@ -189,6 +191,15 @@ Build all targets before submitting changes:
 pio run -e reterminal_e1001 -e reterminal_e1002 \
   -e reterminal_e1003 -e reterminal_e1004
 ```
+
+Run the native unit tests:
+
+```bash
+pio test -c platformio-test.ini -e native_test
+```
+
+The tests cover quiet-hour boundaries, wake overrides, and daily refresh
+timing. GitHub Actions runs them alongside all four firmware builds.
 
 ## References
 
