@@ -1157,12 +1157,32 @@ String updateClock(const String& isoTime) {
   return "";
 }
 
-String updateStamp(const String& isoTime) {
-  const String clock = updateClock(isoTime);
-  if (isoTime.length() >= 10 && !clock.isEmpty()) {
-    return isoTime.substring(5, 10) + " " + clock;
+String weatherAgeText(const String& isoTime) {
+  time_t forecastTime = 0;
+  if (!clockIsValid() || !parseLocalTimestamp(isoTime, forecastTime))
+    return "";
+
+  const int64_t roundedMinutes = app_logic::roundedAgeMinutes(
+      static_cast<int64_t>(time(nullptr)),
+      static_cast<int64_t>(forecastTime));
+  if (roundedMinutes < 0) return "";
+  if (roundedMinutes == 0) return "just now";
+
+  const int64_t hours = roundedMinutes / 60;
+  const int64_t minutes = roundedMinutes % 60;
+  String age;
+  if (hours > 0) {
+    age = String(static_cast<long long>(hours)) +
+          (hours == 1 ? " hour" : " hours");
+    if (minutes > 0) {
+      age += " and " + String(static_cast<long long>(minutes)) +
+             (minutes == 1 ? " minute" : " minutes");
+    }
+  } else {
+    age = String(static_cast<long long>(minutes)) +
+          (minutes == 1 ? " minute" : " minutes");
   }
-  return clock;
+  return age + " ago";
 }
 
 String dayLabel(uint8_t index, const String& date) {
@@ -1363,9 +1383,9 @@ void drawHeader(const WeatherData& weather) {
   epaper.setTextDatum(MC_DATUM);
   selectSmallFont();
   String heading;
-  const String stamp = updateStamp(weather.updateTime);
-  if (!stamp.isEmpty()) {
-    heading = "Weather at " + stamp;
+  const String age = weatherAgeText(weather.updateTime);
+  if (!age.isEmpty()) {
+    heading = "Weather " + age;
   } else {
     heading = "Weather";
   }
@@ -1565,8 +1585,14 @@ void renderFooter() {
   fillStatusBackground(top, config::PANEL_HEIGHT - top);
   epaper.drawFastHLine(config::ui(10), top,
                        config::PANEL_WIDTH - config::ui(20), PANEL_MUTED);
-  epaper.setTextColor(PANEL_BLACK, PANEL_STATUS_BACKGROUND,
-                      !PANEL_STATUS_DITHERED);
+  // GFX free fonts clear their bounding box whenever foreground and
+  // background colors differ. Use transparent text on dithered status bars
+  // so the labels do not leave solid white rectangles behind them.
+  if (PANEL_STATUS_DITHERED) {
+    epaper.setTextColor(PANEL_BLACK);
+  } else {
+    epaper.setTextColor(PANEL_BLACK, PANEL_STATUS_BACKGROUND, true);
+  }
   selectSmallFont();
   epaper.setTextDatum(ML_DATUM);
   epaper.drawString("Weather data: Open-Meteo", config::ui(12),

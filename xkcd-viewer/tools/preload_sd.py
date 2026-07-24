@@ -4,6 +4,7 @@
 The output matches the cache layout used by the XKCD Viewer firmware:
 
     <SD root>/xkcd/latest.json
+    <SD root>/xkcd/index.txt
     <SD root>/xkcd/1.json
     <SD root>/xkcd/1.png
     ...
@@ -40,6 +41,8 @@ USER_AGENT = (
     "(https://github.com/danpodeanu/seeed-reterminal-E100X)"
 )
 CHUNK_SIZE = 128 * 1024
+CACHE_INDEX_NAME = "index.txt"
+CACHE_INDEX_MAGIC = "XKCD_CACHE_INDEX_V1"
 
 
 class DownloadError(RuntimeError):
@@ -213,6 +216,43 @@ def valid_image_header(path: Path, extension: str) -> bool:
     return False
 
 
+def complete_cached_comics(cache_dir: Path) -> list[int]:
+    """Return sorted comic numbers with valid metadata and image files."""
+    numbers: list[int] = []
+    for metadata_path in cache_dir.glob("*.json"):
+        try:
+            number = int(metadata_path.stem)
+        except ValueError:
+            continue
+        if number <= 0 or number == 404:
+            continue
+        metadata = read_valid_metadata(metadata_path, number)
+        if metadata is None:
+            continue
+        extension = image_extension(metadata["img"])
+        if extension and valid_image_header(
+            cache_dir / f"{number}{extension}", extension
+        ):
+            numbers.append(number)
+    return sorted(set(numbers))
+
+
+def encode_cache_index(numbers: list[int]) -> bytes:
+    normalized = sorted(set(numbers))
+    if any(number <= 0 or number == 404 for number in normalized):
+        raise ValueError("cache index contains an invalid comic number")
+    lines = [CACHE_INDEX_MAGIC, str(len(normalized))]
+    lines.extend(str(number) for number in normalized)
+    return ("\n".join(lines) + "\n").encode("ascii")
+
+
+def write_cache_index(cache_dir: Path) -> list[int]:
+    """Regenerate the firmware-compatible index from complete cache entries."""
+    numbers = complete_cached_comics(cache_dir)
+    atomic_write(cache_dir / CACHE_INDEX_NAME, encode_cache_index(numbers))
+    return numbers
+
+
 def download_image(
     url: str, destination: Path, extension: str, timeout: float, retries: int
 ) -> None:
@@ -384,6 +424,11 @@ def main() -> int:
                     break
     except KeyboardInterrupt:
         stop_event.set()
+        try:
+            indexed = write_cache_index(cache_dir)
+            print(f"Updated cache index with {len(indexed)} complete comics.")
+        except OSError as exc:
+            print(f"Warning: could not update cache index: {exc}", file=sys.stderr)
         print("\nInterrupted; completed files are safe and the command can be rerun.", file=sys.stderr)
         return 130
 
@@ -391,6 +436,12 @@ def main() -> int:
         "Summary: "
         + ", ".join(f"{name}={count}" for name, count in counts.items() if count)
     )
+    try:
+        indexed = write_cache_index(cache_dir)
+        print(f"Index:     {len(indexed)} complete comics")
+    except (OSError, ValueError) as exc:
+        print(f"Error: could not update cache index: {exc}", file=sys.stderr)
+        return 1
     if stop_event.is_set():
         print("Stopped because the SD card ran out of space.", file=sys.stderr)
         return 1

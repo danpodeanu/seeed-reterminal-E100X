@@ -59,6 +59,28 @@ void test_cached_weather_must_be_no_older_than_one_sleep_period() {
   TEST_ASSERT_FALSE(app_logic::cachedDataFresh(true, forecast, 0, sleep));
 }
 
+void test_weather_age_rounds_to_nearest_five_minutes() {
+  constexpr int64_t timestamp = 100000;
+  TEST_ASSERT_EQUAL_INT64(
+      0, app_logic::roundedAgeMinutes(timestamp + 149, timestamp));
+  TEST_ASSERT_EQUAL_INT64(
+      5, app_logic::roundedAgeMinutes(timestamp + 150, timestamp));
+  TEST_ASSERT_EQUAL_INT64(
+      15, app_logic::roundedAgeMinutes(timestamp + 17 * 60 + 29, timestamp));
+  TEST_ASSERT_EQUAL_INT64(
+      20, app_logic::roundedAgeMinutes(timestamp + 17 * 60 + 30, timestamp));
+  TEST_ASSERT_EQUAL_INT64(
+      150, app_logic::roundedAgeMinutes(timestamp + 2 * 3600 + 28 * 60,
+                                        timestamp));
+  TEST_ASSERT_EQUAL_INT64(
+      2400, app_logic::roundedAgeMinutes(timestamp + 40 * 3600, timestamp));
+}
+
+void test_weather_age_rejects_invalid_or_future_timestamps() {
+  TEST_ASSERT_EQUAL_INT64(-1, app_logic::roundedAgeMinutes(1000, 0));
+  TEST_ASSERT_EQUAL_INT64(-1, app_logic::roundedAgeMinutes(999, 1000));
+}
+
 void test_quiet_suppression_preserves_override_wakes() {
   TEST_ASSERT_TRUE(app_logic::suppressForQuietHours(
       false, false, false, true, true));
@@ -79,6 +101,8 @@ int main(int, char**) {
   RUN_TEST(test_next_wake_detects_quiet_boundary);
   RUN_TEST(test_daily_refresh_due_logic);
   RUN_TEST(test_cached_weather_must_be_no_older_than_one_sleep_period);
+  RUN_TEST(test_weather_age_rounds_to_nearest_five_minutes);
+  RUN_TEST(test_weather_age_rejects_invalid_or_future_timestamps);
   RUN_TEST(test_quiet_suppression_preserves_override_wakes);
   return UNITY_END();
 }
