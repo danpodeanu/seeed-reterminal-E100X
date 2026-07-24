@@ -49,6 +49,13 @@ constexpr int PIN_BATTERY_ENABLE = 40;
 constexpr int PIN_SD_ENABLE = 16;
 constexpr int PIN_BATTERY_ENABLE = 21;
 #endif
+#if RETERMINAL_MODEL == 1001 || RETERMINAL_MODEL == 1002
+constexpr int PIN_STATUS_LED = 6;
+#elif RETERMINAL_MODEL == 1003
+constexpr int PIN_STATUS_LED = 16;
+#else
+constexpr int PIN_STATUS_LED = 48;
+#endif
 constexpr int PIN_BUTTON_GREEN = 3;
 constexpr int PIN_BUTTON_RIGHT = 4;
 constexpr int PIN_BUTTON_LEFT = 5;
@@ -61,6 +68,11 @@ constexpr int PIN_LOG_TX = 43;
 
 TimestampedLogger appLog(Serial1);
 #define LOG appLog
+
+void setStatusLed(bool on) {
+  pinMode(PIN_STATUS_LED, OUTPUT);
+  digitalWrite(PIN_STATUS_LED, on ? LOW : HIGH);
+}
 
 #if RETERMINAL_MODEL == 1001
 constexpr uint32_t PANEL_WHITE = TFT_GRAY_3;
@@ -2011,12 +2023,14 @@ void powerDownAndSleep(uint64_t sleepSeconds = config::SLEEP_SECONDS) {
   }
   LOG.flush();
   delay(50);
+  setStatusLed(false);
   esp_deep_sleep_start();
 }
 
 }  // namespace
 
 void setup() {
+  setStatusLed(true);
   const esp_sleep_wakeup_cause_t wakeCause = esp_sleep_get_wakeup_cause();
   const uint64_t wakePins = wakeCause == ESP_SLEEP_WAKEUP_EXT1
                                 ? esp_sleep_get_ext1_wakeup_status()
