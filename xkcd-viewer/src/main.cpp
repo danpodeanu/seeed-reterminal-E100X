@@ -1743,11 +1743,14 @@ void setup() {
       (wakePins & (1ULL << PIN_BUTTON_RIGHT)) != 0;
   const bool leftWokeDevice =
       (wakePins & (1ULL << PIN_BUTTON_LEFT)) != 0;
+  const bool coldBoot = wakeCause == ESP_SLEEP_WAKEUP_UNDEFINED;
+  const bool buttonWake = wakeCause == ESP_SLEEP_WAKEUP_EXT1;
+  const bool timerWake = wakeCause == ESP_SLEEP_WAKEUP_TIMER;
 
   LOG.begin(115200, SERIAL_8N1, PIN_LOG_RX, PIN_LOG_TX);
-  if (wakeCause == ESP_SLEEP_WAKEUP_EXT1) {
-    // Acknowledge the wake immediately. Holding the green button through this
-    // beep and for the interval below requests a screenshot.
+  if (app_logic::startupBeepRequired(coldBoot, buttonWake)) {
+    // Acknowledge cold boots and button wakes immediately. Holding the green
+    // button through this beep and the interval below requests a screenshot.
     beep();
   }
 
@@ -1790,9 +1793,6 @@ void setup() {
     beep();
   }
 
-  const bool coldBoot = wakeCause == ESP_SLEEP_WAKEUP_UNDEFINED;
-  const bool buttonWake = wakeCause == ESP_SLEEP_WAKEUP_EXT1;
-  const bool timerWake = wakeCause == ESP_SLEEP_WAKEUP_TIMER;
   configureLocalTimezone();
   bool wakeEventLogged = logWakeEvent(wakeCause, wakePins, false);
   const bool ntpDue = ntpRefreshDue(coldBoot);

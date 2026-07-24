@@ -6,6 +6,10 @@ namespace app_logic {
 
 constexpr int SECONDS_PER_DAY = 24 * 60 * 60;
 
+constexpr bool startupBeepRequired(bool coldBoot, bool buttonWake) {
+  return coldBoot || buttonWake;
+}
+
 constexpr int secondsOfDay(int hour, int minute, int second) {
   return hour * 3600 + minute * 60 + second;
 }
