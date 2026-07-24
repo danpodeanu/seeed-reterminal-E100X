@@ -44,6 +44,13 @@ constexpr bool refreshDue(bool coldBoot, bool clockValid, int64_t now,
          static_cast<uint64_t>(now - lastRefresh) >= intervalSeconds;
 }
 
+constexpr bool cachedDataFresh(bool clockValid, int64_t now,
+                               int64_t dataTimestamp,
+                               uint64_t maximumAgeSeconds) {
+  return clockValid && dataTimestamp > 0 && now >= dataTimestamp &&
+         static_cast<uint64_t>(now - dataTimestamp) <= maximumAgeSeconds;
+}
+
 constexpr bool suppressForQuietHours(bool coldBoot, bool buttonWake,
                                      bool ntpDue, bool clockValid,
                                      bool quietActive) {

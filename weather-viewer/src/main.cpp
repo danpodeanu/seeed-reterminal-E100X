@@ -156,6 +156,42 @@ bool localClock(struct tm& localTime) {
   return clockIsValid() && localtime_r(&now, &localTime) != nullptr;
 }
 
+bool parseLocalTimestamp(const String& value, time_t& timestamp) {
+  int year = 0;
+  int month = 0;
+  int day = 0;
+  int hour = 0;
+  int minute = 0;
+  int second = 0;
+  const int fields = sscanf(value.c_str(), "%d-%d-%dT%d:%d:%d",
+                            &year, &month, &day, &hour, &minute, &second);
+  if (fields < 5 || year < 1970 || month < 1 || month > 12 ||
+      day < 1 || day > 31 || hour < 0 || hour > 23 ||
+      minute < 0 || minute > 59 || second < 0 || second > 59) {
+    return false;
+  }
+
+  struct tm parsed = {};
+  parsed.tm_year = year - 1900;
+  parsed.tm_mon = month - 1;
+  parsed.tm_mday = day;
+  parsed.tm_hour = hour;
+  parsed.tm_min = minute;
+  parsed.tm_sec = second;
+  parsed.tm_isdst = -1;
+  timestamp = mktime(&parsed);
+  if (timestamp <= 0) return false;
+
+  struct tm roundTrip = {};
+  if (localtime_r(&timestamp, &roundTrip) == nullptr) return false;
+  return roundTrip.tm_year == year - 1900 &&
+         roundTrip.tm_mon == month - 1 &&
+         roundTrip.tm_mday == day &&
+         roundTrip.tm_hour == hour &&
+         roundTrip.tm_min == minute &&
+         roundTrip.tm_sec == second;
+}
+
 int secondsOfDay(const struct tm& localTime) {
   return app_logic::secondsOfDay(
       localTime.tm_hour, localTime.tm_min, localTime.tm_sec);
@@ -650,9 +686,11 @@ bool writeFileAtomically(const String& path, const String& contents) {
   return true;
 }
 
-bool connectWifi() {
+bool connectWifi(String& failureReason) {
+  failureReason = "";
   if (strcmp(WIFI_SSID, "YOUR_WIFI_NAME") == 0) {
     LOG.println("[wifi] edit include/secrets.h first");
+    failureReason = "Wi-Fi is not configured";
     return false;
   }
   WiFi.persistent(false);
@@ -675,6 +713,7 @@ bool connectWifi() {
   }
   if (WiFi.status() != WL_CONNECTED) {
     LOG.println("[wifi] connection timed out");
+    failureReason = "Wi-Fi connection timed out";
     return false;
   }
   LOG.printf("[wifi] connected, IP=%s RSSI=%d\n",
@@ -896,8 +935,9 @@ bool parseWeather(const String& body, WeatherData& weather) {
 }
 
 bool fetchWeather(WeatherData& weather, String& responseBody,
-                  bool bypassHttpCache = false) {
+                  String& failureReason, bool bypassHttpCache = false) {
   responseBody = "";
+  failureReason = "";
   WiFiClientSecure client;
   client.setInsecure();
   client.setTimeout(config::HTTP_TIMEOUT_MS);
@@ -909,6 +949,7 @@ bool fetchWeather(WeatherData& weather, String& responseBody,
   const String url = forecastUrl();
   if (!http.begin(client, url)) {
     LOG.println("[weather] could not start HTTPS request");
+    failureReason = "Could not start weather request";
     return false;
   }
   if (bypassHttpCache) {
@@ -920,6 +961,7 @@ bool fetchWeather(WeatherData& weather, String& responseBody,
   if (status != HTTP_CODE_OK) {
     LOG.printf("[weather] HTTP GET -> %d\n", status);
     http.end();
+    failureReason = "Weather service returned HTTP " + String(status);
     return false;
   }
   responseBody = http.getString();
@@ -927,16 +969,63 @@ bool fetchWeather(WeatherData& weather, String& responseBody,
   LOG.printf("[weather] received %u bytes from Open-Meteo\n",
              static_cast<unsigned>(responseBody.length()));
   weather.fromCache = false;
-  return parseWeather(responseBody, weather);
-}
-
-bool loadCachedWeather(WeatherData& weather) {
-  String body;
-  if (!sdReady || !readFile(config::FORECAST_CACHE, body)) return false;
-  if (!parseWeather(body, weather)) {
-    LOG.println("[cache] saved forecast is invalid");
+  if (!parseWeather(responseBody, weather)) {
+    failureReason = "Weather service returned invalid data";
     return false;
   }
+  return true;
+}
+
+bool loadCachedWeather(WeatherData& weather, String& failureReason) {
+  failureReason = "";
+  String body;
+  if (!sdReady) {
+    failureReason = "No SD forecast cache is available";
+    return false;
+  }
+  if (!SD.exists(config::FORECAST_CACHE)) {
+    failureReason = "No saved forecast is available";
+    return false;
+  }
+  if (!readFile(config::FORECAST_CACHE, body)) {
+    failureReason = "Saved forecast could not be read";
+    return false;
+  }
+  if (!parseWeather(body, weather)) {
+    LOG.println("[cache] saved forecast is invalid");
+    failureReason = "Saved forecast is invalid";
+    return false;
+  }
+
+  const time_t now = time(nullptr);
+  time_t forecastTime = 0;
+  if (!clockIsValid()) {
+    failureReason = "Cannot verify saved forecast age";
+    LOG.printf("[cache] %s\n", failureReason.c_str());
+    return false;
+  }
+  if (!parseLocalTimestamp(weather.updateTime, forecastTime)) {
+    failureReason = "Saved forecast time is invalid";
+    LOG.printf("[cache] %s: %s\n", failureReason.c_str(),
+               weather.updateTime.c_str());
+    return false;
+  }
+  if (!app_logic::cachedDataFresh(
+          true, now, forecastTime, config::SLEEP_SECONDS)) {
+    if (now < forecastTime) {
+      failureReason = "Saved forecast time is in the future";
+    } else {
+      const uint64_t ageMinutes =
+          static_cast<uint64_t>(now - forecastTime + 59) / 60;
+      failureReason =
+          "Saved forecast is " + String(ageMinutes) + " minutes old";
+    }
+    LOG.printf("[cache] rejected: %s (maximum %llu seconds)\n",
+               failureReason.c_str(),
+               static_cast<unsigned long long>(config::SLEEP_SECONDS));
+    return false;
+  }
+
   weather.fromCache = true;
   LOG.printf("[cache] using forecast updated %s\n",
              weather.updateTime.c_str());
@@ -1405,7 +1494,8 @@ void renderWeather(const WeatherData& weather) {
   LOG.println("[render] complete");
 }
 
-void powerDownAndSleep(uint64_t sleepSeconds = config::SLEEP_SECONDS) {
+void powerDownAndSleep(uint64_t sleepSeconds = config::SLEEP_SECONDS,
+                       bool timerWakeEnabled = true) {
   disableWifi();
   if (sdReady) SD.end();
   pinMode(PIN_SD_ENABLE, OUTPUT);
@@ -1445,16 +1535,23 @@ void powerDownAndSleep(uint64_t sleepSeconds = config::SLEEP_SECONDS) {
           ? esp_sleep_enable_ext1_wakeup(wakeMask, ESP_EXT1_WAKEUP_ANY_LOW)
           : ESP_FAIL;
   const esp_err_t timerWakeResult =
-      esp_sleep_enable_timer_wakeup(sleepSeconds * 1000000ULL);
+      timerWakeEnabled
+          ? esp_sleep_enable_timer_wakeup(sleepSeconds * 1000000ULL)
+          : esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_TIMER);
   LOG.printf("[sleep] wake config: buttons=%s timer=%s levels=%d/%d/%d\n",
              esp_err_to_name(buttonWakeResult),
-             esp_err_to_name(timerWakeResult),
+             timerWakeEnabled ? esp_err_to_name(timerWakeResult) : "disabled",
              digitalRead(PIN_BUTTON_GREEN),
              digitalRead(PIN_BUTTON_RIGHT),
              digitalRead(PIN_BUTTON_LEFT));
-  LOG.printf("[sleep] %llu seconds; GPIO3/GPIO4/GPIO5 wake enabled\n",
-             static_cast<unsigned long long>(sleepSeconds));
-  if (buttonWakeResult != ESP_OK && timerWakeResult != ESP_OK) {
+  if (timerWakeEnabled) {
+    LOG.printf("[sleep] %llu seconds; GPIO3/GPIO4/GPIO5 wake enabled\n",
+               static_cast<unsigned long long>(sleepSeconds));
+  } else {
+    LOG.println("[sleep] waiting for a front button or hardware reset");
+  }
+  if (buttonWakeResult != ESP_OK &&
+      (!timerWakeEnabled || timerWakeResult != ESP_OK)) {
     LOG.println("[sleep] no wake source could be configured; restarting");
     LOG.flush();
     delay(250);
@@ -1587,7 +1684,8 @@ void setup() {
 #endif
 
   WeatherData weather;
-  const bool networkAvailable = connectWifi();
+  String liveFailureReason;
+  const bool networkAvailable = connectWifi(liveFailureReason);
   if (networkAvailable && ntpDue) synchronizeClock();
   configureLocalTimezone();
   if (!wakeEventLogged) {
@@ -1607,7 +1705,7 @@ void setup() {
   String liveResponse;
   const bool liveUpdated =
       networkAvailable &&
-      fetchWeather(weather, liveResponse, buttonWake);
+      fetchWeather(weather, liveResponse, liveFailureReason, buttonWake);
   // The response has already been parsed. Do not keep the radio associated
   // while writing the cache, composing the frame, or refreshing the panel.
   disableWifi();
@@ -1619,7 +1717,9 @@ void setup() {
       LOG.println("[cache] forecast not stored; continuing with live data");
     }
   }
-  const bool haveWeather = liveUpdated || loadCachedWeather(weather);
+  String cacheFailureReason;
+  const bool haveWeather =
+      liveUpdated || loadCachedWeather(weather, cacheFailureReason);
   uint64_t nextSleepSeconds = config::SLEEP_SECONDS;
   if (localClock(localTime)) {
     if (quietHoursActive(localTime) ||
@@ -1633,16 +1733,19 @@ void setup() {
 
   if (haveWeather) {
     renderWeather(weather);
-  } else if (showConnectionStatus) {
-    renderStatus("Weather unavailable",
-                 networkAvailable ? "Forecast download failed"
-                                  : "Check Wi-Fi configuration");
   } else {
-    LOG.println("[weather] refresh failed; retaining previous panel image");
-    if (screenshotRequested) {
-      LOG.println("[screenshot] not saved: no weather frame was rendered");
-      screenshotRequested = false;
-    }
+    if (liveFailureReason.isEmpty())
+      liveFailureReason = "Live weather is unavailable";
+    if (cacheFailureReason.isEmpty())
+      cacheFailureReason = "No fresh saved forecast is available";
+    const String failureSummary =
+        liveFailureReason + "; " + cacheFailureReason;
+    LOG.printf("[weather] unavailable: %s\n", failureSummary.c_str());
+    renderStatus("Weather unavailable",
+                 "Repair the connection, then press a button",
+                 failureSummary);
+    powerDownAndSleep(0, false);
+    return;
   }
 
   powerDownAndSleep(nextSleepSeconds);
