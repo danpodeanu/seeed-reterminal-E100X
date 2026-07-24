@@ -74,7 +74,9 @@ the configured DHCP timeout, it falls back to the two servers above.
 After a successful NTP synchronization, the firmware stores UTC in the onboard
 PCF8563 hardware RTC. If a later deep-sleep wake cannot synchronize with NTP,
 the PCF8563 restores the ESP32 clock only when its voltage-low (`VL`) flag is
-clear. Cold boots log the stored UTC value and `VL` state. A CR1220 coin cell is
+clear. An invalid or rolled-back ESP clock is also recovered from the PCF8563
+before NTP eligibility, quiet hours, or cached-forecast freshness is evaluated.
+Cold boots log the stored UTC value and `VL` state. A CR1220 coin cell is
 required for reliable retention while the physical power switch is off.
 
 The London rule uses GMT in winter and BST from the last Sunday in March until

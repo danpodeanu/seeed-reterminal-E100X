@@ -636,16 +636,18 @@ void drawBadges(uint32_t background = PANEL_WHITE,
   if (cacheStatsAvailable) {
     const int statsRightX =
         percentRightX - epaper.textWidth(percent, 1) - config::ui(10);
-    const int statsOffsetY = config::ui(10);
     selectCacheStatsFont();
     epaper.setTextColor(PANEL_CACHE_STATS_COLOR, background,
                         fillTextBackground);
+    const int statsCenterDistance = epaper.fontHeight(1) + 1;
+    const int upperStatsY = statusCenterY - statsCenterDistance / 2;
+    const int lowerStatsY = upperStatsY + statsCenterDistance;
     epaper.drawString(String(cachedComicCountForDisplay), statsRightX,
-                      statusCenterY - statsOffsetY, 1);
+                      upperStatsY, 1);
     epaper.drawString(totalComicCountForDisplay > 0
                           ? String(totalComicCountForDisplay)
                           : "--",
-                      statsRightX, statusCenterY + statsOffsetY, 1);
+                      statsRightX, lowerStatsY, 1);
   }
   for (int inset = 0; inset < outline; ++inset) {
     epaper.drawRect(x + inset, y + inset, w - 2 * inset, h - 2 * inset,
