@@ -32,8 +32,10 @@ not match.
   `time.cloudflare.com`.
 - Successful NTP synchronization stores UTC in the onboard PCF8563. On a later
   deep-sleep wake, a failed NTP synchronization falls back to that clock only
-  when its voltage-low (`VL`) flag is clear. Cold boots log its stored UTC and
-  `VL` state. A CR1220 is needed to retain it across physical power-off.
+  when its voltage-low (`VL`) flag is clear. An invalid or rolled-back ESP
+  clock is recovered from the PCF8563 before NTP and quiet-hour decisions.
+  Cold boots log its stored UTC and `VL` state. A CR1220 is needed to retain it
+  across physical power-off.
 - Wi-Fi is disabled immediately after time synchronization. Ordinary photo
   changes do not start the radio.
 - Automatic changes occur every six hours by default. Any hardware button

@@ -1731,6 +1731,17 @@ void setup() {
     beep();
   }
 
+  const time_t startupTime = time(nullptr);
+  const bool schedulingClockSuspicious =
+      !clockIsValid() ||
+      (lastNtpSyncEpoch > 0 && startupTime < lastNtpSyncEpoch);
+  const bool hardwareRtcCheckedEarly = schedulingClockSuspicious;
+  if (schedulingClockSuspicious) {
+    LOG.println("[rtc] schedule clock is invalid or behind retained state; "
+                "trying PCF8563");
+    restoreClockFromHardwareRtc();
+  }
+
   bool wakeEventLogged = logWakeEvent(wakeCause, wakePins, false);
   const bool ntpDue = ntpRefreshDue(coldBoot);
   struct tm localTime = {};
@@ -1746,7 +1757,7 @@ void setup() {
   }
 
   readSensors();
-  if (coldBoot) {
+  if (coldBoot && !hardwareRtcCheckedEarly) {
     pcf8563::Reading storedRtc;
     readAndLogHardwareRtc(storedRtc);
   }
