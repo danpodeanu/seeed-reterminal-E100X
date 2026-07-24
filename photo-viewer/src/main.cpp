@@ -39,6 +39,13 @@ constexpr int PIN_BATTERY_ENABLE = 40;
 constexpr int PIN_SD_ENABLE = 16;
 constexpr int PIN_BATTERY_ENABLE = 21;
 #endif
+#if RETERMINAL_MODEL == 1001 || RETERMINAL_MODEL == 1002
+constexpr int PIN_STATUS_LED = 6;
+#elif RETERMINAL_MODEL == 1003
+constexpr int PIN_STATUS_LED = 16;
+#else
+constexpr int PIN_STATUS_LED = 48;
+#endif
 constexpr int PIN_KEY0 = 3;
 constexpr int PIN_KEY1 = 4;
 constexpr int PIN_KEY2 = 5;
@@ -51,6 +58,11 @@ constexpr int PIN_LOG_TX = 43;
 
 TimestampedLogger appLog(Serial1);
 #define LOG appLog
+
+void setStatusLed(bool on) {
+  pinMode(PIN_STATUS_LED, OUTPUT);
+  digitalWrite(PIN_STATUS_LED, on ? LOW : HIGH);
+}
 
 #if RETERMINAL_MODEL == 1001
 constexpr uint32_t PANEL_WHITE = TFT_GRAY_3;
@@ -924,12 +936,14 @@ void powerDownAndSleep(uint64_t sleepSeconds = config::SLEEP_SECONDS) {
   }
   LOG.flush();
   delay(50);
+  setStatusLed(false);
   esp_deep_sleep_start();
 }
 
 }  // namespace
 
 void setup() {
+  setStatusLed(true);
   configureLocalTimezone();
   LOG.begin(115200, SERIAL_8N1, PIN_LOG_RX, PIN_LOG_TX);
   delay(250);
