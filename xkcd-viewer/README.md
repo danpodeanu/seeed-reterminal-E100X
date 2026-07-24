@@ -79,6 +79,14 @@ The firmware requests NTP servers through DHCP option 42 before acquiring its
 Wi-Fi lease. If DHCP supplies no server, or that server does not respond within
 the configured DHCP timeout, it falls back to the two servers above.
 
+After a successful NTP synchronization, the firmware stores UTC in the onboard
+PCF8563 hardware RTC. If a later deep-sleep wake cannot synchronize with NTP,
+the PCF8563 restores the ESP32 clock only when its voltage-low (`VL`) flag is
+clear. Cold boots log the stored UTC value and `VL` state. A CR1220 coin cell is
+required for the PCF8563 to retain reliable time while the physical power
+switch is off; the main battery powers it while the device remains on or in
+deep sleep.
+
 This example uses London time: GMT in winter and BST from the last Sunday in
 March until the last Sunday in October. Change the POSIX `TIMEZONE` rule when
 deploying the device elsewhere.
@@ -134,6 +142,9 @@ pio device monitor --port /dev/ttyUSB0 --baud 115200
 Logging uses UART1 on GPIO43/GPIO44, matching the E-series carrier's
 USB-to-UART bridge. Firmware binaries are written to
 `.pio/build/<environment>/firmware.bin`.
+Every application log line starts with local time in
+`[YYYY-MM-DD HH:MM:SS.mmm]` format. Before the clock is synchronized, the
+same format intentionally shows a 1970 date.
 
 If a build reports `ModuleNotFoundError: No module named 'intelhex'`, install
 it into the Python environment running PlatformIO:
@@ -150,6 +161,10 @@ PIO_PYTHON="$(head -n 1 "$(command -v pio)" | sed 's/^#!//')"
   wakes skip this extra panel refresh to conserve battery power.
 - Every startup logs a `[wake]` line with the local time and whether it was a
   cold boot/reset, scheduled timer, or front-button wake.
+- When an SD card is mounted, the header shows two stacked archive counts
+  immediately left of the battery percentage: complete locally cached comics
+  above, and the total published comics from the last cached online latest
+  check below.
 - Every refresh selects a random XKCD. The default sleep interval is 15
   minutes.
 - With an SD card containing at least 10 complete comics, cold boots, timer
@@ -161,8 +176,11 @@ PIO_PYTHON="$(head -n 1 "$(command -v pio)" | sed 's/^#!//')"
   adds ten uncached historical comics. This scheduled maintenance is the only
   comic-download path once the 10-comic threshold has been reached. Cold boots
   report cache progress and start a new six-hour maintenance interval; they do
-  not refill the archive. Maintenance has a five-minute total deadline; any
-  unfinished downloads are deferred to the next maintenance window.
+  not refill the archive. The ESP clock is recovered from the PCF8563 before
+  maintenance eligibility is evaluated; missing or future retained timestamps
+  establish a new six-hour baseline instead of triggering an immediate refill.
+  Maintenance has a five-minute total deadline; any unfinished downloads are
+  deferred to the next maintenance window.
 - During maintenance, any front-button press cancels outstanding work,
   removes an incomplete download, switches off Wi-Fi, and displays another
   cached comic. Network operations use short cancellation-aware timeouts, so

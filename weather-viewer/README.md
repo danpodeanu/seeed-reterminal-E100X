@@ -71,12 +71,18 @@ The firmware requests NTP servers through DHCP option 42 before acquiring its
 Wi-Fi lease. If DHCP supplies no server, or that server does not respond within
 the configured DHCP timeout, it falls back to the two servers above.
 
+After a successful NTP synchronization, the firmware stores UTC in the onboard
+PCF8563 hardware RTC. If a later deep-sleep wake cannot synchronize with NTP,
+the PCF8563 restores the ESP32 clock only when its voltage-low (`VL`) flag is
+clear. Cold boots log the stored UTC value and `VL` state. A CR1220 coin cell is
+required for reliable retention while the physical power switch is off.
+
 The London rule uses GMT in winter and BST from the last Sunday in March until
 the last Sunday in October. The centered `Weather at` timestamp still comes
 from Open-Meteo and identifies the weather data's valid time; it is not the
 NTP request time.
 
-The default refresh interval is 30 minutes. Change `SLEEP_SECONDS` in the same
+The default refresh interval is 15 minutes. Change `SLEEP_SECONDS` in the same
 file if needed.
 
 Automatic refreshes are suppressed overnight by default:
@@ -100,10 +106,12 @@ constexpr uint8_t RAIN_PROBABILITY_THRESHOLD = 30;
 ```
 
 An SD card is optional. When present, the firmware atomically stores the last
-successful API response as `/weather/forecast.json`. If Wi-Fi or Open-Meteo is
-unavailable later, that forecast is rendered only when its Open-Meteo
-timestamp is no more than `SLEEP_SECONDS` old. Older forecasts are rejected.
-Without a card, live weather works normally.
+successful API response as `/weather/forecast.json`. On normal cold and timer
+wakes, a saved forecast is used without another Open-Meteo request when its
+timestamp is no more than `SLEEP_SECONDS` old. Button wakes remain explicit
+live refreshes. Older forecasts are rejected. A cold boot can still connect for
+NTP before validating the saved timestamp. Without a card, live weather works
+normally.
 
 If neither live weather nor a sufficiently fresh saved forecast is available,
 the display explains the live and cache failures, then enters button-only deep
@@ -137,13 +145,16 @@ pio device monitor --port /dev/ttyUSB0 --baud 115200
 ```
 
 Logging uses UART1 on GPIO43/GPIO44, matching the carrier USB-to-UART bridge.
+Every application log line starts with local time in
+`[YYYY-MM-DD HH:MM:SS.mmm]` format. Before the clock is synchronized, the
+same format intentionally shows a 1970 date.
 
 ## Operation
 
 - Cold boot/reset displays the station MAC above `Connecting to <SSID>`.
 - Every startup logs a `[wake]` line with the local time and whether it was a
   cold boot/reset, scheduled timer, or front-button wake.
-- Timer wakes update every 30 minutes without an intermediate status refresh.
+- Timer wakes update every 15 minutes without an intermediate status refresh.
 - Any front button wakes the device, beeps once, and forces an immediate live
   API update that bypasses HTTP caches.
 - Hold the green GPIO3 button while the device is sleeping. Keep holding it

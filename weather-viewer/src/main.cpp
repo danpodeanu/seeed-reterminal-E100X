@@ -18,6 +18,8 @@
 #include "config.h"
 #include "secrets.h"
 #include "app_logic.h"
+#include "pcf8563_utc.h"
+#include "timestamped_logger.h"
 
 #if RETERMINAL_MODEL == 1003
 #include "fonts/Roboto_Bold90pt7b.h"
@@ -57,13 +59,18 @@ constexpr int PIN_I2C_SCL = 20;
 constexpr int PIN_LOG_RX = 44;
 constexpr int PIN_LOG_TX = 43;
 
-#define LOG Serial1
+TimestampedLogger appLog(Serial1);
+#define LOG appLog
 
 #if RETERMINAL_MODEL == 1001
 constexpr uint32_t PANEL_WHITE = TFT_GRAY_3;
 constexpr uint32_t PANEL_BLACK = TFT_GRAY_0;
 constexpr uint32_t PANEL_LIGHT = TFT_GRAY_2;
 constexpr uint32_t PANEL_MUTED = TFT_GRAY_1;
+constexpr uint32_t PANEL_STATUS_BACKGROUND = TFT_GRAY_3;
+constexpr bool PANEL_STATUS_DITHERED = true;
+constexpr uint32_t PANEL_STATUS_DITHER_COLOR = TFT_GRAY_2;
+constexpr uint8_t PANEL_STATUS_DITHER_THRESHOLD = 8;
 constexpr uint32_t COLOR_SUN = TFT_GRAY_0;
 constexpr uint32_t COLOR_RAIN = TFT_GRAY_1;
 constexpr uint32_t COLOR_ALERT = TFT_GRAY_0;
@@ -74,6 +81,10 @@ constexpr uint32_t PANEL_WHITE = TFT_WHITE;
 constexpr uint32_t PANEL_BLACK = TFT_BLACK;
 constexpr uint32_t PANEL_LIGHT = TFT_WHITE;
 constexpr uint32_t PANEL_MUTED = TFT_BLACK;
+constexpr uint32_t PANEL_STATUS_BACKGROUND = TFT_WHITE;
+constexpr bool PANEL_STATUS_DITHERED = true;
+constexpr uint32_t PANEL_STATUS_DITHER_COLOR = TFT_BLACK;
+constexpr uint8_t PANEL_STATUS_DITHER_THRESHOLD = 4;
 constexpr uint32_t COLOR_SUN = TFT_YELLOW;
 constexpr uint32_t COLOR_RAIN = TFT_BLUE;
 constexpr uint32_t COLOR_ALERT = TFT_RED;
@@ -84,6 +95,10 @@ constexpr uint32_t PANEL_WHITE = TFT_GRAY_15;
 constexpr uint32_t PANEL_BLACK = TFT_GRAY_0;
 constexpr uint32_t PANEL_LIGHT = TFT_GRAY_12;
 constexpr uint32_t PANEL_MUTED = TFT_GRAY_6;
+constexpr uint32_t PANEL_STATUS_BACKGROUND = TFT_GRAY_13;
+constexpr bool PANEL_STATUS_DITHERED = false;
+constexpr uint32_t PANEL_STATUS_DITHER_COLOR = TFT_GRAY_13;
+constexpr uint8_t PANEL_STATUS_DITHER_THRESHOLD = 0;
 constexpr uint32_t COLOR_SUN = TFT_GRAY_2;
 constexpr uint32_t COLOR_RAIN = TFT_GRAY_5;
 constexpr uint32_t COLOR_ALERT = TFT_GRAY_0;
@@ -94,6 +109,10 @@ constexpr uint32_t PANEL_WHITE = TFT_WHITE;
 constexpr uint32_t PANEL_BLACK = TFT_BLACK;
 constexpr uint32_t PANEL_LIGHT = TFT_WHITE;
 constexpr uint32_t PANEL_MUTED = TFT_BLACK;
+constexpr uint32_t PANEL_STATUS_BACKGROUND = TFT_WHITE;
+constexpr bool PANEL_STATUS_DITHERED = true;
+constexpr uint32_t PANEL_STATUS_DITHER_COLOR = TFT_BLACK;
+constexpr uint8_t PANEL_STATUS_DITHER_THRESHOLD = 4;
 constexpr uint32_t COLOR_SUN = TFT_YELLOW;
 constexpr uint32_t COLOR_RAIN = TFT_BLUE;
 constexpr uint32_t COLOR_ALERT = TFT_RED;
@@ -107,6 +126,7 @@ Adafruit_SHT4x sht4;
 bool sdReady = false;
 bool screenshotRequested = false;
 bool climateValid = false;
+bool i2cReady = false;
 float indoorTemperatureC = NAN;
 float indoorHumidityPct = NAN;
 float batteryVoltage = NAN;
@@ -460,9 +480,10 @@ void readSensors() {
        attempt < config::SENSOR_READ_ATTEMPTS && !climateValid; ++attempt) {
     if (attempt > 0) {
       Wire.end();
+      i2cReady = false;
       delay(config::SENSOR_RETRY_DELAY_MS);
     }
-    Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
+    i2cReady = Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
     Wire.setClock(100000);
     if (sht4.begin(&Wire)) {
       sht4.setPrecision(SHT4X_HIGH_PRECISION);
@@ -481,6 +502,56 @@ void readSensors() {
                config::SENSOR_READ_ATTEMPTS);
   }
   if (!climateValid) LOG.println("[sensor] SHT4x unavailable after retries");
+}
+
+bool ensureI2cBus() {
+  if (i2cReady) return true;
+  i2cReady = Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
+  if (!i2cReady) {
+    LOG.println("[rtc] could not initialize the I2C bus");
+    return false;
+  }
+  Wire.setClock(100000);
+  return true;
+}
+
+bool readAndLogHardwareRtc(pcf8563::Reading& stored) {
+  if (!ensureI2cBus()) return false;
+  String error;
+  if (!pcf8563::readUtc(Wire, stored, error)) {
+    LOG.printf("[rtc] PCF8563 read failed: %s\n", error.c_str());
+    return false;
+  }
+  LOG.printf("[rtc] PCF8563 stored UTC=%s, %s\n",
+             pcf8563::format(stored).c_str(),
+             stored.voltageLow ? "VL set - stored time is unreliable"
+                               : "VL clear - stored time is valid");
+  return true;
+}
+
+void saveNtpTimeToHardwareRtc(time_t now) {
+  if (!ensureI2cBus()) return;
+  String error;
+  if (!pcf8563::writeUtc(Wire, now, error)) {
+    LOG.printf("[rtc] PCF8563 NTP update failed: %s\n", error.c_str());
+    return;
+  }
+  LOG.println("[rtc] PCF8563 updated from NTP");
+  pcf8563::Reading verified;
+  readAndLogHardwareRtc(verified);
+}
+
+bool restoreClockFromHardwareRtc() {
+  pcf8563::Reading stored;
+  if (!readAndLogHardwareRtc(stored)) return false;
+  String error;
+  if (!pcf8563::setSystemClock(stored, error)) {
+    LOG.printf("[rtc] PCF8563 fallback rejected: %s\n", error.c_str());
+    return false;
+  }
+  LOG.printf("[rtc] restored ESP32 clock from PCF8563 UTC=%s\n",
+             pcf8563::format(stored).c_str());
+  return true;
 }
 
 void selectSmallFont() {
@@ -529,8 +600,31 @@ String ellipsize(String text, int maxWidth, uint8_t font = 1) {
   return text + suffix;
 }
 
-void drawBadges() {
-  epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, true);
+void fillStatusBackground(int top, int height) {
+  epaper.fillRect(0, top, config::PANEL_WIDTH, height,
+                  PANEL_STATUS_BACKGROUND);
+  if (!PANEL_STATUS_DITHERED) return;
+
+  // Ordered neutral patterns provide intermediate shades when the panel
+  // palette has no suitable native gray.
+  static constexpr uint8_t bayer4[4][4] = {
+      {0, 8, 2, 10},
+      {12, 4, 14, 6},
+      {3, 11, 1, 9},
+      {15, 7, 13, 5},
+  };
+  const int bottom = min(config::PANEL_HEIGHT, top + height);
+  for (int y = max(0, top); y < bottom; ++y) {
+    for (int x = 0; x < config::PANEL_WIDTH; ++x) {
+      if (bayer4[y & 3][x & 3] < PANEL_STATUS_DITHER_THRESHOLD)
+        epaper.drawPixel(x, y, PANEL_STATUS_DITHER_COLOR);
+    }
+  }
+}
+
+void drawBadges(uint32_t background = PANEL_WHITE,
+                bool fillTextBackground = true) {
+  epaper.setTextColor(PANEL_BLACK, background, fillTextBackground);
   selectSmallFont();
 
   const int statusCenterY = config::ui(24);
@@ -792,6 +886,7 @@ bool synchronizeClock() {
            &localTime);
   lastNtpSyncEpoch = now;
   LOG.printf("[ntp] synchronized: %s\n", formatted);
+  saveNtpTimeToHardwareRtc(now);
   return true;
 }
 
@@ -1261,7 +1356,9 @@ void drawLargeTemperature(float temperature, int cx, int cy) {
 }
 
 void drawHeader(const WeatherData& weather) {
-  drawBadges();
+  const int height = config::ui(45);
+  epaper.fillRect(0, 0, config::PANEL_WIDTH, height, PANEL_WHITE);
+  drawBadges(PANEL_WHITE, true);
   epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, true);
   epaper.setTextDatum(MC_DATUM);
   selectSmallFont();
@@ -1464,17 +1561,20 @@ void renderPortrait(const WeatherData& weather) {
 
 void renderFooter() {
   const int top = config::PANEL_HEIGHT - config::ui(30);
+  const int labelY = config::PANEL_HEIGHT - config::ui(17);
+  fillStatusBackground(top, config::PANEL_HEIGHT - top);
   epaper.drawFastHLine(config::ui(10), top,
                        config::PANEL_WIDTH - config::ui(20), PANEL_MUTED);
-  epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, true);
+  epaper.setTextColor(PANEL_BLACK, PANEL_STATUS_BACKGROUND,
+                      !PANEL_STATUS_DITHERED);
   selectSmallFont();
   epaper.setTextDatum(ML_DATUM);
   epaper.drawString("Weather data: Open-Meteo", config::ui(12),
-                    config::PANEL_HEIGHT - config::ui(14), 1);
+                    labelY, 1);
   epaper.setTextDatum(MR_DATUM);
   epaper.drawString(config::LOCATION_NAME,
                     config::PANEL_WIDTH - config::ui(12),
-                    config::PANEL_HEIGHT - config::ui(14), 1);
+                    labelY, 1);
 }
 
 void renderWeather(const WeatherData& weather) {
@@ -1583,6 +1683,7 @@ void setup() {
   const bool leftWokeDevice =
       (wakePins & (1ULL << PIN_BUTTON_LEFT)) != 0;
 
+  configureLocalTimezone();
   LOG.begin(115200, SERIAL_8N1, PIN_LOG_RX, PIN_LOG_TX);
   if (app_logic::startupBeepRequired(coldBoot, buttonWake)) {
     // Acknowledge cold boots and button wakes immediately. Holding the green
@@ -1630,7 +1731,6 @@ void setup() {
     beep();
   }
 
-  configureLocalTimezone();
   bool wakeEventLogged = logWakeEvent(wakeCause, wakePins, false);
   const bool ntpDue = ntpRefreshDue(coldBoot);
   struct tm localTime = {};
@@ -1646,6 +1746,10 @@ void setup() {
   }
 
   readSensors();
+  if (coldBoot) {
+    pcf8563::Reading storedRtc;
+    readAndLogHardwareRtc(storedRtc);
+  }
   epaper.begin();
   sdReady = mountSd();
   if (screenshotRequested && !sdReady) {
@@ -1685,8 +1789,27 @@ void setup() {
 
   WeatherData weather;
   String liveFailureReason;
-  const bool networkAvailable = connectWifi(liveFailureReason);
-  if (networkAvailable && ntpDue) synchronizeClock();
+  String cacheFailureReason;
+  bool cacheChecked = false;
+  bool cacheLoaded = false;
+
+  // A normal wake can render a forecast already obtained within the current
+  // refresh interval. Button wakes remain an explicit request for live data.
+  if (!buttonWake && clockIsValid()) {
+    cacheChecked = true;
+    cacheLoaded = loadCachedWeather(weather, cacheFailureReason);
+  }
+
+  const bool networkRequired = buttonWake || ntpDue || !cacheLoaded;
+  const bool networkAvailable =
+      networkRequired && connectWifi(liveFailureReason);
+  const bool ntpSynchronized =
+      networkAvailable && ntpDue && synchronizeClock();
+  bool rtcRestored = false;
+  if (ntpDue && !ntpSynchronized && !coldBoot) {
+    LOG.println("[ntp] using PCF8563 fallback after synchronization failure");
+    rtcRestored = restoreClockFromHardwareRtc();
+  }
   configureLocalTimezone();
   if (!wakeEventLogged) {
     logWakeEvent(wakeCause, wakePins, true);
@@ -1702,10 +1825,21 @@ void setup() {
     return;
   }
 
+  // Cold boot NTP may have made it possible to validate a cache whose age
+  // could not be checked before connecting.
+  if (!buttonWake &&
+      (!cacheLoaded || ntpSynchronized || rtcRestored) && clockIsValid()) {
+    cacheChecked = true;
+    cacheLoaded = loadCachedWeather(weather, cacheFailureReason);
+  }
+
   String liveResponse;
   const bool liveUpdated =
-      networkAvailable &&
+      !cacheLoaded && networkAvailable &&
       fetchWeather(weather, liveResponse, liveFailureReason, buttonWake);
+  if (cacheLoaded) {
+    LOG.println("[cache] fresh forecast selected; skipping live weather request");
+  }
   // The response has already been parsed. Do not keep the radio associated
   // while writing the cache, composing the frame, or refreshing the panel.
   disableWifi();
@@ -1717,9 +1851,10 @@ void setup() {
       LOG.println("[cache] forecast not stored; continuing with live data");
     }
   }
-  String cacheFailureReason;
-  const bool haveWeather =
-      liveUpdated || loadCachedWeather(weather, cacheFailureReason);
+  if (!liveUpdated && !cacheLoaded && !cacheChecked) {
+    cacheLoaded = loadCachedWeather(weather, cacheFailureReason);
+  }
+  const bool haveWeather = liveUpdated || cacheLoaded;
   uint64_t nextSleepSeconds = config::SLEEP_SECONDS;
   if (localClock(localTime)) {
     if (quietHoursActive(localTime) ||

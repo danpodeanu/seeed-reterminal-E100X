@@ -83,6 +83,7 @@ constexpr int CONTENT_TOP = ui(50);
 constexpr int FOOTER_BOTTOM = PANEL_HEIGHT - ui(12);
 constexpr int FOOTER_MAX_LINES = 3;
 constexpr int FOOTER_LINE_HEIGHT = ui(22);
+constexpr int FOOTER_VERTICAL_PADDING = ui(8);
 
 constexpr char CACHE_DIR[] = "/xkcd";
 constexpr char LATEST_CACHE[] = "/xkcd/latest.json";
