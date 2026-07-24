@@ -101,9 +101,14 @@ constexpr uint8_t RAIN_PROBABILITY_THRESHOLD = 30;
 
 An SD card is optional. When present, the firmware atomically stores the last
 successful API response as `/weather/forecast.json`. If Wi-Fi or Open-Meteo is
-unavailable later, that forecast is rendered with its original timestamp and
-without an additional status label. Without a card, live weather works
-normally.
+unavailable later, that forecast is rendered only when its Open-Meteo
+timestamp is no more than `SLEEP_SECONDS` old. Older forecasts are rejected.
+Without a card, live weather works normally.
+
+If neither live weather nor a sufficiently fresh saved forecast is available,
+the display explains the live and cache failures, then enters button-only deep
+sleep. Automatic timer retries remain disabled until a front button or
+hardware reset starts another attempt.
 
 Weather icons are vector graphics built into the firmware, not downloaded
 images, so they consume no network traffic and require no SD cache.

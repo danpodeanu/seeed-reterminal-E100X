@@ -43,6 +43,22 @@ void test_daily_refresh_due_logic() {
   TEST_ASSERT_TRUE(app_logic::refreshDue(false, true, last - 1, last, day));
 }
 
+void test_cached_weather_must_be_no_older_than_one_sleep_period() {
+  constexpr int64_t forecast = 1000;
+  constexpr uint64_t sleep = 30 * 60;
+  TEST_ASSERT_TRUE(
+      app_logic::cachedDataFresh(true, forecast, forecast, sleep));
+  TEST_ASSERT_TRUE(
+      app_logic::cachedDataFresh(true, forecast + sleep, forecast, sleep));
+  TEST_ASSERT_FALSE(
+      app_logic::cachedDataFresh(true, forecast + sleep + 1, forecast, sleep));
+  TEST_ASSERT_FALSE(
+      app_logic::cachedDataFresh(false, forecast, forecast, sleep));
+  TEST_ASSERT_FALSE(
+      app_logic::cachedDataFresh(true, forecast - 1, forecast, sleep));
+  TEST_ASSERT_FALSE(app_logic::cachedDataFresh(true, forecast, 0, sleep));
+}
+
 void test_quiet_suppression_preserves_override_wakes() {
   TEST_ASSERT_TRUE(app_logic::suppressForQuietHours(
       false, false, false, true, true));
@@ -62,6 +78,7 @@ int main(int, char**) {
   RUN_TEST(test_quiet_hours_boundaries);
   RUN_TEST(test_next_wake_detects_quiet_boundary);
   RUN_TEST(test_daily_refresh_due_logic);
+  RUN_TEST(test_cached_weather_must_be_no_older_than_one_sleep_period);
   RUN_TEST(test_quiet_suppression_preserves_override_wakes);
   return UNITY_END();
 }
