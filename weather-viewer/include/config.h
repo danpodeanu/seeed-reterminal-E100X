@@ -73,4 +73,11 @@ static_assert(QUIET_START_MINUTE < 60 && QUIET_END_MINUTE < 60,
 constexpr char CACHE_DIR[] = "/weather";
 constexpr char FORECAST_CACHE[] = "/weather/forecast.json";
 
+// When a live weather fetch fails, keep displaying the last saved forecast
+// for up to this long instead of showing the "weather unavailable" screen.
+constexpr uint64_t FAILURE_CACHE_MAX_AGE_SECONDS = 60ULL * 60ULL;
+// When live weather is unavailable and no acceptable cache exists, retry
+// automatically after this interval instead of waiting for a button press.
+constexpr uint64_t FAILURE_RETRY_SECONDS = 15ULL * 60ULL;
+
 }  // namespace config

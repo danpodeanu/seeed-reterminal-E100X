@@ -1106,7 +1106,7 @@ bool fetchWeather(WeatherData& weather, String& responseBody,
   if (status != HTTP_CODE_OK) {
     LOG.printf("[weather] HTTP GET -> %d\n", status);
     http.end();
-    failureReason = "Weather service returned HTTP " + String(status);
+    failureReason = "Weather service returned an error";
     return false;
   }
   // Reject an implausibly large body before letting http.getString() load it
@@ -1141,7 +1141,8 @@ bool fetchWeather(WeatherData& weather, String& responseBody,
   return true;
 }
 
-bool loadCachedWeather(WeatherData& weather, String& failureReason) {
+bool loadCachedWeather(WeatherData& weather, String& failureReason,
+                       uint64_t maxAgeSeconds = config::SLEEP_SECONDS) {
   failureReason = "";
   String body;
   if (!sdReady) {
@@ -1176,7 +1177,7 @@ bool loadCachedWeather(WeatherData& weather, String& failureReason) {
     return false;
   }
   if (!app_logic::cachedDataFresh(
-          true, now, forecastTime, config::SLEEP_SECONDS)) {
+          true, now, forecastTime, maxAgeSeconds)) {
     if (now < forecastTime) {
       failureReason = "Saved forecast time is in the future";
     } else {
@@ -1187,7 +1188,7 @@ bool loadCachedWeather(WeatherData& weather, String& failureReason) {
     }
     LOG.printf("[cache] rejected: %s (maximum %llu seconds)\n",
                failureReason.c_str(),
-               static_cast<unsigned long long>(config::SLEEP_SECONDS));
+               static_cast<unsigned long long>(maxAgeSeconds));
     return false;
   }
 
@@ -1974,17 +1975,33 @@ void setup() {
   if (haveWeather) {
     renderWeather(weather);
   } else {
+    // Live weather failed. Fall back to the saved forecast if it is still
+    // reasonably fresh; only show the error screen if the cache is older
+    // than FAILURE_CACHE_MAX_AGE_SECONDS (or missing).
+    String staleFailureReason;
+    if (clockIsValid() &&
+        loadCachedWeather(weather, staleFailureReason,
+                          config::FAILURE_CACHE_MAX_AGE_SECONDS)) {
+      LOG.println("[weather] live fetch failed; showing recent cached forecast");
+      renderWeather(weather);
+      powerDownAndSleep(config::FAILURE_RETRY_SECONDS);
+      return;
+    }
     if (liveFailureReason.isEmpty())
       liveFailureReason = "Live weather is unavailable";
     if (cacheFailureReason.isEmpty())
-      cacheFailureReason = "No fresh saved forecast is available";
+      cacheFailureReason = staleFailureReason.isEmpty()
+                               ? "No fresh saved forecast is available"
+                               : staleFailureReason;
     const String failureSummary =
         liveFailureReason + "; " + cacheFailureReason;
     LOG.printf("[weather] unavailable: %s\n", failureSummary.c_str());
-    renderStatus("Weather unavailable",
-                 "Repair the connection, then press a button",
-                 failureSummary);
-    powerDownAndSleep(0, false);
+    const uint64_t retryMinutes = config::FAILURE_RETRY_SECONDS / 60ULL;
+    const String detail =
+        "Retrying in " + String(static_cast<unsigned long>(retryMinutes)) +
+        " minutes. Press any button to retry now.";
+    renderStatus("Weather unavailable", detail, failureSummary);
+    powerDownAndSleep(config::FAILURE_RETRY_SECONDS);
     return;
   }
 
