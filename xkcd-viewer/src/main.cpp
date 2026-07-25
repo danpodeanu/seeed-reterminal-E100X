@@ -1,10 +1,8 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
-#include <HTTPClient.h>
 #include <SD.h>
 #include <SPI.h>
 #include <WiFi.h>
-#include <WiFiClientSecure.h>
 #include <Wire.h>
 #include <Adafruit_SHT4x.h>
 #include <TFT_eSPI.h>
@@ -32,6 +30,7 @@
 #include "wifi_sta.h"
 #include "climate_sensor.h"
 #include "sd_card.h"
+#include "net_http.h"
 #include "text_render.h"
 #include "dither.h"
 #include "image_loader.h"
@@ -448,238 +447,6 @@ void updatePanel() {
   epaper.update();
 }
 
-bool httpGetString(const String& url, String& body) {
-  if (networkOperationShouldStop()) return false;
-  WiFiClientSecure client;
-  client.setInsecure();
-  client.setTimeout(boundedNetworkTimeout(config::HTTP_TIMEOUT_MS));
-  HTTPClient http;
-  http.setConnectTimeout(boundedNetworkTimeout(config::HTTP_TIMEOUT_MS));
-  http.setTimeout(boundedNetworkTimeout(config::HTTP_TIMEOUT_MS));
-  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
-  if (!http.begin(client, url)) return false;
-  const int status = http.GET();
-  if (networkOperationShouldStop()) {
-    http.end();
-    return false;
-  }
-  if (status != HTTP_CODE_OK) {
-    LOG.printf("[http] GET %s -> %d\n", url.c_str(), status);
-    http.end();
-    return false;
-  }
-  client.setTimeout(boundedNetworkTimeout(config::HTTP_TIMEOUT_MS));
-  body = http.getString();
-  http.end();
-  return !networkOperationShouldStop() && !body.isEmpty();
-}
-
-bool downloadToSd(const String& url, const String& destination) {
-  if (networkOperationShouldStop()) return false;
-  WiFiClientSecure client;
-  client.setInsecure();
-  client.setTimeout(boundedNetworkTimeout(config::DOWNLOAD_IDLE_TIMEOUT_MS));
-  HTTPClient http;
-  http.setConnectTimeout(boundedNetworkTimeout(config::HTTP_TIMEOUT_MS));
-  http.setTimeout(boundedNetworkTimeout(config::DOWNLOAD_IDLE_TIMEOUT_MS));
-  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
-  if (!http.begin(client, url)) return false;
-
-  const int status = http.GET();
-  if (status != HTTP_CODE_OK) {
-    LOG.printf("[http] image GET -> %d\n", status);
-    http.end();
-    return false;
-  }
-  const int declaredSize = http.getSize();
-  if (declaredSize > static_cast<int>(config::MAX_IMAGE_BYTES)) {
-    LOG.printf("[http] image is too large to cache: %d bytes\n", declaredSize);
-    http.end();
-    return false;
-  }
-
-  const String temporary = destination + ".part";
-  SD.remove(temporary);
-  File file = SD.open(temporary, FILE_WRITE);
-  if (!file) {
-    LOG.printf("[cache] could not create %s\n", temporary.c_str());
-    http.end();
-    return false;
-  }
-
-  WiFiClient* stream = http.getStreamPtr();
-  constexpr size_t bufferSize = 4096;
-  uint8_t* buffer = static_cast<uint8_t*>(malloc(bufferSize));
-  if (!buffer) {
-    LOG.println("[http] could not allocate SD download buffer");
-    file.close();
-    SD.remove(temporary);
-    http.end();
-    return false;
-  }
-  size_t total = 0;
-  uint32_t lastDataAt = millis();
-  bool ok = true;
-
-  while (!networkOperationShouldStop() && http.connected() &&
-         (declaredSize < 0 ||
-          total < static_cast<size_t>(declaredSize))) {
-    const size_t available = stream->available();
-    if (available > 0) {
-      const size_t wanted = available < bufferSize ? available : bufferSize;
-      stream->setTimeout(
-          boundedNetworkTimeout(config::DOWNLOAD_IDLE_TIMEOUT_MS));
-      const int received = stream->readBytes(buffer, wanted);
-      if (received <= 0 || file.write(buffer, received) != static_cast<size_t>(received)) {
-        ok = false;
-        break;
-      }
-      total += received;
-      lastDataAt = millis();
-      if (total > config::MAX_IMAGE_BYTES) {
-        LOG.println("[http] image exceeded download limit");
-        ok = false;
-        break;
-      }
-      // Let the network and idle tasks run and feed the task watchdog even
-      // when both the server and SD card can sustain a continuous stream.
-      delay(1);
-    } else {
-      if (millis() - lastDataAt > config::DOWNLOAD_IDLE_TIMEOUT_MS) {
-        LOG.println("[http] image download timed out");
-        ok = false;
-        break;
-      }
-      delay(5);
-    }
-  }
-  if (networkOperationShouldStop()) ok = false;
-  if (declaredSize >= 0 && total != static_cast<size_t>(declaredSize)) ok = false;
-  free(buffer);
-  file.flush();
-  file.close();
-  http.end();
-
-  if (!ok || total == 0) {
-    LOG.printf("[cache] write/download failed for %s after %lu bytes\n",
-               destination.c_str(), static_cast<unsigned long>(total));
-    SD.remove(temporary);
-    return false;
-  }
-  SD.remove(destination);
-  if (!SD.rename(temporary, destination)) {
-    LOG.printf("[cache] could not install %s\n", destination.c_str());
-    SD.remove(temporary);
-    return false;
-  }
-  LOG.printf("[cache] saved %s (%lu bytes)\n", destination.c_str(),
-             static_cast<unsigned long>(total));
-  return true;
-}
-
-bool downloadToMemory(const String& url, uint8_t*& output, size_t& outputLength) {
-  output = nullptr;
-  outputLength = 0;
-  if (networkOperationShouldStop()) return false;
-
-  WiFiClientSecure client;
-  client.setInsecure();
-  client.setTimeout(boundedNetworkTimeout(config::DOWNLOAD_IDLE_TIMEOUT_MS));
-  HTTPClient http;
-  http.setConnectTimeout(boundedNetworkTimeout(config::HTTP_TIMEOUT_MS));
-  http.setTimeout(boundedNetworkTimeout(config::DOWNLOAD_IDLE_TIMEOUT_MS));
-  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
-  if (!http.begin(client, url)) return false;
-
-  const int status = http.GET();
-  if (status != HTTP_CODE_OK) {
-    LOG.printf("[http] live image GET -> %d\n", status);
-    http.end();
-    return false;
-  }
-
-  const int declaredSize = http.getSize();
-  if (declaredSize > static_cast<int>(config::MAX_LIVE_IMAGE_BYTES)) {
-    LOG.printf("[http] live image is too large for PSRAM: %d bytes\n", declaredSize);
-    http.end();
-    return false;
-  }
-
-  size_t capacity = declaredSize > 0 ? static_cast<size_t>(declaredSize) : 128U * 1024U;
-  uint8_t* data = static_cast<uint8_t*>(ps_malloc(capacity));
-  if (!data) {
-    LOG.printf("[http] could not allocate %lu bytes for live image\n",
-               static_cast<unsigned long>(capacity));
-    http.end();
-    return false;
-  }
-
-  WiFiClient* stream = http.getStreamPtr();
-  size_t total = 0;
-  uint32_t lastDataAt = millis();
-  bool ok = true;
-
-  while (!networkOperationShouldStop() && http.connected() &&
-         (declaredSize < 0 ||
-          total < static_cast<size_t>(declaredSize))) {
-    size_t available = stream->available();
-    if (available > 0) {
-      if (total + available > config::MAX_LIVE_IMAGE_BYTES) {
-        LOG.println("[http] live image exceeded PSRAM download limit");
-        ok = false;
-        break;
-      }
-      if (total + available > capacity) {
-        size_t expanded = capacity;
-        while (expanded < total + available) expanded *= 2;
-        if (expanded > config::MAX_LIVE_IMAGE_BYTES) expanded = config::MAX_LIVE_IMAGE_BYTES;
-        uint8_t* resized = static_cast<uint8_t*>(ps_realloc(data, expanded));
-        if (!resized) {
-          LOG.println("[http] could not grow live-image PSRAM buffer");
-          ok = false;
-          break;
-        }
-        data = resized;
-        capacity = expanded;
-      }
-      const size_t wanted = available < 4096 ? available : 4096;
-      stream->setTimeout(
-          boundedNetworkTimeout(config::DOWNLOAD_IDLE_TIMEOUT_MS));
-      const int received = stream->readBytes(data + total, wanted);
-      if (received <= 0) {
-        ok = false;
-        break;
-      }
-      total += received;
-      lastDataAt = millis();
-    } else {
-      if (millis() - lastDataAt > config::DOWNLOAD_IDLE_TIMEOUT_MS) {
-        LOG.println("[http] live image download timed out");
-        ok = false;
-        break;
-      }
-      delay(5);
-    }
-  }
-  if (networkOperationShouldStop()) ok = false;
-  if (declaredSize >= 0 && total != static_cast<size_t>(declaredSize)) ok = false;
-  http.end();
-
-  if (!ok || total == 0) {
-    free(data);
-    return false;
-  }
-  if (total < capacity) {
-    uint8_t* resized = static_cast<uint8_t*>(ps_realloc(data, total));
-    if (resized) data = resized;
-  }
-  output = data;
-  outputLength = total;
-  LOG.printf("[http] live image held in PSRAM (%lu bytes, not cached)\n",
-             static_cast<unsigned long>(total));
-  return true;
-}
-
 bool parseComic(const String& json, Comic& comic) {
   JsonDocument document;
   const DeserializationError error = deserializeJson(document, json);
@@ -701,26 +468,13 @@ String metadataPath(int number) {
   return String(config::CACHE_DIR) + "/" + number + ".json";
 }
 
-String imageExtension(const String& url) {
-  String path = url;
-  const int query = path.indexOf('?');
-  if (query >= 0) path.remove(query);
-  const int dot = path.lastIndexOf('.');
-  if (dot < 0) return "";
-  String extension = path.substring(dot);
-  extension.toLowerCase();
-  if (extension == ".png" || extension == ".jpg" ||
-      extension == ".jpeg" || extension == ".bmp") return extension;
-  return "";
-}
-
 bool comicFullyCached(int number) {
   if (!sdReady || number <= 0 || number == 404) return false;
   String json;
   Comic comic;
   if (!sd_card::readFile(metadataPath(number), json, 64U * 1024U) || !parseComic(json, comic))
     return false;
-  const String extension = imageExtension(comic.imageUrl);
+  const String extension = net_http::imageExtension(comic.imageUrl);
   if (extension.isEmpty()) return false;
   return SD.exists(String(config::CACHE_DIR) + "/" + number + extension);
 }
@@ -916,7 +670,7 @@ bool getComic(int number, bool networkAvailable, Comic& comic) {
   if (!metadataCached) {
     if (!networkAvailable || number == 404) return false;
     const String url = "https://xkcd.com/" + String(number) + "/info.0.json";
-    if (!httpGetString(url, json) || !parseComic(json, comic)) return false;
+    if (!net_http::getString(url, json, config::HTTP_TIMEOUT_MS, networkOperationShouldStop, boundedNetworkTimeout) || !parseComic(json, comic)) return false;
     if (sd_card::writeFileAtomically(metaPath, json)) {
       LOG.printf("[cache] saved metadata #%d\n", number);
     } else {
@@ -926,7 +680,7 @@ bool getComic(int number, bool networkAvailable, Comic& comic) {
     }
   }
 
-  const String extension = imageExtension(comic.imageUrl);
+  const String extension = net_http::imageExtension(comic.imageUrl);
   if (extension.isEmpty()) {
     LOG.printf("[comic] #%d uses an unsupported image format\n", comic.number);
     return false;
@@ -940,7 +694,7 @@ bool getComic(int number, bool networkAvailable, Comic& comic) {
       return false;
     }
     LOG.printf("[comic] downloading #%d from %s\n", comic.number, comic.imageUrl.c_str());
-    if (!downloadToSd(comic.imageUrl, comic.imagePath)) {
+    if (!net_http::downloadToSd(comic.imageUrl, comic.imagePath, config::HTTP_TIMEOUT_MS, config::DOWNLOAD_IDLE_TIMEOUT_MS, config::MAX_IMAGE_BYTES, networkOperationShouldStop, boundedNetworkTimeout)) {
       sdCacheWritable = false;
       LOG.printf("[cache] image #%d not stored; PSRAM fallback available\n",
                  comic.number);
@@ -959,7 +713,7 @@ bool getLatestNumber(bool networkAvailable, int& latest,
   const bool shouldCheckOnline = networkAvailable &&
       (refreshOnline || !SD.exists(config::LATEST_CACHE));
   if (shouldCheckOnline) {
-    if (httpGetString(config::XKCD_LATEST_URL, json) && parseComic(json, comic)) {
+    if (net_http::getString(config::XKCD_LATEST_URL, json, config::HTTP_TIMEOUT_MS, networkOperationShouldStop, boundedNetworkTimeout) && parseComic(json, comic)) {
       latest = comic.number;
       if (!sd_card::writeFileAtomically(config::LATEST_CACHE, json)) {
         sdCacheWritable = false;
@@ -1067,7 +821,7 @@ bool getLatestNumberWithoutSd(bool networkAvailable, int& latest) {
 
   String json;
   Comic latestComic;
-  if (httpGetString(config::XKCD_LATEST_URL, json) && parseComic(json, latestComic)) {
+  if (net_http::getString(config::XKCD_LATEST_URL, json, config::HTTP_TIMEOUT_MS, networkOperationShouldStop, boundedNetworkTimeout) && parseComic(json, latestComic)) {
     latest = latestComic.number;
     LOG.printf("[xkcd] live latest is #%d (not cached)\n", latest);
     return true;
@@ -1083,13 +837,13 @@ bool getComicWithoutSd(int number, Comic& comic, uint8_t*& compressed,
 
   String json;
   const String metadataUrl = "https://xkcd.com/" + String(number) + "/info.0.json";
-  if (!httpGetString(metadataUrl, json) || !parseComic(json, comic)) return false;
-  if (imageExtension(comic.imageUrl).isEmpty()) {
+  if (!net_http::getString(metadataUrl, json, config::HTTP_TIMEOUT_MS, networkOperationShouldStop, boundedNetworkTimeout) || !parseComic(json, comic)) return false;
+  if (net_http::imageExtension(comic.imageUrl).isEmpty()) {
     LOG.printf("[comic] #%d uses an unsupported image format\n", comic.number);
     return false;
   }
   LOG.printf("[comic] downloading #%d directly to PSRAM\n", comic.number);
-  return downloadToMemory(comic.imageUrl, compressed, compressedLength);
+  return net_http::downloadToMemory(comic.imageUrl, compressed, compressedLength, config::HTTP_TIMEOUT_MS, config::DOWNLOAD_IDLE_TIMEOUT_MS, config::MAX_LIVE_IMAGE_BYTES, networkOperationShouldStop, boundedNetworkTimeout);
 }
 
 int pickRandomCachedNumber() {
@@ -1178,11 +932,11 @@ bool loadUsableComic(int number, bool networkAvailable, Comic& comic,
   // cache entry. Keep the live PSRAM path available instead of making the
   // mounted-card path an all-or-nothing choice.
   if (!decoded && networkAvailable && comic.number > 0 &&
-      !comic.imageUrl.isEmpty() && !imageExtension(comic.imageUrl).isEmpty()) {
+      !comic.imageUrl.isEmpty() && !net_http::imageExtension(comic.imageUrl).isEmpty()) {
     LOG.printf("[comic] loading #%d live into PSRAM without caching\n", number);
     uint8_t* compressed = nullptr;
     size_t compressedLength = 0;
-    if (downloadToMemory(comic.imageUrl, compressed, compressedLength)) {
+    if (net_http::downloadToMemory(comic.imageUrl, compressed, compressedLength, config::HTTP_TIMEOUT_MS, config::DOWNLOAD_IDLE_TIMEOUT_MS, config::MAX_LIVE_IMAGE_BYTES, networkOperationShouldStop, boundedNetworkTimeout)) {
       decoded = load_image_from_memory(
           compressed, compressedLength, comic.imageUrl.c_str(), 0, 0, &image);
       free(compressed);
