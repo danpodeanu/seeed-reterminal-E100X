@@ -30,6 +30,7 @@
 #include "wifi_sta.h"
 #include "climate_sensor.h"
 #include "sd_card.h"
+#include "text_render.h"
 #include "pcf8563_utc.h"
 #include "screenshot_bmp.h"
 #include "timestamped_logger.h"
@@ -280,17 +281,6 @@ void selectLargeTemperatureFont() {
 #endif
 }
 
-String ellipsize(String text, int maxWidth, uint8_t font = 1) {
-  if (epaper.textWidth(text, font) <= maxWidth) return text;
-  const String suffix = "...";
-  while (text.length() > 1 &&
-         epaper.textWidth(text + suffix, font) > maxWidth) {
-    text.remove(text.length() - 1);
-  }
-  text.trim();
-  return text + suffix;
-}
-
 void fillStatusBackground(int top, int height) {
   epaper.fillRect(0, top, config::PANEL_WIDTH, height,
                   PANEL_STATUS_BACKGROUND);
@@ -360,22 +350,8 @@ void drawBadges(uint32_t background = PANEL_WHITE,
       epaper.drawString(updateClock, updateRightX, timeY, 1);
     }
   }
-  for (int inset = 0; inset < outline; ++inset) {
-    epaper.drawRect(x + inset, y + inset, w - 2 * inset, h - 2 * inset,
-                    PANEL_BLACK);
-  }
-  epaper.fillRect(x + w, gaugeCenterY - terminalHeight / 2,
-                  terminalWidth, terminalHeight, PANEL_BLACK);
-  if (batteryPct >= 0) {
-    const int innerX = x + outline + 1;
-    const int innerY = y + outline + 1;
-    const int innerWidth = max(0, w - 2 * (outline + 1));
-    const int innerHeight = max(0, h - 2 * (outline + 1));
-    const int fillWidth = (innerWidth * batteryPct + 50) / 100;
-    if (fillWidth > 0) {
-      epaper.fillRect(innerX, innerY, fillWidth, innerHeight, PANEL_BLACK);
-    }
-  }
+  text_render::drawBatteryGauge(epaper, x, y, w, h, batteryPct, outline,
+                                terminalWidth, terminalHeight, PANEL_BLACK);
   epaper.setTextSize(1);
   epaper.setFreeFont(nullptr);
   epaper.setTextFont(2);
@@ -389,19 +365,19 @@ void renderStatus(const String& message, const String& detail = "",
   if (!lineAbove.isEmpty()) {
     selectSmallFont();
     epaper.drawString(
-        ellipsize(lineAbove, config::PANEL_WIDTH - config::ui(60)),
+        text_render::ellipsize(epaper, lineAbove, config::PANEL_WIDTH - config::ui(60)),
         config::PANEL_WIDTH / 2,
         config::PANEL_HEIGHT / 2 - config::ui(55), 1);
   }
   selectMediumFont();
   epaper.drawString(
-      ellipsize(message, config::PANEL_WIDTH - config::ui(60)),
+      text_render::ellipsize(epaper, message, config::PANEL_WIDTH - config::ui(60)),
       config::PANEL_WIDTH / 2,
       config::PANEL_HEIGHT / 2 - config::ui(15), 1);
   if (!detail.isEmpty()) {
     selectSmallFont();
     epaper.drawString(
-        ellipsize(detail, config::PANEL_WIDTH - config::ui(60)),
+        text_render::ellipsize(epaper, detail, config::PANEL_WIDTH - config::ui(60)),
         config::PANEL_WIDTH / 2,
         config::PANEL_HEIGHT / 2 + config::ui(25), 1);
   }
@@ -759,7 +735,7 @@ void drawHeader(const WeatherData& weather) {
     heading = "Weather - sleeping until " + quietEndLabel();
   }
   epaper.drawString(
-      ellipsize(heading, config::PANEL_WIDTH - config::ui(380)),
+      text_render::ellipsize(epaper, heading, config::PANEL_WIDTH - config::ui(380)),
       config::PANEL_WIDTH / 2, config::ui(24), 1);
   epaper.drawFastHLine(config::ui(10), config::ui(44),
                        config::PANEL_WIDTH - config::ui(20), PANEL_BLACK);
@@ -780,7 +756,7 @@ void drawForecastCard(const DailyForecast& day, uint8_t index,
 
   selectSmallFont();
   epaper.drawString(
-      ellipsize(conditionName(day.weatherCode), width - config::ui(12)),
+      text_render::ellipsize(epaper, conditionName(day.weatherCode), width - config::ui(12)),
       centerX, top + config::ui(83), 1);
   const String range =
       String(static_cast<int>(roundf(day.minimumC))) + "C  /  " +
@@ -789,7 +765,7 @@ void drawForecastCard(const DailyForecast& day, uint8_t index,
   const String extra =
       "Rain " + String(day.precipitationProbability) + "%   UV " +
       String(day.uvMaximum, 1) + " " + uvDescription(day.uvMaximum);
-  epaper.drawString(ellipsize(extra, width - config::ui(12)), centerX,
+  epaper.drawString(text_render::ellipsize(epaper, extra, width - config::ui(12)), centerX,
                     top + config::ui(130), 1);
 }
 
@@ -841,7 +817,7 @@ void renderLandscape(const WeatherData& weather) {
 
   const int detailWidth = config::PANEL_WIDTH * 31 / 100;
   epaper.drawString(
-      ellipsize(rainSummary(weather), detailWidth),
+      text_render::ellipsize(epaper, rainSummary(weather), detailWidth),
       detailX, mainCenterY + config::ui(67), 1);
   epaper.drawString(
       "Wind " + String(weather.windKmh, 0) + " km/h", detailX,
@@ -884,7 +860,7 @@ void drawPortraitForecastRow(const DailyForecast& day, uint8_t index,
                     centerY - config::ui(28), 1);
   selectSmallFont();
   epaper.drawString(
-      ellipsize(conditionName(day.weatherCode),
+      text_render::ellipsize(epaper, conditionName(day.weatherCode),
                 config::PANEL_WIDTH * 36 / 100),
       textX, centerY + config::ui(4), 1);
   epaper.drawString(
@@ -929,10 +905,10 @@ void renderPortrait(const WeatherData& weather) {
       String(weather.humidityPct, 0) + "%   Wind " +
       String(weather.windKmh, 0) + " km/h";
   epaper.drawString(
-      ellipsize(details, config::PANEL_WIDTH - config::ui(40)),
+      text_render::ellipsize(epaper, details, config::PANEL_WIDTH - config::ui(40)),
       config::PANEL_WIDTH / 2, mainCenterY + config::ui(108), 1);
   epaper.drawString(
-      ellipsize(rainSummary(weather),
+      text_render::ellipsize(epaper, rainSummary(weather),
                 config::PANEL_WIDTH - config::ui(40)),
       config::PANEL_WIDTH / 2, mainCenterY + config::ui(142), 1);
 

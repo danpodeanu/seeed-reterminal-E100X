@@ -32,6 +32,7 @@
 #include "wifi_sta.h"
 #include "climate_sensor.h"
 #include "sd_card.h"
+#include "text_render.h"
 #include "dither.h"
 #include "image_loader.h"
 #include "pcf8563_utc.h"
@@ -285,85 +286,6 @@ void logMemory(const char* label) {
              static_cast<unsigned long>(ESP.getPsramSize() / 1024));
 }
 
-String displayText(String value) {
-  value.replace("&quot;", "\"");
-  value.replace("&apos;", "'");
-  value.replace("&#39;", "'");
-  value.replace("&lt;", "<");
-  value.replace("&gt;", ">");
-  value.replace("&amp;", "&");
-
-  String ascii;
-  ascii.reserve(value.length());
-  bool lastWasSpace = false;
-  for (size_t i = 0; i < value.length(); ++i) {
-    const uint8_t c = static_cast<uint8_t>(value[i]);
-    if (c >= 32 && c <= 126) {
-      const bool isSpace = c == ' ' || c == '\t' || c == '\r' || c == '\n';
-      if (isSpace) {
-        if (!lastWasSpace) ascii += ' ';
-      } else {
-        ascii += static_cast<char>(c);
-      }
-      lastWasSpace = isSpace;
-    } else if (!lastWasSpace) {
-      ascii += '?';
-      lastWasSpace = false;
-    }
-  }
-  ascii.trim();
-  return ascii;
-}
-
-String ellipsize(String text, int maxWidth, uint8_t font) {
-  if (epaper.textWidth(text, font) <= maxWidth) return text;
-  const String suffix = "...";
-  while (text.length() > 1 &&
-         epaper.textWidth(text + suffix, font) > maxWidth) {
-    text.remove(text.length() - 1);
-  }
-  text.trim();
-  return text + suffix;
-}
-
-int wrapText(const String& source, String* lines, int maxLines,
-             int maxWidth, uint8_t font) {
-  String text = displayText(source);
-  int lineCount = 0;
-  int start = 0;
-
-  while (start < static_cast<int>(text.length()) && lineCount < maxLines) {
-    while (start < static_cast<int>(text.length()) && text[start] == ' ') ++start;
-    if (start >= static_cast<int>(text.length())) break;
-
-    String line;
-    while (start < static_cast<int>(text.length())) {
-      int end = text.indexOf(' ', start);
-      if (end < 0) end = text.length();
-      const String word = text.substring(start, end);
-      const String candidate = line.isEmpty() ? word : line + " " + word;
-      if (!line.isEmpty() && epaper.textWidth(candidate, font) > maxWidth) break;
-      line = candidate;
-      start = end + 1;
-      if (epaper.textWidth(line, font) > maxWidth) {
-        line = ellipsize(line, maxWidth, font);
-        break;
-      }
-    }
-
-    if (lineCount == maxLines - 1 && start < static_cast<int>(text.length())) {
-      line = ellipsize(line + "...", maxWidth, font);
-    }
-    lines[lineCount++] = line;
-  }
-
-  if (lineCount == 0) {
-    lines[0] = "xkcd";
-    lineCount = 1;
-  }
-  return lineCount;
-}
-
 // batteryPercentForVoltage() and the 16-sample averaging block used to be
 // inline here; they now live in common/include/battery_gauge.h and are
 // invoked via battery::measureBatteryFromAdc().
@@ -476,22 +398,8 @@ void drawBadges(uint32_t background = PANEL_WHITE,
                           : "--",
                       statsRightX, lowerStatsY, 1);
   }
-  for (int inset = 0; inset < outline; ++inset) {
-    epaper.drawRect(x + inset, y + inset, w - 2 * inset, h - 2 * inset,
-                    PANEL_BLACK);
-  }
-  epaper.fillRect(x + w, gaugeCenterY - terminalHeight / 2,
-                  terminalWidth, terminalHeight, PANEL_BLACK);
-  if (batteryPct >= 0) {
-    const int innerX = x + outline + 1;
-    const int innerY = y + outline + 1;
-    const int innerWidth = max(0, w - 2 * (outline + 1));
-    const int innerHeight = max(0, h - 2 * (outline + 1));
-    const int fillWidth = (innerWidth * batteryPct + 50) / 100;
-    if (fillWidth > 0) {
-      epaper.fillRect(innerX, innerY, fillWidth, innerHeight, PANEL_BLACK);
-    }
-  }
+  text_render::drawBatteryGauge(epaper, x, y, w, h, batteryPct, outline,
+                                terminalWidth, terminalHeight, PANEL_BLACK);
 
   epaper.setFreeFont(nullptr);
   epaper.setTextFont(2);
@@ -504,19 +412,19 @@ void renderStatus(const String& message, const String& detail = "",
   epaper.setTextDatum(MC_DATUM);
   if (!lineAbove.isEmpty()) {
     selectFooterFont();
-    epaper.drawString(ellipsize(displayText(lineAbove),
+    epaper.drawString(text_render::ellipsize(epaper, text_render::displayText(lineAbove),
                                 config::PANEL_WIDTH - config::ui(60), 1),
                       config::PANEL_WIDTH / 2,
                       config::PANEL_HEIGHT / 2 - config::ui(55), 1);
   }
   selectTitleFont();
-  epaper.drawString(ellipsize(displayText(message),
+  epaper.drawString(text_render::ellipsize(epaper, text_render::displayText(message),
                               config::PANEL_WIDTH - config::ui(60), 1),
                     config::PANEL_WIDTH / 2,
                     config::PANEL_HEIGHT / 2 - config::ui(15), 1);
   if (!detail.isEmpty()) {
     selectFooterFont();
-    epaper.drawString(ellipsize(displayText(detail),
+    epaper.drawString(text_render::ellipsize(epaper, text_render::displayText(detail),
                                 config::PANEL_WIDTH - config::ui(60), 1),
                       config::PANEL_WIDTH / 2,
                       config::PANEL_HEIGHT / 2 + config::ui(22), 1);
@@ -783,8 +691,8 @@ bool parseComic(const String& json, Comic& comic) {
   const char* title = document["safe_title"];
   if (!title || !*title) title = document["title"];
   if (!title || !*title) title = "xkcd";
-  comic.title = displayText(String(title));
-  comic.alt = displayText(String(document["alt"] | ""));
+  comic.title = text_render::displayText(String(title));
+  comic.alt = text_render::displayText(String(document["alt"] | ""));
   comic.imageUrl = String(document["img"] | "");
   return comic.number > 0 && !comic.imageUrl.isEmpty();
 }
@@ -1208,7 +1116,7 @@ ImageLayout calculateLayout(const Comic& comic, int sourceWidth, int sourceHeigh
   ImageLayout layout;
   const String footer = comic.alt.isEmpty() ? comic.title : comic.alt;
   selectFooterFont();
-  layout.footerLineCount = wrapText(footer, layout.footerLines,
+  layout.footerLineCount = text_render::wrapText(epaper, footer, layout.footerLines,
                                     config::FOOTER_MAX_LINES,
                                     config::PANEL_WIDTH - config::ui(24), 1);
   epaper.setFreeFont(nullptr);
@@ -1437,7 +1345,7 @@ bool renderComic(const Comic& comic, RgbImage& image, ImageLayout layout) {
                 quietEndLabel()
           : "XKCD #" + String(comic.number) + " - " + comic.title;
   selectTitleFont();
-  epaper.drawString(ellipsize(heading, config::PANEL_WIDTH - config::ui(380), 1),
+  epaper.drawString(text_render::ellipsize(epaper, heading, config::PANEL_WIDTH - config::ui(380), 1),
                     config::PANEL_WIDTH / 2, config::ui(24), 1);
   epaper.setFreeFont(nullptr);
   epaper.drawFastHLine(config::CONTENT_MARGIN_X, config::ui(43),

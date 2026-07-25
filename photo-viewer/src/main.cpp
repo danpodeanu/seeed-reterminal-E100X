@@ -28,6 +28,7 @@
 #include "wifi_sta.h"
 #include "climate_sensor.h"
 #include "sd_card.h"
+#include "text_render.h"
 #include "image_loader.h"
 #include "pcf8563_utc.h"
 #include "secrets.h"
@@ -248,15 +249,6 @@ void selectTitleFont() {
 #endif
 }
 
-String ellipsize(String text, int maximumWidth) {
-  if (epaper.textWidth(text, 1) <= maximumWidth) return text;
-  while (text.length() > 1 &&
-         epaper.textWidth(text + "...", 1) > maximumWidth) {
-    text.remove(text.length() - 1);
-  }
-  return text + "...";
-}
-
 void drawStatusBadges() {
   epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, true);
   selectStatusFont();
@@ -289,19 +281,19 @@ void renderStatus(const String& message, const String& detail = "",
   if (!lineAbove.isEmpty()) {
     selectStatusFont();
     epaper.drawString(
-        ellipsize(lineAbove, config::PANEL_WIDTH - config::ui(60)),
+        text_render::ellipsize(epaper, lineAbove, config::PANEL_WIDTH - config::ui(60)),
         config::PANEL_WIDTH / 2,
         config::PANEL_HEIGHT / 2 - config::ui(55), 1);
   }
   selectTitleFont();
   epaper.drawString(
-      ellipsize(message, config::PANEL_WIDTH - config::ui(60)),
+      text_render::ellipsize(epaper, message, config::PANEL_WIDTH - config::ui(60)),
       config::PANEL_WIDTH / 2,
       config::PANEL_HEIGHT / 2 - config::ui(15), 1);
   if (!detail.isEmpty()) {
     selectStatusFont();
     epaper.drawString(
-        ellipsize(detail, config::PANEL_WIDTH - config::ui(60)),
+        text_render::ellipsize(epaper, detail, config::PANEL_WIDTH - config::ui(60)),
         config::PANEL_WIDTH / 2,
         config::PANEL_HEIGHT / 2 + config::ui(22), 1);
   }
