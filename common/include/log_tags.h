@@ -10,6 +10,10 @@
 //
 // New tags MUST be added here and reviewed against the existing set before
 // use so we don't accumulate near-synonyms (e.g. "[net]" vs "[http]").
+//
+// The Python script `common/tools/check_log_tags.py` scans every firmware
+// source file and fails loudly on any tag used in code that is not declared
+// below. Run it locally, or wire it into CI, to enforce this contract.
 
 namespace log_tags {
 
@@ -39,7 +43,13 @@ inline constexpr char HTTP[]     = "http";
 inline constexpr char WEATHER[]  = "weather";
 inline constexpr char PHOTO[]    = "photo";
 inline constexpr char XKCD[]     = "xkcd";
+inline constexpr char COMIC[]    = "comic";
 inline constexpr char PRECACHE[] = "precache";
+
+// UI / IO
+inline constexpr char BUTTON[]     = "button";
+inline constexpr char LAYOUT[]     = "layout";
+inline constexpr char SCREENSHOT[] = "screenshot";
 
 // Sensors
 inline constexpr char SENSOR[]   = "sensor";
