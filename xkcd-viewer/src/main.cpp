@@ -21,10 +21,13 @@
 #include "config.h"
 #include "secrets.h"
 #include "app_logic.h"
+#include "app_logger.h"
+#include "battery_gauge.h"
 #include "board_pins.h"
 #include "dither.h"
 #include "image_loader.h"
 #include "pcf8563_utc.h"
+#include "screenshot_bmp.h"
 #include "timestamped_logger.h"
 
 // HTTPS, HTTPClient and the SD filesystem have a fairly deep combined call
@@ -36,15 +39,16 @@ SET_LOOP_TASK_STACK_SIZE(16U * 1024U);
 #error "Seeed_GFX did not select a reTerminal E-series driver; check src/driver.h"
 #endif
 
+TimestampedLogger appLog(Serial1);
+// LOG is provided by app_logger.h; the definition above lives at namespace
+// scope so shared translation units (screenshot_bmp.h) can extern-link.
+
 namespace {
 
 using namespace ::board;
 constexpr int PIN_BUTTON_GREEN = 3;
 constexpr int PIN_BUTTON_RIGHT = 4;
 constexpr int PIN_BUTTON_LEFT = 5;
-
-TimestampedLogger appLog(Serial1);
-#define LOG appLog
 
 void setStatusLed(bool on) {
   pinMode(PIN_STATUS_LED, OUTPUT);
@@ -407,41 +411,13 @@ int wrapText(const String& source, String* lines, int maxLines,
   return lineCount;
 }
 
-float batteryPercentForVoltage(float voltage) {
-  static constexpr float volts[] = {
-      3.27f, 3.30f, 3.41f, 3.49f, 3.58f, 3.68f,
-      3.75f, 3.80f, 3.85f, 3.91f, 3.96f, 4.15f};
-  static constexpr float percents[] = {
-      0.0f, 5.0f, 10.0f, 20.0f, 30.0f, 40.0f,
-      50.0f, 60.0f, 70.0f, 80.0f, 90.0f, 100.0f};
-  constexpr size_t count = sizeof(volts) / sizeof(volts[0]);
-
-  if (voltage <= volts[0]) return 0.0f;
-  if (voltage >= volts[count - 1]) return 100.0f;
-  for (size_t i = 1; i < count; ++i) {
-    if (voltage <= volts[i]) {
-      const float fraction = (voltage - volts[i - 1]) /
-                             (volts[i] - volts[i - 1]);
-      return percents[i - 1] + fraction * (percents[i] - percents[i - 1]);
-    }
-  }
-  return 0.0f;
-}
+// batteryPercentForVoltage() and the 16-sample averaging block used to be
+// inline here; they now live in common/include/battery_gauge.h and are
+// invoked via battery::measureBatteryFromAdc().
 
 void readSensors() {
-  pinMode(PIN_BATTERY_ENABLE, OUTPUT);
-  digitalWrite(PIN_BATTERY_ENABLE, HIGH);
-  delay(200);
-  analogReadResolution(12);
-  analogSetPinAttenuation(PIN_BATTERY_ADC, ADC_11db);
-  uint32_t totalMv = 0;
-  for (int i = 0; i < 16; ++i) {
-    totalMv += analogReadMilliVolts(PIN_BATTERY_ADC);
-    delay(4);
-  }
-  batteryVoltage = (totalMv / 16.0f) * 2.0f / 1000.0f;
-  batteryPct = constrain(static_cast<int>(batteryPercentForVoltage(batteryVoltage) + 0.5f),
-                         0, 100);
+  battery::measureBatteryFromAdc(PIN_BATTERY_ENABLE, PIN_BATTERY_ADC,
+                                 batteryVoltage, batteryPct);
   LOG.printf("[sensor] battery %.3fV -> %d%%\n", batteryVoltage, batteryPct);
 
   climateValid = false;
@@ -771,135 +747,14 @@ bool writeFileAtomically(const String& path, const String& contents) {
   return true;
 }
 
-bool writeLittleEndian16(File& file, uint16_t value) {
-  const uint8_t bytes[] = {
-      static_cast<uint8_t>(value),
-      static_cast<uint8_t>(value >> 8),
-  };
-  return file.write(bytes, sizeof(bytes)) == sizeof(bytes);
-}
-
-bool writeLittleEndian32(File& file, uint32_t value) {
-  const uint8_t bytes[] = {
-      static_cast<uint8_t>(value),
-      static_cast<uint8_t>(value >> 8),
-      static_cast<uint8_t>(value >> 16),
-      static_cast<uint8_t>(value >> 24),
-  };
-  return file.write(bytes, sizeof(bytes)) == sizeof(bytes);
-}
-
-void screenshotPaletteColor(uint8_t index, uint8_t& red, uint8_t& green,
-                            uint8_t& blue) {
-#if RETERMINAL_MODEL == 1001
-  const uint8_t gray = index <= 3 ? static_cast<uint8_t>(index * 85) : 255;
-  red = green = blue = gray;
-#elif RETERMINAL_MODEL == 1003
-  const uint8_t gray = index <= 15 ? static_cast<uint8_t>(index * 17) : 255;
-  red = green = blue = gray;
-#else
-  red = green = blue = 255;
-  switch (index) {
-    case 0x0: red = 255; green = 255; blue = 255; break;
-    case 0x2: red = 29;  green = 185; blue = 84;  break;
-    case 0x6: red = 229; green = 57;  blue = 53;  break;
-    case 0xB: red = 255; green = 216; blue = 0;   break;
-    case 0xD: red = 0;   green = 76;  blue = 255; break;
-    case 0xF: red = 0;   green = 0;   blue = 0;   break;
-  }
-#endif
-}
-
-bool saveScreenshotBmp() {
-  constexpr char screenshotPath[] = "/screenshot.bmp";
-  constexpr char temporaryPath[] = "/screenshot.bmp.part";
-  constexpr uint32_t fileHeaderSize = 14;
-  constexpr uint32_t dibHeaderSize = 40;
-  constexpr uint32_t paletteSize = 256 * 4;
-  constexpr uint32_t pixelOffset = fileHeaderSize + dibHeaderSize + paletteSize;
-
-  const uint32_t width = config::PANEL_WIDTH;
-  const uint32_t height = config::PANEL_HEIGHT;
-  const uint32_t rowSize = (width + 3U) & ~3U;
-  const uint32_t pixelBytes = rowSize * height;
-  const uint32_t fileSize = pixelOffset + pixelBytes;
-
-  uint8_t* row = static_cast<uint8_t*>(malloc(rowSize));
-  if (!row) {
-    LOG.println("[screenshot] could not allocate BMP row buffer");
-    return false;
-  }
-
-  SD.remove(temporaryPath);
-  File file = SD.open(temporaryPath, FILE_WRITE);
-  if (!file) {
-    LOG.println("[screenshot] could not create temporary BMP");
-    free(row);
-    return false;
-  }
-
-  bool ok = file.write(static_cast<uint8_t>('B')) == 1 &&
-            file.write(static_cast<uint8_t>('M')) == 1 &&
-            writeLittleEndian32(file, fileSize) &&
-            writeLittleEndian32(file, 0) &&
-            writeLittleEndian32(file, pixelOffset) &&
-            writeLittleEndian32(file, dibHeaderSize) &&
-            writeLittleEndian32(file, width) &&
-            writeLittleEndian32(file, height) &&
-            writeLittleEndian16(file, 1) &&
-            writeLittleEndian16(file, 8) &&
-            writeLittleEndian32(file, 0) &&
-            writeLittleEndian32(file, pixelBytes) &&
-            writeLittleEndian32(file, 2835) &&
-            writeLittleEndian32(file, 2835) &&
-            writeLittleEndian32(file, 256) &&
-            writeLittleEndian32(file, 16);
-
-  for (uint16_t index = 0; ok && index < 256; ++index) {
-    uint8_t red;
-    uint8_t green;
-    uint8_t blue;
-    screenshotPaletteColor(static_cast<uint8_t>(index), red, green, blue);
-    const uint8_t entry[] = {blue, green, red, 0};
-    ok = file.write(entry, sizeof(entry)) == sizeof(entry);
-  }
-
-  memset(row, 0, rowSize);
-  // A positive BMP height stores rows bottom-up. readPixelValue() returns the
-  // raw Gray4, Gray16, or E6 palette index from the composed panel sprite.
-  for (int32_t y = static_cast<int32_t>(height) - 1; ok && y >= 0; --y) {
-    for (uint32_t x = 0; x < width; ++x) {
-      row[x] = static_cast<uint8_t>(epaper.readPixelValue(x, y));
-    }
-    ok = file.write(row, rowSize) == rowSize;
-    if ((y & 31) == 0) delay(1);
-  }
-
-  file.flush();
-  file.close();
-  free(row);
-
-  if (!ok) {
-    LOG.println("[screenshot] BMP write failed");
-    SD.remove(temporaryPath);
-    return false;
-  }
-
-  SD.remove(screenshotPath);
-  if (!SD.rename(temporaryPath, screenshotPath)) {
-    LOG.println("[screenshot] could not install /screenshot.bmp");
-    SD.remove(temporaryPath);
-    return false;
-  }
-
-  LOG.printf("[screenshot] saved %s (%lu bytes)\n", screenshotPath,
-             static_cast<unsigned long>(fileSize));
-  return true;
-}
+// writeLittleEndian16/32, screenshotPaletteColor, and saveScreenshotBmp now
+// live in common/include/screenshot_bmp.h and are invoked via the template
+// screenshot::saveScreenshotBmp<EPaper>().
 
 void updatePanel() {
   if (screenshotRequested && sdReady) {
-    saveScreenshotBmp();
+    screenshot::saveScreenshotBmp(epaper, config::PANEL_WIDTH,
+                                  config::PANEL_HEIGHT);
     screenshotRequested = false;
   }
   epaper.update();

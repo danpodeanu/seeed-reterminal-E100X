@@ -17,6 +17,8 @@
 
 #include "config.h"
 #include "app_logic.h"
+#include "app_logger.h"
+#include "battery_gauge.h"
 #include "board_pins.h"
 #include "image_loader.h"
 #include "pcf8563_utc.h"
@@ -29,15 +31,15 @@ SET_LOOP_TASK_STACK_SIZE(16U * 1024U);
 #error "Seeed_GFX did not select a reTerminal E-series driver; check src/driver.h"
 #endif
 
+TimestampedLogger appLog(Serial1);
+// LOG is provided by app_logger.h.
+
 namespace {
 
 using namespace ::board;
 constexpr int PIN_KEY0 = 3;
 constexpr int PIN_KEY1 = 4;
 constexpr int PIN_KEY2 = 5;
-
-TimestampedLogger appLog(Serial1);
-#define LOG appLog
 
 void setStatusLed(bool on) {
   pinMode(PIN_STATUS_LED, OUTPUT);
@@ -269,43 +271,13 @@ bool ntpRefreshDue(bool coldBoot) {
       config::NTP_REFRESH_SECONDS);
 }
 
-float batteryPercentForVoltage(float voltage) {
-  static constexpr float volts[] = {
-      3.27f, 3.30f, 3.41f, 3.49f, 3.58f, 3.68f,
-      3.75f, 3.80f, 3.85f, 3.91f, 3.96f, 4.15f};
-  static constexpr float percents[] = {
-      0.0f, 5.0f, 10.0f, 20.0f, 30.0f, 40.0f, 50.0f,
-      60.0f, 70.0f, 80.0f, 90.0f, 100.0f};
-  constexpr size_t count = sizeof(volts) / sizeof(volts[0]);
-  if (voltage <= volts[0]) return 0.0f;
-  if (voltage >= volts[count - 1]) return 100.0f;
-  for (size_t index = 1; index < count; ++index) {
-    if (voltage <= volts[index]) {
-      const float fraction =
-          (voltage - volts[index - 1]) /
-          (volts[index] - volts[index - 1]);
-      return percents[index - 1] +
-             fraction * (percents[index] - percents[index - 1]);
-    }
-  }
-  return 0.0f;
-}
+// batteryPercentForVoltage() and the 16-sample averaging block used to be
+// inline here; they now live in common/include/battery_gauge.h and are
+// invoked via battery::measureBatteryFromAdc().
 
 void readSensors() {
-  pinMode(PIN_BATTERY_ENABLE, OUTPUT);
-  digitalWrite(PIN_BATTERY_ENABLE, HIGH);
-  delay(200);
-  analogReadResolution(12);
-  analogSetPinAttenuation(PIN_BATTERY_ADC, ADC_11db);
-  uint32_t totalMillivolts = 0;
-  for (int sample = 0; sample < 16; ++sample) {
-    totalMillivolts += analogReadMilliVolts(PIN_BATTERY_ADC);
-    delay(4);
-  }
-  batteryVoltage = (totalMillivolts / 16.0f) * 2.0f / 1000.0f;
-  batteryPct = constrain(
-      static_cast<int>(batteryPercentForVoltage(batteryVoltage) + 0.5f),
-      0, 100);
+  battery::measureBatteryFromAdc(PIN_BATTERY_ENABLE, PIN_BATTERY_ADC,
+                                 batteryVoltage, batteryPct);
   LOG.printf("[sensor] battery %.3fV -> %d%%\n",
              batteryVoltage, batteryPct);
 
