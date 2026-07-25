@@ -77,6 +77,33 @@ def _parse_config_coords(config_path: Path) -> Dict[str, float]:
     return out
 
 
+def _normalize_hex_digits(text: str) -> str:
+    """Strip the same separators the firmware's normalizeHexDigits() strips.
+
+    The C++ implementation lives in ``weather-viewer/include/app_logic.h`` and
+    accepts only ASCII whitespace, ``:`` between bytes, and a single leading
+    ``0x``/``0X`` prefix; anything else (including ``_`` or ``-``, which some
+    people copy from ssh-style key dumps) is rejected. Keeping the tester in
+    lockstep matters because otherwise the tester will happily accept a key
+    the firmware would refuse -- exactly the "tester green, device fails"
+    trap we hit before.
+    """
+    if text.lower().startswith("0x"):
+        text = text[2:]
+    cleaned_chars = []
+    for ch in text:
+        if ch in " \t\n\r:":
+            continue
+        if ch in "0123456789abcdefABCDEF":
+            cleaned_chars.append(ch)
+            continue
+        raise ValueError(
+            f"unexpected character {ch!r}; only hex digits, "
+            "ASCII whitespace, and ':' are allowed"
+        )
+    return "".join(cleaned_chars)
+
+
 def _base64url(data: bytes) -> str:
     return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
 
@@ -93,11 +120,9 @@ def _build_qweather_jwt(sub: str, kid: str, private_key_hex: str,
             "Run: pip install cryptography") from exc
 
     try:
-        cleaned = re.sub(r"[\s:_-]", "", private_key_hex)
-        if cleaned.lower().startswith("0x"):
-            cleaned = cleaned[2:]
+        cleaned = _normalize_hex_digits(private_key_hex)
         seed = binascii.unhexlify(cleaned)
-    except binascii.Error as exc:
+    except (ValueError, binascii.Error) as exc:
         raise SystemExit(
             f"[qweather] QWEATHER_PRIVATE_KEY_HEX is not valid hex: {exc}"
         )
@@ -243,7 +268,46 @@ def test_open_meteo(latitude: float, longitude: float) -> bool:
     return True
 
 
+def _self_test() -> None:
+    """Parity check between this tester and the firmware normaliser.
+
+    Every fixture here MUST also appear in weather-viewer/test/test_app_logic/
+    test_main.cpp :: test_normalize_hex_digits_strips_common_key_formats -- the
+    two sides have to accept and reject the same set of inputs, otherwise the
+    tester can report "OK" for a key the device will refuse (which is exactly
+    what happened before this function existed).
+    """
+    accept = [
+        ("94:d1:33", "94d133"),
+        ("  94 d1\n33\t94\r\n1e ec 4d c5  ", "94d133941eec4dc5"),
+        ("0xdeadbeef", "deadbeef"),
+        ("0Xdeadbeef", "deadbeef"),
+        ("", ""),
+        # Full 32-byte seed in openssl priv: format, matching the C++ test.
+        ("94:d1:33:94:1e:ec:4d:c5:de:f2:b8:ff:76:01:ee:06:"
+         "30:eb:38:20:1b:1b:b0:3a:23:16:f2:5f:fa:4c:bd:81",
+         "94d133941eec4dc5def2b8ff7601ee06"
+         "30eb38201b1bb03a2316f25ffa4cbd81"),
+    ]
+    for raw, expected in accept:
+        got = _normalize_hex_digits(raw)
+        assert got == expected, (
+            f"parity drift: _normalize_hex_digits({raw!r}) = {got!r}, "
+            f"expected {expected!r}")
+
+    reject = ["94g1", "94,1", "94_d1", "94-d1"]
+    for raw in reject:
+        try:
+            _normalize_hex_digits(raw)
+        except ValueError:
+            continue
+        raise AssertionError(
+            f"parity drift: _normalize_hex_digits({raw!r}) accepted an "
+            "input the firmware would reject")
+
+
 def main(argv: Optional[list] = None) -> int:
+    _self_test()
     parser = argparse.ArgumentParser(
         description="Verify weather-viewer credentials against live APIs.")
     parser.add_argument(
