@@ -89,11 +89,11 @@ def _build_qweather_jwt(sub: str, kid: str, private_key_hex: str,
         seed = binascii.unhexlify(cleaned)
     except binascii.Error as exc:
         raise SystemExit(
-            f"[qweather] QWEATHER_JWT_PRIVATE_KEY_HEX is not valid hex: {exc}"
+            f"[qweather] QWEATHER_PRIVATE_KEY_HEX is not valid hex: {exc}"
         )
     if len(seed) != 32:
         raise SystemExit(
-            "[qweather] QWEATHER_JWT_PRIVATE_KEY_HEX must decode to 32 bytes "
+            "[qweather] QWEATHER_PRIVATE_KEY_HEX must decode to 32 bytes "
             f"(got {len(seed)})")
 
     private_key = Ed25519PrivateKey.from_private_bytes(seed)
@@ -157,8 +157,8 @@ def _http_get_json(url: str, headers: Optional[Dict[str, str]] = None,
 def test_qweather(secrets: Dict[str, str], latitude: float,
                   longitude: float) -> bool:
     print("[qweather] checking credentials...")
-    required = ("QWEATHER_API_HOST", "QWEATHER_JWT_SUB", "QWEATHER_JWT_KID",
-                "QWEATHER_JWT_PRIVATE_KEY_HEX")
+    required = ("QWEATHER_API_HOST", "QWEATHER_PROJECT_ID", "QWEATHER_CREDENTIAL_ID",
+                "QWEATHER_PRIVATE_KEY_HEX")
     missing = [k for k in required if not secrets.get(k)]
     if missing:
         print(f"[qweather] SKIP -- missing in secrets.h: {', '.join(missing)}")
@@ -166,9 +166,9 @@ def test_qweather(secrets: Dict[str, str], latitude: float,
 
     try:
         jwt = _build_qweather_jwt(
-            sub=secrets["QWEATHER_JWT_SUB"],
-            kid=secrets["QWEATHER_JWT_KID"],
-            private_key_hex=secrets["QWEATHER_JWT_PRIVATE_KEY_HEX"],
+            sub=secrets["QWEATHER_PROJECT_ID"],
+            kid=secrets["QWEATHER_CREDENTIAL_ID"],
+            private_key_hex=secrets["QWEATHER_PRIVATE_KEY_HEX"],
         )
     except SystemExit as exc:
         print(str(exc))

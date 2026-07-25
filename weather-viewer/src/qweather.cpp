@@ -22,14 +22,14 @@
 #ifndef QWEATHER_API_HOST
 #define QWEATHER_API_HOST "devapi.qweather.com"
 #endif
-#ifndef QWEATHER_JWT_SUB
-#define QWEATHER_JWT_SUB ""
+#ifndef QWEATHER_PROJECT_ID
+#define QWEATHER_PROJECT_ID ""
 #endif
-#ifndef QWEATHER_JWT_KID
-#define QWEATHER_JWT_KID ""
+#ifndef QWEATHER_CREDENTIAL_ID
+#define QWEATHER_CREDENTIAL_ID ""
 #endif
-#ifndef QWEATHER_JWT_PRIVATE_KEY_HEX
-#define QWEATHER_JWT_PRIVATE_KEY_HEX ""
+#ifndef QWEATHER_PRIVATE_KEY_HEX
+#define QWEATHER_PRIVATE_KEY_HEX ""
 #endif
 
 namespace weather_provider {
@@ -93,18 +93,18 @@ int parseInt(const char* text, int fallback) {
 }
 
 // Build a QWeather JWT (EdDSA / Ed25519) suitable for the Authorization
-// Bearer header. Reads QWEATHER_JWT_KID, QWEATHER_JWT_SUB, and
-// QWEATHER_JWT_PRIVATE_KEY_HEX from the compilation environment.
+// Bearer header. Reads QWEATHER_CREDENTIAL_ID, QWEATHER_PROJECT_ID, and
+// QWEATHER_PRIVATE_KEY_HEX from the compilation environment.
 bool buildJwt(String& jwt, String& failureReason) {
   jwt = "";
-  const char* kid = QWEATHER_JWT_KID;
-  const char* sub = QWEATHER_JWT_SUB;
-  const char* privateKeyHex = QWEATHER_JWT_PRIVATE_KEY_HEX;
+  const char* kid = QWEATHER_CREDENTIAL_ID;
+  const char* sub = QWEATHER_PROJECT_ID;
+  const char* privateKeyHex = QWEATHER_PRIVATE_KEY_HEX;
   if (kid[0] == '\0' || sub[0] == '\0' || privateKeyHex[0] == '\0') {
     failureReason = "QWeather credentials are not configured";
     LOG.println(
-        "[weather] QWeather selected but JWT_KID / JWT_SUB / "
-        "JWT_PRIVATE_KEY_HEX is empty");
+        "[weather] QWeather selected but PROJECT_ID / CREDENTIAL_ID / "
+        "PRIVATE_KEY_HEX is empty");
     return false;
   }
   uint8_t privateKey[32];
@@ -112,7 +112,7 @@ bool buildJwt(String& jwt, String& failureReason) {
       privateKeyHex, strlen(privateKeyHex), privateKey, sizeof(privateKey));
   if (decoded != sizeof(privateKey)) {
     failureReason = "QWeather private key is not 32 bytes of hex";
-    LOG.println("[weather] QWEATHER_JWT_PRIVATE_KEY_HEX is not 64 hex chars");
+    LOG.println("[weather] QWEATHER_PRIVATE_KEY_HEX is not 64 hex chars");
     return false;
   }
 

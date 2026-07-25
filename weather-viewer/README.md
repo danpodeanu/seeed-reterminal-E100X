@@ -78,11 +78,14 @@ constexpr WeatherProvider WEATHER_PROVIDER = WeatherProvider::OpenMeteo;
   add to `include/secrets.h`:
 
   ```cpp
-  #define QWEATHER_API_HOST "devapi.qweather.com"          // or your paid host
-  #define QWEATHER_JWT_SUB  "<your project id>"
-  #define QWEATHER_JWT_KID  "<your key id>"
-  #define QWEATHER_JWT_PRIVATE_KEY_HEX "<64 hex chars>"
+  #define QWEATHER_API_HOST       "devapi.qweather.com"   // or your paid host
+  #define QWEATHER_PROJECT_ID     "<your project id>"     // JWT "sub"
+  #define QWEATHER_CREDENTIAL_ID  "<your credential id>"  // JWT "kid"
+  #define QWEATHER_PRIVATE_KEY_HEX "<64 hex chars>"
   ```
+
+  The QWeather console also shows a **Developer ID** at the account
+  level -- it is not used by the JWT and does not need to be stored.
 
   Extract the 32-byte ed25519 seed as 64 hex characters from the downloaded
   PEM with:
@@ -92,7 +95,7 @@ constexpr WeatherProvider WEATHER_PROVIDER = WeatherProvider::OpenMeteo;
   ```
 
   Copy the `priv:` bytes (removing colons and whitespace) into
-  `QWEATHER_JWT_PRIVATE_KEY_HEX`. The firmware generates a fresh JWT on
+  `QWEATHER_PRIVATE_KEY_HEX`. The firmware generates a fresh JWT on
   every fetch cycle using `rweather/Crypto` and sends it as
   `Authorization: Bearer <jwt>`.
 
