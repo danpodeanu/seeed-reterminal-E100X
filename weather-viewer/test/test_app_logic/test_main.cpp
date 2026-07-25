@@ -1,6 +1,8 @@
 #include <unity.h>
 
 #include <stdlib.h>
+#include <string.h>
+#include <stdio.h>
 #include <time.h>
 
 #include "app_logic.h"
@@ -329,6 +331,105 @@ void test_parse_iso8601_local_rejects_invalid_input() {
   TEST_ASSERT_FALSE(local_time::parseIso8601Local("2025-04-31T12:00", ts));
 }
 
+// Every branch of conditionName() -- the string that actually ends up on the
+// e-paper panel. If someone tweaks the WMO bucket table without updating the
+// UI (or vice versa) this catches the divergence immediately.
+void test_condition_name_covers_every_wmo_bucket() {
+  TEST_ASSERT_EQUAL_STRING("Clear", app_logic::conditionName(0));
+  TEST_ASSERT_EQUAL_STRING("Partly cloudy", app_logic::conditionName(1));
+  TEST_ASSERT_EQUAL_STRING("Partly cloudy", app_logic::conditionName(2));
+  TEST_ASSERT_EQUAL_STRING("Overcast", app_logic::conditionName(3));
+  TEST_ASSERT_EQUAL_STRING("Fog", app_logic::conditionName(45));
+  TEST_ASSERT_EQUAL_STRING("Fog", app_logic::conditionName(48));
+  TEST_ASSERT_EQUAL_STRING("Drizzle", app_logic::conditionName(51));
+  TEST_ASSERT_EQUAL_STRING("Drizzle", app_logic::conditionName(57));
+  TEST_ASSERT_EQUAL_STRING("Rain", app_logic::conditionName(61));
+  TEST_ASSERT_EQUAL_STRING("Rain", app_logic::conditionName(65));
+  TEST_ASSERT_EQUAL_STRING("Rain", app_logic::conditionName(80));
+  TEST_ASSERT_EQUAL_STRING("Rain", app_logic::conditionName(82));
+  TEST_ASSERT_EQUAL_STRING("Snow", app_logic::conditionName(71));
+  TEST_ASSERT_EQUAL_STRING("Snow", app_logic::conditionName(75));
+  TEST_ASSERT_EQUAL_STRING("Snow", app_logic::conditionName(85));
+  TEST_ASSERT_EQUAL_STRING("Snow", app_logic::conditionName(86));
+  TEST_ASSERT_EQUAL_STRING("Thunderstorm", app_logic::conditionName(95));
+  TEST_ASSERT_EQUAL_STRING("Thunderstorm", app_logic::conditionName(99));
+}
+
+// Codes that fall between named buckets (or a garbled provider payload) must
+// degrade to "Mixed weather" rather than crash or print an empty string.
+void test_condition_name_falls_back_to_mixed_weather() {
+  TEST_ASSERT_EQUAL_STRING("Mixed weather", app_logic::conditionName(4));
+  TEST_ASSERT_EQUAL_STRING("Mixed weather", app_logic::conditionName(50));
+  TEST_ASSERT_EQUAL_STRING("Mixed weather", app_logic::conditionName(60));
+  TEST_ASSERT_EQUAL_STRING("Mixed weather", app_logic::conditionName(70));
+  TEST_ASSERT_EQUAL_STRING("Mixed weather", app_logic::conditionName(78));
+  TEST_ASSERT_EQUAL_STRING("Mixed weather", app_logic::conditionName(84));
+  TEST_ASSERT_EQUAL_STRING("Mixed weather", app_logic::conditionName(-1));
+}
+
+// End-to-end mapping check: for every canonical QWeather icon we care about,
+// icon -> WMO -> UI label produces the label a user would expect to see on
+// the panel. This is the layer that would have covered the "did we display
+// sunny correctly" concern -- and the reason it survived the Chinese-lang
+// era is that the firmware only ever consumed the icon, never the text.
+void test_qweather_icon_to_condition_name_end_to_end() {
+  struct Case {
+    int qweatherIcon;
+    const char* expected;
+  };
+  const Case cases[] = {
+      // 1xx cloud cover (both day and night halves).
+      {100, "Clear"},          {150, "Clear"},
+      {101, "Partly cloudy"},  {151, "Partly cloudy"},
+      {102, "Partly cloudy"},  {152, "Partly cloudy"},
+      {103, "Partly cloudy"},  {153, "Partly cloudy"},
+      {104, "Overcast"},       {154, "Overcast"},
+      // 3xx precipitation.
+      {300, "Rain"},           {305, "Drizzle"},
+      {306, "Rain"},           {307, "Rain"},
+      {308, "Rain"},           {313, "Rain"},
+      {316, "Rain"},           {318, "Rain"},
+      {302, "Thunderstorm"},   {303, "Thunderstorm"},
+      {304, "Thunderstorm"},
+      // 4xx snow.
+      {400, "Snow"},           {401, "Snow"},
+      {402, "Snow"},           {406, "Snow"},
+      {404, "Rain"},           // sleet is bucketed with freezing rain (66)
+      // 5xx fog / haze.
+      {500, "Fog"},            {501, "Fog"},
+      {502, "Fog"},            {503, "Fog"},
+  };
+  for (const auto& c : cases) {
+    const int wmo = app_logic::qweatherIconToWmoCode(c.qweatherIcon);
+    TEST_ASSERT_NOT_EQUAL(-1, wmo);
+    const char* got = app_logic::conditionName(wmo);
+    if (strcmp(got, c.expected) != 0) {
+      char msg[96];
+      snprintf(msg, sizeof(msg),
+               "QWeather icon %d -> WMO %d -> \"%s\" (expected \"%s\")",
+               c.qweatherIcon, wmo, got, c.expected);
+      TEST_FAIL_MESSAGE(msg);
+    }
+  }
+}
+
+// Open-Meteo already returns WMO codes directly, so parseWeather feeds them
+// into conditionName untouched. Spot-check the same buckets to make sure the
+// two providers converge on identical labels for equivalent conditions.
+void test_open_meteo_weathercode_to_condition_name() {
+  TEST_ASSERT_EQUAL_STRING("Clear", app_logic::conditionName(0));
+  TEST_ASSERT_EQUAL_STRING("Partly cloudy", app_logic::conditionName(2));
+  TEST_ASSERT_EQUAL_STRING("Overcast", app_logic::conditionName(3));
+  TEST_ASSERT_EQUAL_STRING("Fog", app_logic::conditionName(45));
+  TEST_ASSERT_EQUAL_STRING("Drizzle", app_logic::conditionName(53));
+  TEST_ASSERT_EQUAL_STRING("Rain", app_logic::conditionName(63));
+  TEST_ASSERT_EQUAL_STRING("Rain", app_logic::conditionName(81));
+  TEST_ASSERT_EQUAL_STRING("Snow", app_logic::conditionName(73));
+  TEST_ASSERT_EQUAL_STRING("Snow", app_logic::conditionName(85));
+  TEST_ASSERT_EQUAL_STRING("Thunderstorm", app_logic::conditionName(95));
+  TEST_ASSERT_EQUAL_STRING("Thunderstorm", app_logic::conditionName(96));
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_startup_beep_only_for_cold_boot_and_button_wake);
@@ -351,5 +452,9 @@ int main(int, char**) {
   RUN_TEST(test_jwt_lifetime_clamps_to_qweather_bounds);
   RUN_TEST(test_parse_iso8601_local_accepts_full_and_minute_form);
   RUN_TEST(test_parse_iso8601_local_rejects_invalid_input);
+  RUN_TEST(test_condition_name_covers_every_wmo_bucket);
+  RUN_TEST(test_condition_name_falls_back_to_mixed_weather);
+  RUN_TEST(test_qweather_icon_to_condition_name_end_to_end);
+  RUN_TEST(test_open_meteo_weathercode_to_condition_name);
   return UNITY_END();
 }

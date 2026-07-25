@@ -194,4 +194,24 @@ constexpr bool useCachedForecastOnFailure(bool liveFetchSucceeded,
          cacheWithinFailureWindow;
 }
 
+// Map an Open-Meteo WMO weather code (or a QWeather icon that has already been
+// funnelled through qweatherIconToWmoCode) to the short English label the UI
+// prints under each forecast panel. Unknown codes fall back to
+// "Mixed weather" so the display always shows something.
+inline const char* conditionName(int wmoCode) {
+  if (wmoCode == 0) return "Clear";
+  if (wmoCode == 1 || wmoCode == 2) return "Partly cloudy";
+  if (wmoCode == 3) return "Overcast";
+  if (wmoCode == 45 || wmoCode == 48) return "Fog";
+  if (wmoCode >= 51 && wmoCode <= 57) return "Drizzle";
+  if ((wmoCode >= 61 && wmoCode <= 67) ||
+      (wmoCode >= 80 && wmoCode <= 82))
+    return "Rain";
+  if ((wmoCode >= 71 && wmoCode <= 77) ||
+      (wmoCode >= 85 && wmoCode <= 86))
+    return "Snow";
+  if (wmoCode >= 95) return "Thunderstorm";
+  return "Mixed weather";
+}
+
 }  // namespace app_logic

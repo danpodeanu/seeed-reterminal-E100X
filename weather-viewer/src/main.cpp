@@ -354,20 +354,6 @@ bool loadCachedWeather(WeatherData& weather, String& failureReason,
   return true;
 }
 
-String conditionName(int code) {
-  if (code == 0) return "Clear";
-  if (code == 1 || code == 2) return "Partly cloudy";
-  if (code == 3) return "Overcast";
-  if (code == 45 || code == 48) return "Fog";
-  if (code >= 51 && code <= 57) return "Drizzle";
-  if ((code >= 61 && code <= 67) || (code >= 80 && code <= 82))
-    return "Rain";
-  if ((code >= 71 && code <= 77) || (code >= 85 && code <= 86))
-    return "Snow";
-  if (code >= 95) return "Thunderstorm";
-  return "Mixed weather";
-}
-
 String uvDescription(float uv) {
   if (!isfinite(uv)) return "--";
   if (uv < 3.0f) return "Low";
@@ -641,7 +627,7 @@ void drawForecastCard(const DailyForecast& day, uint8_t index,
 
   selectSmallFont();
   epaper.drawString(
-      text_render::ellipsize(epaper, conditionName(day.weatherCode), width - config::ui(12)),
+      text_render::ellipsize(epaper, app_logic::conditionName(day.weatherCode), width - config::ui(12)),
       centerX, top + config::ui(83), 1);
   const String range =
       String(static_cast<int>(roundf(day.minimumC))) + "C  /  " +
@@ -677,7 +663,7 @@ void renderLandscape(const WeatherData& weather) {
   selectSmallFont();
   epaper.drawString("Outdoor temperature", temperatureX,
                     mainCenterY + config::ui(57), 1);
-  epaper.drawString(conditionName(weather.weatherCode), temperatureX,
+  epaper.drawString(app_logic::conditionName(weather.weatherCode), temperatureX,
                     mainCenterY + config::ui(82), 1);
 
   epaper.drawFastVLine(config::PANEL_WIDTH * 66 / 100,
@@ -745,7 +731,7 @@ void drawPortraitForecastRow(const DailyForecast& day, uint8_t index,
                     centerY - config::ui(28), 1);
   selectSmallFont();
   epaper.drawString(
-      text_render::ellipsize(epaper, conditionName(day.weatherCode),
+      text_render::ellipsize(epaper, app_logic::conditionName(day.weatherCode),
                 config::PANEL_WIDTH * 36 / 100),
       textX, centerY + config::ui(4), 1);
   epaper.drawString(
@@ -781,7 +767,7 @@ void renderPortrait(const WeatherData& weather) {
   epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, true);
   epaper.setTextDatum(MC_DATUM);
   selectMediumFont();
-  epaper.drawString(conditionName(weather.weatherCode),
+  epaper.drawString(app_logic::conditionName(weather.weatherCode),
                     config::PANEL_WIDTH / 2,
                     mainCenterY + config::ui(72), 1);
   selectSmallFont();
