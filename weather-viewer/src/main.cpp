@@ -26,6 +26,7 @@
 #include "hardware.h"
 #include "local_time.h"
 #include "wake_report.h"
+#include "rtc_sync.h"
 #include "pcf8563_utc.h"
 #include "screenshot_bmp.h"
 #include "timestamped_logger.h"
@@ -252,45 +253,6 @@ void readSensors() {
                config::SENSOR_READ_ATTEMPTS);
   }
   if (!climateValid) LOG.println("[sensor] SHT4x unavailable after retries");
-}
-
-bool readAndLogHardwareRtc(pcf8563::Reading& stored) {
-  if (!hardware::ensureI2cBus()) return false;
-  String error;
-  if (!pcf8563::readUtc(Wire, stored, error)) {
-    LOG.printf("[rtc] PCF8563 read failed: %s\n", error.c_str());
-    return false;
-  }
-  LOG.printf("[rtc] PCF8563 stored UTC=%s, %s\n",
-             pcf8563::format(stored).c_str(),
-             stored.voltageLow ? "VL set - stored time is unreliable"
-                               : "VL clear - stored time is valid");
-  return true;
-}
-
-void saveNtpTimeToHardwareRtc(time_t now) {
-  if (!hardware::ensureI2cBus()) return;
-  String error;
-  if (!pcf8563::writeUtc(Wire, now, error)) {
-    LOG.printf("[rtc] PCF8563 NTP update failed: %s\n", error.c_str());
-    return;
-  }
-  LOG.println("[rtc] PCF8563 updated from NTP");
-  pcf8563::Reading verified;
-  readAndLogHardwareRtc(verified);
-}
-
-bool restoreClockFromHardwareRtc() {
-  pcf8563::Reading stored;
-  if (!readAndLogHardwareRtc(stored)) return false;
-  String error;
-  if (!pcf8563::setSystemClock(stored, error)) {
-    LOG.printf("[rtc] PCF8563 fallback rejected: %s\n", error.c_str());
-    return false;
-  }
-  LOG.printf("[rtc] restored ESP32 clock from PCF8563 UTC=%s\n",
-             pcf8563::format(stored).c_str());
-  return true;
 }
 
 void selectSmallFont() {
@@ -599,7 +561,7 @@ bool synchronizeClock() {
       config::NTP_SERVER_SECONDARY, config::NTP_DHCP_TIMEOUT_MS,
       config::NTP_SYNC_TIMEOUT_MS, [](time_t now) {
         lastNtpSyncEpoch = now;
-        saveNtpTimeToHardwareRtc(now);
+        rtc_sync::saveTime(now);
       });
 }
 
@@ -1323,7 +1285,7 @@ void setup() {
   if (schedulingClockSuspicious) {
     LOG.println("[rtc] schedule clock is invalid or behind retained state; "
                 "trying PCF8563");
-    restoreClockFromHardwareRtc();
+    rtc_sync::restoreSystemClock();
   }
 
   bool wakeEventLogged = wake_report::logWakeEvent(wakeCause, wakePins, false);
@@ -1343,7 +1305,7 @@ void setup() {
   readSensors();
   if (coldBoot && !hardwareRtcCheckedEarly) {
     pcf8563::Reading storedRtc;
-    readAndLogHardwareRtc(storedRtc);
+    rtc_sync::readAndLog(storedRtc);
   }
   epaper.begin();
   sdReady = mountSd();
@@ -1399,7 +1361,7 @@ void setup() {
   bool rtcRestored = false;
   if (ntpDue && !ntpSynchronized && !coldBoot) {
     LOG.println("[ntp] using PCF8563 fallback after synchronization failure");
-    rtcRestored = restoreClockFromHardwareRtc();
+    rtcRestored = rtc_sync::restoreSystemClock();
   }
   local_time::configureTimezone(config::TIMEZONE);
   if (!wakeEventLogged) {
