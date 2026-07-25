@@ -2122,7 +2122,7 @@ void setup() {
   const bool ntpDue = ntpRefreshDue(coldBoot);
   struct tm localTime = {};
   if (!coldBoot && !ntpDue && !buttonWake && localClock(localTime) &&
-      quietHoursActive(localTime)) {
+      quietHoursActive(localTime) && !archiveRefreshDue()) {
     const uint64_t quietSleepSeconds = secondsUntilQuietEnd(localTime);
     LOG.printf("[quiet] refresh suppressed; sleeping until %s\n",
                quietEndLabel().c_str());
@@ -2241,14 +2241,19 @@ void setup() {
   const bool archiveDue = app_logic::archiveMaintenanceDue(
       sdReady, timerWake, clockIsValid() && archiveRefreshDue());
 
+  bool inQuietHours = false;
   if (!coldBoot && !buttonWake && localClock(localTime) &&
       quietHoursActive(localTime)) {
-    const uint64_t quietSleepSeconds = secondsUntilQuietEnd(localTime);
-    LOG.printf("[quiet] refresh suppressed after clock sync; sleeping until %s\n",
-               quietEndLabel().c_str());
-    disableWifi();
-    powerDownAndSleep(quietSleepSeconds);
-    return;
+    if (!archiveDue) {
+      const uint64_t quietSleepSeconds = secondsUntilQuietEnd(localTime);
+      LOG.printf("[quiet] refresh suppressed after clock sync; sleeping until %s\n",
+                 quietEndLabel().c_str());
+      disableWifi();
+      powerDownAndSleep(quietSleepSeconds);
+      return;
+    }
+    inQuietHours = true;
+    LOG.println("[quiet] running archive maintenance only; display suppressed");
   }
 
   Comic comic;
@@ -2296,12 +2301,12 @@ void setup() {
     }
   }
 
-  if (acquired) {
+  if (acquired && !inQuietHours) {
     displayed = renderComic(comic, image, layout);
   }
   image_free(&image);
 
-  if (!displayed) {
+  if (!displayed && !inQuietHours) {
     const String reason = sdReady
                               ? "No usable cached or downloadable comic"
                               : "Live download failed; check Wi-Fi or insert an SD card";
@@ -2335,18 +2340,22 @@ void setup() {
 
     if (maintenanceWasCancelled) {
       LOG.println("[button] maintenance stopped; displaying another cached comic");
-      beep();
-      Comic replacement;
-      RgbImage replacementImage;
-      ImageLayout replacementLayout;
-      if (acquireComic(false, replacement, replacementImage,
-                       replacementLayout)) {
-        renderComic(replacement, replacementImage, replacementLayout);
+      if (!inQuietHours) {
+        beep();
+        Comic replacement;
+        RgbImage replacementImage;
+        ImageLayout replacementLayout;
+        if (acquireComic(false, replacement, replacementImage,
+                         replacementLayout)) {
+          renderComic(replacement, replacementImage, replacementLayout);
+        } else {
+          LOG.println("[button] no replacement cached comic was usable; "
+                      "keeping the current frame");
+        }
+        image_free(&replacementImage);
       } else {
-        LOG.println("[button] no replacement cached comic was usable; "
-                    "keeping the current frame");
+        LOG.println("[quiet] not switching comics during quiet hours");
       }
-      image_free(&replacementImage);
     }
   }
 
