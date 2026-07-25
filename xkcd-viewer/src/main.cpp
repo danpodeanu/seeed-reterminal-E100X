@@ -368,7 +368,16 @@ void updatePanel() {
                                   config::PANEL_HEIGHT);
     screenshotRequested = false;
   }
+  const uint32_t heap = ESP.getFreeHeap();
+  const uint32_t psram = ESP.getFreePsram();
+  LOG.printf("[mem] before epd update  heap=%luK psram=%luK\n",
+             static_cast<unsigned long>(heap / 1024),
+             static_cast<unsigned long>(psram / 1024));
+  const uint32_t start = millis();
+  LOG.println("[render] epaper.update() start");
   epaper.update();
+  LOG.printf("[render] epaper.update() returned after %lu ms\n",
+             static_cast<unsigned long>(millis() - start));
 }
 
 bool parseComic(const String& json, Comic& comic) {
@@ -718,6 +727,18 @@ bool loadUsableComic(int number, bool networkAvailable, Comic& comic,
 
 bool acquireComic(bool networkAvailable, Comic& comic, RgbImage& image,
                   ImageLayout& layout) {
+  if (config::DEBUG_FORCE_COMIC > 0) {
+    LOG.printf("[debug] DEBUG_FORCE_COMIC=%d, bypassing selection\n",
+               config::DEBUG_FORCE_COMIC);
+    if (loadUsableComic(config::DEBUG_FORCE_COMIC, networkAvailable, comic,
+                        image, layout)) {
+      return true;
+    }
+    LOG.printf("[debug] forced comic #%d could not be loaded; falling back\n",
+               config::DEBUG_FORCE_COMIC);
+    image_free(&image);
+  }
+
   if (networkAvailable) {
     int latest = 0;
     if (getLatestNumber(true, latest)) {

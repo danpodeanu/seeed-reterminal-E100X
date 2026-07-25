@@ -92,4 +92,10 @@ constexpr char CACHE_INDEX_MAGIC[] = "XKCD_CACHE_INDEX_V1";
 constexpr uint32_t MAX_CACHE_INDEX_ENTRIES = 10000;
 constexpr char XKCD_LATEST_URL[] = "https://xkcd.com/info.0.json";
 
+// Debug: when set to a positive comic number, the very next cold-boot
+// selection short-circuits random picking and loads that specific comic
+// straight from the local cache. Intended for reproducing a render-path
+// hang on a known-bad comic; leave at 0 for normal operation.
+constexpr int DEBUG_FORCE_COMIC = 1741;
+
 }  // namespace config

@@ -50,6 +50,7 @@ inline constexpr char PRECACHE[] = "precache";
 inline constexpr char BUTTON[]     = "button";
 inline constexpr char LAYOUT[]     = "layout";
 inline constexpr char SCREENSHOT[] = "screenshot";
+inline constexpr char DEBUG[]      = "debug";
 
 // Sensors
 inline constexpr char SENSOR[]   = "sensor";
