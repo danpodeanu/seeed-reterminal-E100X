@@ -36,6 +36,7 @@
 #include "pcf8563_utc.h"
 #include "screenshot_bmp.h"
 #include "timestamped_logger.h"
+#include "theme.h"
 #include "weather_data.h"
 #include "weather_provider.h"
 #include "canonical_weather.h"
@@ -61,59 +62,10 @@ TimestampedLogger appLog(Serial1);
 namespace {
 
 using namespace ::board;
-constexpr int PIN_BUTTON_GREEN = 3;
-constexpr int PIN_BUTTON_RIGHT = 4;
-constexpr int PIN_BUTTON_LEFT = 5;
-
-#if RETERMINAL_MODEL == 1001
-constexpr uint32_t PANEL_WHITE = TFT_GRAY_3;
-constexpr uint32_t PANEL_BLACK = TFT_GRAY_0;
-constexpr uint32_t PANEL_LIGHT = TFT_GRAY_2;
-constexpr uint32_t PANEL_MUTED = TFT_GRAY_1;
-constexpr uint32_t PANEL_STATUS_BACKGROUND = TFT_GRAY_3;
-constexpr bool PANEL_STATUS_DITHERED = true;
-constexpr uint32_t PANEL_STATUS_DITHER_COLOR = TFT_GRAY_2;
-constexpr uint8_t PANEL_STATUS_DITHER_THRESHOLD = 8;
-constexpr uint32_t COLOR_SUN = TFT_GRAY_0;
-constexpr uint32_t COLOR_RAIN = TFT_GRAY_1;
-constexpr uint32_t COLOR_ALERT = TFT_GRAY_0;
-#elif RETERMINAL_MODEL == 1002
-constexpr uint32_t PANEL_WHITE = TFT_WHITE;
-constexpr uint32_t PANEL_BLACK = TFT_BLACK;
-constexpr uint32_t PANEL_LIGHT = TFT_WHITE;
-constexpr uint32_t PANEL_MUTED = TFT_BLACK;
-constexpr uint32_t PANEL_STATUS_BACKGROUND = TFT_WHITE;
-constexpr bool PANEL_STATUS_DITHERED = true;
-constexpr uint32_t PANEL_STATUS_DITHER_COLOR = TFT_BLACK;
-constexpr uint8_t PANEL_STATUS_DITHER_THRESHOLD = 4;
-constexpr uint32_t COLOR_SUN = TFT_YELLOW;
-constexpr uint32_t COLOR_RAIN = TFT_BLUE;
-constexpr uint32_t COLOR_ALERT = TFT_RED;
-#elif RETERMINAL_MODEL == 1003
-constexpr uint32_t PANEL_WHITE = TFT_GRAY_15;
-constexpr uint32_t PANEL_BLACK = TFT_GRAY_0;
-constexpr uint32_t PANEL_LIGHT = TFT_GRAY_12;
-constexpr uint32_t PANEL_MUTED = TFT_GRAY_6;
-constexpr uint32_t PANEL_STATUS_BACKGROUND = TFT_GRAY_13;
-constexpr bool PANEL_STATUS_DITHERED = false;
-constexpr uint32_t PANEL_STATUS_DITHER_COLOR = TFT_GRAY_13;
-constexpr uint8_t PANEL_STATUS_DITHER_THRESHOLD = 0;
-constexpr uint32_t COLOR_SUN = TFT_GRAY_2;
-constexpr uint32_t COLOR_RAIN = TFT_GRAY_5;
-constexpr uint32_t COLOR_ALERT = TFT_GRAY_0;
-#elif RETERMINAL_MODEL == 1004
-constexpr uint32_t PANEL_WHITE = TFT_WHITE;
-constexpr uint32_t PANEL_BLACK = TFT_BLACK;
-constexpr uint32_t PANEL_LIGHT = TFT_WHITE;
-constexpr uint32_t PANEL_MUTED = TFT_BLACK;
-constexpr uint32_t PANEL_STATUS_BACKGROUND = TFT_WHITE;
-constexpr bool PANEL_STATUS_DITHERED = true;
-constexpr uint32_t PANEL_STATUS_DITHER_COLOR = TFT_BLACK;
-constexpr uint8_t PANEL_STATUS_DITHER_THRESHOLD = 4;
-constexpr uint32_t COLOR_SUN = TFT_YELLOW;
-constexpr uint32_t COLOR_RAIN = TFT_BLUE;
-constexpr uint32_t COLOR_ALERT = TFT_RED;
-#endif
+// Per-model palette, layout, dither and button-pin constants all live in
+// include/theme.h; the using-directive keeps unqualified names (PANEL_WHITE,
+// COLOR_SUN, PIN_BUTTON_GREEN, ...) working at every callsite below.
+using namespace theme;
 
 EPaper epaper;
 Adafruit_SHT4x sht4;
