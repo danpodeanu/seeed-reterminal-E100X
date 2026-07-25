@@ -581,10 +581,10 @@ uint32_t countPhotos() {
   if (config::PHOTO_ORDER_RANDOM) {
     // Shuffle at boot so rotation feels random rather than following FAT32
     // directory order. esp_random() draws from the hardware RNG.
-    for (size_t i = photoList.size(); i > 1; --i) {
-      const size_t j = esp_random() % i;
-      if (j != i - 1) std::swap(photoList[i - 1], photoList[j]);
-    }
+    app_logic::shuffleInPlace(
+        photoList, [](size_t upperExclusive) -> size_t {
+          return static_cast<size_t>(esp_random()) % upperExclusive;
+        });
   } else {
     // Alphabetical sort makes ordinal-based rotation deterministic across
     // boots and independent of FAT32 directory ordering.

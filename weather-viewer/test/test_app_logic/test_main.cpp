@@ -94,6 +94,40 @@ void test_quiet_suppression_preserves_override_wakes() {
       false, false, false, false, true));
 }
 
+void test_failure_window_uses_cache_only_when_clock_and_cache_are_valid() {
+  // Live succeeded: never fall back to cache, regardless of cache state.
+  TEST_ASSERT_FALSE(
+      app_logic::useCachedForecastOnFailure(true, true, true, true));
+  // Live failed, everything valid, cache is within the failure window:
+  // render cached forecast (no error screen).
+  TEST_ASSERT_TRUE(
+      app_logic::useCachedForecastOnFailure(false, true, true, true));
+  // Live failed but clock is invalid: cannot trust the recorded timestamp,
+  // so don't rely on the cache.
+  TEST_ASSERT_FALSE(
+      app_logic::useCachedForecastOnFailure(false, false, true, true));
+  // Live failed but no cache exists: fall through to the error screen.
+  TEST_ASSERT_FALSE(
+      app_logic::useCachedForecastOnFailure(false, true, false, true));
+  // Live failed and cache is outside the failure window: show error screen.
+  TEST_ASSERT_FALSE(
+      app_logic::useCachedForecastOnFailure(false, true, true, false));
+}
+
+void test_failure_cache_boundary_at_one_hour() {
+  // Documents the 1 h contract from config::FAILURE_CACHE_MAX_AGE_SECONDS:
+  // a cache saved exactly one hour ago is still acceptable; a second later
+  // it is not. This is checked through cachedDataFresh, which is the
+  // predicate that gates the failure-window path.
+  constexpr uint64_t oneHour = 60ULL * 60ULL;
+  constexpr int64_t saved = 1'000'000;
+  TEST_ASSERT_TRUE(
+      app_logic::cachedDataFresh(true, saved + oneHour, saved, oneHour));
+  TEST_ASSERT_FALSE(
+      app_logic::cachedDataFresh(true, saved + oneHour + 1, saved, oneHour));
+  TEST_ASSERT_FALSE(app_logic::cachedDataFresh(false, saved, saved, oneHour));
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_startup_beep_only_for_cold_boot_and_button_wake);
@@ -104,5 +138,7 @@ int main(int, char**) {
   RUN_TEST(test_weather_age_rounds_to_nearest_five_minutes);
   RUN_TEST(test_weather_age_rejects_invalid_or_future_timestamps);
   RUN_TEST(test_quiet_suppression_preserves_override_wakes);
+  RUN_TEST(test_failure_window_uses_cache_only_when_clock_and_cache_are_valid);
+  RUN_TEST(test_failure_cache_boundary_at_one_hour);
   return UNITY_END();
 }

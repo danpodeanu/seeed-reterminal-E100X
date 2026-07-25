@@ -2121,13 +2121,22 @@ void setup() {
   bool wakeEventLogged = logWakeEvent(wakeCause, wakePins, false);
   const bool ntpDue = ntpRefreshDue(coldBoot);
   struct tm localTime = {};
-  if (!coldBoot && !ntpDue && !buttonWake && localClock(localTime) &&
-      quietHoursActive(localTime) && !archiveRefreshDue()) {
-    const uint64_t quietSleepSeconds = secondsUntilQuietEnd(localTime);
-    LOG.printf("[quiet] refresh suppressed; sleeping until %s\n",
-               quietEndLabel().c_str());
-    powerDownAndSleep(quietSleepSeconds);
-    return;
+  {
+    const bool haveLocalClock = localClock(localTime);
+    const bool quietNow = haveLocalClock && quietHoursActive(localTime);
+    // archiveRefreshDue() needs a valid clock; guard the read so we don't
+    // treat a bogus retained epoch as "maintenance overdue".
+    const bool archiveDuePreSync =
+        sdReady && clockIsValid() && archiveRefreshDue();
+    if (app_logic::suppressPreSyncForQuietHours(
+            coldBoot, ntpDue, buttonWake, haveLocalClock, quietNow,
+            archiveDuePreSync)) {
+      const uint64_t quietSleepSeconds = secondsUntilQuietEnd(localTime);
+      LOG.printf("[quiet] refresh suppressed; sleeping until %s\n",
+                 quietEndLabel().c_str());
+      powerDownAndSleep(quietSleepSeconds);
+      return;
+    }
   }
 
   randomSeed(esp_random());
@@ -2242,9 +2251,11 @@ void setup() {
       sdReady, timerWake, clockIsValid() && archiveRefreshDue());
 
   bool inQuietHours = false;
-  if (!coldBoot && !buttonWake && localClock(localTime) &&
-      quietHoursActive(localTime)) {
-    if (!archiveDue) {
+  {
+    const bool haveLocalClock = localClock(localTime);
+    const bool quietNow = haveLocalClock && quietHoursActive(localTime);
+    if (app_logic::suppressPostSyncForQuietHours(
+            coldBoot, buttonWake, haveLocalClock, quietNow, archiveDue)) {
       const uint64_t quietSleepSeconds = secondsUntilQuietEnd(localTime);
       LOG.printf("[quiet] refresh suppressed after clock sync; sleeping until %s\n",
                  quietEndLabel().c_str());
@@ -2252,8 +2263,10 @@ void setup() {
       powerDownAndSleep(quietSleepSeconds);
       return;
     }
-    inQuietHours = true;
-    LOG.println("[quiet] running archive maintenance only; display suppressed");
+    if (app_logic::maintainSilentlyInQuietHours(quietNow, archiveDue)) {
+      inQuietHours = true;
+      LOG.println("[quiet] running archive maintenance only; display suppressed");
+    }
   }
 
   Comic comic;

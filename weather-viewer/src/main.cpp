@@ -1979,9 +1979,14 @@ void setup() {
     // reasonably fresh; only show the error screen if the cache is older
     // than FAILURE_CACHE_MAX_AGE_SECONDS (or missing).
     String staleFailureReason;
-    if (clockIsValid() &&
+    const bool staleCacheLoaded =
+        clockIsValid() &&
         loadCachedWeather(weather, staleFailureReason,
-                          config::FAILURE_CACHE_MAX_AGE_SECONDS)) {
+                          config::FAILURE_CACHE_MAX_AGE_SECONDS);
+    if (app_logic::useCachedForecastOnFailure(
+            /*liveFetchSucceeded=*/false, clockIsValid(),
+            /*cacheAvailable=*/staleCacheLoaded,
+            /*cacheWithinFailureWindow=*/staleCacheLoaded)) {
       LOG.println("[weather] live fetch failed; showing recent cached forecast");
       renderWeather(weather);
       powerDownAndSleep(config::FAILURE_RETRY_SECONDS);

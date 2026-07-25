@@ -74,6 +74,35 @@ constexpr bool archiveMaintenanceDue(bool sdReady, bool timerWake,
   return sdReady && timerWake && refreshIsDue;
 }
 
+// Should the pre-clock-sync path short-sleep until end-of-quiet instead of
+// proceeding to display and maintenance work?
+//
+// The wake proceeds when it is a cold boot, an NTP-refresh wake, a button
+// wake, when the retained clock is not valid, when quiet hours are not
+// active, or when archive maintenance is due (which is allowed to run
+// silently during quiet hours).
+constexpr bool suppressPreSyncForQuietHours(bool coldBoot, bool ntpDue,
+                                            bool buttonWake, bool clockValid,
+                                            bool quietActive,
+                                            bool archiveDue) {
+  return !coldBoot && !ntpDue && !buttonWake && clockValid && quietActive &&
+         !archiveDue;
+}
+
+// Same idea for the post-clock-sync path, where an NTP-due wake has already
+// been serviced and no longer forces a full refresh.
+constexpr bool suppressPostSyncForQuietHours(bool coldBoot, bool buttonWake,
+                                             bool clockValid, bool quietActive,
+                                             bool archiveDue) {
+  return !coldBoot && !buttonWake && clockValid && quietActive && !archiveDue;
+}
+
+// Are we running maintenance silently inside quiet hours? If so the caller
+// must skip beeps, comic rotation, and any renderStatus/renderComic calls.
+constexpr bool maintainSilentlyInQuietHours(bool quietActive, bool archiveDue) {
+  return quietActive && archiveDue;
+}
+
 constexpr bool deadlineReached(uint32_t nowMs, uint32_t deadlineMs) {
   return deadlineMs != 0 &&
          static_cast<int32_t>(nowMs - deadlineMs) >= 0;

@@ -95,6 +95,59 @@ void test_deadline_comparison_survives_millis_wrap() {
   TEST_ASSERT_TRUE(app_logic::deadlineReached(0x10U, 0xFFFFFFF0U));
 }
 
+void test_pre_sync_quiet_suppression_lets_maintenance_run() {
+  // Normal quiet-hour timer wake with no maintenance due: suppress.
+  TEST_ASSERT_TRUE(app_logic::suppressPreSyncForQuietHours(
+      false, false, false, true, true, false));
+  // Same wake, but archive maintenance is due: do NOT suppress; the caller
+  // should proceed so silent maintenance can happen.
+  TEST_ASSERT_FALSE(app_logic::suppressPreSyncForQuietHours(
+      false, false, false, true, true, true));
+  // Cold boot always wins over quiet hours.
+  TEST_ASSERT_FALSE(app_logic::suppressPreSyncForQuietHours(
+      true, false, false, true, true, false));
+  // NTP-refresh wakes always proceed.
+  TEST_ASSERT_FALSE(app_logic::suppressPreSyncForQuietHours(
+      false, true, false, true, true, false));
+  // Button wakes always proceed.
+  TEST_ASSERT_FALSE(app_logic::suppressPreSyncForQuietHours(
+      false, false, true, true, true, false));
+  // Invalid clock: quiet-hour check cannot be trusted; proceed and let NTP
+  // path re-evaluate.
+  TEST_ASSERT_FALSE(app_logic::suppressPreSyncForQuietHours(
+      false, false, false, false, true, false));
+  // Outside quiet hours: never suppress.
+  TEST_ASSERT_FALSE(app_logic::suppressPreSyncForQuietHours(
+      false, false, false, true, false, false));
+}
+
+void test_post_sync_quiet_suppression_matches_pre_sync_minus_ntp() {
+  TEST_ASSERT_TRUE(app_logic::suppressPostSyncForQuietHours(
+      false, false, true, true, false));
+  // Archive maintenance overrides quiet suppression here too.
+  TEST_ASSERT_FALSE(app_logic::suppressPostSyncForQuietHours(
+      false, false, true, true, true));
+  // Cold boot always wins.
+  TEST_ASSERT_FALSE(app_logic::suppressPostSyncForQuietHours(
+      true, false, true, true, false));
+  // Button wakes always proceed.
+  TEST_ASSERT_FALSE(app_logic::suppressPostSyncForQuietHours(
+      false, true, true, true, false));
+  // Outside quiet hours: never suppress.
+  TEST_ASSERT_FALSE(app_logic::suppressPostSyncForQuietHours(
+      false, false, true, false, false));
+  // Invalid clock (unlikely at this point but handled): do not suppress.
+  TEST_ASSERT_FALSE(app_logic::suppressPostSyncForQuietHours(
+      false, false, false, true, false));
+}
+
+void test_silent_maintenance_flag_only_when_quiet_and_archive_due() {
+  TEST_ASSERT_TRUE(app_logic::maintainSilentlyInQuietHours(true, true));
+  TEST_ASSERT_FALSE(app_logic::maintainSilentlyInQuietHours(false, true));
+  TEST_ASSERT_FALSE(app_logic::maintainSilentlyInQuietHours(true, false));
+  TEST_ASSERT_FALSE(app_logic::maintainSilentlyInQuietHours(false, false));
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_startup_beep_only_for_cold_boot_and_button_wake);
@@ -106,5 +159,8 @@ int main(int, char**) {
   RUN_TEST(test_cache_only_threshold_controls_network);
   RUN_TEST(test_archive_maintenance_requires_timer_and_sd);
   RUN_TEST(test_deadline_comparison_survives_millis_wrap);
+  RUN_TEST(test_pre_sync_quiet_suppression_lets_maintenance_run);
+  RUN_TEST(test_post_sync_quiet_suppression_matches_pre_sync_minus_ntp);
+  RUN_TEST(test_silent_maintenance_flag_only_when_quiet_and_archive_due);
   return UNITY_END();
 }

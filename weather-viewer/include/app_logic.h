@@ -66,4 +66,16 @@ constexpr bool suppressForQuietHours(bool coldBoot, bool buttonWake,
   return !coldBoot && !buttonWake && !ntpDue && clockValid && quietActive;
 }
 
+// When a live fetch fails, should the caller render the last-known forecast
+// instead of the "weather unavailable" error screen? The cache is acceptable
+// only when the clock is valid (so its recorded timestamp can be trusted)
+// and the recorded age is within the failure window (typically 1 hour).
+constexpr bool useCachedForecastOnFailure(bool liveFetchSucceeded,
+                                          bool clockValid,
+                                          bool cacheAvailable,
+                                          bool cacheWithinFailureWindow) {
+  return !liveFetchSucceeded && clockValid && cacheAvailable &&
+         cacheWithinFailureWindow;
+}
+
 }  // namespace app_logic
