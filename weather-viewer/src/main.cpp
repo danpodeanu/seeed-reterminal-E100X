@@ -127,42 +127,6 @@ bool quietSleepNotice = false;
 // WeatherData / DailyForecast now live in weather_data.h so both the
 // provider translation units and main.cpp share one definition.
 
-bool parseLocalTimestamp(const String& value, time_t& timestamp) {
-  int year = 0;
-  int month = 0;
-  int day = 0;
-  int hour = 0;
-  int minute = 0;
-  int second = 0;
-  const int fields = sscanf(value.c_str(), "%d-%d-%dT%d:%d:%d",
-                            &year, &month, &day, &hour, &minute, &second);
-  if (fields < 5 || year < 1970 || month < 1 || month > 12 ||
-      day < 1 || day > 31 || hour < 0 || hour > 23 ||
-      minute < 0 || minute > 59 || second < 0 || second > 59) {
-    return false;
-  }
-
-  struct tm parsed = {};
-  parsed.tm_year = year - 1900;
-  parsed.tm_mon = month - 1;
-  parsed.tm_mday = day;
-  parsed.tm_hour = hour;
-  parsed.tm_min = minute;
-  parsed.tm_sec = second;
-  parsed.tm_isdst = -1;
-  timestamp = mktime(&parsed);
-  if (timestamp <= 0) return false;
-
-  struct tm roundTrip = {};
-  if (localtime_r(&timestamp, &roundTrip) == nullptr) return false;
-  return roundTrip.tm_year == year - 1900 &&
-         roundTrip.tm_mon == month - 1 &&
-         roundTrip.tm_mday == day &&
-         roundTrip.tm_hour == hour &&
-         roundTrip.tm_min == minute &&
-         roundTrip.tm_sec == second;
-}
-
 // writeLittleEndian16/32, screenshotPaletteColor, and saveScreenshotBmp now
 // live in common/include/screenshot_bmp.h and are invoked via the template
 // screenshot::saveScreenshotBmp<EPaper>().
@@ -362,7 +326,7 @@ bool loadCachedWeather(WeatherData& weather, String& failureReason,
     LOG.printf("[cache] %s\n", failureReason.c_str());
     return false;
   }
-  if (!parseLocalTimestamp(weather.updateTime, forecastTime)) {
+  if (!local_time::parseIso8601Local(weather.updateTime, forecastTime)) {
     failureReason = "Saved forecast time is invalid";
     LOG.printf("[cache] %s: %s\n", failureReason.c_str(),
                weather.updateTime.c_str());
@@ -422,7 +386,7 @@ String updateClock(const String& isoTime) {
 
 String weatherAgeText(const String& isoTime) {
   time_t forecastTime = 0;
-  if (!local_time::clockIsValid() || !parseLocalTimestamp(isoTime, forecastTime))
+  if (!local_time::clockIsValid() || !local_time::parseIso8601Local(isoTime, forecastTime))
     return "";
 
   const int64_t roundedMinutes = app_logic::roundedAgeMinutes(

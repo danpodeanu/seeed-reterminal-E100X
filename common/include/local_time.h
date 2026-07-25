@@ -1,5 +1,6 @@
 #pragma once
 
+#include <Arduino.h>
 #include <stdint.h>
 #include <sys/time.h>
 #include <time.h>
@@ -27,5 +28,14 @@ bool localClock(struct tm& out);
 // older than `intervalSeconds`. Suitable to back an app's
 // `ntpRefreshDue()` wrapper.
 bool refreshDue(bool coldBoot, time_t lastSync, uint32_t intervalSeconds);
+
+// Parse an ISO-8601-ish local-time string ("YYYY-MM-DDTHH:MM[:SS]"),
+// interpreting it as wall-clock time in the currently configured
+// timezone, and write the resulting `time_t` into `timestamp`.
+// Seconds are optional (defaults to 0) but every other field must be
+// present and in range. Also round-trips the result through
+// localtime_r to reject values that mktime silently normalised (e.g.
+// "2025-02-30"). Returns false on any parse or range failure.
+bool parseIso8601Local(const String& value, time_t& timestamp);
 
 }  // namespace local_time
