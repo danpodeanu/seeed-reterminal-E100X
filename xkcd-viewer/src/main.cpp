@@ -21,6 +21,7 @@
 #include "config.h"
 #include "secrets.h"
 #include "app_logic.h"
+#include "board_pins.h"
 #include "dither.h"
 #include "image_loader.h"
 #include "pcf8563_utc.h"
@@ -37,34 +38,10 @@ SET_LOOP_TASK_STACK_SIZE(16U * 1024U);
 
 namespace {
 
-constexpr int PIN_SD_SCK = 7;
-constexpr int PIN_SD_MISO = 8;
-constexpr int PIN_SD_MOSI = 9;
-constexpr int PIN_SD_CS = 14;
-constexpr int PIN_SD_DETECT = 15;
-#if RETERMINAL_MODEL == 1003
-constexpr int PIN_SD_ENABLE = 39;
-constexpr int PIN_BATTERY_ENABLE = 40;
-#else
-constexpr int PIN_SD_ENABLE = 16;
-constexpr int PIN_BATTERY_ENABLE = 21;
-#endif
-#if RETERMINAL_MODEL == 1001 || RETERMINAL_MODEL == 1002
-constexpr int PIN_STATUS_LED = 6;
-#elif RETERMINAL_MODEL == 1003
-constexpr int PIN_STATUS_LED = 16;
-#else
-constexpr int PIN_STATUS_LED = 48;
-#endif
+using namespace ::board;
 constexpr int PIN_BUTTON_GREEN = 3;
 constexpr int PIN_BUTTON_RIGHT = 4;
 constexpr int PIN_BUTTON_LEFT = 5;
-constexpr int PIN_BUZZER = 45;
-constexpr int PIN_BATTERY_ADC = 1;
-constexpr int PIN_I2C_SDA = 19;
-constexpr int PIN_I2C_SCL = 20;
-constexpr int PIN_LOG_RX = 44;
-constexpr int PIN_LOG_TX = 43;
 
 TimestampedLogger appLog(Serial1);
 #define LOG appLog
@@ -83,8 +60,6 @@ constexpr uint32_t PANEL_STATUS_DITHER_COLOR = TFT_GRAY_2;
 constexpr uint8_t PANEL_STATUS_DITHER_THRESHOLD = 0;
 constexpr uint32_t PANEL_CACHE_STATS_COLOR = TFT_GRAY_1;
 constexpr DitherPalette PANEL_PALETTE = PAL_GRAY4;
-constexpr char MODEL_NAME[] = "E1001";
-constexpr char COLOR_MODE_NAME[] = "Gray4";
 #elif RETERMINAL_MODEL == 1002
 constexpr uint32_t PANEL_WHITE = TFT_WHITE;
 constexpr uint32_t PANEL_BLACK = TFT_BLACK;
@@ -94,8 +69,6 @@ constexpr uint32_t PANEL_STATUS_DITHER_COLOR = TFT_BLACK;
 constexpr uint8_t PANEL_STATUS_DITHER_THRESHOLD = 4;
 constexpr uint32_t PANEL_CACHE_STATS_COLOR = TFT_DARKGREY;
 constexpr DitherPalette PANEL_PALETTE = PAL_E6;
-constexpr char MODEL_NAME[] = "E1002";
-constexpr char COLOR_MODE_NAME[] = "six-color";
 #elif RETERMINAL_MODEL == 1003
 constexpr uint32_t PANEL_WHITE = TFT_GRAY_15;
 constexpr uint32_t PANEL_BLACK = TFT_GRAY_0;
@@ -105,8 +78,6 @@ constexpr uint32_t PANEL_STATUS_DITHER_COLOR = TFT_GRAY_13;
 constexpr uint8_t PANEL_STATUS_DITHER_THRESHOLD = 0;
 constexpr uint32_t PANEL_CACHE_STATS_COLOR = TFT_GRAY_5;
 constexpr DitherPalette PANEL_PALETTE = PAL_GRAY16;
-constexpr char MODEL_NAME[] = "E1003";
-constexpr char COLOR_MODE_NAME[] = "Gray16";
 #elif RETERMINAL_MODEL == 1004
 constexpr uint32_t PANEL_WHITE = TFT_WHITE;
 constexpr uint32_t PANEL_BLACK = TFT_BLACK;
@@ -116,8 +87,6 @@ constexpr uint32_t PANEL_STATUS_DITHER_COLOR = TFT_BLACK;
 constexpr uint8_t PANEL_STATUS_DITHER_THRESHOLD = 4;
 constexpr uint32_t PANEL_CACHE_STATS_COLOR = TFT_DARKGREY;
 constexpr DitherPalette PANEL_PALETTE = PAL_E6;
-constexpr char MODEL_NAME[] = "E1004";
-constexpr char COLOR_MODE_NAME[] = "six-color";
 #endif
 
 EPaper epaper;
