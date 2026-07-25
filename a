@@ -1,0 +1,17 @@
+ Volume in drive C has no label.
+ Volume Serial Number is 5EF4-D6FD
+
+ Directory of C:\Repos-Personal\seeed-reterminal-E100X
+
+07/25/2026  09:26 AM    <DIR>          .
+07/25/2026  09:25 AM    <DIR>          ..
+07/25/2026  09:25 AM    <DIR>          .github
+07/25/2026  09:25 AM                 9 .gitignore
+07/25/2026  09:26 AM                 0 a
+07/25/2026  09:25 AM            18,431 LICENSE
+07/25/2026  09:25 AM    <DIR>          photo-viewer
+07/25/2026  09:25 AM             5,154 README.md
+07/25/2026  09:25 AM    <DIR>          weather-viewer
+07/25/2026  09:25 AM    <DIR>          xkcd-viewer
+               4 File(s)         23,594 bytes
+               6 Dir(s)  811,155,980,288 bytes free
