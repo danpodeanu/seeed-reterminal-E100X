@@ -578,12 +578,21 @@ uint32_t countPhotos() {
     entry = directory.openNextFile();
   }
   directory.close();
-  // Sort so that ordinal-based rotation is deterministic across boots and
-  // independent of FAT32 directory ordering.
-  std::sort(photoList.begin(), photoList.end(),
-            [](const String& a, const String& b) {
-              return strcmp(a.c_str(), b.c_str()) < 0;
-            });
+  if (config::PHOTO_ORDER_RANDOM) {
+    // Shuffle at boot so rotation feels random rather than following FAT32
+    // directory order. esp_random() draws from the hardware RNG.
+    for (size_t i = photoList.size(); i > 1; --i) {
+      const size_t j = esp_random() % i;
+      if (j != i - 1) std::swap(photoList[i - 1], photoList[j]);
+    }
+  } else {
+    // Alphabetical sort makes ordinal-based rotation deterministic across
+    // boots and independent of FAT32 directory ordering.
+    std::sort(photoList.begin(), photoList.end(),
+              [](const String& a, const String& b) {
+                return strcmp(a.c_str(), b.c_str()) < 0;
+              });
+  }
   return static_cast<uint32_t>(photoList.size());
 }
 

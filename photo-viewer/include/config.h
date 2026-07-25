@@ -70,4 +70,9 @@ static_assert(QUIET_START_MINUTE < 60 && QUIET_END_MINUTE < 60,
 // are already panel-dithered by tools/prepare_photos.py and bypass this path.
 constexpr float FALLBACK_DITHER_GAMMA = 1.0f;
 
+// Photo rotation order. When true, the enumeration is shuffled at each boot
+// so successive photos feel random; when false, files are sorted
+// alphabetically so rotation order is deterministic across boots.
+constexpr bool PHOTO_ORDER_RANDOM = true;
+
 }  // namespace config
