@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import io
+import json
 import struct
 import sys
 from dataclasses import dataclass
@@ -12,6 +13,17 @@ from pathlib import Path
 from typing import Iterable
 
 from PIL import Image, ImageChops, ImageCms, ImageOps
+
+
+# Dither algorithm version. Bumped in lockstep with the C constant
+# `config::DITHER_VERSION` in `photo-viewer/include/config.h`. The firmware
+# writes a warning to the serial log when the manifest on the SD card carries
+# a different value from what it expects, so users know to re-run this script
+# after a firmware update that changes quantisation.
+DITHER_VERSION = "v1"
+
+MANIFEST_SCHEMA = "reterminal-photos-v1"
+MANIFEST_FILENAME = "manifest.json"
 
 
 @dataclass(frozen=True)
@@ -429,7 +441,39 @@ def main() -> int:
             print(f"error: {source}: {error}", file=sys.stderr)
 
     print(f"Prepared {converted} photo(s); {failed} failed.")
+    if converted:
+        write_manifest(args.output, args.model, args.fit, args.gamma,
+                       not args.no_dither, not args.no_warm_tone_protection)
     return 1 if failed else 0
+
+
+def write_manifest(output_dir: Path, model: str, fit: str, gamma: float,
+                   dither: bool, warm_tone_protection: bool) -> None:
+    """Emit a schema-tagged manifest that lists every prepared BMP alongside
+    the dither settings that produced it. Merges with any existing manifest
+    so multiple prepare_photos.py runs against the same output directory keep
+    accumulating entries, but always rewrites metadata to reflect this run.
+    """
+    manifest_path = output_dir / MANIFEST_FILENAME
+    bmps = sorted(
+        entry.name for entry in output_dir.iterdir()
+        if entry.is_file() and entry.suffix.lower() == ".bmp"
+    )
+    manifest = {
+        "_schema": MANIFEST_SCHEMA,
+        "dither_version": DITHER_VERSION,
+        "model": model,
+        "fit": fit,
+        "gamma": gamma,
+        "dither": dither,
+        "warm_tone_protection": warm_tone_protection,
+        "photos": bmps,
+    }
+    manifest_path.write_text(
+        json.dumps(manifest, indent=2, sort_keys=False) + "\n",
+        encoding="utf-8",
+    )
+    print(f"Wrote {manifest_path} ({len(bmps)} photos, dither {DITHER_VERSION})")
 
 
 if __name__ == "__main__":

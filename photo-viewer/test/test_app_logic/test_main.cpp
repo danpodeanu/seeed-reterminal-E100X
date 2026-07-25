@@ -1,8 +1,10 @@
 #include <unity.h>
 
+#include <string>
 #include <vector>
 
 #include "app_logic.h"
+#include "photo_manifest.h"
 
 void setUp() {}
 void tearDown() {}
@@ -99,6 +101,61 @@ void test_shuffle_handles_empty_and_singleton_lists() {
   TEST_ASSERT_EQUAL_INT(42, singleton[0]);
 }
 
+static photo_manifest::Status inspectStr(const std::string& json,
+                                         const char* expected,
+                                         std::string& found) {
+  return photo_manifest::inspect(json.c_str(), json.size(), expected, found);
+}
+
+void test_photo_manifest_matches_when_version_is_expected() {
+  const std::string json =
+      R"({"_schema":"reterminal-photos-v1","dither_version":"v1"})";
+  std::string found;
+  TEST_ASSERT_EQUAL_INT(
+      static_cast<int>(photo_manifest::Status::Matches),
+      static_cast<int>(inspectStr(json, "v1", found)));
+  TEST_ASSERT_EQUAL_STRING("v1", found.c_str());
+}
+
+void test_photo_manifest_reports_stale_when_versions_differ() {
+  const std::string json =
+      R"({"_schema":"reterminal-photos-v1","dither_version":"v2"})";
+  std::string found;
+  TEST_ASSERT_EQUAL_INT(
+      static_cast<int>(photo_manifest::Status::StaleDither),
+      static_cast<int>(inspectStr(json, "v1", found)));
+  TEST_ASSERT_EQUAL_STRING("v2", found.c_str());
+}
+
+void test_photo_manifest_rejects_mismatched_schema() {
+  const std::string json =
+      R"({"_schema":"some-other-schema","dither_version":"v1"})";
+  std::string found;
+  TEST_ASSERT_EQUAL_INT(
+      static_cast<int>(photo_manifest::Status::Unrecognised),
+      static_cast<int>(inspectStr(json, "v1", found)));
+}
+
+void test_photo_manifest_rejects_missing_version_field() {
+  const std::string json = R"({"_schema":"reterminal-photos-v1"})";
+  std::string found;
+  TEST_ASSERT_EQUAL_INT(
+      static_cast<int>(photo_manifest::Status::Unrecognised),
+      static_cast<int>(inspectStr(json, "v1", found)));
+}
+
+void test_photo_manifest_ignores_nested_matching_field_names() {
+  // A `dither_version` string nested inside another object must not fool the
+  // parser into thinking the manifest carries one at the top level.
+  const std::string json =
+      R"({"_schema":"reterminal-photos-v1",)"
+      R"("nested":{"dither_version":"v9"}})";
+  std::string found;
+  TEST_ASSERT_EQUAL_INT(
+      static_cast<int>(photo_manifest::Status::Unrecognised),
+      static_cast<int>(inspectStr(json, "v1", found)));
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_startup_beep_only_for_cold_boot_and_button_wake);
@@ -110,5 +167,10 @@ int main(int, char**) {
   RUN_TEST(test_shuffle_is_a_permutation_and_uses_only_valid_indices);
   RUN_TEST(test_shuffle_identity_when_rng_picks_last_index);
   RUN_TEST(test_shuffle_handles_empty_and_singleton_lists);
+  RUN_TEST(test_photo_manifest_matches_when_version_is_expected);
+  RUN_TEST(test_photo_manifest_reports_stale_when_versions_differ);
+  RUN_TEST(test_photo_manifest_rejects_mismatched_schema);
+  RUN_TEST(test_photo_manifest_rejects_missing_version_field);
+  RUN_TEST(test_photo_manifest_ignores_nested_matching_field_names);
   return UNITY_END();
 }

@@ -70,6 +70,13 @@ static_assert(QUIET_START_MINUTE < 60 && QUIET_END_MINUTE < 60,
 // are already panel-dithered by tools/prepare_photos.py and bypass this path.
 constexpr float FALLBACK_DITHER_GAMMA = 1.0f;
 
+// Dither algorithm version. Bumped in lockstep with any change to the
+// Python quantiser (tools/prepare_photos.py) or the C++ dither library. If
+// the manifest on the SD card carries a different value the firmware logs a
+// warning; the photos still display, but the user should re-run
+// prepare_photos.py to freshen them.
+constexpr char DITHER_VERSION[] = "v1";
+
 // Photo rotation order. When true, the enumeration is shuffled at each boot
 // so successive photos feel random; when false, files are sorted
 // alphabetically so rotation order is deterministic across boots.

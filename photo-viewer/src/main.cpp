@@ -29,6 +29,7 @@
 #include "climate_sensor.h"
 #include "sd_card.h"
 #include "text_render.h"
+#include "photo_manifest.h"
 #include "quiet_hours.h"
 #include "sensors.h"
 #include "image_loader.h"
@@ -617,6 +618,36 @@ void setup() {
   const uint32_t photoCount = countPhotos();
   LOG.printf("[photo] %lu supported files in %s\n",
              static_cast<unsigned long>(photoCount), config::PHOTO_DIR);
+
+  if (sdReady) {
+    const String manifestPath =
+        String(config::PHOTO_DIR) + photo_manifest::MANIFEST_FILE;
+    String manifestJson;
+    if (sd_card::readFile(manifestPath, manifestJson, 32U * 1024U)) {
+      String foundVersion;
+      const photo_manifest::Status status = photo_manifest::inspect(
+          manifestJson, config::DITHER_VERSION, foundVersion);
+      switch (status) {
+        case photo_manifest::Status::Matches:
+          LOG.printf("[photo] manifest OK (dither %s)\n",
+                     config::DITHER_VERSION);
+          break;
+        case photo_manifest::Status::StaleDither:
+          LOG.printf(
+              "[photo] manifest dither %s but firmware expects %s; "
+              "re-run prepare_photos.py\n",
+              foundVersion.c_str(), config::DITHER_VERSION);
+          break;
+        case photo_manifest::Status::Unrecognised:
+          LOG.println("[photo] manifest present but unrecognised; ignoring");
+          break;
+        case photo_manifest::Status::Absent:
+          break;
+      }
+    } else {
+      LOG.println("[photo] no manifest.json in /photos (legacy card)");
+    }
+  }
 
   const bool showStartupStatus = coldBoot;
   const String stationMac = wifi_sta::stationMacAddress();
