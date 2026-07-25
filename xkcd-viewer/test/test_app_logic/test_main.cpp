@@ -3,7 +3,10 @@
 #include <stdint.h>
 #include <string.h>
 
+#include <string>
+
 #include "app_logic.h"
+#include "xkcd_cache_schema.h"
 #include "xkcd_index_pure.h"
 
 void setUp() {}
@@ -199,6 +202,36 @@ void test_pack_4bpp_in_place_masks_high_nibble() {
   TEST_ASSERT_EQUAL_UINT8(0xBD, buffer[0]);
 }
 
+void test_cache_schema_wrap_injects_tag_as_first_key() {
+  const std::string in = R"({"num":42,"img":"https://example/x.png"})";
+  const std::string out = xkcd_cache::wrapWithSchema(in);
+  TEST_ASSERT_EQUAL_STRING(
+      "{\"_schema\":\"xkcd-comic-v1\",\"num\":42,\"img\":\"https://example/x.png\"}",
+      out.c_str());
+}
+
+void test_cache_schema_wrap_handles_empty_object() {
+  const std::string out = xkcd_cache::wrapWithSchema("{}");
+  TEST_ASSERT_EQUAL_STRING("{\"_schema\":\"xkcd-comic-v1\"}", out.c_str());
+}
+
+void test_cache_schema_wrap_preserves_leading_whitespace() {
+  const std::string out = xkcd_cache::wrapWithSchema("  {\"n\":1}");
+  TEST_ASSERT_EQUAL_STRING("  {\"_schema\":\"xkcd-comic-v1\",\"n\":1}",
+                           out.c_str());
+}
+
+void test_cache_schema_wrap_passthrough_when_not_object() {
+  // Non-object payloads (arrays, partial downloads, empty string) must be
+  // returned unchanged so we never prepend a tag to something we don't
+  // understand.
+  TEST_ASSERT_EQUAL_STRING("", xkcd_cache::wrapWithSchema("").c_str());
+  TEST_ASSERT_EQUAL_STRING(
+      "[1,2,3]", xkcd_cache::wrapWithSchema("[1,2,3]").c_str());
+  TEST_ASSERT_EQUAL_STRING(
+      "not json", xkcd_cache::wrapWithSchema("not json").c_str());
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_startup_beep_only_for_cold_boot_and_button_wake);
@@ -216,5 +249,9 @@ int main(int, char**) {
   RUN_TEST(test_parse_unsigned_digits_accepts_and_rejects_correctly);
   RUN_TEST(test_pack_4bpp_in_place_packs_two_pixels_per_byte);
   RUN_TEST(test_pack_4bpp_in_place_masks_high_nibble);
+  RUN_TEST(test_cache_schema_wrap_injects_tag_as_first_key);
+  RUN_TEST(test_cache_schema_wrap_handles_empty_object);
+  RUN_TEST(test_cache_schema_wrap_preserves_leading_whitespace);
+  RUN_TEST(test_cache_schema_wrap_passthrough_when_not_object);
   return UNITY_END();
 }

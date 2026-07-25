@@ -33,6 +33,7 @@
 #include "net_http.h"
 #include "text_render.h"
 #include "xkcd_index.h"
+#include "xkcd_cache_schema.h"
 #include "quiet_hours.h"
 #include "sensors.h"
 #include "dither.h"
@@ -377,6 +378,14 @@ bool parseComic(const String& json, Comic& comic) {
     LOG.printf("[json] %s\n", error.c_str());
     return false;
   }
+  JsonVariantConst schemaField = document[xkcd_cache::SCHEMA_FIELD];
+  if (!schemaField.isNull()) {
+    const char* tag = schemaField.as<const char*>();
+    if (!tag || strcmp(tag, xkcd_cache::SCHEMA_TAG) != 0) {
+      LOG.printf("[cache] schema mismatch: %s\n", tag ? tag : "(null)");
+      return false;
+    }
+  }
   comic.number = document["num"] | 0;
   const char* title = document["safe_title"];
   if (!title || !*title) title = document["title"];
@@ -411,7 +420,8 @@ bool getComic(int number, bool networkAvailable, Comic& comic) {
     if (!networkAvailable || number == 404) return false;
     const String url = "https://xkcd.com/" + String(number) + "/info.0.json";
     if (!net_http::getString(url, json, config::HTTP_TIMEOUT_MS, networkOperationShouldStop, boundedNetworkTimeout) || !parseComic(json, comic)) return false;
-    if (sd_card::writeFileAtomically(metaPath, json)) {
+    const String tagged = xkcd_cache::wrapWithSchema(json);
+    if (sd_card::writeFileAtomically(metaPath, tagged)) {
       LOG.printf("[cache] saved metadata #%d\n", number);
     } else {
       sdCacheWritable = false;
@@ -455,12 +465,13 @@ bool getLatestNumber(bool networkAvailable, int& latest,
   if (shouldCheckOnline) {
     if (net_http::getString(config::XKCD_LATEST_URL, json, config::HTTP_TIMEOUT_MS, networkOperationShouldStop, boundedNetworkTimeout) && parseComic(json, comic)) {
       latest = comic.number;
-      if (!sd_card::writeFileAtomically(config::LATEST_CACHE, json)) {
+      const String tagged = xkcd_cache::wrapWithSchema(json);
+      if (!sd_card::writeFileAtomically(config::LATEST_CACHE, tagged)) {
         sdCacheWritable = false;
         LOG.println("[cache] latest metadata not stored; using live value");
       }
       if (sdCacheWritable &&
-          !sd_card::writeFileAtomically(metadataPath(latest), json)) {
+          !sd_card::writeFileAtomically(metadataPath(latest), tagged)) {
         sdCacheWritable = false;
         LOG.printf("[cache] metadata #%d not stored; using live value\n",
                    latest);
