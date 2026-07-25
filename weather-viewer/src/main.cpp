@@ -38,6 +38,7 @@
 #include "timestamped_logger.h"
 #include "weather_data.h"
 #include "weather_provider.h"
+#include "canonical_weather.h"
 
 #if RETERMINAL_MODEL == 1003
 #include "fonts/Roboto_Bold90pt7b.h"
@@ -313,8 +314,7 @@ bool loadCachedWeather(WeatherData& weather, String& failureReason,
     failureReason = "Saved forecast could not be read";
     return false;
   }
-  if (!parseWeather(body, weather)) {
-    LOG.println("[cache] saved forecast is invalid");
+  if (!canonical_weather::parse(body, weather)) {
     failureReason = "Saved forecast is invalid";
     return false;
   }
@@ -1103,7 +1103,11 @@ void setup() {
   wifi_sta::disable();
 
   if (liveUpdated && sdReady) {
-    if (sd_card::writeFileAtomically(config::FORECAST_CACHE, liveResponse)) {
+    String canonical;
+    if (!canonical_weather::serialize(weather, canonical)) {
+      LOG.println("[cache] forecast serialization failed; skipping save");
+    } else if (sd_card::writeFileAtomically(config::FORECAST_CACHE,
+                                            canonical)) {
       LOG.println("[cache] saved latest forecast");
     } else {
       LOG.println("[cache] forecast not stored; continuing with live data");
