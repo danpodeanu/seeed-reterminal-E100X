@@ -251,6 +251,13 @@ void test_normalize_hex_digits_strips_common_key_formats() {
       app_logic::normalizeHexDigits("94g1", out, sizeof(out)));
   TEST_ASSERT_EQUAL_UINT(static_cast<size_t>(-1),
       app_logic::normalizeHexDigits("94,1", out, sizeof(out)));
+  // ssh-style key dumps sometimes use '_' or '-' as separators; both
+  // sides must refuse them so a paste from the wrong tool fails loudly
+  // rather than decoding to a subtly different key.
+  TEST_ASSERT_EQUAL_UINT(static_cast<size_t>(-1),
+      app_logic::normalizeHexDigits("94_d1", out, sizeof(out)));
+  TEST_ASSERT_EQUAL_UINT(static_cast<size_t>(-1),
+      app_logic::normalizeHexDigits("94-d1", out, sizeof(out)));
 
   // Output buffer overflow is signalled the same way.
   char tiny[4];  // room for 3 chars + NUL

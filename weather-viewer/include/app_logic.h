@@ -4,53 +4,22 @@
 #include <stdint.h>
 
 #include "app_logic_core.h"
+#include "secrets_normalise.h"
 
 namespace app_logic {
 
 // Decode one hex character to its 0..15 value, or -1 if not a hex digit.
 constexpr int hexNibble(char c) {
-  if (c >= '0' && c <= '9') return c - '0';
-  if (c >= 'a' && c <= 'f') return 10 + (c - 'a');
-  if (c >= 'A' && c <= 'F') return 10 + (c - 'A');
-  return -1;
+  return secrets_normalise::hexNibble(c);
 }
 
-// Copy `text` into `out` while dropping the punctuation people paste along
-// with hex-encoded keys: ASCII whitespace, ':' byte separators (as in
-// openssl's `priv:` output), and a single leading "0x" / "0X" prefix.
-// Any character that is neither a hex digit nor allowed punctuation causes
-// the function to return SIZE_MAX; if the cleaned string would not fit in
-// `outCapacity` (including the trailing NUL) it also returns SIZE_MAX.
-// On success, `out` is NUL-terminated and the return value is the length
-// of the cleaned string (excluding the NUL). Callers typically feed the
-// result into decodeHex().
-inline size_t normalizeHexDigits(const char* text, char* out,
-                                 size_t outCapacity) {
-  if (text == nullptr || out == nullptr || outCapacity == 0) {
-    return static_cast<size_t>(-1);
-  }
-  size_t o = 0;
-  bool consumedPrefix = false;
-  for (size_t i = 0; text[i] != '\0'; ++i) {
-    const char c = text[i];
-    if (c == ' ' || c == '\t' || c == '\n' || c == '\r' || c == ':') {
-      continue;
-    }
-    if (!consumedPrefix && o == 0 && c == '0' &&
-        (text[i + 1] == 'x' || text[i + 1] == 'X')) {
-      consumedPrefix = true;
-      ++i;  // skip the 'x' as well
-      continue;
-    }
-    if (hexNibble(c) < 0) {
-      return static_cast<size_t>(-1);
-    }
-    if (o + 1u >= outCapacity) return static_cast<size_t>(-1);
-    out[o++] = c;
-  }
-  out[o] = '\0';
-  return o;
-}
+// The hex-digit normaliser lives in common/include/secrets_normalise.h so
+// it can be shared with any future app that consumes a hex-encoded secret,
+// and so common/tools/secrets_normalise.py can enforce firmware/tester
+// parity from a single source of truth. app_logic keeps the historical
+// name available as a thin re-export -- callers and tests need not care
+// where the implementation lives.
+using secrets_normalise::normalizeHexDigits;
 
 // Decode a hexadecimal string (2 chars per byte). Returns the number of
 // bytes written on success, or 0 if the input is malformed (odd length,
