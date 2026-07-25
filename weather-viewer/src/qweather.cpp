@@ -110,11 +110,26 @@ bool buildJwt(String& jwt, String& failureReason) {
     return false;
   }
   uint8_t privateKey[32];
+  // Users often paste the openssl `priv:` output with ':' separators or
+  // whitespace from the PEM dump; normalise before decoding so the firmware
+  // accepts the same inputs the test_credentials.py tester accepts.
+  char cleanedHex[128];
+  const size_t cleanedLen = app_logic::normalizeHexDigits(
+      privateKeyHex, cleanedHex, sizeof(cleanedHex));
+  if (cleanedLen == static_cast<size_t>(-1)) {
+    failureReason = "QWeather private key contains non-hex characters";
+    LOG.println(
+        "[weather] QWEATHER_PRIVATE_KEY_HEX contains characters that are "
+        "not hex digits, whitespace, or ':'");
+    return false;
+  }
   const size_t decoded = app_logic::decodeHex(
-      privateKeyHex, strlen(privateKeyHex), privateKey, sizeof(privateKey));
+      cleanedHex, cleanedLen, privateKey, sizeof(privateKey));
   if (decoded != sizeof(privateKey)) {
     failureReason = "QWeather private key is not 32 bytes of hex";
-    LOG.println("[weather] QWEATHER_PRIVATE_KEY_HEX is not 64 hex chars");
+    LOG.printf(
+        "[weather] QWEATHER_PRIVATE_KEY_HEX is not 64 hex chars "
+        "(cleaned length=%u)\n", static_cast<unsigned>(cleanedLen));
     return false;
   }
 

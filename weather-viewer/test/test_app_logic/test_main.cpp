@@ -215,6 +215,62 @@ void test_rain_slot_threshold_is_shared_by_both_providers() {
   TEST_ASSERT_FALSE(app_logic::rainSlotQualifies(0.05f, -1, minMm, minProb));
 }
 
+// The openssl `priv:` output ships as "94:d1:33:..." across multiple lines,
+// and users often paste it that way into secrets.h. The tester and the
+// firmware both must accept it, otherwise a green tester run gives a false
+// sense of confidence and the device silently rejects the key at runtime.
+void test_normalize_hex_digits_strips_common_key_formats() {
+  char out[128];
+  // Colons between bytes (openssl `pkey -text -noout` format).
+  size_t n = app_logic::normalizeHexDigits("94:d1:33", out, sizeof(out));
+  TEST_ASSERT_EQUAL_UINT(6u, n);
+  TEST_ASSERT_EQUAL_STRING("94d133", out);
+
+  // Whitespace and newlines between groups.
+  n = app_logic::normalizeHexDigits(
+      "  94 d1\n33\t94\r\n1e ec 4d c5  ", out, sizeof(out));
+  TEST_ASSERT_EQUAL_UINT(16u, n);
+  TEST_ASSERT_EQUAL_STRING("94d133941eec4dc5", out);
+
+  // Leading 0x / 0X prefix stripped exactly once.
+  n = app_logic::normalizeHexDigits("0xdeadbeef", out, sizeof(out));
+  TEST_ASSERT_EQUAL_UINT(8u, n);
+  TEST_ASSERT_EQUAL_STRING("deadbeef", out);
+  n = app_logic::normalizeHexDigits("0Xdeadbeef", out, sizeof(out));
+  TEST_ASSERT_EQUAL_UINT(8u, n);
+  TEST_ASSERT_EQUAL_STRING("deadbeef", out);
+
+  // Empty input produces an empty string, not a failure.
+  n = app_logic::normalizeHexDigits("", out, sizeof(out));
+  TEST_ASSERT_EQUAL_UINT(0u, n);
+  TEST_ASSERT_EQUAL_STRING("", out);
+
+  // Non-hex, non-separator characters are rejected so garbage doesn't
+  // silently decode to something plausible-looking.
+  TEST_ASSERT_EQUAL_UINT(static_cast<size_t>(-1),
+      app_logic::normalizeHexDigits("94g1", out, sizeof(out)));
+  TEST_ASSERT_EQUAL_UINT(static_cast<size_t>(-1),
+      app_logic::normalizeHexDigits("94,1", out, sizeof(out)));
+
+  // Output buffer overflow is signalled the same way.
+  char tiny[4];  // room for 3 chars + NUL
+  TEST_ASSERT_EQUAL_UINT(static_cast<size_t>(-1),
+      app_logic::normalizeHexDigits("abcd", tiny, sizeof(tiny)));
+
+  // End-to-end: cleaned then decoded matches the raw-hex path.
+  const char* colonForm =
+      "94:d1:33:94:1e:ec:4d:c5:de:f2:b8:ff:76:01:ee:06:"
+      "30:eb:38:20:1b:1b:b0:3a:23:16:f2:5f:fa:4c:bd:81";
+  n = app_logic::normalizeHexDigits(colonForm, out, sizeof(out));
+  TEST_ASSERT_EQUAL_UINT(64u, n);
+  uint8_t decoded[32];
+  const size_t decodedLen =
+      app_logic::decodeHex(out, n, decoded, sizeof(decoded));
+  TEST_ASSERT_EQUAL_UINT(32u, decodedLen);
+  TEST_ASSERT_EQUAL_UINT8(0x94, decoded[0]);
+  TEST_ASSERT_EQUAL_UINT8(0x81, decoded[31]);
+}
+
 void test_hex_decode_round_trips_known_bytes_and_rejects_bad_input() {
   uint8_t buffer[8] = {};
   // Valid 8-byte decode.
@@ -447,6 +503,7 @@ int main(int, char**) {
   RUN_TEST(test_qweather_icon_night_flag_only_covers_150_range);
   RUN_TEST(test_rain_slot_threshold_is_shared_by_both_providers);
   RUN_TEST(test_hex_decode_round_trips_known_bytes_and_rejects_bad_input);
+  RUN_TEST(test_normalize_hex_digits_strips_common_key_formats);
   RUN_TEST(test_base64url_encodes_canonical_examples);
   RUN_TEST(test_base64url_rejects_overflow_and_preserves_bytes);
   RUN_TEST(test_jwt_lifetime_clamps_to_qweather_bounds);
