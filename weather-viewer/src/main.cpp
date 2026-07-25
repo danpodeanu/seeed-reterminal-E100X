@@ -29,6 +29,7 @@
 #include "rtc_sync.h"
 #include "wifi_sta.h"
 #include "climate_sensor.h"
+#include "sd_card.h"
 #include "pcf8563_utc.h"
 #include "screenshot_bmp.h"
 #include "timestamped_logger.h"
@@ -411,88 +412,7 @@ void renderStatus(const String& message, const String& detail = "",
   updatePanel();
 }
 
-bool mountSd() {
-  pinMode(PIN_SD_ENABLE, OUTPUT);
-  digitalWrite(PIN_SD_ENABLE, HIGH);
-  pinMode(PIN_SD_DETECT, INPUT_PULLUP);
-  pinMode(PIN_SD_CS, OUTPUT);
-  digitalWrite(PIN_SD_CS, HIGH);
-  delay(50);
-
-  SPIClass& spi = epaper.getSPIinstance();
-  spi.end();
-  spi.begin(PIN_SD_SCK, PIN_SD_MISO, PIN_SD_MOSI, -1);
-  if (!SD.begin(PIN_SD_CS, spi)) {
-    LOG.println("[sd] unavailable; weather will run without persistent cache");
-    digitalWrite(PIN_SD_ENABLE, LOW);
-    return false;
-  }
-  if (!SD.exists(config::CACHE_DIR) && !SD.mkdir(config::CACHE_DIR)) {
-    LOG.println("[sd] could not create /weather; cache disabled");
-    SD.end();
-    digitalWrite(PIN_SD_ENABLE, LOW);
-    return false;
-  }
-  LOG.printf("[sd] mounted, card=%lluMB\n",
-             static_cast<unsigned long long>(
-                 SD.cardSize() / (1024ULL * 1024ULL)));
-  return true;
-}
-
-bool readFile(const String& path, String& contents) {
-  File file = SD.open(path, FILE_READ);
-  if (!file) return false;
-  // Guard against a corrupted or hostile cache entry consuming all heap.
-  // A well-formed Open-Meteo response for our query is typically <32 KiB.
-  constexpr size_t kMaxCacheFileBytes = 128U * 1024U;
-  if (file.size() > kMaxCacheFileBytes) {
-    LOG.printf("[cache] refusing to read oversized %s (%lu bytes)\n",
-               path.c_str(), static_cast<unsigned long>(file.size()));
-    file.close();
-    return false;
-  }
-  contents = file.readString();
-  file.close();
-  return !contents.isEmpty();
-}
-
-bool writeFileAtomically(const String& path, const String& contents) {
-  const String temporary = path + ".part";
-  SD.remove(temporary);
-  File file = SD.open(temporary, FILE_WRITE);
-  if (!file) {
-    LOG.printf("[cache] could not create %s\n", temporary.c_str());
-    return false;
-  }
-  const size_t written = file.print(contents);
-  file.flush();
-  file.close();
-  if (written != contents.length()) {
-    LOG.printf("[cache] short write for %s\n", path.c_str());
-    SD.remove(temporary);
-    return false;
-  }
-  SD.remove(path);
-  if (!SD.rename(temporary, path)) {
-    LOG.printf("[cache] could not install %s\n", path.c_str());
-    SD.remove(temporary);
-    return false;
-  }
-  return true;
-}
-
 // NTP sync helpers now live in common/include/ntp_sync.h. The wrapper below
-// keeps this app's call sites (and lastNtpSyncEpoch storage) unchanged.
-bool synchronizeClock() {
-  return ntp::synchronizeClock(
-      config::TIMEZONE, config::NTP_SERVER_PRIMARY,
-      config::NTP_SERVER_SECONDARY, config::NTP_DHCP_TIMEOUT_MS,
-      config::NTP_SYNC_TIMEOUT_MS, [](time_t now) {
-        lastNtpSyncEpoch = now;
-        rtc_sync::saveTime(now);
-      });
-}
-
 bool parseWeather(const String& body, WeatherData& weather) {
   if (config::WEATHER_PROVIDER == config::WeatherProvider::QWeather) {
     return weather_provider::parseQWeather(body, weather);
@@ -528,7 +448,7 @@ bool loadCachedWeather(WeatherData& weather, String& failureReason,
     failureReason = "No saved forecast is available";
     return false;
   }
-  if (!readFile(config::FORECAST_CACHE, body)) {
+  if (!sd_card::readFile(config::FORECAST_CACHE, body, 128U * 1024U)) {
     failureReason = "Saved forecast could not be read";
     return false;
   }
@@ -1236,7 +1156,7 @@ void setup() {
     rtc_sync::readAndLog(storedRtc);
   }
   epaper.begin();
-  sdReady = mountSd();
+  sdReady = sd_card::mount(epaper.getSPIinstance(), config::CACHE_DIR);
   if (screenshotRequested && !sdReady) {
     LOG.println("[screenshot] request ignored: SD card is unavailable");
     screenshotRequested = false;
@@ -1285,7 +1205,7 @@ void setup() {
   const bool networkAvailable =
       networkRequired && wifi_sta::connectStation(WIFI_SSID, WIFI_PASSWORD, config::WIFI_TIMEOUT_MS, &liveFailureReason);
   const bool ntpSynchronized =
-      networkAvailable && ntpDue && synchronizeClock();
+      networkAvailable && ntpDue && ntp::synchronizeAndPersist(config::TIMEZONE, config::NTP_SERVER_PRIMARY, config::NTP_SERVER_SECONDARY, config::NTP_DHCP_TIMEOUT_MS, config::NTP_SYNC_TIMEOUT_MS, &lastNtpSyncEpoch);
   bool rtcRestored = false;
   if (ntpDue && !ntpSynchronized && !coldBoot) {
     LOG.println("[ntp] using PCF8563 fallback after synchronization failure");
@@ -1326,7 +1246,7 @@ void setup() {
   wifi_sta::disable();
 
   if (liveUpdated && sdReady) {
-    if (writeFileAtomically(config::FORECAST_CACHE, liveResponse)) {
+    if (sd_card::writeFileAtomically(config::FORECAST_CACHE, liveResponse)) {
       LOG.println("[cache] saved latest forecast");
     } else {
       LOG.println("[cache] forecast not stored; continuing with live data");

@@ -27,6 +27,7 @@
 #include "rtc_sync.h"
 #include "wifi_sta.h"
 #include "climate_sensor.h"
+#include "sd_card.h"
 #include "image_loader.h"
 #include "pcf8563_utc.h"
 #include "secrets.h"
@@ -310,34 +311,6 @@ void renderStatus(const String& message, const String& detail = "",
   updatePanel();
 }
 
-bool mountSd() {
-  pinMode(PIN_SD_ENABLE, OUTPUT);
-  digitalWrite(PIN_SD_ENABLE, HIGH);
-  pinMode(PIN_SD_DETECT, INPUT_PULLUP);
-  pinMode(PIN_SD_CS, OUTPUT);
-  digitalWrite(PIN_SD_CS, HIGH);
-  delay(50);
-
-  SPIClass& spi = epaper.getSPIinstance();
-  spi.end();
-  spi.begin(PIN_SD_SCK, PIN_SD_MISO, PIN_SD_MOSI, -1);
-  if (!SD.begin(PIN_SD_CS, spi)) {
-    LOG.println("[sd] mount failed; insert a FAT32 card");
-    digitalWrite(PIN_SD_ENABLE, LOW);
-    return false;
-  }
-  if (!SD.exists(config::PHOTO_DIR) && !SD.mkdir(config::PHOTO_DIR)) {
-    LOG.printf("[sd] could not create %s\n", config::PHOTO_DIR);
-    SD.end();
-    digitalWrite(PIN_SD_ENABLE, LOW);
-    return false;
-  }
-  LOG.printf("[sd] mounted, card=%lluMB\n",
-             static_cast<unsigned long long>(
-                 SD.cardSize() / (1024ULL * 1024ULL)));
-  return true;
-}
-
 bool supportedPhotoName(String name) {
   name.toLowerCase();
   return name.endsWith(".bmp") || name.endsWith(".png") ||
@@ -587,17 +560,6 @@ bool renderPhoto(const String& path) {
 }
 
 // NTP sync helpers now live in common/include/ntp_sync.h. The wrapper below
-// keeps this app's call sites (and lastNtpSyncEpoch storage) unchanged.
-bool synchronizeClock() {
-  return ntp::synchronizeClock(
-      config::TIMEZONE, config::NTP_SERVER_PRIMARY,
-      config::NTP_SERVER_SECONDARY, config::NTP_DHCP_TIMEOUT_MS,
-      config::NTP_SYNC_TIMEOUT_MS, [](time_t now) {
-        lastNtpSyncEpoch = now;
-        rtc_sync::saveTime(now);
-      });
-}
-
 void powerDownAndSleep(uint64_t sleepSeconds = config::SLEEP_SECONDS) {
   wifi_sta::disable();
   if (sdReady) SD.end();
@@ -711,7 +673,7 @@ void setup() {
     }
   }
   epaper.begin();
-  sdReady = mountSd();
+  sdReady = sd_card::mount(epaper.getSPIinstance(), config::PHOTO_DIR);
   const uint32_t photoCount = countPhotos();
   LOG.printf("[photo] %lu supported files in %s\n",
              static_cast<unsigned long>(photoCount), config::PHOTO_DIR);
@@ -749,7 +711,7 @@ void setup() {
 
   bool ntpSynchronized = false;
   if (ntpDue) {
-    if (wifi_sta::connectStation(WIFI_SSID, WIFI_PASSWORD, config::WIFI_TIMEOUT_MS)) ntpSynchronized = synchronizeClock();
+    if (wifi_sta::connectStation(WIFI_SSID, WIFI_PASSWORD, config::WIFI_TIMEOUT_MS)) ntpSynchronized = ntp::synchronizeAndPersist(config::TIMEZONE, config::NTP_SERVER_PRIMARY, config::NTP_SERVER_SECONDARY, config::NTP_DHCP_TIMEOUT_MS, config::NTP_SYNC_TIMEOUT_MS, &lastNtpSyncEpoch);
     if (!ntpSynchronized && !coldBoot) {
       LOG.println("[ntp] using PCF8563 fallback after synchronization failure");
       rtc_sync::restoreSystemClock();

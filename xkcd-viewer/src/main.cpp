@@ -31,6 +31,7 @@
 #include "rtc_sync.h"
 #include "wifi_sta.h"
 #include "climate_sensor.h"
+#include "sd_card.h"
 #include "dither.h"
 #include "image_loader.h"
 #include "pcf8563_utc.h"
@@ -526,71 +527,6 @@ void renderStatus(const String& message, const String& detail = "",
   updatePanel();
 }
 
-bool mountSd() {
-  pinMode(PIN_SD_ENABLE, OUTPUT);
-  digitalWrite(PIN_SD_ENABLE, HIGH);
-  pinMode(PIN_SD_DETECT, INPUT_PULLUP);
-  pinMode(PIN_SD_CS, OUTPUT);
-  digitalWrite(PIN_SD_CS, HIGH);
-  delay(50);
-
-  SPIClass& spi = epaper.getSPIinstance();
-  spi.end();
-  spi.begin(PIN_SD_SCK, PIN_SD_MISO, PIN_SD_MOSI, -1);
-  if (!SD.begin(PIN_SD_CS, spi)) {
-    LOG.println("[sd] mount failed; insert a FAT32/exFAT card");
-    digitalWrite(PIN_SD_ENABLE, LOW);
-    return false;
-  }
-  if (!SD.exists(config::CACHE_DIR) && !SD.mkdir(config::CACHE_DIR)) {
-    LOG.println("[sd] could not create /xkcd");
-    SD.end();
-    digitalWrite(PIN_SD_ENABLE, LOW);
-    return false;
-  }
-  LOG.printf("[sd] mounted, card=%lluMB\n",
-             static_cast<unsigned long long>(SD.cardSize() / (1024ULL * 1024ULL)));
-  return true;
-}
-
-bool readFile(const String& path, String& output) {
-  File file = SD.open(path, FILE_READ);
-  if (!file) return false;
-  // Guard against a corrupted or hostile cache entry consuming all heap.
-  // XKCD metadata JSON is typically <2 KiB; the cache index is bounded by
-  // MAX_CACHE_INDEX_ENTRIES lines of a few characters each.
-  constexpr size_t kMaxCacheFileBytes = 64U * 1024U;
-  if (file.size() > kMaxCacheFileBytes) {
-    LOG.printf("[cache] refusing to read oversized %s (%lu bytes)\n",
-               path.c_str(), static_cast<unsigned long>(file.size()));
-    file.close();
-    return false;
-  }
-  output = file.readString();
-  file.close();
-  return !output.isEmpty();
-}
-
-bool writeFileAtomically(const String& path, const String& contents) {
-  const String temporary = path + ".part";
-  SD.remove(temporary);
-  File file = SD.open(temporary, FILE_WRITE);
-  if (!file) return false;
-  const size_t written = file.print(contents);
-  file.flush();
-  file.close();
-  if (written != contents.length()) {
-    SD.remove(temporary);
-    return false;
-  }
-  SD.remove(path);
-  if (!SD.rename(temporary, path)) {
-    SD.remove(temporary);
-    return false;
-  }
-  return true;
-}
-
 // writeLittleEndian16/32, screenshotPaletteColor, and saveScreenshotBmp now
 // live in common/include/screenshot_bmp.h and are invoked via the template
 // screenshot::saveScreenshotBmp<EPaper>().
@@ -874,7 +810,7 @@ bool comicFullyCached(int number) {
   if (!sdReady || number <= 0 || number == 404) return false;
   String json;
   Comic comic;
-  if (!readFile(metadataPath(number), json) || !parseComic(json, comic))
+  if (!sd_card::readFile(metadataPath(number), json, 64U * 1024U) || !parseComic(json, comic))
     return false;
   const String extension = imageExtension(comic.imageUrl);
   if (extension.isEmpty()) return false;
@@ -1067,13 +1003,13 @@ void addCurrentCacheIndexEntry(int number) {
 bool getComic(int number, bool networkAvailable, Comic& comic) {
   const String metaPath = metadataPath(number);
   String json;
-  bool metadataCached = readFile(metaPath, json) && parseComic(json, comic);
+  bool metadataCached = sd_card::readFile(metaPath, json, 64U * 1024U) && parseComic(json, comic);
 
   if (!metadataCached) {
     if (!networkAvailable || number == 404) return false;
     const String url = "https://xkcd.com/" + String(number) + "/info.0.json";
     if (!httpGetString(url, json) || !parseComic(json, comic)) return false;
-    if (writeFileAtomically(metaPath, json)) {
+    if (sd_card::writeFileAtomically(metaPath, json)) {
       LOG.printf("[cache] saved metadata #%d\n", number);
     } else {
       sdCacheWritable = false;
@@ -1117,12 +1053,12 @@ bool getLatestNumber(bool networkAvailable, int& latest,
   if (shouldCheckOnline) {
     if (httpGetString(config::XKCD_LATEST_URL, json) && parseComic(json, comic)) {
       latest = comic.number;
-      if (!writeFileAtomically(config::LATEST_CACHE, json)) {
+      if (!sd_card::writeFileAtomically(config::LATEST_CACHE, json)) {
         sdCacheWritable = false;
         LOG.println("[cache] latest metadata not stored; using live value");
       }
       if (sdCacheWritable &&
-          !writeFileAtomically(metadataPath(latest), json)) {
+          !sd_card::writeFileAtomically(metadataPath(latest), json)) {
         sdCacheWritable = false;
         LOG.printf("[cache] metadata #%d not stored; using live value\n",
                    latest);
@@ -1133,7 +1069,7 @@ bool getLatestNumber(bool networkAvailable, int& latest,
       return true;
     }
   }
-  if (readFile(config::LATEST_CACHE, json) && parseComic(json, comic)) {
+  if (sd_card::readFile(config::LATEST_CACHE, json, 64U * 1024U) && parseComic(json, comic)) {
     latest = comic.number;
     totalComicCountForDisplay =
         app_logic::publishedComicCount(latest);
@@ -1533,17 +1469,6 @@ bool renderComic(const Comic& comic, RgbImage& image, ImageLayout layout) {
 }
 
 // NTP sync helpers now live in common/include/ntp_sync.h. The wrapper below
-// keeps this app's call sites (and lastNtpSyncEpoch storage) unchanged.
-bool synchronizeClock() {
-  return ntp::synchronizeClock(
-      config::TIMEZONE, config::NTP_SERVER_PRIMARY,
-      config::NTP_SERVER_SECONDARY, config::NTP_DHCP_TIMEOUT_MS,
-      config::NTP_SYNC_TIMEOUT_MS, [](time_t now) {
-        lastNtpSyncEpoch = now;
-        rtc_sync::saveTime(now);
-      });
-}
-
 void powerDownAndSleep(uint64_t sleepSeconds = config::SLEEP_SECONDS) {
   wifi_sta::disable();
   if (sdReady) SD.end();
@@ -1716,7 +1641,7 @@ void setup() {
   }
 
   epaper.begin();
-  sdReady = mountSd();
+  sdReady = sd_card::mount(epaper.getSPIinstance(), config::CACHE_DIR);
   if (screenshotRequested && !sdReady) {
     LOG.println("[screenshot] request ignored: SD card is unavailable");
     screenshotRequested = false;
@@ -1794,7 +1719,7 @@ void setup() {
     LOG.println("[wifi] skipped; using the local XKCD cache");
   }
   const bool ntpSynchronized =
-      networkAvailable && ntpDue && synchronizeClock();
+      networkAvailable && ntpDue && ntp::synchronizeAndPersist(config::TIMEZONE, config::NTP_SERVER_PRIMARY, config::NTP_SERVER_SECONDARY, config::NTP_DHCP_TIMEOUT_MS, config::NTP_SYNC_TIMEOUT_MS, &lastNtpSyncEpoch);
   if (ntpDue && !ntpSynchronized && !coldBoot) {
     LOG.println("[ntp] using PCF8563 fallback after synchronization failure");
     rtc_sync::restoreSystemClock();
@@ -1862,7 +1787,7 @@ void setup() {
     LOG.println("[cache] no usable local comic; trying one live refresh");
     networkAvailable = wifi_sta::connectStation(WIFI_SSID, WIFI_PASSWORD, config::WIFI_TIMEOUT_MS, nullptr, networkOperationShouldStop);
     if (networkAvailable) {
-      if (local_time::refreshDue(coldBoot, lastNtpSyncEpoch, config::NTP_REFRESH_SECONDS)) synchronizeClock();
+      if (local_time::refreshDue(coldBoot, lastNtpSyncEpoch, config::NTP_REFRESH_SECONDS)) ntp::synchronizeAndPersist(config::TIMEZONE, config::NTP_SERVER_PRIMARY, config::NTP_SERVER_SECONDARY, config::NTP_DHCP_TIMEOUT_MS, config::NTP_SYNC_TIMEOUT_MS, &lastNtpSyncEpoch);
       acquired = acquireComic(true, comic, image, layout);
     }
   }

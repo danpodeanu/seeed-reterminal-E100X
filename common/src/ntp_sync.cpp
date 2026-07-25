@@ -7,13 +7,23 @@
 #include <time.h>
 
 #include "app_logger.h"
+#include "rtc_sync.h"
 
 namespace ntp {
 namespace {
 
 volatile bool syncCompleted = false;
 
+// Set by synchronizeAndPersist so the shared onSynced callback can find
+// the caller's storage from a plain (non-capturing) function pointer.
+time_t* g_lastSyncOut = nullptr;
+
 void onTimeSync(struct timeval*) { syncCompleted = true; }
+
+void persistSyncedTime(time_t now) {
+  if (g_lastSyncOut != nullptr) *g_lastSyncOut = now;
+  rtc_sync::saveTime(now);
+}
 
 bool waitForSync(uint32_t timeoutMs) {
   const uint32_t started = millis();
@@ -77,6 +87,17 @@ bool synchronizeClock(const char* timezone, const char* primary,
   LOG.printf("[ntp] synchronized: %s\n", formatted);
   if (onSynced != nullptr) onSynced(now);
   return true;
+}
+
+bool synchronizeAndPersist(const char* timezone, const char* primary,
+                           const char* secondary, uint32_t dhcpTimeoutMs,
+                           uint32_t syncTimeoutMs, time_t* lastSyncOut) {
+  g_lastSyncOut = lastSyncOut;
+  const bool ok =
+      synchronizeClock(timezone, primary, secondary, dhcpTimeoutMs,
+                       syncTimeoutMs, persistSyncedTime);
+  g_lastSyncOut = nullptr;
+  return ok;
 }
 
 }  // namespace ntp

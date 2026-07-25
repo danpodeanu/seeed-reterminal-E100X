@@ -17,4 +17,12 @@ bool synchronizeClock(const char* timezone, const char* primary,
                       const char* secondary, uint32_t dhcpTimeoutMs,
                       uint32_t syncTimeoutMs, OnSyncedFn onSynced);
 
+// Convenience wrapper for the common case: run synchronizeClock, and on
+// success update `*lastSyncOut` (typically an RTC_DATA_ATTR time_t in
+// the caller) and mirror the new time to the hardware PCF8563 via
+// rtc_sync::saveTime. Returns whatever synchronizeClock returned.
+bool synchronizeAndPersist(const char* timezone, const char* primary,
+                           const char* secondary, uint32_t dhcpTimeoutMs,
+                           uint32_t syncTimeoutMs, time_t* lastSyncOut);
+
 }  // namespace ntp
