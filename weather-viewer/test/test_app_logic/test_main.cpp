@@ -1,6 +1,16 @@
 #include <unity.h>
 
+#include <stdlib.h>
+#include <time.h>
+
 #include "app_logic.h"
+#include "local_time.h"
+
+#ifdef _WIN32
+static inline struct tm* gmtime_r(const time_t* t, struct tm* out) {
+  return gmtime_s(out, t) == 0 ? out : nullptr;
+}
+#endif
 
 void setUp() {}
 void tearDown() {}
@@ -277,6 +287,48 @@ void test_jwt_lifetime_clamps_to_qweather_bounds() {
       app_logic::clampJwtLifetime(48 * 60 * 60));
 }
 
+void test_parse_iso8601_local_accepts_full_and_minute_form() {
+  setenv("TZ", "UTC0", 1);
+  tzset();
+  time_t ts = 0;
+  TEST_ASSERT_TRUE(
+      local_time::parseIso8601Local("2025-03-14T15:09:26", ts));
+  struct tm r = {};
+  gmtime_r(&ts, &r);
+  TEST_ASSERT_EQUAL_INT(2025, r.tm_year + 1900);
+  TEST_ASSERT_EQUAL_INT(3, r.tm_mon + 1);
+  TEST_ASSERT_EQUAL_INT(14, r.tm_mday);
+  TEST_ASSERT_EQUAL_INT(15, r.tm_hour);
+  TEST_ASSERT_EQUAL_INT(9, r.tm_min);
+  TEST_ASSERT_EQUAL_INT(26, r.tm_sec);
+
+  // Seconds optional, default to zero.
+  ts = 0;
+  TEST_ASSERT_TRUE(local_time::parseIso8601Local("2025-03-14T15:09", ts));
+  gmtime_r(&ts, &r);
+  TEST_ASSERT_EQUAL_INT(0, r.tm_sec);
+  TEST_ASSERT_EQUAL_INT(15, r.tm_hour);
+}
+
+void test_parse_iso8601_local_rejects_invalid_input() {
+  setenv("TZ", "UTC0", 1);
+  tzset();
+  time_t ts = 0;
+  TEST_ASSERT_FALSE(local_time::parseIso8601Local(nullptr, ts));
+  TEST_ASSERT_FALSE(local_time::parseIso8601Local("", ts));
+  TEST_ASSERT_FALSE(local_time::parseIso8601Local("garbage", ts));
+  // Missing time portion (only 3 numeric fields parsed).
+  TEST_ASSERT_FALSE(local_time::parseIso8601Local("2025-03-14", ts));
+  // Out-of-range fields.
+  TEST_ASSERT_FALSE(local_time::parseIso8601Local("2025-13-01T00:00", ts));
+  TEST_ASSERT_FALSE(local_time::parseIso8601Local("2025-03-14T24:00", ts));
+  TEST_ASSERT_FALSE(local_time::parseIso8601Local("2025-03-14T15:60", ts));
+  TEST_ASSERT_FALSE(local_time::parseIso8601Local("1969-12-31T23:59", ts));
+  // Silently-normalised dates must be rejected via the round-trip check.
+  TEST_ASSERT_FALSE(local_time::parseIso8601Local("2025-02-30T12:00", ts));
+  TEST_ASSERT_FALSE(local_time::parseIso8601Local("2025-04-31T12:00", ts));
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_startup_beep_only_for_cold_boot_and_button_wake);
@@ -297,5 +349,7 @@ int main(int, char**) {
   RUN_TEST(test_base64url_encodes_canonical_examples);
   RUN_TEST(test_base64url_rejects_overflow_and_preserves_bytes);
   RUN_TEST(test_jwt_lifetime_clamps_to_qweather_bounds);
+  RUN_TEST(test_parse_iso8601_local_accepts_full_and_minute_form);
+  RUN_TEST(test_parse_iso8601_local_rejects_invalid_input);
   return UNITY_END();
 }

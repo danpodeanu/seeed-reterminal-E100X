@@ -8,6 +8,7 @@
 
 #include "app_logger.h"
 #include "config.h"
+#include "xkcd_index_pure.h"
 
 namespace xkcd_index {
 namespace {
@@ -27,16 +28,7 @@ const std::vector<int>& entries() { return g_numbers; }
 
 bool parseUnsignedLine(String line, uint32_t& value, bool allowZero) {
   line.trim();
-  if (line.isEmpty() || line.length() > 10) return false;
-  uint64_t parsed = 0;
-  for (size_t i = 0; i < line.length(); ++i) {
-    if (!isDigit(line[i])) return false;
-    parsed = parsed * 10U + static_cast<uint8_t>(line[i] - '0');
-    if (parsed > 100000U) return false;
-  }
-  if (!allowZero && parsed == 0) return false;
-  value = static_cast<uint32_t>(parsed);
-  return true;
+  return parseUnsignedDigits(line.c_str(), line.length(), value, allowZero);
 }
 
 bool writeFile(const std::vector<int>& numbers) {
@@ -203,18 +195,6 @@ void addCurrent(int number) {
       std::lower_bound(g_numbers.begin(), g_numbers.end(), number);
   if (position == g_numbers.end() || *position != number) {
     g_numbers.insert(position, number);
-  }
-}
-
-void pack4bppInPlace(uint8_t* indices, int width, int height) {
-  for (int y = 0; y < height; ++y) {
-    const uint8_t* source = indices + static_cast<size_t>(y) * width;
-    uint8_t* destination =
-        indices + static_cast<size_t>(y) * (width / 2);
-    for (int x = 0; x < width; x += 2) {
-      destination[x / 2] = static_cast<uint8_t>(
-          ((source[x] & 0x0F) << 4) | (source[x + 1] & 0x0F));
-    }
   }
 }
 

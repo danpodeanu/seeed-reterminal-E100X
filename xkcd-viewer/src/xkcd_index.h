@@ -6,6 +6,8 @@
 
 #include <vector>
 
+#include "xkcd_index_pure.h"
+
 // Comic-cache index management. xkcd-viewer keeps a text file on the
 // SD card listing every comic number whose metadata + image are both
 // fully cached; loading/rebuilding/appending to that list used to
@@ -70,6 +72,7 @@ void addCurrent(int number);
 
 // Pack an 8bpp indexed image (one byte per pixel, values 0..15) into
 // 4bpp storage in-place, two pixels per byte. `width` must be even.
-void pack4bppInPlace(uint8_t* indices, int width, int height);
+// Defined inline in xkcd_index_pure.h so unit tests can call it on the
+// native platform without linking this translation unit.
 
 }  // namespace xkcd_index

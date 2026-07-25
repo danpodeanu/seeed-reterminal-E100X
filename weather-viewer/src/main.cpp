@@ -326,7 +326,7 @@ bool loadCachedWeather(WeatherData& weather, String& failureReason,
     LOG.printf("[cache] %s\n", failureReason.c_str());
     return false;
   }
-  if (!local_time::parseIso8601Local(weather.updateTime, forecastTime)) {
+  if (!local_time::parseIso8601Local(weather.updateTime.c_str(), forecastTime)) {
     failureReason = "Saved forecast time is invalid";
     LOG.printf("[cache] %s: %s\n", failureReason.c_str(),
                weather.updateTime.c_str());
@@ -386,7 +386,7 @@ String updateClock(const String& isoTime) {
 
 String weatherAgeText(const String& isoTime) {
   time_t forecastTime = 0;
-  if (!local_time::clockIsValid() || !local_time::parseIso8601Local(isoTime, forecastTime))
+  if (!local_time::clockIsValid() || !local_time::parseIso8601Local(isoTime.c_str(), forecastTime))
     return "";
 
   const int64_t roundedMinutes = app_logic::roundedAgeMinutes(

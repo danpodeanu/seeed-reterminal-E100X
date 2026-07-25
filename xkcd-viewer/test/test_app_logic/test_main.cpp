@@ -1,6 +1,10 @@
 #include <unity.h>
 
+#include <stdint.h>
+#include <string.h>
+
 #include "app_logic.h"
+#include "xkcd_index_pure.h"
 
 void setUp() {}
 void tearDown() {}
@@ -148,6 +152,53 @@ void test_silent_maintenance_flag_only_when_quiet_and_archive_due() {
   TEST_ASSERT_FALSE(app_logic::maintainSilentlyInQuietHours(false, false));
 }
 
+void test_parse_unsigned_digits_accepts_and_rejects_correctly() {
+  uint32_t value = 0;
+  TEST_ASSERT_TRUE(xkcd_index::parseUnsignedDigits("1", 1, value, false));
+  TEST_ASSERT_EQUAL_UINT32(1u, value);
+  TEST_ASSERT_TRUE(
+      xkcd_index::parseUnsignedDigits("100000", 6, value, false));
+  TEST_ASSERT_EQUAL_UINT32(100000u, value);
+
+  // 0 is only accepted when allowZero=true (used for the count-line
+  // prefix, not for actual entries).
+  TEST_ASSERT_FALSE(xkcd_index::parseUnsignedDigits("0", 1, value, false));
+  TEST_ASSERT_TRUE(xkcd_index::parseUnsignedDigits("0", 1, value, true));
+  TEST_ASSERT_EQUAL_UINT32(0u, value);
+
+  // Non-digit, empty, null, over-length and >100000 rejected.
+  TEST_ASSERT_FALSE(xkcd_index::parseUnsignedDigits(nullptr, 3, value, true));
+  TEST_ASSERT_FALSE(xkcd_index::parseUnsignedDigits("12", 0, value, true));
+  TEST_ASSERT_FALSE(xkcd_index::parseUnsignedDigits("1a", 2, value, true));
+  TEST_ASSERT_FALSE(xkcd_index::parseUnsignedDigits("-1", 2, value, true));
+  TEST_ASSERT_FALSE(
+      xkcd_index::parseUnsignedDigits("12345678901", 11, value, true));
+  TEST_ASSERT_FALSE(
+      xkcd_index::parseUnsignedDigits("100001", 6, value, true));
+
+  // The helper does not trim -- callers are expected to trim first.
+  TEST_ASSERT_FALSE(xkcd_index::parseUnsignedDigits(" 1", 2, value, true));
+}
+
+void test_pack_4bpp_in_place_packs_two_pixels_per_byte() {
+  // 4x2 image, values 0..7. Row 0: 1,2,3,4 -> 0x12, 0x34.
+  //                       Row 1: 5,6,7,8 -> 0x56, 0x78.
+  uint8_t buffer[8] = {1, 2, 3, 4, 5, 6, 7, 8};
+  xkcd_index::pack4bppInPlace(buffer, 4, 2);
+  TEST_ASSERT_EQUAL_UINT8(0x12, buffer[0]);
+  TEST_ASSERT_EQUAL_UINT8(0x34, buffer[1]);
+  TEST_ASSERT_EQUAL_UINT8(0x56, buffer[2]);
+  TEST_ASSERT_EQUAL_UINT8(0x78, buffer[3]);
+}
+
+void test_pack_4bpp_in_place_masks_high_nibble() {
+  // Values > 0x0F must be masked to their low nibble (indices should
+  // already be 0..15, but the helper defensively clamps).
+  uint8_t buffer[2] = {0xAB, 0xCD};
+  xkcd_index::pack4bppInPlace(buffer, 2, 1);
+  TEST_ASSERT_EQUAL_UINT8(0xBD, buffer[0]);
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_startup_beep_only_for_cold_boot_and_button_wake);
@@ -162,5 +213,8 @@ int main(int, char**) {
   RUN_TEST(test_pre_sync_quiet_suppression_lets_maintenance_run);
   RUN_TEST(test_post_sync_quiet_suppression_matches_pre_sync_minus_ntp);
   RUN_TEST(test_silent_maintenance_flag_only_when_quiet_and_archive_due);
+  RUN_TEST(test_parse_unsigned_digits_accepts_and_rejects_correctly);
+  RUN_TEST(test_pack_4bpp_in_place_packs_two_pixels_per_byte);
+  RUN_TEST(test_pack_4bpp_in_place_masks_high_nibble);
   return UNITY_END();
 }
