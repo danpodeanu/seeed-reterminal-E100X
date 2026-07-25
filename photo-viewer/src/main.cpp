@@ -39,7 +39,7 @@
 SET_LOOP_TASK_STACK_SIZE(16U * 1024U);
 
 #ifndef EPAPER_ENABLE
-#error "Seeed_GFX did not select a reTerminal E-series driver; check src/driver.h"
+#error "Seeed_GFX did not select a reTerminal E-series driver; check common/include/driver.h"
 #endif
 
 TimestampedLogger appLog(Serial1);

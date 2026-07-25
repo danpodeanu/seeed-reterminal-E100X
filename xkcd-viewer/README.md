@@ -262,7 +262,7 @@ before it exits. Safely eject the card after the script reports completion.
 
 Timing, download limits, retry counts, minimum display scale, and layout
 dimensions are in `include/config.h`. `platformio.ini` supplies the model
-number to `src/driver.h`, which selects Seeed_GFX setup 520, 521, 522, or 523.
+number to `../common/include/driver.h`, which selects Seeed_GFX setup 520, 521, 522, or 523.
 Model-specific power-control pins are selected automatically.
 
 HTTPS certificate verification is disabled because the firmware does not
