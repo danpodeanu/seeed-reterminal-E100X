@@ -282,12 +282,6 @@ bool parseWeather(const String& body, WeatherData& weather) {
   return weather_provider::parseOpenMeteo(body, weather);
 }
 
-const char* weatherProviderName() {
-  return config::WEATHER_PROVIDER == config::WeatherProvider::QWeather
-             ? "QWeather"
-             : "Open-Meteo";
-}
-
 bool fetchWeather(WeatherData& weather, String& responseBody,
                   String& failureReason, bool bypassHttpCache = false) {
   if (config::WEATHER_PROVIDER == config::WeatherProvider::QWeather) {
@@ -808,7 +802,7 @@ void renderFooter() {
   }
   selectSmallFont();
   epaper.setTextDatum(ML_DATUM);
-  epaper.drawString(String("Weather data: ") + weatherProviderName(),
+  epaper.drawString(String("Weather data: ") + weather_provider::name(),
                     config::ui(12), labelY, 1);
   epaper.setTextDatum(MR_DATUM);
   epaper.drawString(config::LOCATION_NAME,
