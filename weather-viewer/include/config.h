@@ -78,7 +78,7 @@ enum class WeatherProvider {
   OpenMeteo,
   QWeather,
 };
-constexpr WeatherProvider WEATHER_PROVIDER = WeatherProvider::OpenMeteo;
+constexpr WeatherProvider WEATHER_PROVIDER = WeatherProvider::QWeather;
 
 // Language for QWeather's textual fields (condition names, warnings).
 // Common values: "en", "zh" (Simplified Chinese, default upstream),
