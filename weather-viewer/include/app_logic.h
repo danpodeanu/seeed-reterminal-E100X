@@ -251,4 +251,56 @@ inline const char* conditionName(int wmoCode) {
   return "Mixed weather";
 }
 
+// Compute the deflate-stream offset and length inside a gzip byte buffer,
+// without actually inflating anything. The gzip framing (RFC 1952) is:
+//   0-1  : magic 0x1f 0x8b
+//   2    : compression method (must be 8 = deflate)
+//   3    : flags (FTEXT/FHCRC/FEXTRA/FNAME/FCOMMENT)
+//   4-9  : mtime + extra flags + os
+//   10-  : optional FEXTRA (2-byte length + N bytes)
+//   ...  : optional FNAME (NUL-terminated)
+//   ...  : optional FCOMMENT (NUL-terminated)
+//   ...  : optional FHCRC (2 bytes)
+//   ...  : raw deflate stream (this is what we want)
+//   -8   : CRC32
+//   -4   : ISIZE (uncompressed length mod 2^32)
+//
+// On success writes the deflate stream's byte offset to *outStart and its
+// length to *outLength, and returns true. Returns false when the buffer is
+// too small, the magic bytes are wrong, the method is not deflate, or the
+// declared header extensions run past the buffer.
+inline bool gzipDeflateSpan(const uint8_t* in, size_t inLen,
+                            size_t* outStart, size_t* outLength) {
+  if (in == nullptr || outStart == nullptr || outLength == nullptr) {
+    return false;
+  }
+  if (inLen < 18u) return false;  // 10-byte header + 8-byte trailer minimum
+  if (in[0] != 0x1fu || in[1] != 0x8bu) return false;
+  if (in[2] != 0x08u) return false;
+  const uint8_t flags = in[3];
+  size_t offset = 10u;
+  if (flags & 0x04u) {
+    if (offset + 2u > inLen) return false;
+    const size_t xlen = static_cast<size_t>(in[offset]) |
+                        (static_cast<size_t>(in[offset + 1]) << 8);
+    offset += 2u + xlen;
+    if (offset > inLen) return false;
+  }
+  if (flags & 0x08u) {
+    while (offset < inLen && in[offset] != 0) ++offset;
+    if (offset >= inLen) return false;
+    ++offset;
+  }
+  if (flags & 0x10u) {
+    while (offset < inLen && in[offset] != 0) ++offset;
+    if (offset >= inLen) return false;
+    ++offset;
+  }
+  if (flags & 0x02u) offset += 2u;
+  if (offset + 8u > inLen) return false;
+  *outStart = offset;
+  *outLength = inLen - offset - 8u;
+  return true;
+}
+
 }  // namespace app_logic

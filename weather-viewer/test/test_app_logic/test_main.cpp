@@ -486,6 +486,94 @@ void test_open_meteo_weathercode_to_condition_name() {
   TEST_ASSERT_EQUAL_STRING("Thunderstorm", app_logic::conditionName(96));
 }
 
+// The gzip framing on QWeather's paid host adds a small envelope around
+// the raw deflate stream (see RFC 1952). If we misread that envelope we
+// feed miniz garbage and inflate fails; if we skip too much we clip real
+// deflate bytes. These fixtures exercise the flag combinations we actually
+// see in the wild (minimal + all-flags-set) plus common corruption modes.
+void test_gzip_deflate_span_parses_minimal_and_full_headers() {
+  size_t start = 0;
+  size_t length = 0;
+
+  // Minimal gzip header (10 bytes, no flags) + 1-byte deflate stream + 8
+  // bytes trailer. This is exactly what miniz/gzip produce with no name/OS
+  // metadata. app_logic::gzipDeflateSpan must report the stream at offset
+  // 10 with length 1.
+  const uint8_t minimalGzip[] = {
+      0x1f, 0x8b, 0x08, 0x00,        // magic, deflate, no flags
+      0x00, 0x00, 0x00, 0x00,        // mtime
+      0x00,                          // xfl
+      0x00,                          // OS
+      0xAA,                          // deflate stream (1 byte)
+      0x00, 0x00, 0x00, 0x00,        // CRC32
+      0x00, 0x00, 0x00, 0x00,        // ISIZE
+  };
+  TEST_ASSERT_TRUE(app_logic::gzipDeflateSpan(
+      minimalGzip, sizeof(minimalGzip), &start, &length));
+  TEST_ASSERT_EQUAL_UINT(10u, start);
+  TEST_ASSERT_EQUAL_UINT(1u, length);
+
+  // Full flags: FEXTRA (3 bytes payload) + FNAME "hi" + FCOMMENT "c" +
+  // FHCRC (2 bytes). Deflate stream is 2 bytes.
+  const uint8_t fullFlagsGzip[] = {
+      0x1f, 0x8b, 0x08,
+      0x1e,                          // flags: FEXTRA|FNAME|FCOMMENT|FHCRC
+      0x00, 0x00, 0x00, 0x00,        // mtime
+      0x00, 0x00,                    // xfl, OS
+      0x03, 0x00,                    // FEXTRA length = 3
+      0xAA, 0xBB, 0xCC,              // FEXTRA payload
+      'h', 'i', 0x00,                // FNAME
+      'c', 0x00,                     // FCOMMENT
+      0xDD, 0xEE,                    // FHCRC
+      0xF1, 0xF2,                    // deflate stream (2 bytes)
+      0x00, 0x00, 0x00, 0x00,        // CRC32
+      0x00, 0x00, 0x00, 0x00,        // ISIZE
+  };
+  TEST_ASSERT_TRUE(app_logic::gzipDeflateSpan(
+      fullFlagsGzip, sizeof(fullFlagsGzip), &start, &length));
+  // 10 header + 2 xlen + 3 extra + 3 fname + 2 fcomment + 2 fhcrc = 22
+  TEST_ASSERT_EQUAL_UINT(22u, start);
+  TEST_ASSERT_EQUAL_UINT(2u, length);
+}
+
+void test_gzip_deflate_span_rejects_malformed_inputs() {
+  size_t start = 0;
+  size_t length = 0;
+  // Too short to be a valid gzip stream.
+  const uint8_t tooShort[10] = {0x1f, 0x8b, 0x08, 0};
+  TEST_ASSERT_FALSE(app_logic::gzipDeflateSpan(
+      tooShort, sizeof(tooShort), &start, &length));
+  // Wrong magic (plain JSON should pass through the caller as "not gzip").
+  const uint8_t notGzip[20] = {'{', '"', 'a', '"', ':', '1', '}', 0};
+  TEST_ASSERT_FALSE(app_logic::gzipDeflateSpan(
+      notGzip, sizeof(notGzip), &start, &length));
+  // Correct magic but unsupported compression method.
+  uint8_t badMethod[20] = {0x1f, 0x8b, 0x09, 0};
+  TEST_ASSERT_FALSE(app_logic::gzipDeflateSpan(
+      badMethod, sizeof(badMethod), &start, &length));
+  // FEXTRA declares a length that runs past the buffer -- must fail rather
+  // than reading garbage.
+  uint8_t truncatedExtra[20] = {
+      0x1f, 0x8b, 0x08, 0x04,        // flags = FEXTRA
+      0x00, 0x00, 0x00, 0x00,
+      0x00, 0x00,
+      0xFF, 0xFF,                    // xlen = 65535, way past buffer
+  };
+  TEST_ASSERT_FALSE(app_logic::gzipDeflateSpan(
+      truncatedExtra, sizeof(truncatedExtra), &start, &length));
+  // FNAME never terminates before the buffer ends.
+  uint8_t truncatedName[20] = {
+      0x1f, 0x8b, 0x08, 0x08,        // flags = FNAME
+      0x00, 0x00, 0x00, 0x00,
+      0x00, 0x00,
+      'n', 'a', 'm', 'e',            // no NUL before end
+      'n', 'a', 'm', 'e',
+      'n', 'a',
+  };
+  TEST_ASSERT_FALSE(app_logic::gzipDeflateSpan(
+      truncatedName, sizeof(truncatedName), &start, &length));
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_startup_beep_only_for_cold_boot_and_button_wake);
@@ -513,5 +601,7 @@ int main(int, char**) {
   RUN_TEST(test_condition_name_falls_back_to_mixed_weather);
   RUN_TEST(test_qweather_icon_to_condition_name_end_to_end);
   RUN_TEST(test_open_meteo_weathercode_to_condition_name);
+  RUN_TEST(test_gzip_deflate_span_parses_minimal_and_full_headers);
+  RUN_TEST(test_gzip_deflate_span_rejects_malformed_inputs);
   return UNITY_END();
 }

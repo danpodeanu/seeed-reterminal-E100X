@@ -4,7 +4,11 @@
 #include <HTTPClient.h>
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
+#include <esp_heap_caps.h>
 #include <math.h>
+#include <miniz.h>
+#include <stdint.h>
+#include <stdlib.h>
 #include <string.h>
 #include <time.h>
 
@@ -52,6 +56,62 @@ String endpointUrl(const char* path) {
   url += "&lang=";
   url += config::QWEATHER_LANG;
   return url;
+}
+
+// QWeather's paid hosts return gzip-compressed bodies regardless of the
+// client's Accept-Encoding header (verified against pb4nmvpcrc.re.qweatherapi
+// .com; also observed with error responses). Detect the gzip magic and
+// inflate into a fresh String via miniz. Returns true when `body` was
+// already plain text or was successfully decompressed in place.
+bool decompressGzipIfNeeded(String& body) {
+  const size_t inLen = body.length();
+  const uint8_t* in = reinterpret_cast<const uint8_t*>(body.c_str());
+  size_t deflateStart = 0;
+  size_t deflateLen = 0;
+  if (!app_logic::gzipDeflateSpan(in, inLen, &deflateStart, &deflateLen)) {
+    // Not a valid gzip stream. If the magic bytes are absent the body is
+    // already plain text and we should let the caller keep going. If the
+    // magic bytes are there but framing is corrupt, fail loudly.
+    if (inLen >= 2 && in[0] == 0x1fu && in[1] == 0x8bu) {
+      LOG.println("[weather] gzip header present but framing is invalid");
+      return false;
+    }
+    return true;
+  }
+  const uint32_t isize =
+      static_cast<uint32_t>(in[inLen - 4]) |
+      (static_cast<uint32_t>(in[inLen - 3]) << 8) |
+      (static_cast<uint32_t>(in[inLen - 2]) << 16) |
+      (static_cast<uint32_t>(in[inLen - 1]) << 24);
+  // ISIZE is mod 2^32; cap the allocation so a bogus header can't blow up
+  // the heap. Weather envelopes are well under 256 KB in practice.
+  size_t outCapacity = isize;
+  constexpr size_t kMaxInflatedBytes = 256u * 1024u;
+  if (outCapacity == 0 || outCapacity > kMaxInflatedBytes) {
+    outCapacity = kMaxInflatedBytes;
+  }
+  uint8_t* out = static_cast<uint8_t*>(
+      heap_caps_malloc(outCapacity, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+  if (out == nullptr) out = static_cast<uint8_t*>(malloc(outCapacity));
+  if (out == nullptr) {
+    LOG.printf("[weather] could not allocate %u bytes for gzip inflate\n",
+               static_cast<unsigned>(outCapacity));
+    return false;
+  }
+  const size_t written = tinfl_decompress_mem_to_mem(
+      out, outCapacity, in + deflateStart, deflateLen, 0);
+  if (written == TINFL_DECOMPRESS_MEM_TO_MEM_FAILED) {
+    free(out);
+    LOG.println("[weather] gzip inflate failed");
+    return false;
+  }
+  body = "";
+  body.reserve(written + 1);
+  body.concat(reinterpret_cast<const char*>(out), written);
+  free(out);
+  LOG.printf("[weather] gzip inflated %u -> %u bytes\n",
+             static_cast<unsigned>(inLen), static_cast<unsigned>(written));
+  return true;
 }
 
 // QWeather returns "YYYY-MM-DDTHH:MM+HH:MM" timestamps (no seconds field).
@@ -222,8 +282,13 @@ bool fetchEndpoint(const String& url, const String& bearerToken, String& body,
     failureReason = "Could not start weather request";
     return false;
   }
+  // Register the response headers we want to read after GET() -- otherwise
+  // HTTPClient::header() returns "" even when the server sent the header.
+  static const char* kResponseHeaders[] = {"Content-Encoding"};
+  http.collectHeaders(kResponseHeaders,
+                      sizeof(kResponseHeaders) / sizeof(kResponseHeaders[0]));
   http.addHeader("Authorization", "Bearer " + bearerToken);
-  http.addHeader("Accept-Encoding", "identity");
+  http.addHeader("Accept-Encoding", "gzip, identity");
   if (bypassHttpCache) {
     http.addHeader("Cache-Control", "no-cache, no-store");
     http.addHeader("Pragma", "no-cache");
@@ -244,6 +309,7 @@ bool fetchEndpoint(const String& url, const String& bearerToken, String& body,
     return false;
   }
   body = http.getString();
+  const String contentEncoding = http.header("Content-Encoding");
   http.end();
   if (static_cast<int>(body.length()) > kMaxResponseBytes) {
     LOG.printf("[weather] streamed response too large: %u bytes\n",
@@ -251,6 +317,21 @@ bool fetchEndpoint(const String& url, const String& bearerToken, String& body,
     body = "";
     failureReason = "Weather response is too large";
     return false;
+  }
+  // QWeather's paid hosts always gzip regardless of the request headers,
+  // and even the free host may compress on some accounts, so decode based
+  // on the actual response header (or the gzip magic bytes) rather than
+  // trusting what we asked for.
+  if (!decompressGzipIfNeeded(body)) {
+    body = "";
+    failureReason = "Weather response could not be decompressed";
+    return false;
+  }
+  if (contentEncoding.length() > 0 &&
+      !contentEncoding.equalsIgnoreCase("identity") &&
+      !contentEncoding.equalsIgnoreCase("gzip")) {
+    LOG.printf("[weather] unexpected Content-Encoding: %s\n",
+               contentEncoding.c_str());
   }
   return true;
 }
