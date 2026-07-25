@@ -198,8 +198,8 @@ def test_qweather(secrets: Dict[str, str], latitude: float,
         return False
 
     now = body.get("now", {})
-    print(f"[qweather] OK -- {now.get('temp')}C {now.get('text')} "
-          f"(obsTime={now.get('obsTime')})")
+    _safe_print(f"[qweather] OK -- {now.get('temp')}C {now.get('text')} "
+                f"(obsTime={now.get('obsTime')})")
     return True
 
 
