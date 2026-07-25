@@ -293,7 +293,7 @@ bool fetchWeather(WeatherData& weather, String& responseBody,
 }
 
 bool loadCachedWeather(WeatherData& weather, String& failureReason,
-                       uint64_t maxAgeSeconds = config::SLEEP_SECONDS) {
+                       uint64_t maxAgeSeconds = config::CACHE_MAX_AGE_SECONDS) {
   failureReason = "";
   String body;
   if (!sdReady) {

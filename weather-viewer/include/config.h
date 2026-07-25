@@ -44,6 +44,11 @@ constexpr uint8_t RAIN_FORECAST_HOURS = 48;
 constexpr float RAIN_START_THRESHOLD_MM = 0.1f;
 constexpr uint8_t RAIN_PROBABILITY_THRESHOLD = 30;
 constexpr uint64_t SLEEP_SECONDS = 15ULL * 60ULL;
+// How stale a cached forecast may be before we ignore it and either fetch
+// live or report "no data". Semantically distinct from SLEEP_SECONDS -- they
+// happen to coincide today because we refresh once per sleep cycle, but a
+// change to one should not silently change the other.
+constexpr uint64_t CACHE_MAX_AGE_SECONDS = SLEEP_SECONDS;
 constexpr uint32_t WIFI_TIMEOUT_MS = 30000;
 constexpr uint32_t HTTP_TIMEOUT_MS = 25000;
 // POSIX TZ notation uses the opposite sign: CST-8 means UTC+8.
