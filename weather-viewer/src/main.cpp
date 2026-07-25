@@ -808,8 +808,8 @@ void renderFooter() {
   }
   selectSmallFont();
   epaper.setTextDatum(ML_DATUM);
-  epaper.drawString("Weather data: Open-Meteo", config::ui(12),
-                    labelY, 1);
+  epaper.drawString(String("Weather data: ") + weatherProviderName(),
+                    config::ui(12), labelY, 1);
   epaper.setTextDatum(MR_DATUM);
   epaper.drawString(config::LOCATION_NAME,
                     config::PANEL_WIDTH - config::ui(12),
