@@ -29,6 +29,7 @@
 #include "climate_sensor.h"
 #include "sd_card.h"
 #include "text_render.h"
+#include "quiet_hours.h"
 #include "image_loader.h"
 #include "pcf8563_utc.h"
 #include "secrets.h"
@@ -178,51 +179,6 @@ uint8_t fallbackPanelCode(uint8_t red, uint8_t green, uint8_t blue,
                         clampByte(green + modulation),
                         clampByte(blue + modulation));
 #endif
-}
-
-int secondsOfDay(const struct tm& localTime) {
-  return app_logic::secondsOfDay(
-      localTime.tm_hour, localTime.tm_min, localTime.tm_sec);
-}
-
-int quietStartSecond() {
-  return config::QUIET_START_HOUR * 3600 +
-         config::QUIET_START_MINUTE * 60;
-}
-
-int quietEndSecond() {
-  return config::QUIET_END_HOUR * 3600 +
-         config::QUIET_END_MINUTE * 60;
-}
-
-bool quietHoursActive(const struct tm& localTime) {
-  return app_logic::quietHoursActive(
-      config::QUIET_HOURS_ENABLED, secondsOfDay(localTime),
-      quietStartSecond(), quietEndSecond());
-}
-
-uint64_t secondsUntilTimeOfDay(int targetSecond,
-                               const struct tm& localTime) {
-  return app_logic::secondsUntilTimeOfDay(
-      targetSecond, secondsOfDay(localTime));
-}
-
-uint64_t secondsUntilQuietEnd(const struct tm& localTime) {
-  return secondsUntilTimeOfDay(quietEndSecond(), localTime);
-}
-
-bool nextWakeFallsInQuietHours(const struct tm& localTime,
-                               uint64_t normalSleepSeconds) {
-  return app_logic::nextWakeFallsInQuietHours(
-      config::QUIET_HOURS_ENABLED, secondsOfDay(localTime),
-      quietStartSecond(), quietEndSecond(), normalSleepSeconds);
-}
-
-String quietEndLabel() {
-  char label[6] = {};
-  snprintf(label, sizeof(label), "%02u:%02u", config::QUIET_END_HOUR,
-           config::QUIET_END_MINUTE);
-  return String(label);
 }
 
 // batteryPercentForVoltage() and the 16-sample averaging block used to be
@@ -607,6 +563,11 @@ void powerDownAndSleep(uint64_t sleepSeconds = config::SLEEP_SECONDS) {
 void setup() {
   hardware::setStatusLed(true);
   local_time::configureTimezone(config::TIMEZONE);
+  quiet_hours::configure({config::QUIET_HOURS_ENABLED,
+                          config::QUIET_START_HOUR,
+                          config::QUIET_START_MINUTE,
+                          config::QUIET_END_HOUR,
+                          config::QUIET_END_MINUTE});
   LOG.begin(115200, SERIAL_8N1, PIN_LOG_RX, PIN_LOG_TX);
   delay(250);
 
@@ -650,10 +611,10 @@ void setup() {
   const bool ntpDue = local_time::refreshDue(coldBoot, lastNtpSyncEpoch, config::NTP_REFRESH_SECONDS);
   struct tm localTime = {};
   if (!ntpDue && !coldBoot && !buttonWake && local_time::localClock(localTime) &&
-      quietHoursActive(localTime)) {
+      quiet_hours::active(localTime)) {
     LOG.printf("[quiet] photo refresh suppressed; sleeping until %s\n",
-               quietEndLabel().c_str());
-    powerDownAndSleep(secondsUntilQuietEnd(localTime));
+               quiet_hours::endLabel().c_str());
+    powerDownAndSleep(quiet_hours::secondsUntilEnd(localTime));
     return;
   }
 
@@ -713,6 +674,11 @@ void setup() {
     LOG.println("[wifi] skipped; daily clock sync is not due");
   }
   local_time::configureTimezone(config::TIMEZONE);
+  quiet_hours::configure({config::QUIET_HOURS_ENABLED,
+                          config::QUIET_START_HOUR,
+                          config::QUIET_START_MINUTE,
+                          config::QUIET_END_HOUR,
+                          config::QUIET_END_MINUTE});
   if (!wakeEventLogged) {
     wake_report::logWakeEvent(wakeCause, wakePins, true);
   }
@@ -721,11 +687,11 @@ void setup() {
   // Automatic timer wakes inside quiet hours otherwise preserve the photo
   // already retained by the e-paper panel.
   if (!coldBoot && !buttonWake && local_time::localClock(localTime) &&
-      quietHoursActive(localTime)) {
+      quiet_hours::active(localTime)) {
     LOG.printf("[quiet] photo refresh suppressed after clock sync; "
                "sleeping until %s\n",
-               quietEndLabel().c_str());
-    powerDownAndSleep(secondsUntilQuietEnd(localTime));
+               quiet_hours::endLabel().c_str());
+    powerDownAndSleep(quiet_hours::secondsUntilEnd(localTime));
     return;
   }
 
@@ -763,11 +729,11 @@ void setup() {
 
   uint64_t nextSleepSeconds = config::SLEEP_SECONDS;
   if (local_time::localClock(localTime)) {
-    if (quietHoursActive(localTime) ||
-        nextWakeFallsInQuietHours(localTime, config::SLEEP_SECONDS)) {
-      nextSleepSeconds = secondsUntilQuietEnd(localTime);
+    if (quiet_hours::active(localTime) ||
+        quiet_hours::nextWakeFallsInside(localTime, config::SLEEP_SECONDS)) {
+      nextSleepSeconds = quiet_hours::secondsUntilEnd(localTime);
       LOG.printf("[quiet] retaining this photo until %s\n",
-                 quietEndLabel().c_str());
+                 quiet_hours::endLabel().c_str());
     }
   }
   powerDownAndSleep(nextSleepSeconds);

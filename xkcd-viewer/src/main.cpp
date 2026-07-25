@@ -33,6 +33,7 @@
 #include "net_http.h"
 #include "text_render.h"
 #include "xkcd_index.h"
+#include "quiet_hours.h"
 #include "dither.h"
 #include "image_loader.h"
 #include "pcf8563_utc.h"
@@ -223,51 +224,6 @@ uint32_t boundedNetworkTimeout(uint32_t normalTimeoutMs) {
   if (remaining <= 0) return 1;
   const uint32_t remainingMs = static_cast<uint32_t>(remaining);
   return remainingMs < normalTimeoutMs ? remainingMs : normalTimeoutMs;
-}
-
-int secondsOfDay(const struct tm& localTime) {
-  return app_logic::secondsOfDay(
-      localTime.tm_hour, localTime.tm_min, localTime.tm_sec);
-}
-
-int quietStartSecond() {
-  return config::QUIET_START_HOUR * 3600 +
-         config::QUIET_START_MINUTE * 60;
-}
-
-int quietEndSecond() {
-  return config::QUIET_END_HOUR * 3600 +
-         config::QUIET_END_MINUTE * 60;
-}
-
-bool quietHoursActive(const struct tm& localTime) {
-  return app_logic::quietHoursActive(
-      config::QUIET_HOURS_ENABLED, secondsOfDay(localTime),
-      quietStartSecond(), quietEndSecond());
-}
-
-uint64_t secondsUntilTimeOfDay(int targetSecond,
-                               const struct tm& localTime) {
-  return app_logic::secondsUntilTimeOfDay(
-      targetSecond, secondsOfDay(localTime));
-}
-
-uint64_t secondsUntilQuietEnd(const struct tm& localTime) {
-  return secondsUntilTimeOfDay(quietEndSecond(), localTime);
-}
-
-bool nextWakeFallsInQuietHours(const struct tm& localTime,
-                               uint64_t normalSleepSeconds) {
-  return app_logic::nextWakeFallsInQuietHours(
-      config::QUIET_HOURS_ENABLED, secondsOfDay(localTime),
-      quietStartSecond(), quietEndSecond(), normalSleepSeconds);
-}
-
-String quietEndLabel() {
-  char label[6] = {};
-  snprintf(label, sizeof(label), "%02u:%02u", config::QUIET_END_HOUR,
-           config::QUIET_END_MINUTE);
-  return String(label);
 }
 
 bool archiveRefreshDue() {
@@ -901,7 +857,7 @@ bool renderComic(const Comic& comic, RgbImage& image, ImageLayout layout) {
   const String heading =
       quietSleepNotice
           ? "XKCD #" + String(comic.number) + " - sleeping until " +
-                quietEndLabel()
+                quiet_hours::endLabel()
           : "XKCD #" + String(comic.number) + " - " + comic.title;
   selectTitleFont();
   epaper.drawString(text_render::ellipsize(epaper, heading, config::PANEL_WIDTH - config::ui(380), 1),
@@ -1019,6 +975,11 @@ void setup() {
   const bool timerWake = wakeCause == ESP_SLEEP_WAKEUP_TIMER;
 
   local_time::configureTimezone(config::TIMEZONE);
+  quiet_hours::configure({config::QUIET_HOURS_ENABLED,
+                          config::QUIET_START_HOUR,
+                          config::QUIET_START_MINUTE,
+                          config::QUIET_END_HOUR,
+                          config::QUIET_END_MINUTE});
   LOG.begin(115200, SERIAL_8N1, PIN_LOG_RX, PIN_LOG_TX);
   if (app_logic::startupBeepRequired(coldBoot, buttonWake)) {
     // Acknowledge cold boots and button wakes immediately. Holding the green
@@ -1083,7 +1044,7 @@ void setup() {
   struct tm localTime = {};
   {
     const bool haveLocalClock = local_time::localClock(localTime);
-    const bool quietNow = haveLocalClock && quietHoursActive(localTime);
+    const bool quietNow = haveLocalClock && quiet_hours::active(localTime);
     // archiveRefreshDue() needs a valid clock; guard the read so we don't
     // treat a bogus retained epoch as "maintenance overdue".
     const bool archiveDuePreSync =
@@ -1091,9 +1052,9 @@ void setup() {
     if (app_logic::suppressPreSyncForQuietHours(
             coldBoot, ntpDue, buttonWake, haveLocalClock, quietNow,
             archiveDuePreSync)) {
-      const uint64_t quietSleepSeconds = secondsUntilQuietEnd(localTime);
+      const uint64_t quietSleepSeconds = quiet_hours::secondsUntilEnd(localTime);
       LOG.printf("[quiet] refresh suppressed; sleeping until %s\n",
-                 quietEndLabel().c_str());
+                 quiet_hours::endLabel().c_str());
       powerDownAndSleep(quietSleepSeconds);
       return;
     }
@@ -1192,6 +1153,11 @@ void setup() {
     rtc_sync::restoreSystemClock();
   }
   local_time::configureTimezone(config::TIMEZONE);
+  quiet_hours::configure({config::QUIET_HOURS_ENABLED,
+                          config::QUIET_START_HOUR,
+                          config::QUIET_START_MINUTE,
+                          config::QUIET_END_HOUR,
+                          config::QUIET_END_MINUTE});
   if (!wakeEventLogged) {
     wake_report::logWakeEvent(wakeCause, wakePins, true);
   }
@@ -1213,12 +1179,12 @@ void setup() {
   bool inQuietHours = false;
   {
     const bool haveLocalClock = local_time::localClock(localTime);
-    const bool quietNow = haveLocalClock && quietHoursActive(localTime);
+    const bool quietNow = haveLocalClock && quiet_hours::active(localTime);
     if (app_logic::suppressPostSyncForQuietHours(
             coldBoot, buttonWake, haveLocalClock, quietNow, archiveDue)) {
-      const uint64_t quietSleepSeconds = secondsUntilQuietEnd(localTime);
+      const uint64_t quietSleepSeconds = quiet_hours::secondsUntilEnd(localTime);
       LOG.printf("[quiet] refresh suppressed after clock sync; sleeping until %s\n",
-                 quietEndLabel().c_str());
+                 quiet_hours::endLabel().c_str());
       wifi_sta::disable();
       powerDownAndSleep(quietSleepSeconds);
       return;
@@ -1265,12 +1231,12 @@ void setup() {
 
   uint64_t nextSleepSeconds = config::SLEEP_SECONDS;
   if (local_time::localClock(localTime)) {
-    if (quietHoursActive(localTime) ||
-        nextWakeFallsInQuietHours(localTime, config::SLEEP_SECONDS)) {
+    if (quiet_hours::active(localTime) ||
+        quiet_hours::nextWakeFallsInside(localTime, config::SLEEP_SECONDS)) {
       quietSleepNotice = true;
-      nextSleepSeconds = secondsUntilQuietEnd(localTime);
+      nextSleepSeconds = quiet_hours::secondsUntilEnd(localTime);
       LOG.printf("[quiet] this is the final refresh; sleeping until %s\n",
-                 quietEndLabel().c_str());
+                 quiet_hours::endLabel().c_str());
     }
   }
 

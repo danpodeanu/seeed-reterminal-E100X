@@ -31,6 +31,7 @@
 #include "climate_sensor.h"
 #include "sd_card.h"
 #include "text_render.h"
+#include "quiet_hours.h"
 #include "pcf8563_utc.h"
 #include "screenshot_bmp.h"
 #include "timestamped_logger.h"
@@ -173,51 +174,6 @@ bool parseLocalTimestamp(const String& value, time_t& timestamp) {
          roundTrip.tm_hour == hour &&
          roundTrip.tm_min == minute &&
          roundTrip.tm_sec == second;
-}
-
-int secondsOfDay(const struct tm& localTime) {
-  return app_logic::secondsOfDay(
-      localTime.tm_hour, localTime.tm_min, localTime.tm_sec);
-}
-
-int quietStartSecond() {
-  return config::QUIET_START_HOUR * 3600 +
-         config::QUIET_START_MINUTE * 60;
-}
-
-int quietEndSecond() {
-  return config::QUIET_END_HOUR * 3600 +
-         config::QUIET_END_MINUTE * 60;
-}
-
-bool quietHoursActive(const struct tm& localTime) {
-  return app_logic::quietHoursActive(
-      config::QUIET_HOURS_ENABLED, secondsOfDay(localTime),
-      quietStartSecond(), quietEndSecond());
-}
-
-uint64_t secondsUntilTimeOfDay(int targetSecond,
-                               const struct tm& localTime) {
-  return app_logic::secondsUntilTimeOfDay(
-      targetSecond, secondsOfDay(localTime));
-}
-
-uint64_t secondsUntilQuietEnd(const struct tm& localTime) {
-  return secondsUntilTimeOfDay(quietEndSecond(), localTime);
-}
-
-bool nextWakeFallsInQuietHours(const struct tm& localTime,
-                               uint64_t normalSleepSeconds) {
-  return app_logic::nextWakeFallsInQuietHours(
-      config::QUIET_HOURS_ENABLED, secondsOfDay(localTime),
-      quietStartSecond(), quietEndSecond(), normalSleepSeconds);
-}
-
-String quietEndLabel() {
-  char label[6] = {};
-  snprintf(label, sizeof(label), "%02u:%02u", config::QUIET_END_HOUR,
-           config::QUIET_END_MINUTE);
-  return String(label);
 }
 
 // writeLittleEndian16/32, screenshotPaletteColor, and saveScreenshotBmp now
@@ -732,7 +688,7 @@ void drawHeader(const WeatherData& weather) {
     heading = "Weather";
   }
   if (quietSleepNotice) {
-    heading = "Weather - sleeping until " + quietEndLabel();
+    heading = "Weather - sleeping until " + quiet_hours::endLabel();
   }
   epaper.drawString(
       text_render::ellipsize(epaper, heading, config::PANEL_WIDTH - config::ui(380)),
@@ -1054,6 +1010,11 @@ void setup() {
       (wakePins & (1ULL << PIN_BUTTON_LEFT)) != 0;
 
   local_time::configureTimezone(config::TIMEZONE);
+  quiet_hours::configure({config::QUIET_HOURS_ENABLED,
+                          config::QUIET_START_HOUR,
+                          config::QUIET_START_MINUTE,
+                          config::QUIET_END_HOUR,
+                          config::QUIET_END_MINUTE});
   LOG.begin(115200, SERIAL_8N1, PIN_LOG_RX, PIN_LOG_TX);
   if (app_logic::startupBeepRequired(coldBoot, buttonWake)) {
     // Acknowledge cold boots and button wakes immediately. Holding the green
@@ -1118,10 +1079,10 @@ void setup() {
   const bool haveLocalTime = local_time::localClock(localTime);
   if (app_logic::suppressForQuietHours(
           coldBoot, buttonWake, ntpDue, haveLocalTime,
-          haveLocalTime && quietHoursActive(localTime))) {
-    const uint64_t quietSleepSeconds = secondsUntilQuietEnd(localTime);
+          haveLocalTime && quiet_hours::active(localTime))) {
+    const uint64_t quietSleepSeconds = quiet_hours::secondsUntilEnd(localTime);
     LOG.printf("[quiet] refresh suppressed; sleeping until %s\n",
-               quietEndLabel().c_str());
+               quiet_hours::endLabel().c_str());
     powerDownAndSleep(quietSleepSeconds);
     return;
   }
@@ -1188,15 +1149,20 @@ void setup() {
     rtcRestored = rtc_sync::restoreSystemClock();
   }
   local_time::configureTimezone(config::TIMEZONE);
+  quiet_hours::configure({config::QUIET_HOURS_ENABLED,
+                          config::QUIET_START_HOUR,
+                          config::QUIET_START_MINUTE,
+                          config::QUIET_END_HOUR,
+                          config::QUIET_END_MINUTE});
   if (!wakeEventLogged) {
     wake_report::logWakeEvent(wakeCause, wakePins, true);
   }
 
   if (!coldBoot && !buttonWake && local_time::localClock(localTime) &&
-      quietHoursActive(localTime)) {
-    const uint64_t quietSleepSeconds = secondsUntilQuietEnd(localTime);
+      quiet_hours::active(localTime)) {
+    const uint64_t quietSleepSeconds = quiet_hours::secondsUntilEnd(localTime);
     LOG.printf("[quiet] refresh suppressed after clock sync; sleeping until %s\n",
-               quietEndLabel().c_str());
+               quiet_hours::endLabel().c_str());
     wifi_sta::disable();
     powerDownAndSleep(quietSleepSeconds);
     return;
@@ -1234,12 +1200,12 @@ void setup() {
   const bool haveWeather = liveUpdated || cacheLoaded;
   uint64_t nextSleepSeconds = config::SLEEP_SECONDS;
   if (local_time::localClock(localTime)) {
-    if (quietHoursActive(localTime) ||
-        nextWakeFallsInQuietHours(localTime, config::SLEEP_SECONDS)) {
+    if (quiet_hours::active(localTime) ||
+        quiet_hours::nextWakeFallsInside(localTime, config::SLEEP_SECONDS)) {
       quietSleepNotice = true;
-      nextSleepSeconds = secondsUntilQuietEnd(localTime);
+      nextSleepSeconds = quiet_hours::secondsUntilEnd(localTime);
       LOG.printf("[quiet] this is the final refresh; sleeping until %s\n",
-                 quietEndLabel().c_str());
+                 quiet_hours::endLabel().c_str());
     }
   }
 
