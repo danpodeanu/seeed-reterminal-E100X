@@ -23,6 +23,9 @@
 #include "battery_gauge.h"
 #include "ntp_sync.h"
 #include "board_pins.h"
+#include "hardware.h"
+#include "local_time.h"
+#include "wake_report.h"
 #include "pcf8563_utc.h"
 #include "screenshot_bmp.h"
 #include "timestamped_logger.h"
@@ -53,11 +56,6 @@ using namespace ::board;
 constexpr int PIN_BUTTON_GREEN = 3;
 constexpr int PIN_BUTTON_RIGHT = 4;
 constexpr int PIN_BUTTON_LEFT = 5;
-
-void setStatusLed(bool on) {
-  pinMode(PIN_STATUS_LED, OUTPUT);
-  digitalWrite(PIN_STATUS_LED, on ? LOW : HIGH);
-}
 
 #if RETERMINAL_MODEL == 1001
 constexpr uint32_t PANEL_WHITE = TFT_GRAY_3;
@@ -115,7 +113,6 @@ Adafruit_SHT4x sht4;
 bool sdReady = false;
 bool screenshotRequested = false;
 bool climateValid = false;
-bool i2cReady = false;
 float indoorTemperatureC = NAN;
 float indoorHumidityPct = NAN;
 float batteryVoltage = NAN;
@@ -125,20 +122,6 @@ bool quietSleepNotice = false;
 
 // WeatherData / DailyForecast now live in weather_data.h so both the
 // provider translation units and main.cpp share one definition.
-
-bool clockIsValid() {
-  return time(nullptr) >= 1700000000;
-}
-
-void configureLocalTimezone() {
-  setenv("TZ", config::TIMEZONE, 1);
-  tzset();
-}
-
-bool localClock(struct tm& localTime) {
-  const time_t now = time(nullptr);
-  return clockIsValid() && localtime_r(&now, &localTime) != nullptr;
-}
 
 bool parseLocalTimestamp(const String& value, time_t& timestamp) {
   int year = 0;
@@ -221,50 +204,6 @@ String quietEndLabel() {
   return String(label);
 }
 
-String wakeReason(esp_sleep_wakeup_cause_t cause, uint64_t wakePins) {
-  if (cause == ESP_SLEEP_WAKEUP_UNDEFINED) return "cold boot/reset";
-  if (cause == ESP_SLEEP_WAKEUP_TIMER) return "scheduled timer";
-  if (cause != ESP_SLEEP_WAKEUP_EXT1) {
-    return "wake cause " + String(static_cast<int>(cause));
-  }
-
-  String buttons;
-  if (wakePins & (1ULL << PIN_BUTTON_GREEN)) buttons += "GPIO3";
-  if (wakePins & (1ULL << PIN_BUTTON_RIGHT)) {
-    if (!buttons.isEmpty()) buttons += "+";
-    buttons += "GPIO4";
-  }
-  if (wakePins & (1ULL << PIN_BUTTON_LEFT)) {
-    if (!buttons.isEmpty()) buttons += "+";
-    buttons += "GPIO5";
-  }
-  return buttons.isEmpty() ? "front button" : "front button " + buttons;
-}
-
-bool logWakeEvent(esp_sleep_wakeup_cause_t cause, uint64_t wakePins,
-                  bool logUnsynchronized) {
-  const String reason = wakeReason(cause, wakePins);
-  struct tm localTime = {};
-  if (!localClock(localTime)) {
-    if (logUnsynchronized) {
-      LOG.printf("[wake] time=unavailable reason=%s\n", reason.c_str());
-    }
-    return false;
-  }
-  char formatted[40] = {};
-  strftime(formatted, sizeof(formatted), "%Y-%m-%d %H:%M:%S %Z",
-           &localTime);
-  LOG.printf("[wake] time=%s reason=%s\n", formatted, reason.c_str());
-  return true;
-}
-
-bool ntpRefreshDue(bool coldBoot) {
-  const time_t now = time(nullptr);
-  return app_logic::refreshDue(
-      coldBoot, clockIsValid(), now, lastNtpSyncEpoch,
-      config::NTP_REFRESH_SECONDS);
-}
-
 // writeLittleEndian16/32, screenshotPaletteColor, and saveScreenshotBmp now
 // live in common/include/screenshot_bmp.h and are invoked via the template
 // screenshot::saveScreenshotBmp<EPaper>().
@@ -292,11 +231,10 @@ void readSensors() {
        attempt < config::SENSOR_READ_ATTEMPTS && !climateValid; ++attempt) {
     if (attempt > 0) {
       Wire.end();
-      i2cReady = false;
+  hardware::resetI2cBus();
       delay(config::SENSOR_RETRY_DELAY_MS);
     }
-    i2cReady = Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
-    Wire.setClock(100000);
+    hardware::ensureI2cBus();
     if (sht4.begin(&Wire)) {
       sht4.setPrecision(SHT4X_HIGH_PRECISION);
       sensors_event_t humidity;
@@ -316,19 +254,8 @@ void readSensors() {
   if (!climateValid) LOG.println("[sensor] SHT4x unavailable after retries");
 }
 
-bool ensureI2cBus() {
-  if (i2cReady) return true;
-  i2cReady = Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
-  if (!i2cReady) {
-    LOG.println("[rtc] could not initialize the I2C bus");
-    return false;
-  }
-  Wire.setClock(100000);
-  return true;
-}
-
 bool readAndLogHardwareRtc(pcf8563::Reading& stored) {
-  if (!ensureI2cBus()) return false;
+  if (!hardware::ensureI2cBus()) return false;
   String error;
   if (!pcf8563::readUtc(Wire, stored, error)) {
     LOG.printf("[rtc] PCF8563 read failed: %s\n", error.c_str());
@@ -342,7 +269,7 @@ bool readAndLogHardwareRtc(pcf8563::Reading& stored) {
 }
 
 void saveNtpTimeToHardwareRtc(time_t now) {
-  if (!ensureI2cBus()) return;
+  if (!hardware::ensureI2cBus()) return;
   String error;
   if (!pcf8563::writeUtc(Wire, now, error)) {
     LOG.printf("[rtc] PCF8563 NTP update failed: %s\n", error.c_str());
@@ -552,14 +479,6 @@ void renderStatus(const String& message, const String& detail = "",
   updatePanel();
 }
 
-void beep() {
-  pinMode(PIN_BUZZER, OUTPUT);
-  tone(PIN_BUZZER, 1000, 100);
-  delay(120);
-  noTone(PIN_BUZZER);
-  digitalWrite(PIN_BUZZER, LOW);
-}
-
 bool mountSd() {
   pinMode(PIN_SD_ENABLE, OUTPUT);
   digitalWrite(PIN_SD_ENABLE, HIGH);
@@ -731,7 +650,7 @@ bool loadCachedWeather(WeatherData& weather, String& failureReason,
 
   const time_t now = time(nullptr);
   time_t forecastTime = 0;
-  if (!clockIsValid()) {
+  if (!local_time::clockIsValid()) {
     failureReason = "Cannot verify saved forecast age";
     LOG.printf("[cache] %s\n", failureReason.c_str());
     return false;
@@ -796,7 +715,7 @@ String updateClock(const String& isoTime) {
 
 String weatherAgeText(const String& isoTime) {
   time_t forecastTime = 0;
-  if (!clockIsValid() || !parseLocalTimestamp(isoTime, forecastTime))
+  if (!local_time::clockIsValid() || !parseLocalTimestamp(isoTime, forecastTime))
     return "";
 
   const int64_t roundedMinutes = app_logic::roundedAgeMinutes(
@@ -1322,14 +1241,14 @@ void powerDownAndSleep(uint64_t sleepSeconds = config::SLEEP_SECONDS,
   }
   LOG.flush();
   delay(50);
-  setStatusLed(false);
+  hardware::setStatusLed(false);
   esp_deep_sleep_start();
 }
 
 }  // namespace
 
 void setup() {
-  setStatusLed(true);
+  hardware::setStatusLed(true);
   const esp_sleep_wakeup_cause_t wakeCause =
       esp_sleep_get_wakeup_cause();
   const bool buttonWake = wakeCause == ESP_SLEEP_WAKEUP_EXT1;
@@ -1348,12 +1267,12 @@ void setup() {
   const bool leftWokeDevice =
       (wakePins & (1ULL << PIN_BUTTON_LEFT)) != 0;
 
-  configureLocalTimezone();
+  local_time::configureTimezone(config::TIMEZONE);
   LOG.begin(115200, SERIAL_8N1, PIN_LOG_RX, PIN_LOG_TX);
   if (app_logic::startupBeepRequired(coldBoot, buttonWake)) {
     // Acknowledge cold boots and button wakes immediately. Holding the green
     // button through this beep and the interval below requests a screenshot.
-    beep();
+    hardware::beep();
   }
 
   bool greenHeldLongEnough = false;
@@ -1393,12 +1312,12 @@ void setup() {
   if (screenshotRequested) {
     LOG.println("[screenshot] green-button long press requested export");
     delay(80);
-    beep();
+    hardware::beep();
   }
 
   const time_t startupTime = time(nullptr);
   const bool schedulingClockSuspicious =
-      !clockIsValid() ||
+      !local_time::clockIsValid() ||
       (lastNtpSyncEpoch > 0 && startupTime < lastNtpSyncEpoch);
   const bool hardwareRtcCheckedEarly = schedulingClockSuspicious;
   if (schedulingClockSuspicious) {
@@ -1407,10 +1326,10 @@ void setup() {
     restoreClockFromHardwareRtc();
   }
 
-  bool wakeEventLogged = logWakeEvent(wakeCause, wakePins, false);
-  const bool ntpDue = ntpRefreshDue(coldBoot);
+  bool wakeEventLogged = wake_report::logWakeEvent(wakeCause, wakePins, false);
+  const bool ntpDue = local_time::refreshDue(coldBoot, lastNtpSyncEpoch, config::NTP_REFRESH_SECONDS);
   struct tm localTime = {};
-  const bool haveLocalTime = localClock(localTime);
+  const bool haveLocalTime = local_time::localClock(localTime);
   if (app_logic::suppressForQuietHours(
           coldBoot, buttonWake, ntpDue, haveLocalTime,
           haveLocalTime && quietHoursActive(localTime))) {
@@ -1441,7 +1360,7 @@ void setup() {
 
   // Validate the cache before composing the cold-boot screen. File existence
   // alone does not mean the saved forecast is recent enough to use.
-  if (!buttonWake && clockIsValid()) {
+  if (!buttonWake && local_time::clockIsValid()) {
     cacheChecked = true;
     cacheLoaded = loadCachedWeather(weather, cacheFailureReason);
   }
@@ -1482,12 +1401,12 @@ void setup() {
     LOG.println("[ntp] using PCF8563 fallback after synchronization failure");
     rtcRestored = restoreClockFromHardwareRtc();
   }
-  configureLocalTimezone();
+  local_time::configureTimezone(config::TIMEZONE);
   if (!wakeEventLogged) {
-    logWakeEvent(wakeCause, wakePins, true);
+    wake_report::logWakeEvent(wakeCause, wakePins, true);
   }
 
-  if (!coldBoot && !buttonWake && localClock(localTime) &&
+  if (!coldBoot && !buttonWake && local_time::localClock(localTime) &&
       quietHoursActive(localTime)) {
     const uint64_t quietSleepSeconds = secondsUntilQuietEnd(localTime);
     LOG.printf("[quiet] refresh suppressed after clock sync; sleeping until %s\n",
@@ -1500,7 +1419,7 @@ void setup() {
   // Cold boot NTP may have made it possible to validate a cache whose age
   // could not be checked before connecting.
   if (!buttonWake &&
-      (!cacheLoaded || ntpSynchronized || rtcRestored) && clockIsValid()) {
+      (!cacheLoaded || ntpSynchronized || rtcRestored) && local_time::clockIsValid()) {
     cacheChecked = true;
     cacheLoaded = loadCachedWeather(weather, cacheFailureReason);
   }
@@ -1528,7 +1447,7 @@ void setup() {
   }
   const bool haveWeather = liveUpdated || cacheLoaded;
   uint64_t nextSleepSeconds = config::SLEEP_SECONDS;
-  if (localClock(localTime)) {
+  if (local_time::localClock(localTime)) {
     if (quietHoursActive(localTime) ||
         nextWakeFallsInQuietHours(localTime, config::SLEEP_SECONDS)) {
       quietSleepNotice = true;
@@ -1546,11 +1465,11 @@ void setup() {
     // than FAILURE_CACHE_MAX_AGE_SECONDS (or missing).
     String staleFailureReason;
     const bool staleCacheLoaded =
-        clockIsValid() &&
+        local_time::clockIsValid() &&
         loadCachedWeather(weather, staleFailureReason,
                           config::FAILURE_CACHE_MAX_AGE_SECONDS);
     if (app_logic::useCachedForecastOnFailure(
-            /*liveFetchSucceeded=*/false, clockIsValid(),
+            /*liveFetchSucceeded=*/false, local_time::clockIsValid(),
             /*cacheAvailable=*/staleCacheLoaded,
             /*cacheWithinFailureWindow=*/staleCacheLoaded)) {
       LOG.println("[weather] live fetch failed; showing recent cached forecast");

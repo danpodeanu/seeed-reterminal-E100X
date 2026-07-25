@@ -21,6 +21,9 @@
 #include "battery_gauge.h"
 #include "ntp_sync.h"
 #include "board_pins.h"
+#include "hardware.h"
+#include "local_time.h"
+#include "wake_report.h"
 #include "image_loader.h"
 #include "pcf8563_utc.h"
 #include "secrets.h"
@@ -41,11 +44,6 @@ using namespace ::board;
 constexpr int PIN_KEY0 = 3;
 constexpr int PIN_KEY1 = 4;
 constexpr int PIN_KEY2 = 5;
-
-void setStatusLed(bool on) {
-  pinMode(PIN_STATUS_LED, OUTPUT);
-  digitalWrite(PIN_STATUS_LED, on ? LOW : HIGH);
-}
 
 #if RETERMINAL_MODEL == 1001
 constexpr uint32_t PANEL_WHITE = TFT_GRAY_3;
@@ -90,7 +88,6 @@ Adafruit_SHT4x sht4;
 bool sdReady = false;
 std::vector<String> photoList;
 bool climateValid = false;
-bool i2cReady = false;
 float temperatureC = NAN;
 float humidityPct = NAN;
 float batteryVoltage = NAN;
@@ -168,20 +165,6 @@ uint8_t fallbackPanelCode(uint8_t red, uint8_t green, uint8_t blue,
 #endif
 }
 
-bool clockIsValid() {
-  return time(nullptr) >= 1700000000;
-}
-
-void configureLocalTimezone() {
-  setenv("TZ", config::TIMEZONE, 1);
-  tzset();
-}
-
-bool localClock(struct tm& localTime) {
-  const time_t now = time(nullptr);
-  return clockIsValid() && localtime_r(&now, &localTime) != nullptr;
-}
-
 int secondsOfDay(const struct tm& localTime) {
   return app_logic::secondsOfDay(
       localTime.tm_hour, localTime.tm_min, localTime.tm_sec);
@@ -227,50 +210,6 @@ String quietEndLabel() {
   return String(label);
 }
 
-String wakeReason(esp_sleep_wakeup_cause_t cause, uint64_t wakePins) {
-  if (cause == ESP_SLEEP_WAKEUP_UNDEFINED) return "cold boot/reset";
-  if (cause == ESP_SLEEP_WAKEUP_TIMER) return "scheduled timer";
-  if (cause != ESP_SLEEP_WAKEUP_EXT1) {
-    return "wake cause " + String(static_cast<int>(cause));
-  }
-
-  String buttons;
-  if (wakePins & (1ULL << PIN_KEY0)) buttons += "GPIO3";
-  if (wakePins & (1ULL << PIN_KEY1)) {
-    if (!buttons.isEmpty()) buttons += "+";
-    buttons += "GPIO4";
-  }
-  if (wakePins & (1ULL << PIN_KEY2)) {
-    if (!buttons.isEmpty()) buttons += "+";
-    buttons += "GPIO5";
-  }
-  return buttons.isEmpty() ? "front button" : "front button " + buttons;
-}
-
-bool logWakeEvent(esp_sleep_wakeup_cause_t cause, uint64_t wakePins,
-                  bool logUnsynchronized) {
-  const String reason = wakeReason(cause, wakePins);
-  struct tm localTime = {};
-  if (!localClock(localTime)) {
-    if (logUnsynchronized) {
-      LOG.printf("[wake] time=unavailable reason=%s\n", reason.c_str());
-    }
-    return false;
-  }
-  char formatted[40] = {};
-  strftime(formatted, sizeof(formatted), "%Y-%m-%d %H:%M:%S %Z",
-           &localTime);
-  LOG.printf("[wake] time=%s reason=%s\n", formatted, reason.c_str());
-  return true;
-}
-
-bool ntpRefreshDue(bool coldBoot) {
-  const time_t now = time(nullptr);
-  return app_logic::refreshDue(
-      coldBoot, clockIsValid(), now, lastNtpSyncEpoch,
-      config::NTP_REFRESH_SECONDS);
-}
-
 // batteryPercentForVoltage() and the 16-sample averaging block used to be
 // inline here; they now live in common/include/battery_gauge.h and are
 // invoked via battery::measureBatteryFromAdc().
@@ -286,11 +225,10 @@ void readSensors() {
        attempt < config::SENSOR_READ_ATTEMPTS && !climateValid; ++attempt) {
     if (attempt > 0) {
       Wire.end();
-      i2cReady = false;
+  hardware::resetI2cBus();
       delay(config::SENSOR_RETRY_DELAY_MS);
     }
-    i2cReady = Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
-    Wire.setClock(100000);
+    hardware::ensureI2cBus();
     if (sht4.begin(&Wire)) {
       sht4.setPrecision(SHT4X_HIGH_PRECISION);
       sensors_event_t humidity;
@@ -307,19 +245,8 @@ void readSensors() {
   if (!climateValid) LOG.println("[sensor] SHT4x unavailable");
 }
 
-bool ensureI2cBus() {
-  if (i2cReady) return true;
-  i2cReady = Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
-  if (!i2cReady) {
-    LOG.println("[rtc] could not initialize the I2C bus");
-    return false;
-  }
-  Wire.setClock(100000);
-  return true;
-}
-
 bool readAndLogHardwareRtc(pcf8563::Reading& stored) {
-  if (!ensureI2cBus()) return false;
+  if (!hardware::ensureI2cBus()) return false;
   String error;
   if (!pcf8563::readUtc(Wire, stored, error)) {
     LOG.printf("[rtc] PCF8563 read failed: %s\n", error.c_str());
@@ -333,7 +260,7 @@ bool readAndLogHardwareRtc(pcf8563::Reading& stored) {
 }
 
 void saveNtpTimeToHardwareRtc(time_t now) {
-  if (!ensureI2cBus()) return;
+  if (!hardware::ensureI2cBus()) return;
   String error;
   if (!pcf8563::writeUtc(Wire, now, error)) {
     LOG.printf("[rtc] PCF8563 NTP update failed: %s\n", error.c_str());
@@ -438,14 +365,6 @@ void renderStatus(const String& message, const String& detail = "",
   epaper.setTextFont(2);
   drawStatusBadges();
   updatePanel();
-}
-
-void beep() {
-  pinMode(PIN_BUZZER, OUTPUT);
-  tone(PIN_BUZZER, 1000, 100);
-  delay(120);
-  noTone(PIN_BUZZER);
-  digitalWrite(PIN_BUZZER, LOW);
 }
 
 String wifiStationMacAddress() {
@@ -782,16 +701,6 @@ bool synchronizeClock() {
       });
 }
 
-bool prepareWakePin(int pin) {
-  pinMode(pin, INPUT_PULLUP);
-  const gpio_num_t gpio = static_cast<gpio_num_t>(pin);
-  rtc_gpio_hold_dis(gpio);
-  return rtc_gpio_init(gpio) == ESP_OK &&
-         rtc_gpio_set_direction(gpio, RTC_GPIO_MODE_INPUT_ONLY) == ESP_OK &&
-         rtc_gpio_pullup_en(gpio) == ESP_OK &&
-         rtc_gpio_pulldown_dis(gpio) == ESP_OK;
-}
-
 void powerDownAndSleep(uint64_t sleepSeconds = config::SLEEP_SECONDS) {
   disableWifi();
   if (sdReady) SD.end();
@@ -810,9 +719,9 @@ void powerDownAndSleep(uint64_t sleepSeconds = config::SLEEP_SECONDS) {
     delay(10);
   }
   bool rtcPinsReady = true;
-  rtcPinsReady = prepareWakePin(PIN_KEY0) && rtcPinsReady;
-  rtcPinsReady = prepareWakePin(PIN_KEY1) && rtcPinsReady;
-  rtcPinsReady = prepareWakePin(PIN_KEY2) && rtcPinsReady;
+  rtcPinsReady = hardware::configureWakePin(PIN_KEY0) && rtcPinsReady;
+  rtcPinsReady = hardware::configureWakePin(PIN_KEY1) && rtcPinsReady;
+  rtcPinsReady = hardware::configureWakePin(PIN_KEY2) && rtcPinsReady;
 
   const uint64_t wakeMask =
       (1ULL << PIN_KEY0) | (1ULL << PIN_KEY1) | (1ULL << PIN_KEY2);
@@ -838,15 +747,15 @@ void powerDownAndSleep(uint64_t sleepSeconds = config::SLEEP_SECONDS) {
   }
   LOG.flush();
   delay(50);
-  setStatusLed(false);
+  hardware::setStatusLed(false);
   esp_deep_sleep_start();
 }
 
 }  // namespace
 
 void setup() {
-  setStatusLed(true);
-  configureLocalTimezone();
+  hardware::setStatusLed(true);
+  local_time::configureTimezone(config::TIMEZONE);
   LOG.begin(115200, SERIAL_8N1, PIN_LOG_RX, PIN_LOG_TX);
   delay(250);
 
@@ -860,7 +769,7 @@ void setup() {
   const bool key0Wake = (wakePins & (1ULL << PIN_KEY0)) != 0;
   const bool key1Wake = (wakePins & (1ULL << PIN_KEY1)) != 0;
   const bool key2Wake = (wakePins & (1ULL << PIN_KEY2)) != 0;
-  if (app_logic::startupBeepRequired(coldBoot, buttonWake)) beep();
+  if (app_logic::startupBeepRequired(coldBoot, buttonWake)) hardware::beep();
 
   LOG.println();
   LOG.println("============================================");
@@ -877,7 +786,7 @@ void setup() {
 
   const time_t startupTime = time(nullptr);
   const bool schedulingClockSuspicious =
-      !clockIsValid() ||
+      !local_time::clockIsValid() ||
       (lastNtpSyncEpoch > 0 && startupTime < lastNtpSyncEpoch);
   const bool hardwareRtcCheckedEarly = schedulingClockSuspicious;
   if (schedulingClockSuspicious) {
@@ -886,10 +795,10 @@ void setup() {
     restoreClockFromHardwareRtc();
   }
 
-  bool wakeEventLogged = logWakeEvent(wakeCause, wakePins, false);
-  const bool ntpDue = ntpRefreshDue(coldBoot);
+  bool wakeEventLogged = wake_report::logWakeEvent(wakeCause, wakePins, false);
+  const bool ntpDue = local_time::refreshDue(coldBoot, lastNtpSyncEpoch, config::NTP_REFRESH_SECONDS);
   struct tm localTime = {};
-  if (!ntpDue && !coldBoot && !buttonWake && localClock(localTime) &&
+  if (!ntpDue && !coldBoot && !buttonWake && local_time::localClock(localTime) &&
       quietHoursActive(localTime)) {
     LOG.printf("[quiet] photo refresh suppressed; sleeping until %s\n",
                quietEndLabel().c_str());
@@ -952,15 +861,15 @@ void setup() {
   } else {
     LOG.println("[wifi] skipped; daily clock sync is not due");
   }
-  configureLocalTimezone();
+  local_time::configureTimezone(config::TIMEZONE);
   if (!wakeEventLogged) {
-    logWakeEvent(wakeCause, wakePins, true);
+    wake_report::logWakeEvent(wakeCause, wakePins, true);
   }
 
   // A cold boot always replaces its temporary startup screen with a photo.
   // Automatic timer wakes inside quiet hours otherwise preserve the photo
   // already retained by the e-paper panel.
-  if (!coldBoot && !buttonWake && localClock(localTime) &&
+  if (!coldBoot && !buttonWake && local_time::localClock(localTime) &&
       quietHoursActive(localTime)) {
     LOG.printf("[quiet] photo refresh suppressed after clock sync; "
                "sleeping until %s\n",
@@ -1002,7 +911,7 @@ void setup() {
   }
 
   uint64_t nextSleepSeconds = config::SLEEP_SECONDS;
-  if (localClock(localTime)) {
+  if (local_time::localClock(localTime)) {
     if (quietHoursActive(localTime) ||
         nextWakeFallsInQuietHours(localTime, config::SLEEP_SECONDS)) {
       nextSleepSeconds = secondsUntilQuietEnd(localTime);

@@ -25,6 +25,9 @@
 #include "battery_gauge.h"
 #include "ntp_sync.h"
 #include "board_pins.h"
+#include "hardware.h"
+#include "local_time.h"
+#include "wake_report.h"
 #include "dither.h"
 #include "image_loader.h"
 #include "pcf8563_utc.h"
@@ -50,11 +53,6 @@ using namespace ::board;
 constexpr int PIN_BUTTON_GREEN = 3;
 constexpr int PIN_BUTTON_RIGHT = 4;
 constexpr int PIN_BUTTON_LEFT = 5;
-
-void setStatusLed(bool on) {
-  pinMode(PIN_STATUS_LED, OUTPUT);
-  digitalWrite(PIN_STATUS_LED, on ? LOW : HIGH);
-}
 
 #if RETERMINAL_MODEL == 1001
 constexpr uint32_t PANEL_WHITE = TFT_GRAY_3;
@@ -101,7 +99,6 @@ bool sdReady = false;
 bool sdCacheWritable = true;
 bool screenshotRequested = false;
 bool climateValid = false;
-bool i2cReady = false;
 float temperatureC = NAN;
 float humidityPct = NAN;
 float batteryVoltage = NAN;
@@ -215,20 +212,6 @@ uint32_t boundedNetworkTimeout(uint32_t normalTimeoutMs) {
   return remainingMs < normalTimeoutMs ? remainingMs : normalTimeoutMs;
 }
 
-bool clockIsValid() {
-  return time(nullptr) >= 1700000000;
-}
-
-void configureLocalTimezone() {
-  setenv("TZ", config::TIMEZONE, 1);
-  tzset();
-}
-
-bool localClock(struct tm& localTime) {
-  const time_t now = time(nullptr);
-  return clockIsValid() && localtime_r(&now, &localTime) != nullptr;
-}
-
 int secondsOfDay(const struct tm& localTime) {
   return app_logic::secondsOfDay(
       localTime.tm_hour, localTime.tm_min, localTime.tm_sec);
@@ -274,54 +257,10 @@ String quietEndLabel() {
   return String(label);
 }
 
-String wakeReason(esp_sleep_wakeup_cause_t cause, uint64_t wakePins) {
-  if (cause == ESP_SLEEP_WAKEUP_UNDEFINED) return "cold boot/reset";
-  if (cause == ESP_SLEEP_WAKEUP_TIMER) return "scheduled timer";
-  if (cause != ESP_SLEEP_WAKEUP_EXT1) {
-    return "wake cause " + String(static_cast<int>(cause));
-  }
-
-  String buttons;
-  if (wakePins & (1ULL << PIN_BUTTON_GREEN)) buttons += "GPIO3";
-  if (wakePins & (1ULL << PIN_BUTTON_RIGHT)) {
-    if (!buttons.isEmpty()) buttons += "+";
-    buttons += "GPIO4";
-  }
-  if (wakePins & (1ULL << PIN_BUTTON_LEFT)) {
-    if (!buttons.isEmpty()) buttons += "+";
-    buttons += "GPIO5";
-  }
-  return buttons.isEmpty() ? "front button" : "front button " + buttons;
-}
-
-bool logWakeEvent(esp_sleep_wakeup_cause_t cause, uint64_t wakePins,
-                  bool logUnsynchronized) {
-  const String reason = wakeReason(cause, wakePins);
-  struct tm localTime = {};
-  if (!localClock(localTime)) {
-    if (logUnsynchronized) {
-      LOG.printf("[wake] time=unavailable reason=%s\n", reason.c_str());
-    }
-    return false;
-  }
-  char formatted[40] = {};
-  strftime(formatted, sizeof(formatted), "%Y-%m-%d %H:%M:%S %Z",
-           &localTime);
-  LOG.printf("[wake] time=%s reason=%s\n", formatted, reason.c_str());
-  return true;
-}
-
-bool ntpRefreshDue(bool coldBoot) {
-  const time_t now = time(nullptr);
-  return app_logic::refreshDue(
-      coldBoot, clockIsValid(), now, lastNtpSyncEpoch,
-      config::NTP_REFRESH_SECONDS);
-}
-
 bool archiveRefreshDue() {
   const time_t now = time(nullptr);
   return app_logic::refreshDue(
-      false, clockIsValid(), now, lastArchiveRefreshEpoch,
+      false, local_time::clockIsValid(), now, lastArchiveRefreshEpoch,
       config::ARCHIVE_REFRESH_SECONDS);
 }
 
@@ -427,11 +366,10 @@ void readSensors() {
       // A sensor left powered across deep sleep can occasionally miss the
       // first transaction. Reset the ESP32 I2C peripheral before retrying.
       Wire.end();
-      i2cReady = false;
+  hardware::resetI2cBus();
       delay(config::SENSOR_RETRY_DELAY_MS);
     }
-    i2cReady = Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
-    Wire.setClock(100000);
+    hardware::ensureI2cBus();
 
     if (sht4.begin(&Wire)) {
       sht4.setPrecision(SHT4X_HIGH_PRECISION);
@@ -453,19 +391,8 @@ void readSensors() {
   if (!climateValid) LOG.println("[sensor] SHT4x unavailable after retries");
 }
 
-bool ensureI2cBus() {
-  if (i2cReady) return true;
-  i2cReady = Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
-  if (!i2cReady) {
-    LOG.println("[rtc] could not initialize the I2C bus");
-    return false;
-  }
-  Wire.setClock(100000);
-  return true;
-}
-
 bool readAndLogHardwareRtc(pcf8563::Reading& stored) {
-  if (!ensureI2cBus()) return false;
+  if (!hardware::ensureI2cBus()) return false;
   String error;
   if (!pcf8563::readUtc(Wire, stored, error)) {
     LOG.printf("[rtc] PCF8563 read failed: %s\n", error.c_str());
@@ -479,7 +406,7 @@ bool readAndLogHardwareRtc(pcf8563::Reading& stored) {
 }
 
 void saveNtpTimeToHardwareRtc(time_t now) {
-  if (!ensureI2cBus()) return;
+  if (!hardware::ensureI2cBus()) return;
   String error;
   if (!pcf8563::writeUtc(Wire, now, error)) {
     LOG.printf("[rtc] PCF8563 NTP update failed: %s\n", error.c_str());
@@ -672,14 +599,6 @@ void renderStatus(const String& message, const String& detail = "",
   epaper.setTextFont(2);
   drawBadges();
   updatePanel();
-}
-
-void beep() {
-  pinMode(PIN_BUZZER, OUTPUT);
-  tone(PIN_BUZZER, 1000, 100);
-  delay(120);
-  noTone(PIN_BUZZER);
-  digitalWrite(PIN_BUZZER, LOW);
 }
 
 bool mountSd() {
@@ -1801,14 +1720,14 @@ void powerDownAndSleep(uint64_t sleepSeconds = config::SLEEP_SECONDS) {
   }
   LOG.flush();
   delay(50);
-  setStatusLed(false);
+  hardware::setStatusLed(false);
   esp_deep_sleep_start();
 }
 
 }  // namespace
 
 void setup() {
-  setStatusLed(true);
+  hardware::setStatusLed(true);
   const esp_sleep_wakeup_cause_t wakeCause = esp_sleep_get_wakeup_cause();
   const uint64_t wakePins = wakeCause == ESP_SLEEP_WAKEUP_EXT1
                                 ? esp_sleep_get_ext1_wakeup_status()
@@ -1826,12 +1745,12 @@ void setup() {
   const bool buttonWake = wakeCause == ESP_SLEEP_WAKEUP_EXT1;
   const bool timerWake = wakeCause == ESP_SLEEP_WAKEUP_TIMER;
 
-  configureLocalTimezone();
+  local_time::configureTimezone(config::TIMEZONE);
   LOG.begin(115200, SERIAL_8N1, PIN_LOG_RX, PIN_LOG_TX);
   if (app_logic::startupBeepRequired(coldBoot, buttonWake)) {
     // Acknowledge cold boots and button wakes immediately. Holding the green
     // button through this beep and the interval below requests a screenshot.
-    beep();
+    hardware::beep();
   }
 
   bool greenHeldLongEnough = false;
@@ -1870,12 +1789,12 @@ void setup() {
   if (screenshotRequested) {
     LOG.println("[screenshot] green-button long press requested export");
     delay(80);
-    beep();
+    hardware::beep();
   }
 
   const time_t startupTime = time(nullptr);
   const bool schedulingClockSuspicious =
-      !clockIsValid() ||
+      !local_time::clockIsValid() ||
       (lastNtpSyncEpoch > 0 && startupTime < lastNtpSyncEpoch) ||
       (lastArchiveRefreshEpoch > 0 &&
        startupTime < lastArchiveRefreshEpoch);
@@ -1886,16 +1805,16 @@ void setup() {
     restoreClockFromHardwareRtc();
   }
 
-  bool wakeEventLogged = logWakeEvent(wakeCause, wakePins, false);
-  const bool ntpDue = ntpRefreshDue(coldBoot);
+  bool wakeEventLogged = wake_report::logWakeEvent(wakeCause, wakePins, false);
+  const bool ntpDue = local_time::refreshDue(coldBoot, lastNtpSyncEpoch, config::NTP_REFRESH_SECONDS);
   struct tm localTime = {};
   {
-    const bool haveLocalClock = localClock(localTime);
+    const bool haveLocalClock = local_time::localClock(localTime);
     const bool quietNow = haveLocalClock && quietHoursActive(localTime);
     // archiveRefreshDue() needs a valid clock; guard the read so we don't
     // treat a bogus retained epoch as "maintenance overdue".
     const bool archiveDuePreSync =
-        sdReady && clockIsValid() && archiveRefreshDue();
+        sdReady && local_time::clockIsValid() && archiveRefreshDue();
     if (app_logic::suppressPreSyncForQuietHours(
             coldBoot, ntpDue, buttonWake, haveLocalClock, quietNow,
             archiveDuePreSync)) {
@@ -1999,9 +1918,9 @@ void setup() {
     LOG.println("[ntp] using PCF8563 fallback after synchronization failure");
     restoreClockFromHardwareRtc();
   }
-  configureLocalTimezone();
+  local_time::configureTimezone(config::TIMEZONE);
   if (!wakeEventLogged) {
-    logWakeEvent(wakeCause, wakePins, true);
+    wake_report::logWakeEvent(wakeCause, wakePins, true);
   }
 
   // Establish or repair the six-hour baseline only after NTP/PCF recovery.
@@ -2009,18 +1928,18 @@ void setup() {
   const time_t scheduleTime = time(nullptr);
   const time_t normalizedArchiveBaseline =
       static_cast<time_t>(app_logic::normalizeRefreshBaseline(
-          coldBoot, clockIsValid(), scheduleTime,
+          coldBoot, local_time::clockIsValid(), scheduleTime,
           lastArchiveRefreshEpoch));
   if (normalizedArchiveBaseline != lastArchiveRefreshEpoch) {
     lastArchiveRefreshEpoch = normalizedArchiveBaseline;
     LOG.println("[cache] archive maintenance scheduled in six hours");
   }
   const bool archiveDue = app_logic::archiveMaintenanceDue(
-      sdReady, timerWake, clockIsValid() && archiveRefreshDue());
+      sdReady, timerWake, local_time::clockIsValid() && archiveRefreshDue());
 
   bool inQuietHours = false;
   {
-    const bool haveLocalClock = localClock(localTime);
+    const bool haveLocalClock = local_time::localClock(localTime);
     const bool quietNow = haveLocalClock && quietHoursActive(localTime);
     if (app_logic::suppressPostSyncForQuietHours(
             coldBoot, buttonWake, haveLocalClock, quietNow, archiveDue)) {
@@ -2062,7 +1981,7 @@ void setup() {
     LOG.println("[cache] no usable local comic; trying one live refresh");
     networkAvailable = connectWifi();
     if (networkAvailable) {
-      if (ntpRefreshDue(coldBoot)) synchronizeClock();
+      if (local_time::refreshDue(coldBoot, lastNtpSyncEpoch, config::NTP_REFRESH_SECONDS)) synchronizeClock();
       acquired = acquireComic(true, comic, image, layout);
     }
   }
@@ -2072,7 +1991,7 @@ void setup() {
   disableWifi();
 
   uint64_t nextSleepSeconds = config::SLEEP_SECONDS;
-  if (localClock(localTime)) {
+  if (local_time::localClock(localTime)) {
     if (quietHoursActive(localTime) ||
         nextWakeFallsInQuietHours(localTime, config::SLEEP_SECONDS)) {
       quietSleepNotice = true;
@@ -2103,14 +2022,14 @@ void setup() {
         millis() + config::ARCHIVE_MAINTENANCE_DEADLINE_MS;
     if (connectWifi()) {
       refreshArchiveCache();
-      if (clockIsValid()) lastArchiveRefreshEpoch = time(nullptr);
+      if (local_time::clockIsValid()) lastArchiveRefreshEpoch = time(nullptr);
     } else if (maintenanceCancellationRequested()) {
       LOG.println("[cache] scheduled maintenance cancelled by button");
     } else {
       LOG.println("[cache] scheduled maintenance deferred: Wi-Fi unavailable");
     }
     const bool maintenanceWasCancelled = maintenanceCancellationRequested();
-    if (maintenanceWasCancelled && clockIsValid()) {
+    if (maintenanceWasCancelled && local_time::clockIsValid()) {
       // A user cancellation is intentional; do not retry maintenance on every
       // 15-minute timer wake.
       lastArchiveRefreshEpoch = time(nullptr);
@@ -2122,7 +2041,7 @@ void setup() {
     if (maintenanceWasCancelled) {
       LOG.println("[button] maintenance stopped; displaying another cached comic");
       if (!inQuietHours) {
-        beep();
+        hardware::beep();
         Comic replacement;
         RgbImage replacementImage;
         ImageLayout replacementLayout;
