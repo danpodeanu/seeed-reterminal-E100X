@@ -128,6 +128,155 @@ void test_failure_cache_boundary_at_one_hour() {
   TEST_ASSERT_FALSE(app_logic::cachedDataFresh(false, saved, saved, oneHour));
 }
 
+void test_qweather_response_code_accepts_only_200() {
+  TEST_ASSERT_TRUE(app_logic::qweatherResponseOk("200"));
+  TEST_ASSERT_FALSE(app_logic::qweatherResponseOk("201"));
+  TEST_ASSERT_FALSE(app_logic::qweatherResponseOk("2000"));
+  TEST_ASSERT_FALSE(app_logic::qweatherResponseOk("20"));
+  TEST_ASSERT_FALSE(app_logic::qweatherResponseOk(""));
+  TEST_ASSERT_FALSE(app_logic::qweatherResponseOk(nullptr));
+  // Guard against a permissive prefix match. The response code is a fixed
+  // 3-character decimal; trailing junk must not be accepted.
+  TEST_ASSERT_FALSE(app_logic::qweatherResponseOk("200x"));
+}
+
+void test_qweather_icon_maps_to_wmo_buckets() {
+  // Clear + partly cloudy pairs (day/night share the same downstream
+  // bucket because conditionName() does not distinguish).
+  TEST_ASSERT_EQUAL_INT(0, app_logic::qweatherIconToWmoCode(100));  // clear day
+  TEST_ASSERT_EQUAL_INT(0, app_logic::qweatherIconToWmoCode(150));  // clear night
+  TEST_ASSERT_EQUAL_INT(2, app_logic::qweatherIconToWmoCode(102));  // partly cloudy
+  TEST_ASSERT_EQUAL_INT(3, app_logic::qweatherIconToWmoCode(104));  // overcast
+
+  // Rain family stays in the WMO "Rain" bucket (61-67 or 80-82).
+  const int lightRain = app_logic::qweatherIconToWmoCode(305);
+  TEST_ASSERT_TRUE((lightRain >= 51 && lightRain <= 57) ||
+                   (lightRain >= 61 && lightRain <= 67) ||
+                   (lightRain >= 80 && lightRain <= 82));
+  const int heavyRain = app_logic::qweatherIconToWmoCode(307);
+  TEST_ASSERT_TRUE(heavyRain >= 61 && heavyRain <= 67);
+
+  // Thunderstorm.
+  const int thunder = app_logic::qweatherIconToWmoCode(302);
+  TEST_ASSERT_TRUE(thunder >= 95);
+
+  // Snow family stays in the WMO "Snow" bucket (71-77 or 85-86).
+  const int snow = app_logic::qweatherIconToWmoCode(401);
+  TEST_ASSERT_TRUE((snow >= 71 && snow <= 77) ||
+                   (snow >= 85 && snow <= 86));
+
+  // Fog / haze.
+  TEST_ASSERT_EQUAL_INT(45, app_logic::qweatherIconToWmoCode(501));
+
+  // Unknown / hot / cold return -1 so parseWeather can reject the payload.
+  TEST_ASSERT_EQUAL_INT(-1, app_logic::qweatherIconToWmoCode(900));
+  TEST_ASSERT_EQUAL_INT(-1, app_logic::qweatherIconToWmoCode(999));
+  TEST_ASSERT_EQUAL_INT(-1, app_logic::qweatherIconToWmoCode(-1));
+  TEST_ASSERT_EQUAL_INT(-1, app_logic::qweatherIconToWmoCode(12345));
+}
+
+void test_qweather_icon_night_flag_only_covers_150_range() {
+  TEST_ASSERT_TRUE(app_logic::qweatherIconIsNight(150));
+  TEST_ASSERT_TRUE(app_logic::qweatherIconIsNight(154));
+  TEST_ASSERT_FALSE(app_logic::qweatherIconIsNight(149));
+  TEST_ASSERT_FALSE(app_logic::qweatherIconIsNight(200));
+  TEST_ASSERT_FALSE(app_logic::qweatherIconIsNight(100));
+  // Rain / snow / fog codes always report as day (no paired night icon).
+  TEST_ASSERT_FALSE(app_logic::qweatherIconIsNight(305));
+  TEST_ASSERT_FALSE(app_logic::qweatherIconIsNight(501));
+}
+
+void test_rain_slot_threshold_is_shared_by_both_providers() {
+  constexpr float minMm = 0.1f;
+  constexpr int minProb = 30;
+  // Both thresholds cleared.
+  TEST_ASSERT_TRUE(app_logic::rainSlotQualifies(0.2f, 50, minMm, minProb));
+  // Boundary: mm exactly at threshold, probability exactly at threshold.
+  TEST_ASSERT_TRUE(app_logic::rainSlotQualifies(0.1f, 30, minMm, minProb));
+  // Below mm threshold: reject.
+  TEST_ASSERT_FALSE(app_logic::rainSlotQualifies(0.05f, 90, minMm, minProb));
+  // Below probability threshold: reject.
+  TEST_ASSERT_FALSE(app_logic::rainSlotQualifies(1.0f, 20, minMm, minProb));
+  // Missing probability (-1): accept, so slots without a `pop` field still
+  // trigger on liquid amount alone. This matches parseWeather behaviour.
+  TEST_ASSERT_TRUE(app_logic::rainSlotQualifies(0.5f, -1, minMm, minProb));
+  TEST_ASSERT_FALSE(app_logic::rainSlotQualifies(0.05f, -1, minMm, minProb));
+}
+
+void test_hex_decode_round_trips_known_bytes_and_rejects_bad_input() {
+  uint8_t buffer[8] = {};
+  // Valid 8-byte decode.
+  const size_t n = app_logic::decodeHex("00ff1234deadbeef", 16, buffer,
+                                        sizeof(buffer));
+  TEST_ASSERT_EQUAL_UINT(8u, n);
+  const uint8_t expected[8] = {0x00, 0xFF, 0x12, 0x34,
+                               0xDE, 0xAD, 0xBE, 0xEF};
+  TEST_ASSERT_EQUAL_MEMORY(expected, buffer, sizeof(expected));
+
+  // Uppercase and mixed case are accepted.
+  TEST_ASSERT_EQUAL_UINT(
+      1u, app_logic::decodeHex("aB", 2, buffer, sizeof(buffer)));
+  TEST_ASSERT_EQUAL_UINT8(0xAB, buffer[0]);
+
+  // Odd length rejected.
+  TEST_ASSERT_EQUAL_UINT(
+      0u, app_logic::decodeHex("abc", 3, buffer, sizeof(buffer)));
+  // Non-hex character rejected.
+  TEST_ASSERT_EQUAL_UINT(
+      0u, app_logic::decodeHex("gg", 2, buffer, sizeof(buffer)));
+  // Buffer too small rejected.
+  uint8_t tiny[1] = {0xAA};
+  TEST_ASSERT_EQUAL_UINT(0u, app_logic::decodeHex("1122", 4, tiny, 1));
+  TEST_ASSERT_EQUAL_UINT8(0xAA, tiny[0]);  // buffer must be untouched
+}
+
+void test_base64url_encodes_canonical_examples() {
+  char out[64] = {};
+  // RFC 4648 §10 examples, adapted to URL-safe alphabet without padding.
+  const uint8_t empty[1] = {0};
+  TEST_ASSERT_EQUAL_UINT(0u,
+      app_logic::encodeBase64Url(empty, 0, out, sizeof(out)));
+  TEST_ASSERT_EQUAL_STRING("", out);
+
+  TEST_ASSERT_EQUAL_UINT(2u, app_logic::encodeBase64Url(
+      reinterpret_cast<const uint8_t*>("f"), 1, out, sizeof(out)));
+  TEST_ASSERT_EQUAL_STRING("Zg", out);
+
+  TEST_ASSERT_EQUAL_UINT(3u, app_logic::encodeBase64Url(
+      reinterpret_cast<const uint8_t*>("fo"), 2, out, sizeof(out)));
+  TEST_ASSERT_EQUAL_STRING("Zm8", out);
+
+  TEST_ASSERT_EQUAL_UINT(4u, app_logic::encodeBase64Url(
+      reinterpret_cast<const uint8_t*>("foo"), 3, out, sizeof(out)));
+  TEST_ASSERT_EQUAL_STRING("Zm9v", out);
+
+  TEST_ASSERT_EQUAL_UINT(11u, app_logic::encodeBase64Url(
+      reinterpret_cast<const uint8_t*>("foobar!?"), 8, out, sizeof(out)));
+  // "foobar!?" uses the URL-safe '-' and '_' characters in the output.
+  TEST_ASSERT_EQUAL_STRING("Zm9vYmFyIT8", out);
+}
+
+void test_base64url_rejects_overflow_and_preserves_bytes() {
+  char small[3] = {'x', 'x', 'x'};
+  // "foo" needs 4 chars + NUL; a 3-char buffer must return 0 and leave
+  // the buffer alone.
+  TEST_ASSERT_EQUAL_UINT(0u, app_logic::encodeBase64Url(
+      reinterpret_cast<const uint8_t*>("foo"), 3, small, sizeof(small)));
+  TEST_ASSERT_EQUAL_UINT8('x', static_cast<uint8_t>(small[0]));
+}
+
+void test_jwt_lifetime_clamps_to_qweather_bounds() {
+  TEST_ASSERT_EQUAL_INT64(60, app_logic::clampJwtLifetime(0));
+  TEST_ASSERT_EQUAL_INT64(60, app_logic::clampJwtLifetime(-5));
+  TEST_ASSERT_EQUAL_INT64(60, app_logic::clampJwtLifetime(59));
+  TEST_ASSERT_EQUAL_INT64(60, app_logic::clampJwtLifetime(60));
+  TEST_ASSERT_EQUAL_INT64(300, app_logic::clampJwtLifetime(300));
+  TEST_ASSERT_EQUAL_INT64(24 * 60 * 60,
+      app_logic::clampJwtLifetime(24 * 60 * 60));
+  TEST_ASSERT_EQUAL_INT64(24 * 60 * 60,
+      app_logic::clampJwtLifetime(48 * 60 * 60));
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_startup_beep_only_for_cold_boot_and_button_wake);
@@ -140,5 +289,13 @@ int main(int, char**) {
   RUN_TEST(test_quiet_suppression_preserves_override_wakes);
   RUN_TEST(test_failure_window_uses_cache_only_when_clock_and_cache_are_valid);
   RUN_TEST(test_failure_cache_boundary_at_one_hour);
+  RUN_TEST(test_qweather_response_code_accepts_only_200);
+  RUN_TEST(test_qweather_icon_maps_to_wmo_buckets);
+  RUN_TEST(test_qweather_icon_night_flag_only_covers_150_range);
+  RUN_TEST(test_rain_slot_threshold_is_shared_by_both_providers);
+  RUN_TEST(test_hex_decode_round_trips_known_bytes_and_rejects_bad_input);
+  RUN_TEST(test_base64url_encodes_canonical_examples);
+  RUN_TEST(test_base64url_rejects_overflow_and_preserves_bytes);
+  RUN_TEST(test_jwt_lifetime_clamps_to_qweather_bounds);
   return UNITY_END();
 }

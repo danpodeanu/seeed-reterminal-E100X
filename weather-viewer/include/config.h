@@ -70,6 +70,16 @@ static_assert(QUIET_START_HOUR < 24 && QUIET_END_HOUR < 24,
 static_assert(QUIET_START_MINUTE < 60 && QUIET_END_MINUTE < 60,
               "Quiet-minute values must be between 0 and 59");
 
+// Weather data provider. Open-Meteo needs no API key and works out of the
+// box. QWeather (https://dev.qweather.com/) requires QWEATHER_API_KEY,
+// QWEATHER_API_HOST, and QWEATHER_LOCATION in secrets.h; see the examples
+// in secrets.h.example.
+enum class WeatherProvider {
+  OpenMeteo,
+  QWeather,
+};
+constexpr WeatherProvider WEATHER_PROVIDER = WeatherProvider::OpenMeteo;
+
 constexpr char CACHE_DIR[] = "/weather";
 constexpr char FORECAST_CACHE[] = "/weather/forecast.json";
 

@@ -57,6 +57,46 @@ constexpr double LATITUDE = 51.5074;
 constexpr double LONGITUDE = -0.1278;
 ```
 
+The same latitude / longitude are used regardless of which weather
+provider you pick below.
+
+### Choosing a weather provider
+
+Two providers are supported. Select one in `include/config.h`:
+
+```cpp
+constexpr WeatherProvider WEATHER_PROVIDER = WeatherProvider::OpenMeteo;
+// constexpr WeatherProvider WEATHER_PROVIDER = WeatherProvider::QWeather;
+```
+
+- **Open-Meteo** (default). No account, no key, no rate limit configuration
+  required. Works globally.
+- **QWeather** (和风天气). Requires a free QWeather developer account,
+  authenticated with JWT (EdDSA / Ed25519). Better coverage inside mainland
+  China. Sign up at <https://dev.qweather.com/>, create a project, create a
+  credential of type "JWT", and download the ed25519 private key PEM. Then
+  add to `include/secrets.h`:
+
+  ```cpp
+  #define QWEATHER_API_HOST "devapi.qweather.com"          // or your paid host
+  #define QWEATHER_JWT_SUB  "<your project id>"
+  #define QWEATHER_JWT_KID  "<your key id>"
+  #define QWEATHER_JWT_PRIVATE_KEY_HEX "<64 hex chars>"
+  ```
+
+  Extract the 32-byte ed25519 seed as 64 hex characters from the downloaded
+  PEM with:
+
+  ```bash
+  openssl pkey -in ed25519-private.pem -text -noout
+  ```
+
+  Copy the `priv:` bytes (removing colons and whitespace) into
+  `QWEATHER_JWT_PRIVATE_KEY_HEX`. The firmware generates a fresh JWT on
+  every fetch cycle using `rweather/Crypto` and sends it as
+  `Authorization: Bearer <jwt>`.
+
+
 The device also synchronizes its system clock after Wi-Fi connects. Configure
 the POSIX timezone and NTP servers in the same file:
 
