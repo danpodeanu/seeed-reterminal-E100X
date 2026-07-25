@@ -30,6 +30,7 @@
 #include "sd_card.h"
 #include "text_render.h"
 #include "quiet_hours.h"
+#include "sensors.h"
 #include "image_loader.h"
 #include "pcf8563_utc.h"
 #include "secrets.h"
@@ -93,21 +94,7 @@ Adafruit_SHT4x sht4;
 
 bool sdReady = false;
 std::vector<String> photoList;
-bool climateValid = false;
-float temperatureC = NAN;
-float humidityPct = NAN;
-float batteryVoltage = NAN;
-int batteryPct = -1;
-
-void readSensors() {
-  battery::measureBatteryFromAdc(PIN_BATTERY_ENABLE, PIN_BATTERY_ADC,
-                                 batteryVoltage, batteryPct);
-  LOG.printf("[sensor] battery %.3fV -> %d%%\n", batteryVoltage, batteryPct);
-  climateValid = climate::readSht4x(sht4, temperatureC, humidityPct,
-                                    config::SENSOR_READ_ATTEMPTS,
-                                    config::SENSOR_RETRY_DELAY_MS);
-  if (!climateValid) LOG.println("[sensor] SHT4x unavailable after retries");
-}
+sensors::Readings sensorReadings;
 
 RTC_DATA_ATTR time_t lastNtpSyncEpoch = 0;
 RTC_DATA_ATTR int32_t currentPhotoIndex = -1;
@@ -212,13 +199,13 @@ void drawStatusBadges() {
   const int edgeInset = config::ui(6);
   epaper.setTextDatum(ML_DATUM);
   const String climate =
-      climateValid
-          ? String(temperatureC, 1) + "C  " + String(humidityPct, 0) + "%"
+      sensorReadings.climateValid
+          ? String(sensorReadings.temperatureC, 1) + "C  " + String(sensorReadings.humidityPct, 0) + "%"
           : "--.-C  --%";
   epaper.drawString(climate, edgeInset, centerY, 1);
 
   const String battery =
-      batteryPct >= 0 ? String(batteryPct) + "%" : "--%";
+      sensorReadings.batteryPct >= 0 ? String(sensorReadings.batteryPct) + "%" : "--%";
   epaper.setTextDatum(MR_DATUM);
   epaper.drawString(battery, config::PANEL_WIDTH - edgeInset, centerY, 1);
   epaper.setFreeFont(nullptr);
@@ -619,7 +606,7 @@ void setup() {
   }
 
   if (coldBoot) {
-    readSensors();
+    sensors::readAll(PIN_BATTERY_ENABLE, PIN_BATTERY_ADC, sht4, config::SENSOR_READ_ATTEMPTS, config::SENSOR_RETRY_DELAY_MS, sensorReadings);
     if (!hardwareRtcCheckedEarly) {
       pcf8563::Reading storedRtc;
       rtc_sync::readAndLog(storedRtc);

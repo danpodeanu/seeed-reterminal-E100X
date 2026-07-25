@@ -32,6 +32,7 @@
 #include "sd_card.h"
 #include "text_render.h"
 #include "quiet_hours.h"
+#include "sensors.h"
 #include "pcf8563_utc.h"
 #include "screenshot_bmp.h"
 #include "timestamped_logger.h"
@@ -118,22 +119,8 @@ Adafruit_SHT4x sht4;
 
 bool sdReady = false;
 bool screenshotRequested = false;
-bool climateValid = false;
-float indoorTemperatureC = NAN;
-float indoorHumidityPct = NAN;
-float batteryVoltage = NAN;
-int batteryPct = -1;
+sensors::Readings sensorReadings;
 
-void readSensors() {
-  battery::measureBatteryFromAdc(PIN_BATTERY_ENABLE, PIN_BATTERY_ADC,
-                                 batteryVoltage, batteryPct);
-  LOG.printf("[sensor] battery %.3fV -> %d%%\n", batteryVoltage, batteryPct);
-  climateValid = climate::readSht4x(sht4, indoorTemperatureC,
-                                    indoorHumidityPct,
-                                    config::SENSOR_READ_ATTEMPTS,
-                                    config::SENSOR_RETRY_DELAY_MS);
-  if (!climateValid) LOG.println("[sensor] SHT4x unavailable after retries");
-}
 RTC_DATA_ATTR time_t lastNtpSyncEpoch = 0;
 bool quietSleepNotice = false;
 
@@ -269,13 +256,13 @@ void drawBadges(uint32_t background = PANEL_WHITE,
   const int edgeInset = config::ui(6);
   epaper.setTextDatum(ML_DATUM);
   String climate = "--.-C  --%";
-  if (climateValid) {
-    climate = String(indoorTemperatureC, 1) + "C  " +
-              String(indoorHumidityPct, 0) + "%";
+  if (sensorReadings.climateValid) {
+    climate = String(sensorReadings.temperatureC, 1) + "C  " +
+              String(sensorReadings.humidityPct, 0) + "%";
   }
   epaper.drawString(climate, edgeInset, statusCenterY, 1);
 
-  const String percent = batteryPct >= 0 ? String(batteryPct) + "%" : "--%";
+  const String percent = sensorReadings.batteryPct >= 0 ? String(sensorReadings.batteryPct) + "%" : "--%";
   const int w = config::ui(22);
   const int h = config::ui(12);
   const int terminalWidth = max(3, config::ui(5));
@@ -306,7 +293,7 @@ void drawBadges(uint32_t background = PANEL_WHITE,
       epaper.drawString(updateClock, updateRightX, timeY, 1);
     }
   }
-  text_render::drawBatteryGauge(epaper, x, y, w, h, batteryPct, outline,
+  text_render::drawBatteryGauge(epaper, x, y, w, h, sensorReadings.batteryPct, outline,
                                 terminalWidth, terminalHeight, PANEL_BLACK);
   epaper.setTextSize(1);
   epaper.setFreeFont(nullptr);
@@ -1087,7 +1074,7 @@ void setup() {
     return;
   }
 
-  readSensors();
+  sensors::readAll(PIN_BATTERY_ENABLE, PIN_BATTERY_ADC, sht4, config::SENSOR_READ_ATTEMPTS, config::SENSOR_RETRY_DELAY_MS, sensorReadings);
   if (coldBoot && !hardwareRtcCheckedEarly) {
     pcf8563::Reading storedRtc;
     rtc_sync::readAndLog(storedRtc);

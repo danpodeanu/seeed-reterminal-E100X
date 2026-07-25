@@ -34,6 +34,7 @@
 #include "text_render.h"
 #include "xkcd_index.h"
 #include "quiet_hours.h"
+#include "sensors.h"
 #include "dither.h"
 #include "image_loader.h"
 #include "pcf8563_utc.h"
@@ -104,21 +105,8 @@ Adafruit_SHT4x sht4;
 bool sdReady = false;
 bool sdCacheWritable = true;
 bool screenshotRequested = false;
-bool climateValid = false;
-float temperatureC = NAN;
-float humidityPct = NAN;
-float batteryVoltage = NAN;
-int batteryPct = -1;
+sensors::Readings sensorReadings;
 
-void readSensors() {
-  battery::measureBatteryFromAdc(PIN_BATTERY_ENABLE, PIN_BATTERY_ADC,
-                                 batteryVoltage, batteryPct);
-  LOG.printf("[sensor] battery %.3fV -> %d%%\n", batteryVoltage, batteryPct);
-  climateValid = climate::readSht4x(sht4, temperatureC, humidityPct,
-                                    config::SENSOR_READ_ATTEMPTS,
-                                    config::SENSOR_RETRY_DELAY_MS);
-  if (!climateValid) LOG.println("[sensor] SHT4x unavailable after retries");
-}
 bool cacheStatsAvailable = false;
 uint32_t cachedComicCountForDisplay = 0;
 uint32_t totalComicCountForDisplay = 0;
@@ -314,12 +302,12 @@ void drawBadges(uint32_t background = PANEL_WHITE,
   const int edgeInset = config::ui(6);
   epaper.setTextDatum(ML_DATUM);
   String climate = "--.-C  --%";
-  if (climateValid) {
-    climate = String(temperatureC, 1) + "C  " + String(humidityPct, 0) + "%";
+  if (sensorReadings.climateValid) {
+    climate = String(sensorReadings.temperatureC, 1) + "C  " + String(sensorReadings.humidityPct, 0) + "%";
   }
   epaper.drawString(climate, edgeInset, statusCenterY, 1);
 
-  String percent = batteryPct >= 0 ? String(batteryPct) + "%" : "--%";
+  String percent = sensorReadings.batteryPct >= 0 ? String(sensorReadings.batteryPct) + "%" : "--%";
 
   // Keep the whole battery group clear of the bezel. A fixed two-pixel optical
   // offset aligns the gauge with the percentage on the high-DPI E1003 without
@@ -352,7 +340,7 @@ void drawBadges(uint32_t background = PANEL_WHITE,
                           : "--",
                       statsRightX, lowerStatsY, 1);
   }
-  text_render::drawBatteryGauge(epaper, x, y, w, h, batteryPct, outline,
+  text_render::drawBatteryGauge(epaper, x, y, w, h, sensorReadings.batteryPct, outline,
                                 terminalWidth, terminalHeight, PANEL_BLACK);
 
   epaper.setFreeFont(nullptr);
@@ -1061,7 +1049,7 @@ void setup() {
   }
 
   randomSeed(esp_random());
-  readSensors();
+  sensors::readAll(PIN_BATTERY_ENABLE, PIN_BATTERY_ADC, sht4, config::SENSOR_READ_ATTEMPTS, config::SENSOR_RETRY_DELAY_MS, sensorReadings);
 
   if (coldBoot && !hardwareRtcCheckedEarly) {
     pcf8563::Reading storedRtc;
