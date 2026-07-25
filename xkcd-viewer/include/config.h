@@ -96,6 +96,6 @@ constexpr char XKCD_LATEST_URL[] = "https://xkcd.com/info.0.json";
 // selection short-circuits random picking and loads that specific comic
 // straight from the local cache. Intended for reproducing a render-path
 // hang on a known-bad comic; leave at 0 for normal operation.
-constexpr int DEBUG_FORCE_COMIC = 1741;
+constexpr int DEBUG_FORCE_COMIC = 0;
 
 }  // namespace config
