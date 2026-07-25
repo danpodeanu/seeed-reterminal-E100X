@@ -1,6 +1,5 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
-#include <Ed25519.h>
 #include <HTTPClient.h>
 #include <SD.h>
 #include <SPI.h>
@@ -20,25 +19,11 @@
 #include "config.h"
 #include "secrets.h"
 #include "app_logic.h"
+#include "app_logger.h"
 #include "pcf8563_utc.h"
 #include "timestamped_logger.h"
-
-// Provide safe defaults for QWeather secrets so the firmware still compiles
-// when the user's secrets.h omits them (they are only needed when
-// config::WEATHER_PROVIDER is set to QWeather). Missing credentials are
-// caught at runtime with a descriptive log line.
-#ifndef QWEATHER_API_HOST
-#define QWEATHER_API_HOST "devapi.qweather.com"
-#endif
-#ifndef QWEATHER_JWT_SUB
-#define QWEATHER_JWT_SUB ""
-#endif
-#ifndef QWEATHER_JWT_KID
-#define QWEATHER_JWT_KID ""
-#endif
-#ifndef QWEATHER_JWT_PRIVATE_KEY_HEX
-#define QWEATHER_JWT_PRIVATE_KEY_HEX ""
-#endif
+#include "weather_data.h"
+#include "weather_provider.h"
 
 #if RETERMINAL_MODEL == 1003
 #include "fonts/Roboto_Bold90pt7b.h"
@@ -53,6 +38,10 @@ SET_LOOP_TASK_STACK_SIZE(16U * 1024U);
 #ifndef EPAPER_ENABLE
 #error "Seeed_GFX did not select a reTerminal E-series driver; check src/driver.h"
 #endif
+
+TimestampedLogger appLog(Serial1);
+// LOG is provided by app_logger.h; the definition above lives at namespace
+// scope so the provider translation units can extern-link to it.
 
 namespace {
 
@@ -84,9 +73,6 @@ constexpr int PIN_I2C_SDA = 19;
 constexpr int PIN_I2C_SCL = 20;
 constexpr int PIN_LOG_RX = 44;
 constexpr int PIN_LOG_TX = 43;
-
-TimestampedLogger appLog(Serial1);
-#define LOG appLog
 
 void setStatusLed(bool on) {
   pinMode(PIN_STATUS_LED, OUTPUT);
@@ -166,32 +152,8 @@ volatile bool ntpSyncCompleted = false;
 RTC_DATA_ATTR time_t lastNtpSyncEpoch = 0;
 bool quietSleepNotice = false;
 
-struct DailyForecast {
-  String date;
-  int weatherCode = -1;
-  float minimumC = NAN;
-  float maximumC = NAN;
-  float uvMaximum = NAN;
-  int precipitationProbability = -1;
-};
-
-struct WeatherData {
-  bool valid = false;
-  bool fromCache = false;
-  bool rainTimingAvailable = false;
-  bool rainExpected = false;
-  String updateTime;
-  String nextRainTime;
-  float temperatureC = NAN;
-  float apparentC = NAN;
-  float humidityPct = NAN;
-  float windKmh = NAN;
-  float nextRainMm = NAN;
-  int nextRainProbability = -1;
-  int weatherCode = -1;
-  bool isDay = true;
-  DailyForecast days[config::FORECAST_DAYS];
-};
+// WeatherData / DailyForecast now live in weather_data.h so both the
+// provider translation units and main.cpp share one definition.
 
 bool clockIsValid() {
   return time(nullptr) >= 1700000000;
@@ -959,314 +921,11 @@ bool synchronizeClock() {
   return true;
 }
 
-String forecastUrlOpenMeteo() {
-  String url =
-      "https://api.open-meteo.com/v1/forecast?latitude=";
-  url += String(config::LATITUDE, 4);
-  url += "&longitude=";
-  url += String(config::LONGITUDE, 4);
-  url +=
-      "&current=temperature_2m,relative_humidity_2m,apparent_temperature,"
-      "is_day,weather_code,wind_speed_10m"
-      "&hourly=precipitation_probability,precipitation,rain,showers"
-      "&daily=weather_code,temperature_2m_max,temperature_2m_min,"
-      "uv_index_max,precipitation_probability_max"
-      "&temperature_unit=celsius&wind_speed_unit=kmh&timezone=auto"
-      "&forecast_hours=";
-  url += String(config::RAIN_FORECAST_HOURS);
-  url += "&forecast_days=";
-  url += String(config::FORECAST_DAYS);
-  return url;
-}
-
-bool parseWeatherOpenMeteo(const String& body, WeatherData& weather) {
-  JsonDocument document;
-  const DeserializationError error = deserializeJson(document, body);
-  if (error) {
-    LOG.printf("[weather] JSON: %s\n", error.c_str());
-    return false;
-  }
-  if (document["error"] | false) {
-    LOG.printf("[weather] API error: %s\n",
-               String(document["reason"] | "unknown").c_str());
-    return false;
-  }
-  JsonObject current = document["current"];
-  JsonObject daily = document["daily"];
-  JsonArray dates = daily["time"];
-  JsonArray codes = daily["weather_code"];
-  JsonArray maxima = daily["temperature_2m_max"];
-  JsonArray minima = daily["temperature_2m_min"];
-  JsonArray uv = daily["uv_index_max"];
-  JsonArray rain = daily["precipitation_probability_max"];
-  if (current.isNull() || dates.size() < config::FORECAST_DAYS ||
-      codes.size() < config::FORECAST_DAYS ||
-      maxima.size() < config::FORECAST_DAYS ||
-      minima.size() < config::FORECAST_DAYS ||
-      uv.size() < config::FORECAST_DAYS ||
-      rain.size() < config::FORECAST_DAYS) {
-    LOG.println("[weather] response is missing required fields");
-    return false;
-  }
-
-  weather.temperatureC = current["temperature_2m"] | NAN;
-  weather.apparentC = current["apparent_temperature"] | NAN;
-  weather.humidityPct = current["relative_humidity_2m"] | NAN;
-  weather.windKmh = current["wind_speed_10m"] | NAN;
-  weather.weatherCode = current["weather_code"] | -1;
-  weather.isDay = (current["is_day"] | 1) != 0;
-  weather.updateTime = String(current["time"] | "");
-  weather.rainTimingAvailable = false;
-  weather.rainExpected = false;
-  weather.nextRainTime = "";
-  weather.nextRainMm = NAN;
-  weather.nextRainProbability = -1;
-
-  for (uint8_t i = 0; i < config::FORECAST_DAYS; ++i) {
-    weather.days[i].date = String(dates[i] | "");
-    weather.days[i].weatherCode = codes[i] | -1;
-    weather.days[i].maximumC = maxima[i] | NAN;
-    weather.days[i].minimumC = minima[i] | NAN;
-    weather.days[i].uvMaximum = uv[i] | NAN;
-    weather.days[i].precipitationProbability = rain[i] | -1;
-  }
-
-  JsonObject hourly = document["hourly"];
-  JsonArray hourlyTimes = hourly["time"];
-  JsonArray hourlyProbability = hourly["precipitation_probability"];
-  JsonArray hourlyPrecipitation = hourly["precipitation"];
-  JsonArray hourlyRain = hourly["rain"];
-  JsonArray hourlyShowers = hourly["showers"];
-  const size_t hourlyCount =
-      min(hourlyTimes.size(), hourlyPrecipitation.size());
-  if (!hourly.isNull() && hourlyCount > 0) {
-    weather.rainTimingAvailable = true;
-    for (size_t i = 0; i < hourlyCount; ++i) {
-      const String slotTime = String(hourlyTimes[i] | "");
-      if (slotTime.isEmpty() ||
-          (!weather.updateTime.isEmpty() &&
-           strcmp(slotTime.c_str(), weather.updateTime.c_str()) <= 0)) {
-        continue;
-      }
-
-      const float precipitation = hourlyPrecipitation[i] | 0.0f;
-      const float rainAmount =
-          i < hourlyRain.size() ? hourlyRain[i] | 0.0f : 0.0f;
-      const float showerAmount =
-          i < hourlyShowers.size() ? hourlyShowers[i] | 0.0f : 0.0f;
-      const float liquidRain =
-          max(precipitation, rainAmount + showerAmount);
-      const int probability =
-          i < hourlyProbability.size() && !hourlyProbability[i].isNull()
-              ? hourlyProbability[i].as<int>()
-              : -1;
-      if (app_logic::rainSlotQualifies(
-              liquidRain, probability, config::RAIN_START_THRESHOLD_MM,
-              config::RAIN_PROBABILITY_THRESHOLD)) {
-        weather.rainExpected = true;
-        weather.nextRainTime = slotTime;
-        weather.nextRainMm = liquidRain;
-        weather.nextRainProbability = probability;
-        break;
-      }
-    }
-  }
-
-  weather.valid = isfinite(weather.temperatureC) &&
-                  isfinite(weather.apparentC) &&
-                  isfinite(weather.humidityPct) &&
-                  weather.weatherCode >= 0;
-  if (!weather.valid) {
-    LOG.println("[weather] current values are invalid");
-    return false;
-  }
-  LOG.printf("[weather] %.1fC, feels %.1fC, %.0f%% RH, code=%d\n",
-             weather.temperatureC, weather.apparentC, weather.humidityPct,
-             weather.weatherCode);
-  if (weather.rainExpected) {
-    LOG.printf("[weather] next rain around %s, %.1fmm, probability=%d%%\n",
-               weather.nextRainTime.c_str(), weather.nextRainMm,
-               weather.nextRainProbability);
-  } else if (weather.rainTimingAvailable) {
-    LOG.printf("[weather] no qualifying rain in the next %u hours\n",
-               config::RAIN_FORECAST_HOURS);
-  } else {
-    LOG.println("[weather] hourly rain timing unavailable");
-  }
-  return true;
-}
-
-String qweatherEndpointUrl(const char* path) {
-  String url = "https://";
-  url += QWEATHER_API_HOST;
-  url += path;
-  // QWeather accepts either a LocationID or "longitude,latitude" (longitude
-  // first, comma-separated, at most two decimals). Reuse the single
-  // config::LATITUDE / LONGITUDE that Open-Meteo also uses.
-  url += "?location=";
-  url += String(config::LONGITUDE, 2);
-  url += ",";
-  url += String(config::LATITUDE, 2);
-  url += "&unit=m";
-  return url;
-}
-
-// QWeather returns "YYYY-MM-DDTHH:MM+HH:MM" timestamps (no seconds field).
-// Normalize to "YYYY-MM-DDTHH:MM:SS" so parseLocalTimestamp() accepts them
-// and slot-vs-observation string comparisons stay consistent.
-String normalizeQWeatherTimestamp(const char* raw) {
-  if (raw == nullptr) return String();
-  String value(raw);
-  const int plus = value.indexOf('+');
-  const int minus = value.lastIndexOf('-');
-  int cut = -1;
-  if (plus >= 10) {
-    cut = plus;                 // drop "+HH:MM"
-  } else if (minus > 10) {
-    cut = minus;                // drop "-HH:MM" (do not truncate date dashes)
-  } else if (value.endsWith("Z")) {
-    cut = value.length() - 1;
-  }
-  if (cut > 0) value.remove(cut);
-  // If seconds are missing (length is exactly "YYYY-MM-DDTHH:MM"), append.
-  if (value.length() == 16 && value.charAt(13) == ':') {
-    value += ":00";
-  }
-  return value;
-}
-
-float parseQWeatherFloat(const char* text) {
-  if (text == nullptr || *text == '\0') return NAN;
-  char* end = nullptr;
-  const float value = strtof(text, &end);
-  if (end == text) return NAN;
-  return value;
-}
-
-int parseQWeatherInt(const char* text, int fallback) {
-  if (text == nullptr || *text == '\0') return fallback;
-  char* end = nullptr;
-  const long value = strtol(text, &end, 10);
-  if (end == text) return fallback;
-  return static_cast<int>(value);
-}
-
-bool parseWeatherQWeather(const String& body, WeatherData& weather) {
-  JsonDocument document;
-  const DeserializationError error = deserializeJson(document, body);
-  if (error) {
-    LOG.printf("[weather] JSON: %s\n", error.c_str());
-    return false;
-  }
-  JsonObject nowEnv = document["now_env"];
-  JsonObject dailyEnv = document["daily_env"];
-  JsonObject hourlyEnv = document["hourly_env"];
-  if (nowEnv.isNull() || dailyEnv.isNull() || hourlyEnv.isNull()) {
-    LOG.println("[weather] QWeather envelope missing");
-    return false;
-  }
-  const char* nowCode = nowEnv["code"] | "";
-  const char* dailyCode = dailyEnv["code"] | "";
-  const char* hourlyCode = hourlyEnv["code"] | "";
-  if (!app_logic::qweatherResponseOk(nowCode) ||
-      !app_logic::qweatherResponseOk(dailyCode) ||
-      !app_logic::qweatherResponseOk(hourlyCode)) {
-    LOG.printf("[weather] QWeather codes now=%s daily=%s hourly=%s\n",
-               nowCode, dailyCode, hourlyCode);
-    return false;
-  }
-
-  JsonObject now = nowEnv["now"];
-  JsonArray daily = dailyEnv["daily"];
-  JsonArray hourly = hourlyEnv["hourly"];
-  if (now.isNull() || daily.size() < config::FORECAST_DAYS) {
-    LOG.println("[weather] QWeather payload missing fields");
-    return false;
-  }
-
-  weather.temperatureC = parseQWeatherFloat(now["temp"] | "");
-  weather.apparentC = parseQWeatherFloat(now["feelsLike"] | "");
-  weather.humidityPct = parseQWeatherFloat(now["humidity"] | "");
-  weather.windKmh = parseQWeatherFloat(now["windSpeed"] | "");
-  const int nowIcon = parseQWeatherInt(now["icon"] | "", -1);
-  weather.weatherCode = app_logic::qweatherIconToWmoCode(nowIcon);
-  weather.isDay = !app_logic::qweatherIconIsNight(nowIcon);
-  weather.updateTime = normalizeQWeatherTimestamp(now["obsTime"] | "");
-  weather.rainTimingAvailable = false;
-  weather.rainExpected = false;
-  weather.nextRainTime = "";
-  weather.nextRainMm = NAN;
-  weather.nextRainProbability = -1;
-
-  for (uint8_t i = 0; i < config::FORECAST_DAYS; ++i) {
-    JsonObject day = daily[i];
-    weather.days[i].date = String(day["fxDate"] | "");
-    const int iconDay = parseQWeatherInt(day["iconDay"] | "", -1);
-    weather.days[i].weatherCode = app_logic::qweatherIconToWmoCode(iconDay);
-    weather.days[i].maximumC = parseQWeatherFloat(day["tempMax"] | "");
-    weather.days[i].minimumC = parseQWeatherFloat(day["tempMin"] | "");
-    weather.days[i].uvMaximum = parseQWeatherFloat(day["uvIndex"] | "");
-    // 7d does not expose a probability field; leave it as unknown.
-    weather.days[i].precipitationProbability = -1;
-  }
-
-  if (hourly.size() > 0) {
-    weather.rainTimingAvailable = true;
-    const size_t limit =
-        min(static_cast<size_t>(config::RAIN_FORECAST_HOURS),
-            hourly.size());
-    for (size_t i = 0; i < limit; ++i) {
-      JsonObject slot = hourly[i];
-      const String slotTime = normalizeQWeatherTimestamp(slot["fxTime"] | "");
-      if (slotTime.isEmpty() ||
-          (!weather.updateTime.isEmpty() &&
-           strcmp(slotTime.c_str(), weather.updateTime.c_str()) <= 0)) {
-        continue;
-      }
-      const float precipitation =
-          parseQWeatherFloat(slot["precip"] | "0");
-      const int probability = parseQWeatherInt(slot["pop"] | "", -1);
-      if (app_logic::rainSlotQualifies(
-              precipitation, probability, config::RAIN_START_THRESHOLD_MM,
-              config::RAIN_PROBABILITY_THRESHOLD)) {
-        weather.rainExpected = true;
-        weather.nextRainTime = slotTime;
-        weather.nextRainMm = precipitation;
-        weather.nextRainProbability = probability;
-        break;
-      }
-    }
-  }
-
-  weather.valid = isfinite(weather.temperatureC) &&
-                  isfinite(weather.apparentC) &&
-                  isfinite(weather.humidityPct) &&
-                  weather.weatherCode >= 0;
-  if (!weather.valid) {
-    LOG.println("[weather] QWeather values are invalid");
-    return false;
-  }
-  LOG.printf("[weather] %.1fC, feels %.1fC, %.0f%% RH, code=%d\n",
-             weather.temperatureC, weather.apparentC, weather.humidityPct,
-             weather.weatherCode);
-  if (weather.rainExpected) {
-    LOG.printf("[weather] next rain around %s, %.1fmm, probability=%d%%\n",
-               weather.nextRainTime.c_str(), weather.nextRainMm,
-               weather.nextRainProbability);
-  } else if (weather.rainTimingAvailable) {
-    LOG.printf("[weather] no qualifying rain in the next %u hours\n",
-               config::RAIN_FORECAST_HOURS);
-  } else {
-    LOG.println("[weather] hourly rain timing unavailable");
-  }
-  return true;
-}
-
 bool parseWeather(const String& body, WeatherData& weather) {
   if (config::WEATHER_PROVIDER == config::WeatherProvider::QWeather) {
-    return parseWeatherQWeather(body, weather);
+    return weather_provider::parseQWeather(body, weather);
   }
-  return parseWeatherOpenMeteo(body, weather);
+  return weather_provider::parseOpenMeteo(body, weather);
 }
 
 const char* weatherProviderName() {
@@ -1275,283 +934,14 @@ const char* weatherProviderName() {
              : "Open-Meteo";
 }
 
-// Build a QWeather JWT (EdDSA / Ed25519) suitable for the Authorization
-// Bearer header. Reads QWEATHER_JWT_KID, QWEATHER_JWT_SUB, and
-// QWEATHER_JWT_PRIVATE_KEY_HEX from the compilation environment. Returns
-// true on success; on failure, `failureReason` is populated and `jwt` is
-// left empty.
-bool buildQWeatherJwt(String& jwt, String& failureReason) {
-  jwt = "";
-  const char* kid = QWEATHER_JWT_KID;
-  const char* sub = QWEATHER_JWT_SUB;
-  const char* privateKeyHex = QWEATHER_JWT_PRIVATE_KEY_HEX;
-  if (kid[0] == '\0' || sub[0] == '\0' || privateKeyHex[0] == '\0') {
-    failureReason = "QWeather credentials are not configured";
-    LOG.println(
-        "[weather] QWeather selected but JWT_KID / JWT_SUB / "
-        "JWT_PRIVATE_KEY_HEX is empty");
-    return false;
-  }
-  uint8_t privateKey[32];
-  const size_t decoded = app_logic::decodeHex(
-      privateKeyHex, strlen(privateKeyHex), privateKey, sizeof(privateKey));
-  if (decoded != sizeof(privateKey)) {
-    failureReason = "QWeather private key is not 32 bytes of hex";
-    LOG.println("[weather] QWEATHER_JWT_PRIVATE_KEY_HEX is not 64 hex chars");
-    return false;
-  }
-
-  const time_t now = time(nullptr);
-  if (now < 1700000000) {
-    failureReason = "Clock is not set; cannot sign JWT";
-    LOG.println("[weather] JWT would use a clock that is not NTP-synced");
-    return false;
-  }
-  const int64_t lifetime = app_logic::clampJwtLifetime(15 * 60);  // 15 min
-  // Back-date iat by 30 seconds so a small clock skew relative to QWeather
-  // does not cause "token not yet valid" rejections.
-  const int64_t iat = static_cast<int64_t>(now) - 30;
-  const int64_t exp = iat + lifetime;
-
-  // Header (compact JSON, deterministic key order).
-  String headerJson;
-  headerJson.reserve(64);
-  headerJson = "{\"alg\":\"EdDSA\",\"kid\":\"";
-  headerJson += kid;
-  headerJson += "\"}";
-  String payloadJson;
-  payloadJson.reserve(80);
-  payloadJson = "{\"sub\":\"";
-  payloadJson += sub;
-  payloadJson += "\",\"iat\":";
-  payloadJson += String(static_cast<long long>(iat));
-  payloadJson += ",\"exp\":";
-  payloadJson += String(static_cast<long long>(exp));
-  payloadJson += "}";
-
-  char encodedHeader[128] = {};
-  char encodedPayload[128] = {};
-  const size_t headerLen = app_logic::encodeBase64Url(
-      reinterpret_cast<const uint8_t*>(headerJson.c_str()),
-      headerJson.length(), encodedHeader, sizeof(encodedHeader));
-  const size_t payloadLen = app_logic::encodeBase64Url(
-      reinterpret_cast<const uint8_t*>(payloadJson.c_str()),
-      payloadJson.length(), encodedPayload, sizeof(encodedPayload));
-  if (headerLen == 0 || payloadLen == 0) {
-    failureReason = "JWT encoding failed";
-    LOG.println("[weather] base64url encoding overflowed a JWT buffer");
-    return false;
-  }
-
-  String signingInput;
-  signingInput.reserve(headerLen + 1 + payloadLen);
-  signingInput = encodedHeader;
-  signingInput += ".";
-  signingInput += encodedPayload;
-
-  uint8_t publicKey[32];
-  Ed25519::derivePublicKey(publicKey, privateKey);
-  uint8_t signature[64];
-  Ed25519::sign(signature, privateKey, publicKey,
-                reinterpret_cast<const uint8_t*>(signingInput.c_str()),
-                signingInput.length());
-
-  char encodedSignature[128] = {};
-  const size_t sigLen = app_logic::encodeBase64Url(
-      signature, sizeof(signature), encodedSignature,
-      sizeof(encodedSignature));
-  if (sigLen == 0) {
-    failureReason = "JWT signature encoding failed";
-    return false;
-  }
-
-  jwt.reserve(signingInput.length() + 1 + sigLen);
-  jwt = signingInput;
-  jwt += ".";
-  jwt += encodedSignature;
-  return true;
-}
-
-// Perform one QWeather HTTP GET and return the raw response body. The
-// HTTPClient is reset per call because reusing it across TLS hosts can leak
-// state; three sequential calls fit comfortably in the timeout budget.
-bool fetchQWeatherEndpoint(const String& url, const String& bearerToken,
-                           String& body, String& failureReason,
-                           bool bypassHttpCache) {
-  body = "";
-  WiFiClientSecure client;
-  client.setInsecure();
-  client.setTimeout(config::HTTP_TIMEOUT_MS);
-  HTTPClient http;
-  http.setConnectTimeout(config::HTTP_TIMEOUT_MS);
-  http.setTimeout(config::HTTP_TIMEOUT_MS);
-  http.setReuse(false);
-  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
-  if (!http.begin(client, url)) {
-    LOG.println("[weather] could not start QWeather request");
-    failureReason = "Could not start weather request";
-    return false;
-  }
-  http.addHeader("Authorization", "Bearer " + bearerToken);
-  http.addHeader("Accept-Encoding", "identity");
-  if (bypassHttpCache) {
-    http.addHeader("Cache-Control", "no-cache, no-store");
-    http.addHeader("Pragma", "no-cache");
-  }
-  const int status = http.GET();
-  if (status != HTTP_CODE_OK) {
-    LOG.printf("[weather] QWeather HTTP GET -> %d\n", status);
-    http.end();
-    failureReason = "Weather service returned an error";
-    return false;
-  }
-  constexpr int kMaxResponseBytes = 128 * 1024;
-  const int declaredSize = http.getSize();
-  if (declaredSize > kMaxResponseBytes) {
-    LOG.printf("[weather] response too large: %d bytes\n", declaredSize);
-    http.end();
-    failureReason = "Weather response is too large";
-    return false;
-  }
-  body = http.getString();
-  http.end();
-  if (static_cast<int>(body.length()) > kMaxResponseBytes) {
-    LOG.printf("[weather] streamed response too large: %u bytes\n",
-               static_cast<unsigned>(body.length()));
-    body = "";
-    failureReason = "Weather response is too large";
-    return false;
-  }
-  return true;
-}
-
-bool fetchWeatherQWeather(WeatherData& weather, String& responseBody,
-                          String& failureReason, bool bypassHttpCache) {
-  responseBody = "";
-  failureReason = "";
-  String bearerToken;
-  if (!buildQWeatherJwt(bearerToken, failureReason)) {
-    return false;
-  }
-  if (bypassHttpCache) {
-    LOG.println("[weather] button wake: forcing live API refresh");
-  }
-  String nowBody;
-  String dailyBody;
-  String hourlyBody;
-  if (!fetchQWeatherEndpoint(qweatherEndpointUrl("/v7/weather/now"),
-                             bearerToken, nowBody, failureReason,
-                             bypassHttpCache)) {
-    return false;
-  }
-  if (!fetchQWeatherEndpoint(qweatherEndpointUrl("/v7/weather/7d"),
-                             bearerToken, dailyBody, failureReason,
-                             bypassHttpCache)) {
-    return false;
-  }
-  if (!fetchQWeatherEndpoint(qweatherEndpointUrl("/v7/weather/24h"),
-                             bearerToken, hourlyBody, failureReason,
-                             bypassHttpCache)) {
-    return false;
-  }
-  responseBody.reserve(nowBody.length() + dailyBody.length() +
-                       hourlyBody.length() + 64);
-  responseBody = "{\"now_env\":";
-  responseBody += nowBody;
-  responseBody += ",\"daily_env\":";
-  responseBody += dailyBody;
-  responseBody += ",\"hourly_env\":";
-  responseBody += hourlyBody;
-  responseBody += "}";
-  constexpr int kMaxEnvelopeBytes = 384 * 1024;
-  if (static_cast<int>(responseBody.length()) > kMaxEnvelopeBytes) {
-    LOG.printf("[weather] stitched envelope too large: %u bytes\n",
-               static_cast<unsigned>(responseBody.length()));
-    responseBody = "";
-    failureReason = "Weather response is too large";
-    return false;
-  }
-  LOG.printf("[weather] received %u bytes from QWeather (stitched)\n",
-             static_cast<unsigned>(responseBody.length()));
-  weather.fromCache = false;
-  if (!parseWeatherQWeather(responseBody, weather)) {
-    failureReason = "Weather service returned invalid data";
-    return false;
-  }
-  return true;
-}
-
-
-bool fetchWeatherOpenMeteo(WeatherData& weather, String& responseBody,
-                           String& failureReason, bool bypassHttpCache) {
-  responseBody = "";
-  failureReason = "";
-  WiFiClientSecure client;
-  client.setInsecure();
-  client.setTimeout(config::HTTP_TIMEOUT_MS);
-  HTTPClient http;
-  http.setConnectTimeout(config::HTTP_TIMEOUT_MS);
-  http.setTimeout(config::HTTP_TIMEOUT_MS);
-  http.setReuse(false);
-  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
-  const String url = forecastUrlOpenMeteo();
-  if (!http.begin(client, url)) {
-    LOG.println("[weather] could not start HTTPS request");
-    failureReason = "Could not start weather request";
-    return false;
-  }
-  if (bypassHttpCache) {
-    http.addHeader("Cache-Control", "no-cache, no-store");
-    http.addHeader("Pragma", "no-cache");
-    LOG.println("[weather] button wake: forcing live API refresh");
-  }
-  const int status = http.GET();
-  if (status != HTTP_CODE_OK) {
-    LOG.printf("[weather] HTTP GET -> %d\n", status);
-    http.end();
-    failureReason = "Weather service returned an error";
-    return false;
-  }
-  // Reject an implausibly large body before letting http.getString() load it
-  // all into heap. Well-formed Open-Meteo responses for this query are well
-  // under 100 KiB; a runaway redirect loop or a malformed proxy could easily
-  // exhaust the ~320 KiB ESP32 heap otherwise.
-  constexpr int kMaxResponseBytes = 256 * 1024;
-  const int declaredSize = http.getSize();
-  if (declaredSize > kMaxResponseBytes) {
-    LOG.printf("[weather] response too large: %d bytes\n", declaredSize);
-    http.end();
-    failureReason = "Weather response is too large";
-    return false;
-  }
-  responseBody = http.getString();
-  if (static_cast<int>(responseBody.length()) > kMaxResponseBytes) {
-    LOG.printf("[weather] streamed response too large: %u bytes\n",
-               static_cast<unsigned>(responseBody.length()));
-    responseBody = "";
-    http.end();
-    failureReason = "Weather response is too large";
-    return false;
-  }
-  http.end();
-  LOG.printf("[weather] received %u bytes from Open-Meteo\n",
-             static_cast<unsigned>(responseBody.length()));
-  weather.fromCache = false;
-  if (!parseWeatherOpenMeteo(responseBody, weather)) {
-    failureReason = "Weather service returned invalid data";
-    return false;
-  }
-  return true;
-}
-
 bool fetchWeather(WeatherData& weather, String& responseBody,
                   String& failureReason, bool bypassHttpCache = false) {
   if (config::WEATHER_PROVIDER == config::WeatherProvider::QWeather) {
-    return fetchWeatherQWeather(weather, responseBody, failureReason,
-                                bypassHttpCache);
+    return weather_provider::fetchQWeather(weather, responseBody,
+                                           failureReason, bypassHttpCache);
   }
-  return fetchWeatherOpenMeteo(weather, responseBody, failureReason,
-                               bypassHttpCache);
+  return weather_provider::fetchOpenMeteo(weather, responseBody,
+                                          failureReason, bypassHttpCache);
 }
 
 bool loadCachedWeather(WeatherData& weather, String& failureReason,
