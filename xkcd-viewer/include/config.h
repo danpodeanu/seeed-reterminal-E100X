@@ -51,6 +51,15 @@ constexpr uint32_t SCREENSHOT_LONG_PRESS_MS = 1500;
 constexpr uint32_t BUTTON_RELEASE_DEBOUNCE_MS = 40;
 constexpr size_t MAX_IMAGE_BYTES = 6U * 1024U * 1024U;
 constexpr size_t MAX_LIVE_IMAGE_BYTES = 2U * 1024U * 1024U;
+// Reject comics whose decoded source or rendered target would blow past a
+// safe pixel budget. RGB888 decode uses w*h*3 bytes, resize target uses
+// w*h bytes; both compete for the 8 MB PSRAM. 2.5 M source pixels caps
+// the decode buffer at ~7.5 MB. The render cap is the full panel — the
+// layout math never intentionally exceeds it, so anything larger is a
+// bug or pathological aspect ratio and we'd rather skip than allocate.
+constexpr size_t MAX_DECODED_PIXELS = 2500000U;
+constexpr size_t MAX_RENDER_PIXELS =
+    static_cast<size_t>(PANEL_WIDTH) * static_cast<size_t>(PANEL_HEIGHT);
 constexpr uint8_t MAX_COMIC_ATTEMPTS = 8;
 constexpr uint8_t MIN_COMICS_FOR_CACHE_ONLY = 10;
 constexpr uint32_t ARCHIVE_REFRESH_SECONDS = 6UL * 60UL * 60UL;

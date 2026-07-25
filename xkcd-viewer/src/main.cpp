@@ -670,6 +670,14 @@ bool layoutIsSuitable(const ImageLayout& layout, int comicNumber) {
                comicNumber, layout.width, config::MIN_RENDERED_WIDTH);
     return false;
   }
+  const size_t renderPixels =
+      static_cast<size_t>(layout.width) * static_cast<size_t>(layout.height);
+  if (renderPixels > config::MAX_RENDER_PIXELS) {
+    LOG.printf("[comic] #%d skipped: %lu render pixels exceeds %lu-pixel budget\n",
+               comicNumber, static_cast<unsigned long>(renderPixels),
+               static_cast<unsigned long>(config::MAX_RENDER_PIXELS));
+    return false;
+  }
   return true;
 }
 
@@ -718,6 +726,15 @@ bool loadUsableComic(int number, bool networkAvailable, Comic& comic,
   LOG.printf("[layout] #%d source=%dx%d target=%dx%d scale=%.3f\n",
              comic.number, image.width, image.height, layout.width, layout.height,
              layout.scale);
+  const size_t sourcePixels =
+      static_cast<size_t>(image.width) * static_cast<size_t>(image.height);
+  if (sourcePixels > config::MAX_DECODED_PIXELS) {
+    LOG.printf("[comic] #%d skipped: %lu source pixels exceeds %lu-pixel budget\n",
+               comic.number, static_cast<unsigned long>(sourcePixels),
+               static_cast<unsigned long>(config::MAX_DECODED_PIXELS));
+    image_free(&image);
+    return false;
+  }
   if (!layoutIsSuitable(layout, comic.number)) {
     image_free(&image);
     return false;
