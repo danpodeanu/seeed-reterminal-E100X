@@ -21,6 +21,7 @@
 #include "app_logic.h"
 #include "app_logger.h"
 #include "battery_gauge.h"
+#include "ntp_sync.h"
 #include "board_pins.h"
 #include "pcf8563_utc.h"
 #include "screenshot_bmp.h"
@@ -119,7 +120,6 @@ float indoorTemperatureC = NAN;
 float indoorHumidityPct = NAN;
 float batteryVoltage = NAN;
 int batteryPct = -1;
-volatile bool ntpSyncCompleted = false;
 RTC_DATA_ATTR time_t lastNtpSyncEpoch = 0;
 bool quietSleepNotice = false;
 
@@ -672,72 +672,16 @@ void disableWifi() {
   LOG.println("[wifi] powered down");
 }
 
-void onNtpTimeSync(struct timeval*) {
-  ntpSyncCompleted = true;
-}
-
-bool waitForNtpSync(uint32_t timeoutMs) {
-  const uint32_t started = millis();
-  while (!ntpSyncCompleted && millis() - started < timeoutMs) delay(50);
-  return ntpSyncCompleted;
-}
-
-bool startDhcpNtpIfAvailable() {
-#if LWIP_DHCP_GET_NTP_SRV
-  const ip_addr_t* server = esp_sntp_getserver(0);
-  if (server == nullptr || ip_addr_isany(server)) return false;
-
-  char address[48] = {};
-  ipaddr_ntoa_r(server, address, sizeof(address));
-  LOG.printf("[ntp] trying DHCP server %s\n", address);
-  ntpSyncCompleted = false;
-  if (esp_sntp_enabled()) esp_sntp_stop();
-  esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
-  esp_sntp_init();
-  if (waitForNtpSync(config::NTP_DHCP_TIMEOUT_MS)) return true;
-  LOG.println("[ntp] DHCP server timed out; trying configured servers");
-  return false;
-#else
-  return false;
-#endif
-}
-
+// NTP sync helpers now live in common/include/ntp_sync.h. The wrapper below
+// keeps this app's call sites (and lastNtpSyncEpoch storage) unchanged.
 bool synchronizeClock() {
-  ntpSyncCompleted = false;
-  sntp_set_time_sync_notification_cb(onNtpTimeSync);
-  bool synchronized = startDhcpNtpIfAvailable();
-  if (!synchronized) {
-#if LWIP_DHCP_GET_NTP_SRV
-    const ip_addr_t* dhcpServer = esp_sntp_getserver(0);
-    if (dhcpServer == nullptr || ip_addr_isany(dhcpServer)) {
-      LOG.println("[ntp] DHCP supplied no NTP server; using configured servers");
-    }
-#else
-    LOG.println("[ntp] DHCP NTP is unavailable; using configured servers");
-#endif
-    ntpSyncCompleted = false;
-    configTzTime(config::TIMEZONE, config::NTP_SERVER_PRIMARY,
-                 config::NTP_SERVER_SECONDARY);
-    synchronized = waitForNtpSync(config::NTP_SYNC_TIMEOUT_MS);
-  }
-  if (!synchronized) {
-    LOG.println("[ntp] synchronization timed out; continuing");
-    return false;
-  }
-
-  const time_t now = time(nullptr);
-  struct tm localTime = {};
-  if (now <= 0 || localtime_r(&now, &localTime) == nullptr) {
-    LOG.println("[ntp] synchronized but local time conversion failed");
-    return false;
-  }
-  char formatted[40] = {};
-  strftime(formatted, sizeof(formatted), "%Y-%m-%d %H:%M:%S %Z",
-           &localTime);
-  lastNtpSyncEpoch = now;
-  LOG.printf("[ntp] synchronized: %s\n", formatted);
-  saveNtpTimeToHardwareRtc(now);
-  return true;
+  return ntp::synchronizeClock(
+      config::TIMEZONE, config::NTP_SERVER_PRIMARY,
+      config::NTP_SERVER_SECONDARY, config::NTP_DHCP_TIMEOUT_MS,
+      config::NTP_SYNC_TIMEOUT_MS, [](time_t now) {
+        lastNtpSyncEpoch = now;
+        saveNtpTimeToHardwareRtc(now);
+      });
 }
 
 bool parseWeather(const String& body, WeatherData& weather) {
