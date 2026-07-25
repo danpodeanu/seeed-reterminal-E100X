@@ -25,6 +25,8 @@
 #include "local_time.h"
 #include "wake_report.h"
 #include "rtc_sync.h"
+#include "wifi_sta.h"
+#include "climate_sensor.h"
 #include "image_loader.h"
 #include "pcf8563_utc.h"
 #include "secrets.h"
@@ -93,6 +95,16 @@ float temperatureC = NAN;
 float humidityPct = NAN;
 float batteryVoltage = NAN;
 int batteryPct = -1;
+
+void readSensors() {
+  battery::measureBatteryFromAdc(PIN_BATTERY_ENABLE, PIN_BATTERY_ADC,
+                                 batteryVoltage, batteryPct);
+  LOG.printf("[sensor] battery %.3fV -> %d%%\n", batteryVoltage, batteryPct);
+  climateValid = climate::readSht4x(sht4, temperatureC, humidityPct,
+                                    config::SENSOR_READ_ATTEMPTS,
+                                    config::SENSOR_RETRY_DELAY_MS);
+  if (!climateValid) LOG.println("[sensor] SHT4x unavailable after retries");
+}
 
 RTC_DATA_ATTR time_t lastNtpSyncEpoch = 0;
 RTC_DATA_ATTR int32_t currentPhotoIndex = -1;
@@ -215,37 +227,6 @@ String quietEndLabel() {
 // inline here; they now live in common/include/battery_gauge.h and are
 // invoked via battery::measureBatteryFromAdc().
 
-void readSensors() {
-  battery::measureBatteryFromAdc(PIN_BATTERY_ENABLE, PIN_BATTERY_ADC,
-                                 batteryVoltage, batteryPct);
-  LOG.printf("[sensor] battery %.3fV -> %d%%\n",
-             batteryVoltage, batteryPct);
-
-  climateValid = false;
-  for (uint8_t attempt = 0;
-       attempt < config::SENSOR_READ_ATTEMPTS && !climateValid; ++attempt) {
-    if (attempt > 0) {
-      Wire.end();
-  hardware::resetI2cBus();
-      delay(config::SENSOR_RETRY_DELAY_MS);
-    }
-    hardware::ensureI2cBus();
-    if (sht4.begin(&Wire)) {
-      sht4.setPrecision(SHT4X_HIGH_PRECISION);
-      sensors_event_t humidity;
-      sensors_event_t temperature;
-      if (sht4.getEvent(&humidity, &temperature)) {
-        temperatureC = temperature.temperature;
-        humidityPct = humidity.relative_humidity;
-        climateValid = true;
-        LOG.printf("[sensor] %.1fC %.0f%% RH (attempt %u)\n",
-                   temperatureC, humidityPct, attempt + 1);
-      }
-    }
-  }
-  if (!climateValid) LOG.println("[sensor] SHT4x unavailable");
-}
-
 void selectStatusFont() {
 #if RETERMINAL_MODEL == 1003
   epaper.setFreeFont(&FreeSansBold18pt7b);
@@ -327,16 +308,6 @@ void renderStatus(const String& message, const String& detail = "",
   epaper.setTextFont(2);
   drawStatusBadges();
   updatePanel();
-}
-
-String wifiStationMacAddress() {
-  uint8_t mac[6] = {};
-  if (esp_read_mac(mac, ESP_MAC_WIFI_STA) != ESP_OK) return "unavailable";
-  char formatted[18] = {};
-  snprintf(formatted, sizeof(formatted),
-           "%02X:%02X:%02X:%02X:%02X:%02X",
-           mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-  return String(formatted);
 }
 
 bool mountSd() {
@@ -615,42 +586,6 @@ bool renderPhoto(const String& path) {
   return renderGenericPhoto(path);
 }
 
-bool connectWifi() {
-  if (strcmp(WIFI_SSID, "YOUR_WIFI_NAME") == 0) {
-    LOG.println("[wifi] edit include/secrets.h first");
-    return false;
-  }
-  WiFi.persistent(false);
-  WiFi.setSleep(true);
-  WiFi.mode(WIFI_STA);
-#if LWIP_DHCP_GET_NTP_SRV
-  if (esp_sntp_enabled()) esp_sntp_stop();
-  for (uint8_t index = 0; index < SNTP_MAX_SERVERS; ++index)
-    esp_sntp_setservername(index, nullptr);
-  esp_sntp_servermode_dhcp(true);
-#endif
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  const uint32_t started = millis();
-  while (WiFi.status() != WL_CONNECTED &&
-         millis() - started < config::WIFI_TIMEOUT_MS) {
-    delay(250);
-  }
-  if (WiFi.status() != WL_CONNECTED) {
-    LOG.println("[wifi] connection timed out");
-    return false;
-  }
-  LOG.printf("[wifi] connected, IP=%s RSSI=%d\n",
-             WiFi.localIP().toString().c_str(), WiFi.RSSI());
-  return true;
-}
-
-void disableWifi() {
-  if (WiFi.getMode() == WIFI_MODE_NULL) return;
-  WiFi.disconnect(true, false);
-  WiFi.mode(WIFI_OFF);
-  LOG.println("[wifi] powered down");
-}
-
 // NTP sync helpers now live in common/include/ntp_sync.h. The wrapper below
 // keeps this app's call sites (and lastNtpSyncEpoch storage) unchanged.
 bool synchronizeClock() {
@@ -664,7 +599,7 @@ bool synchronizeClock() {
 }
 
 void powerDownAndSleep(uint64_t sleepSeconds = config::SLEEP_SECONDS) {
-  disableWifi();
+  wifi_sta::disable();
   if (sdReady) SD.end();
   pinMode(PIN_SD_ENABLE, OUTPUT);
   digitalWrite(PIN_SD_ENABLE, LOW);
@@ -782,7 +717,7 @@ void setup() {
              static_cast<unsigned long>(photoCount), config::PHOTO_DIR);
 
   const bool showStartupStatus = coldBoot;
-  const String stationMac = wifiStationMacAddress();
+  const String stationMac = wifi_sta::stationMacAddress();
   String statusDetail;
   if (!sdReady) {
     statusDetail = "No SD card - insert a FAT32 card";
@@ -814,12 +749,12 @@ void setup() {
 
   bool ntpSynchronized = false;
   if (ntpDue) {
-    if (connectWifi()) ntpSynchronized = synchronizeClock();
+    if (wifi_sta::connectStation(WIFI_SSID, WIFI_PASSWORD, config::WIFI_TIMEOUT_MS)) ntpSynchronized = synchronizeClock();
     if (!ntpSynchronized && !coldBoot) {
       LOG.println("[ntp] using PCF8563 fallback after synchronization failure");
       rtc_sync::restoreSystemClock();
     }
-    disableWifi();
+    wifi_sta::disable();
   } else {
     LOG.println("[wifi] skipped; daily clock sync is not due");
   }

@@ -27,6 +27,8 @@
 #include "local_time.h"
 #include "wake_report.h"
 #include "rtc_sync.h"
+#include "wifi_sta.h"
+#include "climate_sensor.h"
 #include "pcf8563_utc.h"
 #include "screenshot_bmp.h"
 #include "timestamped_logger.h"
@@ -118,6 +120,17 @@ float indoorTemperatureC = NAN;
 float indoorHumidityPct = NAN;
 float batteryVoltage = NAN;
 int batteryPct = -1;
+
+void readSensors() {
+  battery::measureBatteryFromAdc(PIN_BATTERY_ENABLE, PIN_BATTERY_ADC,
+                                 batteryVoltage, batteryPct);
+  LOG.printf("[sensor] battery %.3fV -> %d%%\n", batteryVoltage, batteryPct);
+  climateValid = climate::readSht4x(sht4, indoorTemperatureC,
+                                    indoorHumidityPct,
+                                    config::SENSOR_READ_ATTEMPTS,
+                                    config::SENSOR_RETRY_DELAY_MS);
+  if (!climateValid) LOG.println("[sensor] SHT4x unavailable after retries");
+}
 RTC_DATA_ATTR time_t lastNtpSyncEpoch = 0;
 bool quietSleepNotice = false;
 
@@ -221,39 +234,6 @@ void updatePanel() {
 // batteryPercentForVoltage() and the 16-sample averaging block used to be
 // inline here; they now live in common/include/battery_gauge.h and are
 // invoked via battery::measureBatteryFromAdc().
-
-void readSensors() {
-  battery::measureBatteryFromAdc(PIN_BATTERY_ENABLE, PIN_BATTERY_ADC,
-                                 batteryVoltage, batteryPct);
-  LOG.printf("[sensor] battery %.3fV -> %d%%\n", batteryVoltage, batteryPct);
-
-  climateValid = false;
-  for (uint8_t attempt = 0;
-       attempt < config::SENSOR_READ_ATTEMPTS && !climateValid; ++attempt) {
-    if (attempt > 0) {
-      Wire.end();
-  hardware::resetI2cBus();
-      delay(config::SENSOR_RETRY_DELAY_MS);
-    }
-    hardware::ensureI2cBus();
-    if (sht4.begin(&Wire)) {
-      sht4.setPrecision(SHT4X_HIGH_PRECISION);
-      sensors_event_t humidity;
-      sensors_event_t temperature;
-      if (sht4.getEvent(&humidity, &temperature)) {
-        indoorTemperatureC = temperature.temperature;
-        indoorHumidityPct = humidity.relative_humidity;
-        climateValid = true;
-        LOG.printf("[sensor] %.1fC %.0f%% RH (attempt %u)\n",
-                   indoorTemperatureC, indoorHumidityPct, attempt + 1);
-        break;
-      }
-    }
-    LOG.printf("[sensor] SHT4x attempt %u/%u failed\n", attempt + 1,
-               config::SENSOR_READ_ATTEMPTS);
-  }
-  if (!climateValid) LOG.println("[sensor] SHT4x unavailable after retries");
-}
 
 void selectSmallFont() {
   epaper.setTextSize(1);
@@ -400,16 +380,6 @@ void drawBadges(uint32_t background = PANEL_WHITE,
   epaper.setTextFont(2);
 }
 
-String wifiStationMacAddress() {
-  uint8_t mac[6] = {};
-  if (esp_read_mac(mac, ESP_MAC_WIFI_STA) != ESP_OK) return "unavailable";
-  char formatted[18];
-  snprintf(formatted, sizeof(formatted),
-           "%02X:%02X:%02X:%02X:%02X:%02X",
-           mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-  return String(formatted);
-}
-
 void renderStatus(const String& message, const String& detail = "",
                   const String& lineAbove = "") {
   epaper.fillSprite(PANEL_WHITE);
@@ -509,48 +479,6 @@ bool writeFileAtomically(const String& path, const String& contents) {
     return false;
   }
   return true;
-}
-
-bool connectWifi(String& failureReason) {
-  failureReason = "";
-  if (strcmp(WIFI_SSID, "YOUR_WIFI_NAME") == 0) {
-    LOG.println("[wifi] edit include/secrets.h first");
-    failureReason = "Wi-Fi is not configured";
-    return false;
-  }
-  WiFi.persistent(false);
-  WiFi.setSleep(true);
-  WiFi.mode(WIFI_STA);
-#if LWIP_DHCP_GET_NTP_SRV
-  // DHCP option 42 must be enabled before the station acquires its lease.
-  // Remove any configured fallback servers left by a prior attempt so a
-  // populated slot below unambiguously came from DHCP.
-  if (esp_sntp_enabled()) esp_sntp_stop();
-  for (uint8_t index = 0; index < SNTP_MAX_SERVERS; ++index)
-    esp_sntp_setservername(index, nullptr);
-  esp_sntp_servermode_dhcp(true);
-#endif
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-  const uint32_t started = millis();
-  while (WiFi.status() != WL_CONNECTED &&
-         millis() - started < config::WIFI_TIMEOUT_MS) {
-    delay(250);
-  }
-  if (WiFi.status() != WL_CONNECTED) {
-    LOG.println("[wifi] connection timed out");
-    failureReason = "Wi-Fi connection timed out";
-    return false;
-  }
-  LOG.printf("[wifi] connected, IP=%s RSSI=%d\n",
-             WiFi.localIP().toString().c_str(), WiFi.RSSI());
-  return true;
-}
-
-void disableWifi() {
-  if (WiFi.getMode() == WIFI_MODE_NULL) return;
-  WiFi.disconnect(true, false);
-  WiFi.mode(WIFI_OFF);
-  LOG.println("[wifi] powered down");
 }
 
 // NTP sync helpers now live in common/include/ntp_sync.h. The wrapper below
@@ -1140,7 +1068,7 @@ void renderWeather(const WeatherData& weather) {
 
 void powerDownAndSleep(uint64_t sleepSeconds = config::SLEEP_SECONDS,
                        bool timerWakeEnabled = true) {
-  disableWifi();
+  wifi_sta::disable();
   if (sdReady) SD.end();
   pinMode(PIN_SD_ENABLE, OUTPUT);
   digitalWrite(PIN_SD_ENABLE, LOW);
@@ -1330,7 +1258,7 @@ void setup() {
   const bool showConnectionStatus = coldBoot;
   const String connectionDetail =
       cacheLoaded ? "Live update not required" : "Live update required";
-  const String stationMac = wifiStationMacAddress();
+  const String stationMac = wifi_sta::stationMacAddress();
   LOG.printf("[wifi] station MAC=%s\n", stationMac.c_str());
 
 #if RETERMINAL_MODEL == 1001
@@ -1355,7 +1283,7 @@ void setup() {
 
   const bool networkRequired = buttonWake || ntpDue || !cacheLoaded;
   const bool networkAvailable =
-      networkRequired && connectWifi(liveFailureReason);
+      networkRequired && wifi_sta::connectStation(WIFI_SSID, WIFI_PASSWORD, config::WIFI_TIMEOUT_MS, &liveFailureReason);
   const bool ntpSynchronized =
       networkAvailable && ntpDue && synchronizeClock();
   bool rtcRestored = false;
@@ -1373,7 +1301,7 @@ void setup() {
     const uint64_t quietSleepSeconds = secondsUntilQuietEnd(localTime);
     LOG.printf("[quiet] refresh suppressed after clock sync; sleeping until %s\n",
                quietEndLabel().c_str());
-    disableWifi();
+    wifi_sta::disable();
     powerDownAndSleep(quietSleepSeconds);
     return;
   }
@@ -1395,7 +1323,7 @@ void setup() {
   }
   // The response has already been parsed. Do not keep the radio associated
   // while writing the cache, composing the frame, or refreshing the panel.
-  disableWifi();
+  wifi_sta::disable();
 
   if (liveUpdated && sdReady) {
     if (writeFileAtomically(config::FORECAST_CACHE, liveResponse)) {
