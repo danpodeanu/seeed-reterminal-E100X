@@ -224,28 +224,6 @@ void selectLargeTemperatureFont() {
 #endif
 }
 
-void fillStatusBackground(int top, int height) {
-  epaper.fillRect(0, top, config::PANEL_WIDTH, height,
-                  PANEL_STATUS_BACKGROUND);
-  if (!PANEL_STATUS_DITHERED) return;
-
-  // Ordered neutral patterns provide intermediate shades when the panel
-  // palette has no suitable native gray.
-  static constexpr uint8_t bayer4[4][4] = {
-      {0, 8, 2, 10},
-      {12, 4, 14, 6},
-      {3, 11, 1, 9},
-      {15, 7, 13, 5},
-  };
-  const int bottom = min(config::PANEL_HEIGHT, top + height);
-  for (int y = max(0, top); y < bottom; ++y) {
-    for (int x = 0; x < config::PANEL_WIDTH; ++x) {
-      if (bayer4[y & 3][x & 3] < PANEL_STATUS_DITHER_THRESHOLD)
-        epaper.drawPixel(x, y, PANEL_STATUS_DITHER_COLOR);
-    }
-  }
-}
-
 void drawBadges(uint32_t background = PANEL_WHITE,
                 bool fillTextBackground = true,
                 const String* weatherUpdateTime = nullptr) {
@@ -867,7 +845,7 @@ void renderPortrait(const WeatherData& weather) {
 void renderFooter() {
   const int top = config::PANEL_HEIGHT - config::ui(30);
   const int labelY = config::PANEL_HEIGHT - config::ui(17);
-  fillStatusBackground(top, config::PANEL_HEIGHT - top);
+  text_render::fillStatusBackground(epaper, top, config::PANEL_HEIGHT - top, config::PANEL_WIDTH, config::PANEL_HEIGHT, PANEL_STATUS_BACKGROUND, PANEL_STATUS_DITHERED, PANEL_STATUS_DITHER_COLOR, PANEL_STATUS_DITHER_THRESHOLD);
   epaper.drawFastHLine(config::ui(10), top,
                        config::PANEL_WIDTH - config::ui(20), PANEL_MUTED);
   // GFX free fonts clear their bounding box whenever foreground and
