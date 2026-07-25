@@ -12,6 +12,9 @@
 #include <esp_sntp.h>
 #include <time.h>
 
+#include <algorithm>
+#include <vector>
+
 #include "config.h"
 #include "app_logic.h"
 #include "image_loader.h"
@@ -113,6 +116,7 @@ EPaper epaper;
 Adafruit_SHT4x sht4;
 
 bool sdReady = false;
+std::vector<String> photoList;
 bool climateValid = false;
 bool i2cReady = false;
 volatile bool ntpSyncCompleted = false;
@@ -556,42 +560,37 @@ String baseName(String path) {
 uint32_t countPhotos() {
   if (!sdReady) return 0;
   File directory = SD.open(config::PHOTO_DIR);
-  if (!directory || !directory.isDirectory()) return 0;
-  uint32_t count = 0;
-  File entry = directory.openNextFile();
-  while (entry) {
-    if (!entry.isDirectory() && supportedPhotoName(baseName(entry.name())))
-      ++count;
-    entry.close();
-    entry = directory.openNextFile();
+  if (!directory || !directory.isDirectory()) {
+    if (directory) directory.close();
+    return 0;
   }
-  directory.close();
-  return count;
-}
-
-bool photoPathAt(uint32_t ordinal, String& path) {
-  File directory = SD.open(config::PHOTO_DIR);
-  if (!directory || !directory.isDirectory()) return false;
-  uint32_t seen = 0;
+  photoList.clear();
   File entry = directory.openNextFile();
   while (entry) {
     if (!entry.isDirectory() && supportedPhotoName(baseName(entry.name()))) {
-      if (seen == ordinal) {
-        path = entry.name();
-        if (!path.startsWith("/")) {
-          path = String(config::PHOTO_DIR) + "/" + path;
-        }
-        entry.close();
-        directory.close();
-        return true;
+      String path = entry.name();
+      if (!path.startsWith("/")) {
+        path = String(config::PHOTO_DIR) + "/" + path;
       }
-      ++seen;
+      photoList.emplace_back(std::move(path));
     }
     entry.close();
     entry = directory.openNextFile();
   }
   directory.close();
-  return false;
+  // Sort so that ordinal-based rotation is deterministic across boots and
+  // independent of FAT32 directory ordering.
+  std::sort(photoList.begin(), photoList.end(),
+            [](const String& a, const String& b) {
+              return strcmp(a.c_str(), b.c_str()) < 0;
+            });
+  return static_cast<uint32_t>(photoList.size());
+}
+
+bool photoPathAt(uint32_t ordinal, String& path) {
+  if (ordinal >= photoList.size()) return false;
+  path = photoList[ordinal];
+  return true;
 }
 
 bool renderPreparedBmp(const String& path) {
@@ -614,6 +613,12 @@ bool renderPreparedBmp(const String& path) {
   const uint16_t bitsPerPixel = readLe16(dib + 14);
   const uint32_t compression = readLe32(dib + 16);
   const uint32_t pixelOffset = readLe32(fileHeader + 10);
+  // Negating INT32_MIN is undefined behaviour; reject it up front along with
+  // any other value that couldn't plausibly be a panel-sized BMP.
+  if (signedHeight == INT32_MIN) {
+    file.close();
+    return false;
+  }
   const int32_t height = signedHeight < 0 ? -signedHeight : signedHeight;
 
   if (dibSize < 40 || width != config::PANEL_WIDTH ||

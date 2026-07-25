@@ -767,6 +767,16 @@ bool mountSd() {
 bool readFile(const String& path, String& output) {
   File file = SD.open(path, FILE_READ);
   if (!file) return false;
+  // Guard against a corrupted or hostile cache entry consuming all heap.
+  // XKCD metadata JSON is typically <2 KiB; the cache index is bounded by
+  // MAX_CACHE_INDEX_ENTRIES lines of a few characters each.
+  constexpr size_t kMaxCacheFileBytes = 64U * 1024U;
+  if (file.size() > kMaxCacheFileBytes) {
+    LOG.printf("[cache] refusing to read oversized %s (%lu bytes)\n",
+               path.c_str(), static_cast<unsigned long>(file.size()));
+    file.close();
+    return false;
+  }
   output = file.readString();
   file.close();
   return !output.isEmpty();

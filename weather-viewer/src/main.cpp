@@ -791,6 +791,15 @@ bool mountSd() {
 bool readFile(const String& path, String& contents) {
   File file = SD.open(path, FILE_READ);
   if (!file) return false;
+  // Guard against a corrupted or hostile cache entry consuming all heap.
+  // A well-formed Open-Meteo response for our query is typically <32 KiB.
+  constexpr size_t kMaxCacheFileBytes = 128U * 1024U;
+  if (file.size() > kMaxCacheFileBytes) {
+    LOG.printf("[cache] refusing to read oversized %s (%lu bytes)\n",
+               path.c_str(), static_cast<unsigned long>(file.size()));
+    file.close();
+    return false;
+  }
   contents = file.readString();
   file.close();
   return !contents.isEmpty();
@@ -1100,7 +1109,27 @@ bool fetchWeather(WeatherData& weather, String& responseBody,
     failureReason = "Weather service returned HTTP " + String(status);
     return false;
   }
+  // Reject an implausibly large body before letting http.getString() load it
+  // all into heap. Well-formed Open-Meteo responses for this query are well
+  // under 100 KiB; a runaway redirect loop or a malformed proxy could easily
+  // exhaust the ~320 KiB ESP32 heap otherwise.
+  constexpr int kMaxResponseBytes = 256 * 1024;
+  const int declaredSize = http.getSize();
+  if (declaredSize > kMaxResponseBytes) {
+    LOG.printf("[weather] response too large: %d bytes\n", declaredSize);
+    http.end();
+    failureReason = "Weather response is too large";
+    return false;
+  }
   responseBody = http.getString();
+  if (static_cast<int>(responseBody.length()) > kMaxResponseBytes) {
+    LOG.printf("[weather] streamed response too large: %u bytes\n",
+               static_cast<unsigned>(responseBody.length()));
+    responseBody = "";
+    http.end();
+    failureReason = "Weather response is too large";
+    return false;
+  }
   http.end();
   LOG.printf("[weather] received %u bytes from Open-Meteo\n",
              static_cast<unsigned>(responseBody.length()));

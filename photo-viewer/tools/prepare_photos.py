@@ -78,6 +78,7 @@ def input_files(paths: Iterable[Path]) -> list[Path]:
                 candidate
                 for candidate in sorted(path.rglob("*"))
                 if candidate.is_file()
+                and not candidate.name.startswith(".")
                 and candidate.suffix.lower() in SUPPORTED_SUFFIXES
             )
         elif path.is_file() and path.suffix.lower() in SUPPORTED_SUFFIXES:
