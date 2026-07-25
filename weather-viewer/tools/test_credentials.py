@@ -52,6 +52,16 @@ def _parse_defines(header_path: Path) -> Dict[str, str]:
     return {m.group(1): m.group(2) for m in pattern.finditer(text)}
 
 
+def _parse_config_string(config_path: Path, name: str) -> Optional[str]:
+    """Extract ``constexpr char NAME[] = "..."`` from config.h."""
+    if not config_path.is_file():
+        return None
+    text = config_path.read_text(encoding="utf-8")
+    match = re.search(
+        rf'\b{name}\s*\[\s*\]\s*=\s*"([^"]*)"', text)
+    return match.group(1) if match else None
+
+
 def _parse_config_coords(config_path: Path) -> Dict[str, float]:
     """Pull LATITUDE / LONGITUDE out of the firmware's config.h."""
     if not config_path.is_file():
@@ -155,7 +165,7 @@ def _http_get_json(url: str, headers: Optional[Dict[str, str]] = None,
 
 
 def test_qweather(secrets: Dict[str, str], latitude: float,
-                  longitude: float) -> bool:
+                  longitude: float, lang: str) -> bool:
     print("[qweather] checking credentials...")
     required = ("QWEATHER_API_HOST", "QWEATHER_PROJECT_ID", "QWEATHER_CREDENTIAL_ID",
                 "QWEATHER_PRIVATE_KEY_HEX")
@@ -178,7 +188,8 @@ def test_qweather(secrets: Dict[str, str], latitude: float,
     # QWeather takes location as "lon,lat" with up to two decimals.
     location = f"{longitude:.2f},{latitude:.2f}"
     url = (f"https://{host}/v7/weather/now?"
-           + urllib.parse.urlencode({"location": location}))
+           + urllib.parse.urlencode(
+               {"location": location, "unit": "m", "lang": lang}))
     print(f"[qweather] GET {url}")
     try:
         body = _http_get_json(url, headers={"Authorization": f"Bearer {jwt}"})
@@ -263,8 +274,10 @@ def main(argv: Optional[list] = None) -> int:
         print(f"[error] could not find LATITUDE / LONGITUDE in {config_path}")
         return 2
     print(f"[config] latitude={latitude} longitude={longitude}")
+    lang = _parse_config_string(config_path, "QWEATHER_LANG") or "en"
+    print(f"[config] qweather lang={lang}")
 
-    qweather_ok = test_qweather(secrets, latitude, longitude)
+    qweather_ok = test_qweather(secrets, latitude, longitude, lang)
     open_meteo_ok = test_open_meteo(latitude, longitude)
 
     print()

@@ -49,6 +49,8 @@ String endpointUrl(const char* path) {
   url += ",";
   url += String(config::LATITUDE, 2);
   url += "&unit=m";
+  url += "&lang=";
+  url += config::QWEATHER_LANG;
   return url;
 }
 

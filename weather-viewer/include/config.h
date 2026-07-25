@@ -80,6 +80,13 @@ enum class WeatherProvider {
 };
 constexpr WeatherProvider WEATHER_PROVIDER = WeatherProvider::OpenMeteo;
 
+// Language for QWeather's textual fields (condition names, warnings).
+// Common values: "en", "zh" (Simplified Chinese, default upstream),
+// "zh-hant", "de", "es", "fr", "ja", "ko", "ru". Ignored when the
+// active provider is Open-Meteo. See https://dev.qweather.com/en/docs/
+// resource/language/ for the full list.
+constexpr char QWEATHER_LANG[] = "en";
+
 constexpr char CACHE_DIR[] = "/weather";
 constexpr char FORECAST_CACHE[] = "/weather/forecast.json";
 
