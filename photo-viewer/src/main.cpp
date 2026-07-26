@@ -692,7 +692,7 @@ void setup() {
     }
     wifi_sta::disable();
   } else {
-    LOG.println("[wifi] skipped; daily clock sync is not due");
+    LOG.println("[wifi] skipped; clock sync is not due");
   }
   local_time::configureTimezone(config::TIMEZONE);
   quiet_hours::configure({config::QUIET_HOURS_ENABLED,
