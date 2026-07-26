@@ -114,13 +114,14 @@ inline int wrapText(EPaper& epaper, const String& source, String* lines,
 // the border thickness, `terminalW`/`terminalH` describe the small knob
 // that sticks out on the right, `black` is the panel-black color the
 // caller wants to use for the outline/fill. When `charging` is true a
-// small lightning-bolt glyph is drawn immediately to the left of the
-// gauge outline; it lives on the panel background (never over the
-// fill), so it stays legible at any battery percentage.
+// small lightning-bolt glyph is drawn centred inside the gauge with a
+// white interior and a black border, so it reads clearly whether the
+// area behind it is empty (panel background) or filled black by a high
+// battery level.
 template <typename EPaper>
 inline void drawBatteryGauge(EPaper& epaper, int x, int y, int w, int h,
                              int batteryPct, int outline, int terminalW,
-                             int terminalH, uint32_t black,
+                             int terminalH, uint32_t black, uint32_t white,
                              bool charging = false) {
   const int gaugeCenterY = y + h / 2;
   for (int inset = 0; inset < outline; ++inset) {
@@ -140,23 +141,35 @@ inline void drawBatteryGauge(EPaper& epaper, int x, int y, int w, int h,
     }
   }
   if (charging) {
-    // Place the bolt just left of the outline in the panel background,
-    // so we never have to reason about contrast against the fill. Two
-    // right triangles form a chunky "Z" that reads as a bolt even at
-    // 5x8-ish sizes on E1001.
-    const int boltH = h;
-    const int boltW = max(3, h * 3 / 8);
-    const int boltGap = max(1, outline);
-    const int bx = x - boltGap - boltW;
-    const int by = y;
-    // Upper wedge: top-right down to middle-left (bolt's leading edge).
+    // Fit the bolt inside the gauge interior, leaving a 1-px margin so
+    // its black outline never touches the gauge outline. Two right
+    // triangles form a chunky "Z" that reads as a bolt at any panel
+    // size; we paint an outer black bolt one pixel larger than the
+    // inner white bolt to give it a legible border against both the
+    // panel background and any black fill behind it.
+    const int interiorH = max(0, h - 2 * outline - 2);
+    const int boltH = max(4, interiorH);
+    const int boltW = max(3, boltH * 3 / 8);
+    const int bx = x + (w - boltW) / 2;
+    const int by = y + (h - boltH) / 2;
+    // Outer black bolt, expanded by 1 px on all sides for the border.
+    const int obx = bx - 1;
+    const int oby = by - 1;
+    const int obW = boltW + 2;
+    const int obH = boltH + 2;
+    epaper.fillTriangle(obx + obW, oby,
+                        obx, oby + obH / 2,
+                        obx + obW, oby + obH / 2, black);
+    epaper.fillTriangle(obx, oby + obH / 2,
+                        obx + obW, oby + obH / 2,
+                        obx, oby + obH, black);
+    // Inner white bolt at the original bolt dimensions.
     epaper.fillTriangle(bx + boltW, by,
                         bx, by + boltH / 2,
-                        bx + boltW, by + boltH / 2, black);
-    // Lower wedge: middle-left down to bottom-right (bolt's trailing edge).
+                        bx + boltW, by + boltH / 2, white);
     epaper.fillTriangle(bx, by + boltH / 2,
                         bx + boltW, by + boltH / 2,
-                        bx, by + boltH, black);
+                        bx, by + boltH, white);
   }
 }
 

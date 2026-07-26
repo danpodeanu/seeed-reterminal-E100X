@@ -275,7 +275,8 @@ void selectFooterFont() {
 }
 
 void drawBadges(uint32_t background = PANEL_WHITE,
-                bool fillTextBackground = true) {
+                bool fillTextBackground = true,
+                const String* lastRefreshTime = nullptr) {
   epaper.setTextColor(PANEL_BLACK, background, fillTextBackground);
   selectStatusFont();
 
@@ -305,9 +306,39 @@ void drawBadges(uint32_t background = PANEL_WHITE,
   epaper.setTextDatum(MR_DATUM);
   const int percentRightX = x - config::ui(9);
   epaper.drawString(percent, percentRightX, statusCenterY, 1);
+
+  // The two-line "MM-DD / HH:MM" refresh timestamp sits directly to the
+  // left of the battery percentage, in the same greyed-out cache-stats
+  // colour as the comic counts to its left, so the eye reads the whole
+  // right-hand cluster as a single "status" block.
+  int nextRightX =
+      percentRightX - epaper.textWidth(percent, 1) - config::ui(10);
+  if (lastRefreshTime != nullptr && !lastRefreshTime->isEmpty()) {
+    const int separator = lastRefreshTime->indexOf('T');
+    if (separator >= 10 &&
+        lastRefreshTime->length() >= static_cast<size_t>(separator + 6)) {
+      const String updateDate = lastRefreshTime->substring(5, 10);
+      const String updateClock =
+          lastRefreshTime->substring(separator + 1, separator + 6);
+      selectCacheStatsFont();
+      epaper.setTextColor(PANEL_CACHE_STATS_COLOR, background,
+                          fillTextBackground);
+      const int lineCenterDistance = epaper.fontHeight(1) + 1;
+      const int dateY = statusCenterY - lineCenterDistance / 2;
+      const int timeY = dateY + lineCenterDistance;
+      epaper.drawString(updateDate, nextRightX, dateY, 1);
+      epaper.drawString(updateClock, nextRightX, timeY, 1);
+      const int refreshWidth =
+          max(epaper.textWidth(updateDate, 1), epaper.textWidth(updateClock, 1));
+      nextRightX -= refreshWidth + config::ui(10);
+      // Restore the status font so cache-stats layout below sees the same
+      // font height it always did.
+      selectStatusFont();
+    }
+  }
+
   if (cacheStatsAvailable) {
-    const int statsRightX =
-        percentRightX - epaper.textWidth(percent, 1) - config::ui(10);
+    const int statsRightX = nextRightX;
     selectCacheStatsFont();
     epaper.setTextColor(PANEL_CACHE_STATS_COLOR, background,
                         fillTextBackground);
@@ -322,7 +353,7 @@ void drawBadges(uint32_t background = PANEL_WHITE,
                       statsRightX, lowerStatsY, 1);
   }
   text_render::drawBatteryGauge(epaper, x, y, w, h, sensorReadings.batteryPct, outline,
-                                terminalWidth, terminalHeight, PANEL_BLACK,
+                                terminalWidth, terminalHeight, PANEL_BLACK, PANEL_WHITE,
                                 sensorReadings.chargerValid && sensorReadings.externalPower);
 
   epaper.setFreeFont(nullptr);
@@ -900,7 +931,17 @@ bool renderComic(const Comic& comic, RgbImage& image, ImageLayout layout) {
   }
   epaper.setFreeFont(nullptr);
   epaper.setTextFont(2);
-  drawBadges(PANEL_WHITE, true);
+  String refreshTime;
+  if (local_time::clockIsValid()) {
+    struct tm now = {};
+    if (local_time::localClock(now)) {
+      char buf[20];
+      strftime(buf, sizeof(buf), "%Y-%m-%dT%H:%M", &now);
+      refreshTime = buf;
+    }
+  }
+  drawBadges(PANEL_WHITE, true,
+             refreshTime.isEmpty() ? nullptr : &refreshTime);
 
   LOG.println("[render] refreshing panel");
   updatePanel();
