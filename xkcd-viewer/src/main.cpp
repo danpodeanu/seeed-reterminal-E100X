@@ -313,7 +313,8 @@ void drawBadges(uint32_t background = PANEL_WHITE,
   // right-hand cluster as a single "status" block.
   int nextRightX =
       percentRightX - epaper.textWidth(percent, 1) - config::ui(10);
-  if (lastRefreshTime != nullptr && !lastRefreshTime->isEmpty()) {
+  if (config::DEBUG_SHOW_STATUS_BADGES && lastRefreshTime != nullptr &&
+      !lastRefreshTime->isEmpty()) {
     const int separator = lastRefreshTime->indexOf('T');
     if (separator >= 10 &&
         lastRefreshTime->length() >= static_cast<size_t>(separator + 6)) {
@@ -337,7 +338,7 @@ void drawBadges(uint32_t background = PANEL_WHITE,
     }
   }
 
-  if (cacheStatsAvailable) {
+  if (config::DEBUG_SHOW_STATUS_BADGES && cacheStatsAvailable) {
     const int statsRightX = nextRightX;
     selectCacheStatsFont();
     epaper.setTextColor(PANEL_CACHE_STATS_COLOR, background,

@@ -170,7 +170,8 @@ void drawBadges(uint32_t background = PANEL_WHITE,
   epaper.setTextDatum(MR_DATUM);
   const int percentRightX = x - config::ui(9);
   epaper.drawString(percent, percentRightX, statusCenterY, 1);
-  if (weatherUpdateTime != nullptr && !weatherUpdateTime->isEmpty()) {
+  if (config::DEBUG_SHOW_STATUS_BADGES && weatherUpdateTime != nullptr &&
+      !weatherUpdateTime->isEmpty()) {
     const int separator = weatherUpdateTime->indexOf('T');
     if (separator >= 10 &&
         weatherUpdateTime->length() >= static_cast<size_t>(separator + 6)) {

@@ -48,6 +48,12 @@ constexpr char NTP_SERVER_SECONDARY[] = "time.cloudflare.com";
 constexpr float MIN_DISPLAY_SCALE = 0.65f;
 
 // --- Debug knobs ------------------------------------------------------------
+// Show the diagnostic badges in the top-right corner (last-refresh
+// timestamp for both apps, plus the cached-comic count for xkcd).
+// Handy while iterating on cache/refresh behaviour; turn off for a
+// cleaner day-to-day display.
+constexpr bool DEBUG_SHOW_STATUS_BADGES = true;
+
 // Debug: when set to a positive comic number, the very next cold-boot
 // selection short-circuits random picking and loads that specific comic
 // straight from the local cache. Intended for reproducing a render-path

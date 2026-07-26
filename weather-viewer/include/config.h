@@ -98,6 +98,11 @@ constexpr bool QWEATHER_ALERTS_ENABLED = true;
 constexpr bool NWS_ALERTS_ENABLED = false;
 
 // --- Debug knobs ------------------------------------------------------------
+// Show the diagnostic last-refresh badge in the top-right corner.
+// Handy while iterating on refresh cadence and provider behaviour;
+// turn off for a cleaner day-to-day display.
+constexpr bool DEBUG_SHOW_STATUS_BADGES = true;
+
 // Debug knobs for QWeather 401 triage. Both default to false. Enable one
 // or both temporarily to diagnose auth failures:
 //   DEBUG_FORCE_NTP:  ignore the "24h refresh" gate and re-sync every wake
