@@ -153,9 +153,37 @@ bool load() {
     return false;
   }
 
-  JsonDocument doc;
-  const DeserializationError error = deserializeJson(doc, file);
+  // ArduinoJson streaming from a File reads a byte (or a handful) at a
+  // time, which costs seconds on a 650 KB manifest sitting on FAT32.
+  // Slurp the whole file into PSRAM first and parse from memory — one
+  // bulk read plus one in-memory parse is an order of magnitude faster.
+  const size_t fileSize = file.size();
+  if (fileSize == 0 || fileSize > 8U * 1024U * 1024U) {
+    file.close();
+    LOG.printf("[cache] comic manifest has an unreasonable size (%u bytes)\n",
+               static_cast<unsigned>(fileSize));
+    return false;
+  }
+  char* const buffer = static_cast<char*>(ps_malloc(fileSize + 1));
+  if (buffer == nullptr) {
+    file.close();
+    LOG.println("[cache] comic manifest cannot be buffered in PSRAM");
+    return false;
+  }
+  const size_t bytesRead = file.read(reinterpret_cast<uint8_t*>(buffer), fileSize);
   file.close();
+  if (bytesRead != fileSize) {
+    free(buffer);
+    LOG.printf("[cache] comic manifest short read (%u of %u bytes)\n",
+               static_cast<unsigned>(bytesRead),
+               static_cast<unsigned>(fileSize));
+    return false;
+  }
+  buffer[fileSize] = '\0';
+
+  JsonDocument doc;
+  const DeserializationError error = deserializeJson(doc, buffer, fileSize);
+  free(buffer);
   if (error) {
     LOG.printf("[cache] comic manifest JSON parse failed: %s\n", error.c_str());
     return false;
