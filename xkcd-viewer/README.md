@@ -30,7 +30,10 @@ feature. Comic: [XKCD #699 — Trimester](https://xkcd.com/699/).
 - Cache-first timer wakes that avoid Wi-Fi between six-hour archive refills.
 - Live operation without an SD card using PSRAM only.
 - Temperature and humidity from the built-in SHT4x sensor, plus battery
-  percentage and gauge.
+  percentage and gauge. A small lightning bolt appears next to the gauge
+  when the SY6974B charger IC reports external USB power at refresh time
+  (V1.2+ E1001/E1002 and all E1003/E1004 boards; older revisions with the
+  ETA6003 charger silently omit the icon).
 - Deep sleep between refreshes, with wake-and-refresh buttons and an audible
   button acknowledgement.
 

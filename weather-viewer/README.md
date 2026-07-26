@@ -22,7 +22,11 @@ export.
   WMO weather condition.
 - Next likely rain time and probability from the upcoming hourly forecast.
 - Three-day low/high, precipitation probability, and maximum UV forecast.
-- Built-in SHT4x indoor temperature/humidity and battery gauge.
+- Built-in SHT4x indoor temperature/humidity and battery gauge. A small
+  lightning bolt appears next to the gauge when the SY6974B charger IC
+  reports external USB power at refresh time (V1.2+ E1001/E1002 and all
+  E1003/E1004 boards; older revisions with the ETA6003 charger silently
+  omit the icon).
 - Cold-boot screen with Wi-Fi SSID and station MAC address.
 - Clearly labeled forecast date/time so stale data is easy to identify.
 - Optional SD cache of the last successful forecast.

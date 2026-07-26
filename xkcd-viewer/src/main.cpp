@@ -322,7 +322,8 @@ void drawBadges(uint32_t background = PANEL_WHITE,
                       statsRightX, lowerStatsY, 1);
   }
   text_render::drawBatteryGauge(epaper, x, y, w, h, sensorReadings.batteryPct, outline,
-                                terminalWidth, terminalHeight, PANEL_BLACK);
+                                terminalWidth, terminalHeight, PANEL_BLACK,
+                                sensorReadings.chargerValid && sensorReadings.externalPower);
 
   epaper.setFreeFont(nullptr);
   epaper.setTextFont(2);

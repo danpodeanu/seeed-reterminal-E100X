@@ -113,11 +113,15 @@ inline int wrapText(EPaper& epaper, const String& source, String* lines,
 // 0..100; a negative value draws just the empty outline. `outline` is
 // the border thickness, `terminalW`/`terminalH` describe the small knob
 // that sticks out on the right, `black` is the panel-black color the
-// caller wants to use for the outline/fill.
+// caller wants to use for the outline/fill. When `charging` is true a
+// small lightning-bolt glyph is drawn immediately to the left of the
+// gauge outline; it lives on the panel background (never over the
+// fill), so it stays legible at any battery percentage.
 template <typename EPaper>
 inline void drawBatteryGauge(EPaper& epaper, int x, int y, int w, int h,
                              int batteryPct, int outline, int terminalW,
-                             int terminalH, uint32_t black) {
+                             int terminalH, uint32_t black,
+                             bool charging = false) {
   const int gaugeCenterY = y + h / 2;
   for (int inset = 0; inset < outline; ++inset) {
     epaper.drawRect(x + inset, y + inset, w - 2 * inset, h - 2 * inset,
@@ -134,6 +138,25 @@ inline void drawBatteryGauge(EPaper& epaper, int x, int y, int w, int h,
     if (fillWidth > 0) {
       epaper.fillRect(innerX, innerY, fillWidth, innerHeight, black);
     }
+  }
+  if (charging) {
+    // Place the bolt just left of the outline in the panel background,
+    // so we never have to reason about contrast against the fill. Two
+    // right triangles form a chunky "Z" that reads as a bolt even at
+    // 5x8-ish sizes on E1001.
+    const int boltH = h;
+    const int boltW = max(3, h * 3 / 8);
+    const int boltGap = max(1, outline);
+    const int bx = x - boltGap - boltW;
+    const int by = y;
+    // Upper wedge: top-right down to middle-left (bolt's leading edge).
+    epaper.fillTriangle(bx + boltW, by,
+                        bx, by + boltH / 2,
+                        bx + boltW, by + boltH / 2, black);
+    // Lower wedge: middle-left down to bottom-right (bolt's trailing edge).
+    epaper.fillTriangle(bx, by + boltH / 2,
+                        bx + boltW, by + boltH / 2,
+                        bx, by + boltH, black);
   }
 }
 

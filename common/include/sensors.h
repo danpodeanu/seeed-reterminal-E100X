@@ -24,6 +24,8 @@ struct Readings {
   bool climateValid = false;
   float temperatureC = NAN;
   float humidityPct = NAN;
+  bool chargerValid = false;
+  bool externalPower = false;
 };
 
 // Populate `out` with a fresh battery sample and, if reachable, an
