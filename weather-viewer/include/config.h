@@ -92,13 +92,13 @@ constexpr WeatherProvider WEATHER_PROVIDER = WeatherProvider::QWeather;
 // resource/language/ for the full list.
 constexpr char QWEATHER_LANG[] = "en";
 
-// Whether to fetch /v7/warning/now on every refresh. The endpoint is a
-// paid-tier resource on QWeather's Dev API -- free/hobby keys receive
-// HTTP 403 and no alerts can be displayed. Default is false because the
-// vast majority of users are on the free plan; set to true on a paid
-// tier to enable the alert bar (~1s extra wake time per refresh for the
-// TLS round-trip). Has no effect when the active provider is Open-Meteo.
-constexpr bool QWEATHER_ALERTS_ENABLED = false;
+// Whether to fetch /v7/warning/now on every refresh. On QWeather's free
+// tier the endpoint requires the "Weather Warning" data resource to be
+// subscribed to the project in the QWeather console -- unsubscribed keys
+// return HTTP 403. Toggle to false if this account cannot access the
+// resource so we skip the guaranteed-to-fail round-trip (~1s of wake
+// time per refresh). Has no effect when the active provider is Open-Meteo.
+constexpr bool QWEATHER_ALERTS_ENABLED = true;
 
 // Debug knobs for QWeather 401 triage. Both default to false. Enable one
 // or both temporarily to diagnose auth failures:
