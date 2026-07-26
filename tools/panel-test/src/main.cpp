@@ -268,6 +268,15 @@ void setup() {
              PANEL_HEIGHT, PALETTE_COUNT);
 
   epaper.begin();
+#if RETERMINAL_MODEL == 1001
+  // Enable 4-level greyscale mode; without this the UC8179 driver runs
+  // in 1-bit mode and every non-zero code renders as white.
+  epaper.initGrayMode(GRAY_LEVEL4);
+#elif RETERMINAL_MODEL == 1003
+  // Enable 16-level greyscale mode on the ED103TC2 driver. Same trap
+  // as E1001 - default is 1-bit and swallows all intermediate shades.
+  epaper.initGrayMode(GRAY_LEVEL16);
+#endif
   renderPattern();
   LOG.println("[panel-test] refreshing panel");
   epaper.update();
