@@ -101,7 +101,8 @@ def _base64url(data: bytes) -> str:
 
 
 def _build_qweather_jwt(sub: str, kid: str, private_key_hex: str,
-                        lifetime_seconds: int = 15 * 60) -> str:
+                        lifetime_seconds: int = 15 * 60,
+                        iat_offset_seconds: int = 0) -> str:
     try:
         from cryptography.hazmat.primitives.asymmetric.ed25519 import (
             Ed25519PrivateKey,
@@ -125,7 +126,7 @@ def _build_qweather_jwt(sub: str, kid: str, private_key_hex: str,
 
     private_key = Ed25519PrivateKey.from_private_bytes(seed)
 
-    now = int(time.time())
+    now = int(time.time()) + iat_offset_seconds
     header = {"alg": "EdDSA", "kid": kid}
     # Match the firmware: iat back-dated 30s, exp = iat + 15 min.
     payload = {"sub": sub, "iat": now - 30, "exp": now - 30 + lifetime_seconds}
@@ -182,7 +183,8 @@ def _http_get_json(url: str, headers: Optional[Dict[str, str]] = None,
 
 
 def test_qweather(secrets: Dict[str, str], latitude: float,
-                  longitude: float, lang: str) -> bool:
+                  longitude: float, lang: str,
+                  iat_offset_seconds: int = 0) -> bool:
     print("[qweather] checking credentials...")
     required = ("QWEATHER_API_HOST", "QWEATHER_PROJECT_ID", "QWEATHER_CREDENTIAL_ID",
                 "QWEATHER_PRIVATE_KEY_HEX")
@@ -196,10 +198,14 @@ def test_qweather(secrets: Dict[str, str], latitude: float,
             sub=secrets["QWEATHER_PROJECT_ID"],
             kid=secrets["QWEATHER_CREDENTIAL_ID"],
             private_key_hex=secrets["QWEATHER_PRIVATE_KEY_HEX"],
+            iat_offset_seconds=iat_offset_seconds,
         )
     except SystemExit as exc:
         print(str(exc))
         return False
+    if iat_offset_seconds:
+        print(f"[qweather] using iat offset {iat_offset_seconds:+d}s "
+              f"from wall clock")
 
     host = secrets["QWEATHER_API_HOST"]
     # QWeather takes location as "lon,lat" with up to two decimals.
@@ -285,6 +291,12 @@ def main(argv: Optional[list] = None) -> int:
         help="Print the JWT header, payload, and signature (base64url "
              "segments) that would be sent to QWeather. Use to compare "
              "against firmware output when DEBUG_LOG_JWT is enabled.")
+    parser.add_argument(
+        "--iat-offset", type=int, default=0, metavar="SECONDS",
+        help="Add this offset to the current wall clock when generating "
+             "the JWT iat/exp claims. Use negative to simulate a slow RTC "
+             "(e.g. --iat-offset -3600 for one hour behind). Applies to "
+             "both --dump-jwt and the live QWeather request.")
     args = parser.parse_args(argv)
 
     secrets_path = args.include_dir / "secrets.h"
@@ -319,22 +331,24 @@ def main(argv: Optional[list] = None) -> int:
         if missing:
             print(f"[dump-jwt] missing: {', '.join(missing)}")
             return 2
-        now = int(time.time())
+        now = int(time.time()) + args.iat_offset
         iat = now - 30
         exp = iat + 15 * 60
         jwt = _build_qweather_jwt(
             sub=secrets["QWEATHER_PROJECT_ID"],
             kid=secrets["QWEATHER_CREDENTIAL_ID"],
             private_key_hex=secrets["QWEATHER_PRIVATE_KEY_HEX"],
+            iat_offset_seconds=args.iat_offset,
         )
         header, payload, signature = jwt.split(".")
-        print(f"[dump-jwt] iat={iat} exp={exp}")
+        print(f"[dump-jwt] iat={iat} exp={exp} offset={args.iat_offset:+d}s")
         print(f"[dump-jwt] header={header}")
         print(f"[dump-jwt] payload={payload}")
         print(f"[dump-jwt] signature={signature}")
         print(f"[dump-jwt] full={jwt}")
 
-    qweather_ok = test_qweather(secrets, latitude, longitude, lang)
+    qweather_ok = test_qweather(secrets, latitude, longitude, lang,
+                                iat_offset_seconds=args.iat_offset)
     open_meteo_ok = test_open_meteo(latitude, longitude)
 
     print()
