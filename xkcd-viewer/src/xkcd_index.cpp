@@ -1,6 +1,7 @@
 #include "xkcd_index.h"
 
 #include <Arduino.h>
+#include <ArduinoJson.h>
 #include <SD.h>
 
 #include <algorithm>
@@ -16,6 +17,28 @@ namespace {
 std::vector<int> g_numbers;
 std::vector<int> g_skips;
 bool g_ready = false;
+
+bool validateSortedUnique(const std::vector<int>& values) {
+  int previous = 0;
+  for (const int value : values) {
+    if (value <= previous || value == 404) return false;
+    previous = value;
+  }
+  return true;
+}
+
+bool decodeIntArray(JsonArrayConst array, std::vector<int>& out) {
+  if (array.size() > config::MAX_CACHE_INDEX_ENTRIES) return false;
+  out.clear();
+  out.reserve(array.size());
+  for (JsonVariantConst element : array) {
+    if (!element.is<int>() && !element.is<long>()) return false;
+    const long value = element.as<long>();
+    if (value <= 0 || value > INT32_MAX) return false;
+    out.push_back(static_cast<int>(value));
+  }
+  return validateSortedUnique(out);
+}
 
 }  // namespace
 
@@ -34,36 +57,24 @@ bool skipped(int number) {
   return std::binary_search(g_skips.begin(), g_skips.end(), number);
 }
 
-bool parseUnsignedLine(String line, uint32_t& value, bool allowZero) {
-  line.trim();
-  return parseUnsignedDigits(line.c_str(), line.length(), value, allowZero);
-}
-
 bool writeFile(const std::vector<int>& cached,
                const std::vector<int>& skipped) {
+  JsonDocument doc;
+  doc["version"] = config::CACHE_INDEX_VERSION;
+  JsonArray cachedArray = doc["cached"].to<JsonArray>();
+  for (const int number : cached) cachedArray.add(number);
+  JsonArray skippedArray = doc["skipped"].to<JsonArray>();
+  for (const int number : skipped) skippedArray.add(number);
+
   const String temporary = String(config::CACHE_INDEX) + ".part";
   SD.remove(temporary);
   File file = SD.open(temporary, FILE_WRITE);
   if (!file) return false;
 
-  bool written = file.println(config::CACHE_INDEX_MAGIC) > 0 &&
-                 file.println(cached.size()) > 0;
-  for (const int number : cached) {
-    if (!written || file.println(number) == 0) {
-      written = false;
-      break;
-    }
-  }
-  if (written) written = file.println(skipped.size()) > 0;
-  for (const int number : skipped) {
-    if (!written || file.println(number) == 0) {
-      written = false;
-      break;
-    }
-  }
+  const size_t bytesWritten = serializeJson(doc, file);
   file.flush();
   file.close();
-  if (!written) {
+  if (bytesWritten == 0) {
     SD.remove(temporary);
     return false;
   }
@@ -73,6 +84,9 @@ bool writeFile(const std::vector<int>& cached,
     SD.remove(temporary);
     return false;
   }
+  // The V2 text file is superseded by the JSON we just wrote; keeping
+  // it around would leave stale skip data on disk.
+  SD.remove(config::CACHE_INDEX_LEGACY_TXT);
   return true;
 }
 
@@ -93,70 +107,31 @@ bool load() {
     return false;
   }
 
-  String magic = file.readStringUntil('\n');
-  magic.trim();
-  uint32_t expectedCount = 0;
-  const bool headerValid =
-      magic == config::CACHE_INDEX_MAGIC &&
-      parseUnsignedLine(file.readStringUntil('\n'), expectedCount, true) &&
-      expectedCount <= config::MAX_CACHE_INDEX_ENTRIES;
-  if (!headerValid) {
-    file.close();
-    LOG.println("[cache] comic index has an invalid header");
+  JsonDocument doc;
+  const DeserializationError error = deserializeJson(doc, file);
+  file.close();
+  if (error) {
+    LOG.printf("[cache] comic index JSON parse failed: %s\n", error.c_str());
+    return false;
+  }
+
+  const uint32_t version = doc["version"].as<uint32_t>();
+  if (version != config::CACHE_INDEX_VERSION) {
+    LOG.printf("[cache] comic index has unsupported version %lu\n",
+               static_cast<unsigned long>(version));
     return false;
   }
 
   std::vector<int> loaded;
-  loaded.reserve(expectedCount);
-  int previous = 0;
-  for (uint32_t i = 0; i < expectedCount; ++i) {
-    uint32_t number = 0;
-    if (!file.available() ||
-        !parseUnsignedLine(file.readStringUntil('\n'), number) ||
-        number == 404 || static_cast<int>(number) <= previous) {
-      file.close();
-      LOG.println("[cache] comic index has invalid or unsorted entries");
-      return false;
-    }
-    loaded.push_back(static_cast<int>(number));
-    previous = static_cast<int>(number);
-  }
-
-  uint32_t skipCount = 0;
-  if (!file.available() ||
-      !parseUnsignedLine(file.readStringUntil('\n'), skipCount, true) ||
-      skipCount > config::MAX_CACHE_INDEX_ENTRIES) {
-    file.close();
-    LOG.println("[cache] comic index has an invalid skip-section header");
+  std::vector<int> loadedSkips;
+  if (!decodeIntArray(doc["cached"].as<JsonArrayConst>(), loaded)) {
+    LOG.println("[cache] comic index has invalid or unsorted entries");
     return false;
   }
-
-  std::vector<int> loadedSkips;
-  loadedSkips.reserve(skipCount);
-  previous = 0;
-  for (uint32_t i = 0; i < skipCount; ++i) {
-    uint32_t number = 0;
-    if (!file.available() ||
-        !parseUnsignedLine(file.readStringUntil('\n'), number) ||
-        number == 404 || static_cast<int>(number) <= previous) {
-      file.close();
-      LOG.println("[cache] comic index has invalid or unsorted skip entries");
-      return false;
-    }
-    loadedSkips.push_back(static_cast<int>(number));
-    previous = static_cast<int>(number);
+  if (!decodeIntArray(doc["skipped"].as<JsonArrayConst>(), loadedSkips)) {
+    LOG.println("[cache] comic index has invalid or unsorted skip entries");
+    return false;
   }
-
-  while (file.available()) {
-    const char trailing = static_cast<char>(file.read());
-    if (trailing != '\r' && trailing != '\n' && trailing != ' ' &&
-        trailing != '\t') {
-      file.close();
-      LOG.println("[cache] comic index contains unexpected trailing data");
-      return false;
-    }
-  }
-  file.close();
 
   g_numbers.swap(loaded);
   g_skips.swap(loadedSkips);

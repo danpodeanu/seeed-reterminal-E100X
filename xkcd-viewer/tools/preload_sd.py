@@ -41,8 +41,10 @@ USER_AGENT = (
     "(https://github.com/danpodeanu/seeed-reterminal-E100X)"
 )
 CHUNK_SIZE = 128 * 1024
-CACHE_INDEX_NAME = "index.txt"
-CACHE_INDEX_MAGIC = "XKCD_CACHE_INDEX_V2"
+CACHE_INDEX_NAME = "index.json"
+CACHE_INDEX_LEGACY_TXT = "index.txt"
+CACHE_INDEX_LEGACY_MAGIC = "XKCD_CACHE_INDEX_V2"
+CACHE_INDEX_VERSION = 3
 
 
 class DownloadError(RuntimeError):
@@ -244,19 +246,23 @@ def encode_cache_index(cached: list[int], skipped: list[int]) -> bytes:
         raise ValueError("cache index contains an invalid comic number")
     if any(number <= 0 or number == 404 for number in normalized_skipped):
         raise ValueError("skip list contains an invalid comic number")
-    lines = [CACHE_INDEX_MAGIC, str(len(normalized_cached))]
-    lines.extend(str(number) for number in normalized_cached)
-    lines.append(str(len(normalized_skipped)))
-    lines.extend(str(number) for number in normalized_skipped)
-    return ("\n".join(lines) + "\n").encode("ascii")
+    document = {
+        "version": CACHE_INDEX_VERSION,
+        "cached": normalized_cached,
+        "skipped": normalized_skipped,
+    }
+    # Compact separators keep the file small — the firmware parser is
+    # tolerant either way but the SD footprint matters here.
+    return json.dumps(document, separators=(",", ":")).encode("ascii")
 
 
 def _adopt_legacy_skip_markers(cache_dir: Path) -> set[int]:
     """Convert any leftover `<n>.skip` sentinel files into a skip set.
 
-    The short-lived pre-V2 preloader wrote these files; V2 folds skip
-    verdicts into the index instead. Migrate them once and delete the
-    files so subsequent runs don't need to look at them again.
+    The short-lived pre-V2 preloader wrote these files; the current
+    index folds skip verdicts into the index instead. Migrate them
+    once and delete the files so subsequent runs don't need to look
+    at them again.
     """
     adopted: set[int] = set()
     for marker in cache_dir.glob("*.skip"):
@@ -270,52 +276,90 @@ def _adopt_legacy_skip_markers(cache_dir: Path) -> set[int]:
     return adopted
 
 
-def read_cache_index_skips(cache_dir: Path) -> set[int]:
-    """Return the persisted skip set from a V2 index, or empty if missing.
-
-    Also adopts any legacy `<n>.skip` sentinel files so an existing V1
-    cache directory upgrades cleanly on the first V2 run.
-    """
-    legacy = _adopt_legacy_skip_markers(cache_dir)
-    path = cache_dir / CACHE_INDEX_NAME
+def _read_legacy_txt_index(path: Path) -> tuple[set[int], set[int]] | None:
+    """Parse the pre-JSON V2 text index. Returns (cached, skipped) or None."""
     if not path.exists():
-        return legacy
+        return None
     try:
         lines = path.read_text().splitlines()
     except OSError:
-        return legacy
-    if not lines or lines[0].strip() != CACHE_INDEX_MAGIC:
-        return legacy
+        return None
+    if not lines or lines[0].strip() != CACHE_INDEX_LEGACY_MAGIC:
+        return None
     try:
         cached_count = int(lines[1].strip())
     except (IndexError, ValueError):
-        return legacy
+        return None
+    cached: set[int] = set()
+    for offset in range(cached_count):
+        try:
+            cached.add(int(lines[2 + offset].strip()))
+        except (IndexError, ValueError):
+            return None
     skip_header_index = 2 + cached_count
     try:
         skip_count = int(lines[skip_header_index].strip())
     except (IndexError, ValueError):
-        return legacy
-    skips: set[int] = set(legacy)
+        return None
+    skipped: set[int] = set()
     for offset in range(skip_count):
-        line_index = skip_header_index + 1 + offset
         try:
-            skips.add(int(lines[line_index].strip()))
+            skipped.add(int(lines[skip_header_index + 1 + offset].strip()))
         except (IndexError, ValueError):
-            return legacy
-    return skips
+            return None
+    return cached, skipped
+
+
+def read_cache_index_skips(cache_dir: Path) -> set[int]:
+    """Return the persisted skip set, or empty if the index is absent.
+
+    Migrates from the pre-JSON text index and from stray `<n>.skip`
+    sentinel files transparently so an existing cache directory
+    upgrades cleanly on the first run.
+    """
+    legacy_markers = _adopt_legacy_skip_markers(cache_dir)
+    path = cache_dir / CACHE_INDEX_NAME
+    if path.exists():
+        try:
+            document = json.loads(path.read_text())
+        except (OSError, ValueError):
+            return legacy_markers
+        if (
+            not isinstance(document, dict)
+            or document.get("version") != CACHE_INDEX_VERSION
+        ):
+            return legacy_markers
+        skipped_raw = document.get("skipped", [])
+        if not isinstance(skipped_raw, list):
+            return legacy_markers
+        skips: set[int] = set(legacy_markers)
+        for value in skipped_raw:
+            if not isinstance(value, int) or isinstance(value, bool):
+                return legacy_markers
+            skips.add(value)
+        return skips
+
+    # No JSON on disk yet — try the pre-JSON txt file.
+    legacy = _read_legacy_txt_index(cache_dir / CACHE_INDEX_LEGACY_TXT)
+    if legacy is None:
+        return legacy_markers
+    _cached, txt_skips = legacy
+    return legacy_markers | txt_skips
 
 
 def write_cache_index(cache_dir: Path, skipped: set[int] | None = None) -> tuple[list[int], list[int]]:
     """Regenerate the firmware-compatible index from complete cache entries.
 
     Preserves the persisted skip set when `skipped` is None; pass an explicit
-    set (possibly empty) to overwrite it.
+    set (possibly empty) to overwrite it. Also removes the pre-JSON txt
+    index file so the two formats never coexist on disk.
     """
     cached = complete_cached_comics(cache_dir)
     if skipped is None:
         skipped = read_cache_index_skips(cache_dir)
     skip_list = sorted(number for number in skipped if number > 0 and number != 404)
     atomic_write(cache_dir / CACHE_INDEX_NAME, encode_cache_index(cached, skip_list))
+    (cache_dir / CACHE_INDEX_LEGACY_TXT).unlink(missing_ok=True)
     return cached, skip_list
 
 

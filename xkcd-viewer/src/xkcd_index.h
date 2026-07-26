@@ -45,13 +45,6 @@ const std::vector<int>& skips();
 // O(log n) membership test against the skip list.
 bool skipped(int number);
 
-// Parse a single decimal line from the on-disk index (accepts a
-// value up to 100000). Returns false on malformed input or on 0 when
-// `allowZero` is false (used for the count-line prefix vs entry
-// lines).
-bool parseUnsignedLine(String line, uint32_t& value,
-                       bool allowZero = false);
-
 // Write the given cached + skipped comic-number lists to the SD
 // index file atomically (.part + rename). Called from rebuild() and
 // after the maintenance pass tops up the cache.

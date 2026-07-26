@@ -122,14 +122,14 @@ class PreloadSdTests(unittest.TestCase):
             self.assertEqual(cached, [2])
             self.assertEqual(skipped, [])
             self.assertEqual(
-                (cache_dir / preload_sd.CACHE_INDEX_NAME).read_text(),
-                "XKCD_CACHE_INDEX_V2\n1\n2\n0\n",
+                json.loads((cache_dir / preload_sd.CACHE_INDEX_NAME).read_text()),
+                {"version": 3, "cached": [2], "skipped": []},
             )
 
     def test_cache_index_encoding_is_sorted_and_unique(self):
         self.assertEqual(
             preload_sd.encode_cache_index([7, 1, 7, 3], [10, 2, 2]),
-            b"XKCD_CACHE_INDEX_V2\n3\n1\n3\n7\n2\n2\n10\n",
+            b'{"version":3,"cached":[1,3,7],"skipped":[2,10]}',
         )
 
     def test_persisted_skip_list_round_trips(self):
@@ -154,7 +154,7 @@ class PreloadSdTests(unittest.TestCase):
                 preload_sd.read_cache_index_skips(cache_dir), {11, 42}
             )
 
-    def test_legacy_v1_index_with_skip_markers_migrates_to_v2(self):
+    def test_legacy_v1_index_with_skip_markers_migrates_to_json(self):
         with tempfile.TemporaryDirectory() as temporary:
             cache_dir = Path(temporary)
             complete = {
@@ -163,24 +163,27 @@ class PreloadSdTests(unittest.TestCase):
             }
             (cache_dir / "2.json").write_text(json.dumps(complete))
             (cache_dir / "2.png").write_bytes(b"\x89PNG\r\n\x1a\nvalid")
-            # A pre-V2 preloader run would have left these behind.
-            (cache_dir / preload_sd.CACHE_INDEX_NAME).write_text(
-                "XKCD_CACHE_INDEX_V1\n1\n2\n"
+            # A pre-JSON preloader would have left the txt index behind,
+            # possibly alongside stray .skip sentinels from an even
+            # older run.
+            (cache_dir / preload_sd.CACHE_INDEX_LEGACY_TXT).write_text(
+                "XKCD_CACHE_INDEX_V2\n1\n2\n1\n7\n"
             )
             (cache_dir / "5.skip").write_text("")
             (cache_dir / "9.skip").write_text("")
 
-            # Reading the legacy index adopts and consumes the .skip files.
+            # Reading the legacy state adopts both sources.
             skips = preload_sd.read_cache_index_skips(cache_dir)
-            self.assertEqual(skips, {5, 9})
+            self.assertEqual(skips, {5, 7, 9})
             self.assertFalse((cache_dir / "5.skip").exists())
             self.assertFalse((cache_dir / "9.skip").exists())
 
-            # Persisting them produces a clean V2 file with both sections.
+            # Persisting writes JSON and removes the txt file.
             preload_sd.write_cache_index(cache_dir, skipped=skips)
+            self.assertFalse((cache_dir / preload_sd.CACHE_INDEX_LEGACY_TXT).exists())
             self.assertEqual(
-                (cache_dir / preload_sd.CACHE_INDEX_NAME).read_text(),
-                "XKCD_CACHE_INDEX_V2\n1\n2\n2\n5\n9\n",
+                json.loads((cache_dir / preload_sd.CACHE_INDEX_NAME).read_text()),
+                {"version": 3, "cached": [2], "skipped": [5, 7, 9]},
             )
 
 
