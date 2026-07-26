@@ -40,6 +40,11 @@ export.
 
 ## Configure
 
+User-editable behavior lives in `include/config.h`. Implementation-level
+knobs (panel geometry, timing budgets, cache paths, retry windows) are
+in `include/system_config.h` and are included from the bottom of
+`config.h`; you should not usually need to touch them.
+
 Create the ignored credentials file:
 
 ```bash
@@ -96,8 +101,39 @@ constexpr WeatherProvider WEATHER_PROVIDER = WeatherProvider::OpenMeteo;
 
   Copy the `priv:` bytes (removing colons and whitespace) into
   `QWEATHER_PRIVATE_KEY_HEX`. The firmware generates a fresh JWT on
-  every fetch cycle using `rweather/Crypto` and sends it as
-  `Authorization: Bearer <jwt>`.
+  every fetch cycle using `rweather/Crypto` and sends it as an
+  `Authorization` bearer token.
+
+  Language for QWeather's textual fields (condition names, warning
+  titles) is controlled by `QWEATHER_LANG` in `include/config.h`.
+  Common values are `"en"`, `"zh"` (Simplified Chinese, upstream
+  default), `"zh-hant"`, `"de"`, `"es"`, `"fr"`, `"ja"`, `"ko"`,
+  `"ru"`. Ignored when the active provider is Open-Meteo.
+
+### Severe-weather alerts
+
+When any severe-weather alert is active for the configured location,
+the firmware renders a shaded `! Alert: <title> (+N more)` bar above
+the current-temperature area. Two independent opt-ins in
+`include/config.h` control which upstream is consulted:
+
+- `QWEATHER_ALERTS_ENABLED` (default `true`): fetch
+  `/v7/warning/now` from QWeather on every refresh. On the free tier
+  the endpoint requires the "Weather Warning" data resource to be
+  bound to your project in the QWeather console; unbound projects
+  return HTTP 403 and no alert bar is shown. Toggle to `false` to
+  skip the guaranteed-to-fail round-trip. Has no effect on the
+  Open-Meteo path.
+- `NWS_ALERTS_ENABLED` (default `false`): fetch
+  `api.weather.gov/alerts/active` from the US National Weather
+  Service. Free, no key, but coverage is US only -- flip to `true`
+  only if the device sits in a US state or territory. Non-US points
+  return HTTP 400 so leaving it on outside the US would just waste
+  bandwidth. Has no effect on the QWeather path.
+
+Open-Meteo itself does not expose a government-alerts endpoint, so
+the Open-Meteo path shows alerts only when `NWS_ALERTS_ENABLED` is on
+and the device is in NWS coverage.
 
 
 The device also synchronizes its system clock after Wi-Fi connects. Configure

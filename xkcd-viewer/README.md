@@ -260,10 +260,33 @@ before it exits. Safely eject the card after the script reports completion.
 
 ## Configuration
 
-Timing, download limits, retry counts, minimum display scale, and layout
-dimensions are in `include/config.h`. `platformio.ini` supplies the model
-number to `../common/include/driver.h`, which selects Seeed_GFX setup 520, 521, 522, or 523.
-Model-specific power-control pins are selected automatically.
+User-editable behavior is in `include/config.h`. Implementation-level
+knobs (panel geometry, timing budgets, PSRAM/image caps, cache paths,
+layout dimensions) live in `include/system_config.h` and are included
+from the bottom of `config.h`; you should not usually need to touch
+them.
+
+- `SLEEP_SECONDS`: interval between automatic refreshes.
+- `TIMEZONE`: POSIX timezone used for quiet hours and logs. Its offset
+  sign is reversed; London can use `GMT0BST,M3.5.0/1,M10.5.0`, while
+  Suzhou uses `CST-8`.
+- `NTP_SERVER_PRIMARY`, `NTP_SERVER_SECONDARY`: fall-back time servers
+  used when DHCP does not advertise one.
+- `QUIET_HOURS_ENABLED`, `QUIET_START_*`, and `QUIET_END_*`: overnight
+  suppression period. Cold boots and any front-button wake still refresh
+  immediately.
+- `MIN_DISPLAY_SCALE`: minimum fraction of the source pixels the panel
+  will accept before a comic is considered illegible and skipped. Raise
+  toward `1.0` to be pickier; lower toward `0.5` to display more comics
+  at the cost of readability.
+- `DEBUG_FORCE_COMIC`: when non-zero, the next cold-boot pick short-
+  circuits random selection and loads that specific comic straight from
+  the local cache. Intended only for reproducing a render bug on a
+  known-bad comic; leave at `0` for normal operation.
+
+`platformio.ini` supplies the model number to `../common/include/driver.h`,
+which selects Seeed_GFX setup 520, 521, 522, or 523. Model-specific
+power-control pins are selected automatically.
 
 HTTPS certificate verification is disabled because the firmware does not
 carry a CA bundle. Wi-Fi credentials are compiled into the firmware; keep

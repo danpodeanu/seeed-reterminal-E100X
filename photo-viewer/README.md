@@ -147,16 +147,23 @@ firmware builds.
 
 ## Settings
 
-User-editable behavior is in `include/config.h`:
+User-editable behavior is in `include/config.h`. Implementation-level
+knobs (hardware timing, sensor debounce, dither internals) live in
+`include/system_config.h` and are included from the bottom of
+`config.h`; you should not usually need to touch them.
 
 - `SLEEP_SECONDS`: normal automatic photo interval.
 - `TIMEZONE`: POSIX timezone used for quiet hours and logs. Its offset sign is
   reversed; London can use `GMT0BST,M3.5.0/1,M10.5.0`, while Suzhou uses
   `CST-8`.
-- `NTP_REFRESH_SECONDS`: internet time-sync interval.
+- `NTP_SERVER_PRIMARY`, `NTP_SERVER_SECONDARY`: fall-back time servers used
+  when DHCP does not advertise one.
 - `QUIET_HOURS_ENABLED`, `QUIET_START_*`, and `QUIET_END_*`: overnight
   suppression period.
-- `PHOTO_DIR`: SD-card directory.
+- `PHOTO_DIR`: SD-card directory scanned for photos.
+- `PHOTO_ORDER_RANDOM`: `true` shuffles the photo enumeration at each boot
+  so successive frames feel random; `false` sorts alphabetically for a
+  deterministic order across boots.
 
 ## Buttons
 
