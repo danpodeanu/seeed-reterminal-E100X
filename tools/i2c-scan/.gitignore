@@ -1,0 +1,5 @@
+# PlatformIO build products
+.pio/
+compile_commands.json
+.cache/
+.clangd/
