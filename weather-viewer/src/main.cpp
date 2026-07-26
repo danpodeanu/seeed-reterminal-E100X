@@ -927,12 +927,15 @@ void setup() {
   const bool schedulingClockSuspicious =
       !local_time::clockIsValid() ||
       (lastNtpSyncEpoch > 0 && startupTime < lastNtpSyncEpoch);
-  const bool hardwareRtcCheckedEarly = schedulingClockSuspicious;
+  // The ESP32's deep-sleep RTC drifts several percent (internal 150 kHz RC
+  // oscillator), so read the PCF8563 on every wake and reset the system
+  // clock from it. PCF8563 is battery-backed and stays accurate to ~20 ppm.
+  const bool hardwareRtcCheckedEarly = true;
   if (schedulingClockSuspicious) {
     LOG.println("[rtc] schedule clock is invalid or behind retained state; "
                 "trying PCF8563");
-    rtc_sync::restoreSystemClock();
   }
+  rtc_sync::restoreSystemClock();
 
   bool wakeEventLogged = wake_report::logWakeEvent(wakeCause, wakePins, false);
   const bool ntpDue = config::DEBUG_FORCE_NTP ||
