@@ -538,11 +538,15 @@ bool fetchQWeather(WeatherData& weather, String& responseBody,
   // still returns HTTP 200 with an empty `warning` array). We stitch a
   // placeholder envelope so the parser can rely on `warning_env` being present.
   String warningBody;
-  String warningFailureReason;
-  if (!fetchEndpoint(endpointUrl("/v7/warning/now"), bearerToken, warningBody,
-                     warningFailureReason, bypassHttpCache)) {
-    LOG.printf("[weather] warning fetch failed (continuing): %s\n",
-               warningFailureReason.c_str());
+  if (config::QWEATHER_ALERTS_ENABLED) {
+    String warningFailureReason;
+    if (!fetchEndpoint(endpointUrl("/v7/warning/now"), bearerToken, warningBody,
+                       warningFailureReason, bypassHttpCache)) {
+      LOG.printf("[weather] warning fetch failed (continuing): %s\n",
+                 warningFailureReason.c_str());
+      warningBody = "{\"code\":\"200\",\"warning\":[]}";
+    }
+  } else {
     warningBody = "{\"code\":\"200\",\"warning\":[]}";
   }
   responseBody.reserve(nowBody.length() + dailyBody.length() +
