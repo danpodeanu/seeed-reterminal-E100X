@@ -302,17 +302,25 @@ void setup() {
 
   epaper.begin();
 #if RETERMINAL_MODEL == 1001
-  // The UC8179 (E1001) needs a 1-bit refresh in its default mode before
-  // switching to grayscale, otherwise the first gray-mode update never
-  // reaches the panel. Weather-viewer gets this for free via its cold-
-  // boot renderStatus() call; here we do it explicitly with an all-white
-  // priming flush.
+  // UC8179 (E1001) quirk: the first update() after initGrayMode(4)
+  // never reaches the panel - it just gets swallowed by the driver.
+  // xkcd-viewer works around this by rendering its Wi-Fi connection
+  // status screen in native 1-bit mode BEFORE switching to Gray4, so
+  // that "lost" first Gray4 frame is actually the second panel refresh
+  // and everything the app really wants to show lands on the third.
+  // Panel-test only ever draws one screen per wake, so without this
+  // priming render the SMPTE pattern would silently vanish and the
+  // panel would stay stuck on whatever the previous app left behind.
+  LOG.println("[panel-test] priming 1-bit refresh (UC8179 workaround)");
   epaper.fillSprite(TFT_WHITE);
+  epaper.setTextColor(TFT_BLACK, TFT_WHITE, true);
+  epaper.setTextDatum(MC_DATUM);
+  epaper.setTextFont(2);
+  epaper.drawString("panel-test", PANEL_WIDTH / 2, PANEL_HEIGHT / 2 - 12, 1);
+  epaper.drawString(PANEL_LABEL, PANEL_WIDTH / 2, PANEL_HEIGHT / 2 + 12, 1);
   epaper.update();
   epaper.initGrayMode(GRAY_LEVEL4);
 #elif RETERMINAL_MODEL == 1003
-  // ED103TC2 (E1003) does not need the priming refresh - initGrayMode
-  // right after begin() works cleanly on the 16-level driver.
   epaper.initGrayMode(GRAY_LEVEL16);
 #endif
   // E1002 (ED2208) and E1004 (T133A01) drive their six-colour palettes
