@@ -35,8 +35,44 @@ const char* knownName(uint8_t addr) {
   switch (addr) {
     case 0x44: return "SHT4x (temp/humidity)";
     case 0x51: return "PCF8563 (RTC)";
+    case 0x5D: return "GT911 touch controller (E1003)";
     case 0x6A: return "SY6974B (charger)";
+    case 0x6B: return "charger @ 0x6B (BQ25895 / BQ25896 / SY6970 family)";
     default:   return nullptr;
+  }
+}
+
+// Read one 8-bit register. Returns true on ACK, false on NACK / timeout.
+bool readReg(uint8_t addr, uint8_t reg, uint8_t& value) {
+  Wire.beginTransmission(addr);
+  Wire.write(reg);
+  if (Wire.endTransmission(false) != 0) return false;
+  if (Wire.requestFrom(addr, static_cast<uint8_t>(1)) !=
+      static_cast<uint8_t>(1)) {
+    return false;
+  }
+  value = Wire.read();
+  return true;
+}
+
+// Dump the first 32 registers of a charger-family device so the chip can
+// be fingerprinted from the log. Limited to 0x60..0x6F to avoid poking at
+// devices (like touch controllers) that may not respond well to arbitrary
+// register reads.
+void dumpChargerRegisters(uint8_t addr) {
+  if (addr < 0x60 || addr > 0x6F) return;
+  logSerial.printf("[scan]        register dump for 0x%02X:\n", addr);
+  for (uint8_t base = 0x00; base < 0x20; base += 0x08) {
+    logSerial.printf("[scan]         %02X:", base);
+    for (uint8_t off = 0; off < 8; ++off) {
+      uint8_t v = 0;
+      if (readReg(addr, base + off, v)) {
+        logSerial.printf(" %02X", v);
+      } else {
+        logSerial.print(" --");
+      }
+    }
+    logSerial.println();
   }
 }
 
@@ -55,6 +91,7 @@ void scanBus() {
         logSerial.printf("[scan]   0x%02X  ACK  <- UNKNOWN (worth investigating)\n",
                          addr);
       }
+      dumpChargerRegisters(addr);
       ++found;
     } else if (err == 4) {
       logSerial.printf("[scan]   0x%02X  other error (err=4)\n", addr);
