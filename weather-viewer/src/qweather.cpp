@@ -293,6 +293,7 @@ bool fetchEndpoint(const String& url, const String& bearerToken, String& body,
     failureReason = "Could not start weather request";
     return false;
   }
+  LOG.printf("[weather] QWeather GET %s\n", url.c_str());
   // Register the response headers we want to read after GET() -- otherwise
   // HTTPClient::header() returns "" even when the server sent the header.
   static const char* kResponseHeaders[] = {"Content-Encoding"};

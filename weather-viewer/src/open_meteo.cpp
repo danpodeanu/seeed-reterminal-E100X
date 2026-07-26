@@ -62,6 +62,7 @@ void fetchNwsAlerts(WeatherData& weather) {
     LOG.println("[weather] NWS alerts: could not start HTTPS request");
     return;
   }
+  LOG.printf("[weather] NWS alerts GET %s\n", url.c_str());
   // NWS requires a descriptive User-Agent; anonymous requests return 403.
   http.addHeader("User-Agent",
                  "reterminal-weather-viewer/1.0 "
@@ -276,6 +277,7 @@ bool fetchOpenMeteo(WeatherData& weather, String& responseBody,
     failureReason = "Could not start weather request";
     return false;
   }
+  LOG.printf("[weather] Open-Meteo GET %s\n", url.c_str());
   if (bypassHttpCache) {
     http.addHeader("Cache-Control", "no-cache, no-store");
     http.addHeader("Pragma", "no-cache");

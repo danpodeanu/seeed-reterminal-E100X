@@ -32,6 +32,7 @@ bool getString(const String& url, String& body, uint32_t timeoutMs,
   http.setTimeout(applyBound(timeoutMs, boundTimeout));
   http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
   if (!http.begin(client, url)) return false;
+  LOG.printf("[http] GET %s\n", url.c_str());
   const int status = http.GET();
   if (aborted(shouldAbort)) {
     http.end();
@@ -61,6 +62,7 @@ bool downloadToSd(const String& url, const String& destination,
   http.setTimeout(applyBound(idleTimeoutMs, boundTimeout));
   http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
   if (!http.begin(client, url)) return false;
+  LOG.printf("[http] image GET %s\n", url.c_str());
 
   const int status = http.GET();
   if (status != HTTP_CODE_OK) {
@@ -175,6 +177,7 @@ bool downloadToMemory(const String& url, uint8_t*& output,
   http.setTimeout(applyBound(idleTimeoutMs, boundTimeout));
   http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
   if (!http.begin(client, url)) return false;
+  LOG.printf("[http] live image GET %s\n", url.c_str());
 
   const int status = http.GET();
   if (status != HTTP_CODE_OK) {
