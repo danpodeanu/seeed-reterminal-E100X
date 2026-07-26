@@ -359,6 +359,190 @@ def test_nws_alerts(latitude: float, longitude: float) -> bool:
     return True
 
 
+# ----------------------------------------------------------------------------
+# Cross-geography probe
+# ----------------------------------------------------------------------------
+
+# Three representative locations chosen so every quadrant of the
+# (in China? / in US?) matrix is covered:
+#   Shanghai -> in China, out US    (QWeather sweet spot)
+#   New York -> out China, in US    (NWS sweet spot)
+#   London   -> out China, out US   (neither national service applies)
+# All three are inside Open-Meteo coverage (worldwide).
+_GEO_LOCATIONS: tuple = (
+    ("Shanghai",  31.2304, 121.4737, "in China, out US"),
+    ("New York",  40.7128, -74.0060, "out China, in US"),
+    ("London",    51.5074,  -0.1278, "out China, out US"),
+)
+
+
+def _probe_qweather_now(host: str, jwt: str, latitude: float,
+                        longitude: float, lang: str) -> str:
+    location = f"{longitude:.2f},{latitude:.2f}"
+    url = (f"https://{host}/v7/weather/now?"
+           + urllib.parse.urlencode(
+               {"location": location, "unit": "m", "lang": lang}))
+    try:
+        body = _http_get_json(url, headers={"Authorization": f"Bearer {jwt}"})
+    except urllib.error.HTTPError as exc:
+        return f"HTTP {exc.code}"
+    except urllib.error.URLError as exc:
+        return f"net err: {exc.reason}"
+    code = body.get("code")
+    if code != "200":
+        return f"code={code}"
+    now = body.get("now", {})
+    return f"OK {now.get('temp')}C {now.get('text', '')}".strip()
+
+
+def _probe_qweather_warning(host: str, jwt: str, latitude: float,
+                            longitude: float, lang: str) -> str:
+    location = f"{longitude:.2f},{latitude:.2f}"
+    url = (f"https://{host}/v7/warning/now?"
+           + urllib.parse.urlencode(
+               {"location": location, "lang": lang}))
+    try:
+        body = _http_get_json(url, headers={"Authorization": f"Bearer {jwt}"})
+    except urllib.error.HTTPError as exc:
+        return f"HTTP {exc.code}"
+    except urllib.error.URLError as exc:
+        return f"net err: {exc.reason}"
+    code = body.get("code")
+    if code != "200":
+        return f"code={code}"
+    warnings_list = body.get("warning") or []
+    if not warnings_list:
+        return "OK no alerts"
+    top = max(warnings_list,
+              key=lambda w: _qweather_severity_rank(w.get("severity", "")))
+    extras = len(warnings_list) - 1
+    suffix = f" (+{extras})" if extras > 0 else ""
+    return (f"OK {top.get('severity') or 'Unknown'}: "
+            f"{top.get('title', '')}{suffix}")
+
+
+def _probe_open_meteo(latitude: float, longitude: float) -> str:
+    url = ("https://api.open-meteo.com/v1/forecast?"
+           + urllib.parse.urlencode({
+               "latitude": f"{latitude}",
+               "longitude": f"{longitude}",
+               "current_weather": "true",
+           }))
+    try:
+        body = _http_get_json(url)
+    except urllib.error.HTTPError as exc:
+        return f"HTTP {exc.code}"
+    except urllib.error.URLError as exc:
+        return f"net err: {exc.reason}"
+    current = body.get("current_weather") or {}
+    if "temperature" not in current:
+        return "no current_weather"
+    return f"OK {current['temperature']}C"
+
+
+def _probe_nws(latitude: float, longitude: float) -> str:
+    url = ("https://api.weather.gov/alerts/active?"
+           + urllib.parse.urlencode(
+               {"point": f"{latitude:.4f},{longitude:.4f}"}))
+    try:
+        body = _http_get_json(
+            url,
+            headers={
+                "User-Agent":
+                    "reterminal-weather-tester/1.0 "
+                    "(https://github.com/danpodeanu/seeed-reterminal-E100X)",
+                "Accept": "application/geo+json",
+            })
+    except urllib.error.HTTPError as exc:
+        return f"HTTP {exc.code}"
+    except urllib.error.URLError as exc:
+        return f"net err: {exc.reason}"
+    features = body.get("features") or []
+    if not features:
+        return "OK no alerts"
+    top = max(
+        features,
+        key=lambda f: _qweather_severity_rank(
+            (f.get("properties") or {}).get("severity", "")))
+    props = top.get("properties") or {}
+    extras = len(features) - 1
+    suffix = f" (+{extras})" if extras > 0 else ""
+    return (f"OK {props.get('severity') or 'Unknown'}: "
+            f"{props.get('event', '')}{suffix}")
+
+
+def run_geo_probe(secrets: Dict[str, str], lang: str,
+                  iat_offset_seconds: int = 0) -> None:
+    """Probe every provider from Shanghai / New York / London to show how
+    each API behaves across the (China vs. US vs. neither) geography
+    matrix. Purely informational -- results are printed as a table and
+    the function never fails the overall tester.
+    """
+    print()
+    print("=" * 78)
+    print("[geo-probe] cross-geography API behaviour")
+    print("=" * 78)
+
+    # Build one JWT and reuse for every QWeather call in this run so
+    # differences across locations reflect the server-side geo-fencing,
+    # not clock drift between requests.
+    required = ("QWEATHER_PROJECT_ID", "QWEATHER_CREDENTIAL_ID",
+                "QWEATHER_PRIVATE_KEY_HEX", "QWEATHER_API_HOST")
+    missing = [k for k in required if not secrets.get(k)]
+    qweather_jwt: Optional[str] = None
+    qweather_host: Optional[str] = None
+    if missing:
+        print(f"[geo-probe] QWeather columns skipped -- missing in "
+              f"secrets.h: {', '.join(missing)}")
+    else:
+        try:
+            qweather_jwt = _build_qweather_jwt(
+                sub=secrets["QWEATHER_PROJECT_ID"],
+                kid=secrets["QWEATHER_CREDENTIAL_ID"],
+                private_key_hex=secrets["QWEATHER_PRIVATE_KEY_HEX"],
+                iat_offset_seconds=iat_offset_seconds,
+            )
+            qweather_host = secrets["QWEATHER_API_HOST"]
+        except SystemExit as exc:
+            print(f"[geo-probe] QWeather columns skipped -- {exc}")
+
+    rows = []
+    for name, lat, lon, note in _GEO_LOCATIONS:
+        print()
+        print(f"[geo-probe] {name} ({lat:.4f}, {lon:.4f}) -- {note}")
+        if qweather_jwt and qweather_host:
+            qw_now = _probe_qweather_now(qweather_host, qweather_jwt,
+                                         lat, lon, lang)
+            qw_warn = _probe_qweather_warning(qweather_host, qweather_jwt,
+                                              lat, lon, lang)
+        else:
+            qw_now = "skipped"
+            qw_warn = "skipped"
+        om = _probe_open_meteo(lat, lon)
+        nws = _probe_nws(lat, lon)
+        _safe_print(f"  qweather now      : {qw_now}")
+        _safe_print(f"  qweather warning  : {qw_warn}")
+        _safe_print(f"  open-meteo now    : {om}")
+        _safe_print(f"  nws alerts        : {nws}")
+        rows.append((name, qw_now, qw_warn, om, nws))
+
+    print()
+    print("[geo-probe] summary (truncated)")
+    header = ("location", "qweather now", "qweather warn",
+              "open-meteo", "nws alerts")
+    widths = (10, 22, 22, 14, 22)
+
+    def _fmt(row: tuple) -> str:
+        return "  ".join(
+            str(cell)[:w].ljust(w) for cell, w in zip(row, widths))
+
+    print(_fmt(header))
+    print(_fmt(tuple("-" * w for w in widths)))
+    for row in rows:
+        _safe_print(_fmt(row))
+    print()
+
+
 def _self_test() -> None:
     """Parity check between this tester and the firmware normaliser.
 
@@ -390,6 +574,13 @@ def main(argv: Optional[list] = None) -> int:
              "the JWT iat/exp claims. Use negative to simulate a slow RTC "
              "(e.g. --iat-offset -3600 for one hour behind). Applies to "
              "both --dump-jwt and the live QWeather request.")
+    parser.add_argument(
+        "--no-geo-probe", action="store_true",
+        help="Skip the cross-geography probe that runs every provider "
+             "from Shanghai / New York / London to compare API behaviour "
+             "inside vs. outside China and the US. The probe runs by "
+             "default; pass this flag to keep runs fast when iterating on "
+             "the configured-location checks only.")
     args = parser.parse_args(argv)
 
     secrets_path = args.include_dir / "secrets.h"
@@ -444,6 +635,9 @@ def main(argv: Optional[list] = None) -> int:
                                 iat_offset_seconds=args.iat_offset)
     open_meteo_ok = test_open_meteo(latitude, longitude)
     test_nws_alerts(latitude, longitude)
+
+    if not args.no_geo_probe:
+        run_geo_probe(secrets, lang, iat_offset_seconds=args.iat_offset)
 
     print()
     print(f"[summary] qweather   = {'ok' if qweather_ok else 'FAIL'}")
