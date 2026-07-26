@@ -72,6 +72,10 @@ family. Panel resolution, color capabilities, peripherals, and pin mappings
 differ between models, so consult each application's README before building or
 uploading firmware.
 
+> **Hardware coverage:** the XKCD Viewer and Weather Viewer have only been
+> verified on E1001 and E1003. Builds for E1002 and E1004 are produced by CI
+> but have not yet been tested on real hardware.
+
 ## Getting started
 
 Choose an application from the table above and follow the instructions in its
