@@ -28,13 +28,37 @@ void measureBatteryFromAdc(int enablePin, int adcPin, float& voltage,
                            int& percent) {
   pinMode(enablePin, OUTPUT);
   digitalWrite(enablePin, HIGH);
-  delay(200);
   analogReadResolution(12);
   analogSetPinAttenuation(adcPin, ADC_11db);
+
+  // The battery divider needs a short time for its filter cap to
+  // settle after the enable switch closes. Rather than a blind
+  // delay(200), give the cap a small minimum window and then poll
+  // the ADC until two consecutive reads agree within a tight mV
+  // threshold. A budget guards against a stuck ADC or an unusually
+  // leaky divider so the measurement still returns in bounded time.
+  constexpr uint32_t kSettleMinMs = 20;
+  constexpr uint32_t kSettleBudgetMs = 250;
+  constexpr uint32_t kSettlePollMs = 5;
+  constexpr uint32_t kSettleToleranceMv = 10;
+  delay(kSettleMinMs);
+  uint32_t prev = analogReadMilliVolts(adcPin);
+  const uint32_t startMs = millis();
+  while ((millis() - startMs) < (kSettleBudgetMs - kSettleMinMs)) {
+    delay(kSettlePollMs);
+    const uint32_t now = analogReadMilliVolts(adcPin);
+    const uint32_t delta = (now > prev) ? (now - prev) : (prev - now);
+    prev = now;
+    if (delta <= kSettleToleranceMv) break;
+  }
+
+  // Oversample to average out ADC noise. delay(1) is enough spacing
+  // for noise decorrelation on the ESP32-S3 ADC; the prior delay(4)
+  // was conservative and multiplied out to 64 ms per wake.
   uint32_t totalMv = 0;
   for (int i = 0; i < 16; ++i) {
     totalMv += analogReadMilliVolts(adcPin);
-    delay(4);
+    delay(1);
   }
   voltage = (totalMv / 16.0f) * 2.0f / 1000.0f;
   percent = constrain(

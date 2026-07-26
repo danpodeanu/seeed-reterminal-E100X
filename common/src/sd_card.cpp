@@ -15,11 +15,29 @@ bool mount(SPIClass& spi, const char* cacheDir) {
   pinMode(board::PIN_SD_DETECT, INPUT_PULLUP);
   pinMode(board::PIN_SD_CS, OUTPUT);
   digitalWrite(board::PIN_SD_CS, HIGH);
-  delay(50);
 
   spi.end();
   spi.begin(board::PIN_SD_SCK, board::PIN_SD_MISO, board::PIN_SD_MOSI, -1);
-  if (!SD.begin(board::PIN_SD_CS, spi)) {
+
+  // The SD card needs its VDD rail to settle and its internal power-on
+  // reset to finish before it will respond to CMD0. There is no ready
+  // pin to sample, so poll SD.begin() at short intervals until it
+  // succeeds or the SD spec's 250 ms power-up budget elapses. Healthy
+  // modern cards typically respond on the first attempt within a few
+  // milliseconds; the retry only pays for itself on a slow or beat-up
+  // card that would previously have failed.
+  constexpr uint32_t kSdInitBudgetMs = 250;
+  constexpr uint32_t kSdInitPollMs = 5;
+  const uint32_t startMs = millis();
+  bool mounted = SD.begin(board::PIN_SD_CS, spi);
+  while (!mounted && (millis() - startMs) < kSdInitBudgetMs) {
+    // Some SPI SD drivers need a clean SD.end() before retrying so any
+    // half-initialised state is cleared out. Cheap on ESP32 Arduino SD.
+    SD.end();
+    delay(kSdInitPollMs);
+    mounted = SD.begin(board::PIN_SD_CS, spi);
+  }
+  if (!mounted) {
     LOG.println("[sd] mount failed; insert a FAT32/exFAT card");
     digitalWrite(board::PIN_SD_ENABLE, LOW);
     return false;
