@@ -16,8 +16,9 @@ for:
   a photo of the panel for support.
 
 The sketch draws once in `setup()` and then enters deep sleep, so the
-pattern stays on the display indefinitely. Press the reset button to
-redraw it (or unplug/replug the USB cable).
+pattern stays on the display indefinitely. Press any of the three front
+buttons (GPIO 3/4/5) to redraw it - they're wired as EXT1 wake sources.
+Unplugging/replugging USB also redraws.
 
 ## Per-panel adaptations
 

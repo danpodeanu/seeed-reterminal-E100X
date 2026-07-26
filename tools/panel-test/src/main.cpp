@@ -25,6 +25,7 @@
 
 #include <Arduino.h>
 #include <TFT_eSPI.h>
+#include <driver/rtc_io.h>
 #include <esp_sleep.h>
 
 #include "app_logger.h"
@@ -254,6 +255,32 @@ void renderPattern() {
 }
 
 void powerDownAndSleep() {
+  // Wire the three front buttons (GPIO 3/4/5, all wired active-low with
+  // external pull-ups on the reTerminal) as EXT1 wake sources so pressing
+  // any of them redraws the pattern. Without this the panel would stay
+  // as-is forever, since there is no physical EN-reset button on the
+  // reTerminal E100X - the labelled "reset" is itself a GPIO.
+  constexpr int kButtons[] = {3, 4, 5};
+  bool rtcPinsReady = true;
+  for (const int pin : kButtons) {
+    const gpio_num_t gpio = static_cast<gpio_num_t>(pin);
+    rtc_gpio_hold_dis(gpio);
+    rtcPinsReady =
+        rtc_gpio_init(gpio) == ESP_OK &&
+        rtc_gpio_set_direction(gpio, RTC_GPIO_MODE_INPUT_ONLY) == ESP_OK &&
+        rtc_gpio_pullup_en(gpio) == ESP_OK &&
+        rtc_gpio_pulldown_dis(gpio) == ESP_OK &&
+        rtcPinsReady;
+  }
+  constexpr uint64_t kWakeMask =
+      (1ULL << 3) | (1ULL << 4) | (1ULL << 5);
+  const esp_err_t wakeResult =
+      rtcPinsReady
+          ? esp_sleep_enable_ext1_wakeup(kWakeMask, ESP_EXT1_WAKEUP_ANY_LOW)
+          : ESP_FAIL;
+  LOG.printf("[panel-test] wake config: %s\n", esp_err_to_name(wakeResult));
+  LOG.flush();
+  delay(50);
   esp_deep_sleep_start();
 }
 
@@ -280,7 +307,7 @@ void setup() {
   renderPattern();
   LOG.println("[panel-test] refreshing panel");
   epaper.update();
-  LOG.println("[panel-test] done; entering deep sleep - press reset to redraw");
+  LOG.println("[panel-test] done; sleeping - press any front button to redraw");
   powerDownAndSleep();
 }
 
