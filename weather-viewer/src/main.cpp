@@ -1066,9 +1066,13 @@ void setup() {
   }
 
   // Cold boot NTP may have made it possible to validate a cache whose age
-  // could not be checked before connecting.
-  if (!buttonWake &&
-      (!cacheLoaded || ntpSynchronized || rtcRestored) && local_time::clockIsValid()) {
+  // could not be checked before connecting. Only re-check when the clock's
+  // state actually changed (fresh NTP sync or RTC restore) or when the first
+  // attempt was skipped because the clock was not yet valid -- otherwise
+  // re-running produces the same answer and duplicates the log line.
+  if (!buttonWake && !cacheLoaded &&
+      (!cacheChecked || ntpSynchronized || rtcRestored) &&
+      local_time::clockIsValid()) {
     cacheChecked = true;
     cacheLoaded = loadCachedWeather(weather, cacheFailureReason);
   }
