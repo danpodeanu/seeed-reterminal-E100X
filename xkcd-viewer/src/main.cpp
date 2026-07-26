@@ -441,6 +441,35 @@ String metadataPath(int number) {
   return String(config::CACHE_DIR) + "/" + number + ".json";
 }
 
+// A ".skip" sentinel means we already know this comic is permanently
+// unusable (e.g. it uses an image format the firmware cannot decode).
+// Writing a marker instead of just returning false stops the random
+// selectors below from wasting attempts re-parsing its metadata every
+// wake. Delete the file on SD to force a fresh evaluation if xkcd ever
+// republishes the comic in a supported format, or run the preloader
+// with --force which clears markers.
+String skipPath(int number) {
+  return String(config::CACHE_DIR) + "/" + number + ".skip";
+}
+
+bool comicPermanentlySkipped(int number) {
+  if (!sdReady || number <= 0) return false;
+  return SD.exists(skipPath(number));
+}
+
+void markComicPermanentlySkipped(int number, const char* reason) {
+  if (!sdReady || number <= 0 || !sdCacheWritable) return;
+  const String path = skipPath(number);
+  if (SD.exists(path)) return;
+  if (sd_card::writeFileAtomically(path, reason ? String(reason) : String())) {
+    LOG.printf("[cache] marked #%d as permanently unusable (%s)\n", number,
+               reason ? reason : "no reason given");
+  } else {
+    sdCacheWritable = false;
+    LOG.printf("[cache] could not write skip marker for #%d\n", number);
+  }
+}
+
 bool comicFullyCached(int number) {
   if (!sdReady || number <= 0 || number == 404) return false;
   String json;
@@ -453,6 +482,7 @@ bool comicFullyCached(int number) {
 }
 
 bool getComic(int number, bool networkAvailable, Comic& comic) {
+  if (comicPermanentlySkipped(number)) return false;
   const String metaPath = metadataPath(number);
   String json;
   bool metadataCached = sd_card::readFile(metaPath, json, 64U * 1024U) && parseComic(json, comic);
@@ -474,6 +504,7 @@ bool getComic(int number, bool networkAvailable, Comic& comic) {
   const String extension = net_http::imageExtension(comic.imageUrl);
   if (extension.isEmpty()) {
     LOG.printf("[comic] #%d uses an unsupported image format\n", comic.number);
+    markComicPermanentlySkipped(number, "unsupported image extension");
     return false;
   }
   comic.imagePath = String(config::CACHE_DIR) + "/" + comic.number + extension;
@@ -583,7 +614,8 @@ void refreshArchiveCache() {
          attempts++ < maxAttempts && latest > 1 && sdCacheWritable &&
          !networkOperationShouldStop()) {
     const int number = random(1, latest);
-    if (number == 404 || comicFullyCached(number)) continue;
+    if (number == 404 || comicPermanentlySkipped(number) ||
+        comicFullyCached(number)) continue;
     Comic historical;
     if (getComic(number, true, historical) && comicFullyCached(number)) {
       ++oldAdded;
@@ -626,12 +658,14 @@ bool getComicWithoutSd(int number, Comic& comic, uint8_t*& compressed,
   compressed = nullptr;
   compressedLength = 0;
   if (number <= 0 || number == 404) return false;
+  if (comicPermanentlySkipped(number)) return false;
 
   String json;
   const String metadataUrl = "https://xkcd.com/" + String(number) + "/info.0.json";
   if (!net_http::getString(metadataUrl, json, config::HTTP_TIMEOUT_MS, networkOperationShouldStop, boundedNetworkTimeout) || !parseComic(json, comic)) return false;
   if (net_http::imageExtension(comic.imageUrl).isEmpty()) {
     LOG.printf("[comic] #%d uses an unsupported image format\n", comic.number);
+    markComicPermanentlySkipped(number, "unsupported image extension");
     return false;
   }
   LOG.printf("[comic] downloading #%d directly to PSRAM\n", comic.number);
@@ -794,7 +828,7 @@ bool acquireComic(bool networkAvailable, Comic& comic, RgbImage& image,
       for (uint8_t attempt = 0; attempt < config::MAX_COMIC_ATTEMPTS;
            ++attempt) {
         int number = random(1, latest + 1);
-        if (number == 404) continue;
+        if (number == 404 || comicPermanentlySkipped(number)) continue;
         LOG.printf("[comic] random attempt %u: #%d\n", attempt + 1, number);
         if (loadUsableComic(number, true, comic, image, layout)) return true;
         image_free(&image);

@@ -73,6 +73,43 @@ class PreloadSdTests(unittest.TestCase):
 
             self.assertEqual(result.status, "skipped")
 
+    def test_unsupported_extension_writes_skip_marker_and_is_reused(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            cache_dir = Path(temporary)
+            metadata = {
+                "num": 5,
+                "img": "https://imgs.xkcd.com/comics/example.gif",
+            }
+            (cache_dir / "5.json").write_text(json.dumps(metadata))
+
+            first = preload_sd.process_comic(
+                5,
+                cache_dir,
+                timeout=0.01,
+                retries=1,
+                force=False,
+                stop_event=threading.Event(),
+            )
+            self.assertEqual(first.status, "skipped")
+            self.assertEqual(first.detail, "unsupported image extension")
+            self.assertTrue((cache_dir / "5.skip").exists())
+
+            # A second run must not touch the network; passing an obviously
+            # broken metadata file exercises that path — the skip marker
+            # short-circuits before decode_metadata is ever called.
+            (cache_dir / "5.json").write_text("not valid json")
+
+            second = preload_sd.process_comic(
+                5,
+                cache_dir,
+                timeout=0.01,
+                retries=1,
+                force=False,
+                stop_event=threading.Event(),
+            )
+            self.assertEqual(second.status, "skipped")
+            self.assertEqual(second.detail, "previously marked non-retriable")
+
     def test_cache_index_contains_only_complete_valid_comics(self):
         with tempfile.TemporaryDirectory() as temporary:
             cache_dir = Path(temporary)

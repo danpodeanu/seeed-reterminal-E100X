@@ -288,6 +288,10 @@ def download_image(
     raise DownloadError(f"{url}: {last_error}") from last_error
 
 
+def skip_marker_path(cache_dir: Path, number: int) -> Path:
+    return cache_dir / f"{number}.skip"
+
+
 def process_comic(
     number: int,
     cache_dir: Path,
@@ -300,6 +304,17 @@ def process_comic(
         return Result(number, "cancelled", "stopped")
     if number == 404:
         return Result(number, "skipped", "XKCD #404 intentionally does not exist")
+
+    # A ".skip" marker records a permanent, non-retriable verdict (e.g.
+    # the comic uses an image format the firmware cannot decode). Once
+    # written, future runs bail out immediately instead of re-parsing
+    # the metadata. --force ignores and clears any existing marker so a
+    # comic can be re-evaluated if xkcd ever republishes it.
+    skip_marker = skip_marker_path(cache_dir, number)
+    if force:
+        skip_marker.unlink(missing_ok=True)
+    elif skip_marker.exists():
+        return Result(number, "skipped", "previously marked non-retriable")
 
     metadata_path = cache_dir / f"{number}.json"
     metadata = None if force else read_valid_metadata(metadata_path, number)
@@ -315,6 +330,7 @@ def process_comic(
 
         extension = image_extension(metadata["img"])
         if not extension:
+            atomic_write(skip_marker, b"unsupported image extension\n")
             return Result(number, "skipped", "unsupported image extension")
 
         image_path = cache_dir / f"{number}{extension}"
