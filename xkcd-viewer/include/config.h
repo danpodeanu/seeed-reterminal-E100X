@@ -1,72 +1,27 @@
 #pragma once
 
+// User-tweakable configuration for the xkcd viewer. Everything in this
+// header is intended to be edited when setting up a new device or when
+// changing personal preferences (refresh cadence, quiet hours, minimum
+// display scale, debug knobs).
+//
+// Hardware, timing budgets, PSRAM budgets, dither/render tuning, and
+// on-flash cache layout live in system_config.h, which is included from
+// the bottom of this file.
+
 #include <Arduino.h>
 
 namespace config {
 
-#ifndef RETERMINAL_MODEL
-#define RETERMINAL_MODEL 1001
-#endif
-
-constexpr int MODEL = RETERMINAL_MODEL;
-
-#if RETERMINAL_MODEL == 1001 || RETERMINAL_MODEL == 1002
-constexpr int PANEL_WIDTH = 800;
-constexpr int PANEL_HEIGHT = 480;
-constexpr int UI_SCALE_NUMERATOR = 1;
-constexpr int UI_SCALE_DENOMINATOR = 1;
-#elif RETERMINAL_MODEL == 1003
-constexpr int PANEL_WIDTH = 1872;
-constexpr int PANEL_HEIGHT = 1404;
-constexpr int UI_SCALE_NUMERATOR = 9;
-constexpr int UI_SCALE_DENOMINATOR = 4;
-#elif RETERMINAL_MODEL == 1004
-constexpr int PANEL_WIDTH = 1200;
-constexpr int PANEL_HEIGHT = 1600;
-constexpr int UI_SCALE_NUMERATOR = 3;
-constexpr int UI_SCALE_DENOMINATOR = 2;
-#else
-#error "Unsupported RETERMINAL_MODEL"
-#endif
-
-constexpr int ui(int e1001Pixels) {
-  return (e1001Pixels * UI_SCALE_NUMERATOR + UI_SCALE_DENOMINATOR / 2) /
-         UI_SCALE_DENOMINATOR;
-}
-
+// --- Refresh cadence --------------------------------------------------------
+// How long the device sleeps between automatic refreshes. Shorter = fresher
+// comics but noticeably more battery drain and more panel wear.
 constexpr uint64_t SLEEP_SECONDS = 15ULL * 60ULL;
-constexpr uint32_t WIFI_TIMEOUT_MS = 30000;
-constexpr uint32_t HTTP_TIMEOUT_MS = 25000;
+
 // POSIX TZ notation uses the opposite sign: CST-8 means UTC+8.
 constexpr char TIMEZONE[] = "CST-8";
-constexpr char NTP_SERVER_PRIMARY[] = "pool.ntp.org";
-constexpr char NTP_SERVER_SECONDARY[] = "time.cloudflare.com";
-constexpr uint32_t NTP_DHCP_TIMEOUT_MS = 4000;
-constexpr uint32_t NTP_SYNC_TIMEOUT_MS = 10000;
-constexpr uint32_t NTP_REFRESH_SECONDS = 24UL * 60UL * 60UL;
-constexpr uint32_t DOWNLOAD_IDLE_TIMEOUT_MS = 10000;
-constexpr uint8_t SENSOR_READ_ATTEMPTS = 4;
-constexpr uint32_t SENSOR_RETRY_DELAY_MS = 75;
-constexpr uint32_t SCREENSHOT_LONG_PRESS_MS = 1500;
-constexpr uint32_t BUTTON_RELEASE_DEBOUNCE_MS = 40;
-constexpr size_t MAX_IMAGE_BYTES = 6U * 1024U * 1024U;
-constexpr size_t MAX_LIVE_IMAGE_BYTES = 2U * 1024U * 1024U;
-// Reject comics whose decoded source or rendered target would blow past a
-// safe pixel budget. RGB888 decode uses w*h*3 bytes, resize target uses
-// w*h bytes; both compete for the 8 MB PSRAM. 2.5 M source pixels caps
-// the decode buffer at ~7.5 MB. The render cap is the full panel — the
-// layout math never intentionally exceeds it, so anything larger is a
-// bug or pathological aspect ratio and we'd rather skip than allocate.
-constexpr size_t MAX_DECODED_PIXELS = 2500000U;
-constexpr size_t MAX_RENDER_PIXELS =
-    static_cast<size_t>(PANEL_WIDTH) * static_cast<size_t>(PANEL_HEIGHT);
-constexpr uint8_t MAX_COMIC_ATTEMPTS = 8;
-constexpr uint8_t MIN_COMICS_FOR_CACHE_ONLY = 10;
-constexpr uint32_t ARCHIVE_REFRESH_SECONDS = 6UL * 60UL * 60UL;
-constexpr uint8_t ARCHIVE_OLD_COMICS_PER_REFRESH = 10;
-constexpr uint32_t ARCHIVE_MAINTENANCE_DEADLINE_MS = 5UL * 60UL * 1000UL;
-constexpr uint32_t ARCHIVE_CANCEL_POLL_TIMEOUT_MS = 2000;
 
+// --- Quiet hours ------------------------------------------------------------
 // Suppress automatic refreshes overnight. A cold boot or any front-button
 // wake still refreshes immediately, then sleeps until the configured end.
 constexpr bool QUIET_HOURS_ENABLED = true;
@@ -79,28 +34,20 @@ static_assert(QUIET_START_HOUR < 24 && QUIET_END_HOUR < 24,
 static_assert(QUIET_START_MINUTE < 60 && QUIET_END_MINUTE < 60,
               "Quiet-minute values must be between 0 and 59");
 
+// --- NTP servers ------------------------------------------------------------
+// Primary and secondary NTP servers. The DHCP-advertised server is tried
+// first regardless; these are the fall-backs when DHCP does not offer one
+// or the DHCP server fails.
+constexpr char NTP_SERVER_PRIMARY[] = "pool.ntp.org";
+constexpr char NTP_SERVER_SECONDARY[] = "time.cloudflare.com";
+
+// --- Legibility floor -------------------------------------------------------
 // Preserve the previous server's rule: do not make a comic illegible merely
-// to squeeze it onto the panel.
+// to squeeze it onto the panel. Comics that would need to shrink below this
+// scale are skipped and another is picked.
 constexpr float MIN_DISPLAY_SCALE = 0.65f;
-// Extremely narrow results can still be illegible on high-resolution panels
-// even when little or no downscaling is required.
-constexpr int MIN_RENDERED_WIDTH = PANEL_WIDTH / 4;
-constexpr float DITHER_GAMMA = 1.0f;
 
-constexpr int CONTENT_MARGIN_X = ui(10);
-constexpr int CONTENT_TOP = ui(50);
-constexpr int FOOTER_BOTTOM = PANEL_HEIGHT - ui(12);
-constexpr int FOOTER_MAX_LINES = 3;
-constexpr int FOOTER_LINE_HEIGHT = ui(22);
-constexpr int FOOTER_VERTICAL_PADDING = ui(8);
-
-constexpr char CACHE_DIR[] = "/xkcd";
-constexpr char LATEST_CACHE[] = "/xkcd/latest.json";
-constexpr char CACHE_INDEX[] = "/xkcd/index.txt";
-constexpr char CACHE_INDEX_MAGIC[] = "XKCD_CACHE_INDEX_V1";
-constexpr uint32_t MAX_CACHE_INDEX_ENTRIES = 10000;
-constexpr char XKCD_LATEST_URL[] = "https://xkcd.com/info.0.json";
-
+// --- Debug knobs ------------------------------------------------------------
 // Debug: when set to a positive comic number, the very next cold-boot
 // selection short-circuits random picking and loads that specific comic
 // straight from the local cache. Intended for reproducing a render-path
@@ -108,3 +55,8 @@ constexpr char XKCD_LATEST_URL[] = "https://xkcd.com/info.0.json";
 constexpr int DEBUG_FORCE_COMIC = 0;
 
 }  // namespace config
+
+// System-level constants (hardware model, timeouts, cache layout, image
+// budgets, layout math). Included after the user constants above so it
+// can reference them.
+#include "system_config.h"

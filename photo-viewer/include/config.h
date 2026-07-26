@@ -1,58 +1,37 @@
 #pragma once
 
+// User-tweakable configuration for the photo viewer. Everything in this
+// header is intended to be edited when setting up a new device or when
+// changing personal preferences (refresh cadence, photo directory,
+// rotation order, quiet hours).
+//
+// Hardware, timing budgets, sensor tuning, and dither internals live in
+// system_config.h, which is included from the bottom of this file.
+
 #include <Arduino.h>
 
 namespace config {
 
-#ifndef RETERMINAL_MODEL
-#define RETERMINAL_MODEL 1001
-#endif
-
-constexpr int MODEL = RETERMINAL_MODEL;
-
-#if RETERMINAL_MODEL == 1001 || RETERMINAL_MODEL == 1002
-constexpr int PANEL_WIDTH = 800;
-constexpr int PANEL_HEIGHT = 480;
-constexpr int UI_SCALE_NUMERATOR = 1;
-constexpr int UI_SCALE_DENOMINATOR = 1;
-#elif RETERMINAL_MODEL == 1003
-constexpr int PANEL_WIDTH = 1872;
-constexpr int PANEL_HEIGHT = 1404;
-constexpr int UI_SCALE_NUMERATOR = 9;
-constexpr int UI_SCALE_DENOMINATOR = 4;
-#elif RETERMINAL_MODEL == 1004
-constexpr int PANEL_WIDTH = 1200;
-constexpr int PANEL_HEIGHT = 1600;
-constexpr int UI_SCALE_NUMERATOR = 3;
-constexpr int UI_SCALE_DENOMINATOR = 2;
-#else
-#error "Unsupported RETERMINAL_MODEL"
-#endif
-
-constexpr int ui(int e1001Pixels) {
-  return (e1001Pixels * UI_SCALE_NUMERATOR + UI_SCALE_DENOMINATOR / 2) /
-         UI_SCALE_DENOMINATOR;
-}
-
+// --- Refresh cadence --------------------------------------------------------
 // Six hours gives an ambient frame four automatic photos per day while
 // keeping expensive color e-paper refreshes and radio usage low.
 constexpr uint64_t SLEEP_SECONDS = 6ULL * 60ULL * 60ULL;
-constexpr char PHOTO_DIR[] = "/photos";
-constexpr uint8_t MAX_PHOTO_ATTEMPTS = 8;
 
-constexpr uint32_t WIFI_TIMEOUT_MS = 30000;
 // POSIX TZ notation uses the opposite sign: CST-8 means UTC+8.
 constexpr char TIMEZONE[] = "CST-8";
-constexpr char NTP_SERVER_PRIMARY[] = "pool.ntp.org";
-constexpr char NTP_SERVER_SECONDARY[] = "time.cloudflare.com";
-constexpr uint32_t NTP_DHCP_TIMEOUT_MS = 4000;
-constexpr uint32_t NTP_SYNC_TIMEOUT_MS = 10000;
-constexpr uint32_t NTP_REFRESH_SECONDS = 24UL * 60UL * 60UL;
 
-constexpr uint8_t SENSOR_READ_ATTEMPTS = 4;
-constexpr uint32_t SENSOR_RETRY_DELAY_MS = 75;
-constexpr uint32_t BUTTON_RELEASE_DEBOUNCE_MS = 40;
+// --- Photo library ----------------------------------------------------------
+// Directory on the SD card that the viewer scans for photos. All supported
+// files (prepared 4-bit BMP + fallback JPEG/PNG/BMP) directly under this
+// directory are candidates for display.
+constexpr char PHOTO_DIR[] = "/photos";
 
+// Photo rotation order. When true, the enumeration is shuffled at each boot
+// so successive photos feel random; when false, files are sorted
+// alphabetically so rotation order is deterministic across boots.
+constexpr bool PHOTO_ORDER_RANDOM = true;
+
+// --- Quiet hours ------------------------------------------------------------
 // Automatic refreshes are suppressed overnight. The current photo remains on
 // the e-paper panel without any sleep message or overlay. Any user button may
 // still wake the frame and change the photo.
@@ -66,20 +45,16 @@ static_assert(QUIET_START_HOUR < 24 && QUIET_END_HOUR < 24,
 static_assert(QUIET_START_MINUTE < 60 && QUIET_END_MINUTE < 60,
               "Quiet-minute values must be between 0 and 59");
 
-// Used only for unprepared JPEG/PNG/BMP compatibility. Prepared 4-bit BMPs
-// are already panel-dithered by tools/prepare_photos.py and bypass this path.
-constexpr float FALLBACK_DITHER_GAMMA = 1.0f;
-
-// Dither algorithm version. Bumped in lockstep with any change to the
-// Python quantiser (tools/prepare_photos.py) or the C++ dither library. If
-// the manifest on the SD card carries a different value the firmware logs a
-// warning; the photos still display, but the user should re-run
-// prepare_photos.py to freshen them.
-constexpr char DITHER_VERSION[] = "v1";
-
-// Photo rotation order. When true, the enumeration is shuffled at each boot
-// so successive photos feel random; when false, files are sorted
-// alphabetically so rotation order is deterministic across boots.
-constexpr bool PHOTO_ORDER_RANDOM = true;
+// --- NTP servers ------------------------------------------------------------
+// Primary and secondary NTP servers. The DHCP-advertised server is tried
+// first regardless; these are the fall-backs when DHCP does not offer one
+// or the DHCP server fails.
+constexpr char NTP_SERVER_PRIMARY[] = "pool.ntp.org";
+constexpr char NTP_SERVER_SECONDARY[] = "time.cloudflare.com";
 
 }  // namespace config
+
+// System-level constants (hardware model, timeouts, sensor tuning,
+// dither internals). Included after the user constants above so it can
+// reference them.
+#include "system_config.h"
