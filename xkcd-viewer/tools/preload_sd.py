@@ -3,16 +3,18 @@
 
 The output matches the cache layout used by the XKCD Viewer firmware:
 
-    <SD root>/xkcd/index.json   (manifest: version, latest, comics, skipped)
+    <SD root>/xkcd/index.jsonl (JSON Lines manifest: header + one line per comic)
     <SD root>/xkcd/1.png
     <SD root>/xkcd/2.png
     ...
 
 All per-comic metadata (title, alt, extension, image URL) lives in the
 single manifest — the firmware never needs to open a per-comic .json file
-during the hot pick path. Legacy layouts (per-comic `.json`, `latest.json`,
-pre-JSON `index.txt`, stray `.skip` markers) are migrated on first run and
-their files are deleted.
+during the hot pick path. JSON Lines means the firmware can parse one
+tiny doc per line instead of holding a giant parse tree in memory.
+Legacy layouts (per-comic `.json`, `latest.json`, pre-JSON `index.txt`,
+v4 single-doc `index.json`, stray `.skip` markers) are migrated on first
+run and their files are deleted.
 
 The command is resumable. Images already on the card whose manifest entry
 matches xkcd's current metadata are not downloaded again unless --force
@@ -47,11 +49,12 @@ USER_AGENT = (
     "(https://github.com/danpodeanu/seeed-reterminal-E100X)"
 )
 CHUNK_SIZE = 128 * 1024
-CACHE_INDEX_NAME = "index.json"
+CACHE_INDEX_NAME = "index.jsonl"
+CACHE_INDEX_LEGACY_JSON = "index.json"
 CACHE_INDEX_LEGACY_TXT = "index.txt"
 CACHE_INDEX_LEGACY_MAGIC = "XKCD_CACHE_INDEX_V2"
 CACHE_INDEX_LEGACY_LATEST = "latest.json"
-CACHE_INDEX_VERSION = 4
+CACHE_INDEX_VERSION = 5
 
 
 class DownloadError(RuntimeError):
@@ -76,7 +79,7 @@ class Result:
 
 @dataclass
 class Manifest:
-    """In-memory representation of the v4 manifest."""
+    """In-memory representation of the v5 JSONL manifest."""
 
     version: int = CACHE_INDEX_VERSION
     latest: int = 0
@@ -264,24 +267,29 @@ def encode_manifest(manifest: Manifest) -> bytes:
     if any(m.extension not in SUPPORTED_EXTENSIONS for m in manifest.comics.values()):
         raise ValueError("manifest contains an unsupported image extension")
 
-    comics_out: dict[str, dict[str, str]] = {}
+    # JSONL: one JSON object per line. Line 1 is the header (version,
+    # latest, skips); every subsequent line is one comic keyed by "n".
+    # The firmware parses one line at a time with a tiny stack doc, so
+    # neither side ever has to hold the whole thing as a parse tree.
+    lines: list[str] = []
+    header: dict[str, Any] = {
+        "v": CACHE_INDEX_VERSION,
+        "l": manifest.latest,
+        "s": sorted(manifest.skipped),
+    }
+    lines.append(json.dumps(header, separators=(",", ":"), ensure_ascii=False))
     for number in sorted(manifest.comics):
         m = manifest.comics[number]
-        comics_out[str(number)] = {
+        entry: dict[str, Any] = {
+            "n": number,
             "t": m.title,
             "a": m.alt,
             "e": m.extension,
             "u": m.url,
         }
-    document: dict[str, Any] = {
-        "version": CACHE_INDEX_VERSION,
-        "latest": manifest.latest,
-        "comics": comics_out,
-        "skipped": sorted(manifest.skipped),
-    }
-    # Compact separators keep the file small; the firmware parser tolerates
-    # either form but the SD footprint matters.
-    return json.dumps(document, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+        lines.append(json.dumps(entry, separators=(",", ":"), ensure_ascii=False))
+    # Trailing newline so tools like `tail` see the final entry.
+    return ("\n".join(lines) + "\n").encode("utf-8")
 
 
 def _adopt_legacy_skip_markers(cache_dir: Path) -> set[int]:
@@ -327,12 +335,13 @@ def _read_legacy_txt_index(path: Path) -> set[int]:
 def _ingest_legacy_per_comic_json(cache_dir: Path, manifest: Manifest) -> int:
     """Absorb per-comic <n>.json files into the manifest, then delete them.
 
-    Returns the number of files migrated. Called on first v4 run so
-    existing SD cards upgrade cleanly.
+    Returns the number of files migrated. Called on first v5 run so
+    existing SD cards upgrade cleanly. Skips the retired v4 single-doc
+    index (`index.json`) and the retired latest.json.
     """
     migrated = 0
     for metadata_path in cache_dir.glob("*.json"):
-        if metadata_path.name in {CACHE_INDEX_NAME, CACHE_INDEX_LEGACY_LATEST}:
+        if metadata_path.name in {CACHE_INDEX_LEGACY_JSON, CACHE_INDEX_LEGACY_LATEST}:
             continue
         try:
             number = int(metadata_path.stem)
@@ -358,68 +367,148 @@ def _ingest_legacy_per_comic_json(cache_dir: Path, manifest: Manifest) -> int:
     return migrated
 
 
+def _ingest_comic_dict(value: Any, manifest: Manifest, number: int) -> None:
+    """Add a comic to the manifest if the dict has valid ext + url fields."""
+    if not isinstance(value, dict):
+        return
+    ext = value.get("e", "")
+    url = value.get("u", "")
+    if not isinstance(ext, str) or ext not in SUPPORTED_EXTENSIONS:
+        return
+    if not isinstance(url, str) or not url:
+        return
+    manifest.comics[number] = ComicMeta(
+        title=str(value.get("t", "")),
+        alt=str(value.get("a", "")),
+        extension=ext,
+        url=url,
+    )
+
+
+def _ingest_skipped_list(raw: Any, manifest: Manifest) -> None:
+    if not isinstance(raw, list):
+        return
+    for value in raw:
+        if (
+            isinstance(value, int)
+            and not isinstance(value, bool)
+            and value > 0
+            and value != 404
+        ):
+            manifest.skipped.add(value)
+
+
+def _load_v4_json(path: Path, manifest: Manifest) -> bool:
+    """Read a v4 single-document manifest and populate `manifest`.
+
+    Always harvests skips (regardless of version). Populates comics /
+    latest only when version == 4. Returns True when the file existed
+    and parsed as JSON, so the caller knows to delete it.
+    """
+    if not path.exists():
+        return False
+    try:
+        document = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return False
+    if not isinstance(document, dict):
+        return True
+    _ingest_skipped_list(document.get("skipped", []), manifest)
+    if document.get("version") != 4:
+        return True
+    latest_raw = document.get("latest")
+    if (
+        isinstance(latest_raw, int)
+        and not isinstance(latest_raw, bool)
+        and latest_raw > 0
+    ):
+        manifest.latest = latest_raw
+    comics_raw = document.get("comics", {})
+    if isinstance(comics_raw, dict):
+        for key, value in comics_raw.items():
+            try:
+                number = int(key)
+            except (TypeError, ValueError):
+                continue
+            if number <= 0 or number == 404:
+                continue
+            _ingest_comic_dict(value, manifest, number)
+    return True
+
+
+def _load_v5_jsonl(path: Path, manifest: Manifest) -> None:
+    """Read a v5 JSONL manifest and populate `manifest` in place."""
+    try:
+        text = path.read_text(encoding="utf-8")
+    except OSError:
+        return
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except ValueError:
+            # Ignore malformed lines rather than discarding the whole
+            # manifest — the firmware is stricter, but this tool's job
+            # is to recover as much state as possible before re-writing.
+            continue
+        if not isinstance(obj, dict):
+            continue
+        # Header line: no "n", carries version/latest/skips.
+        if "n" not in obj:
+            if obj.get("v") != CACHE_INDEX_VERSION:
+                # Stale header from a mismatched version; ignore comics
+                # from this file entirely and let the caller re-download.
+                manifest.comics.clear()
+                manifest.latest = 0
+                # Skips are still useful across upgrades.
+                _ingest_skipped_list(obj.get("s", []), manifest)
+                return
+            latest_raw = obj.get("l")
+            if (
+                isinstance(latest_raw, int)
+                and not isinstance(latest_raw, bool)
+                and latest_raw > 0
+            ):
+                manifest.latest = latest_raw
+            _ingest_skipped_list(obj.get("s", []), manifest)
+            continue
+        # Comic line.
+        number = obj.get("n")
+        if not isinstance(number, int) or isinstance(number, bool):
+            continue
+        if number <= 0 or number == 404:
+            continue
+        _ingest_comic_dict(obj, manifest, number)
+
+
 def load_manifest(cache_dir: Path) -> Manifest:
     """Load the persisted manifest, migrating from legacy layouts.
 
-    Handles all upgrade paths transparently: v4 (native), v3 JSON (cached
-    list only, per-comic .json ingest), pre-JSON txt (skips only), stray
-    .skip markers. Leaves the cache dir in a state where only image files
-    and index.json remain.
+    Handles all upgrade paths transparently: v5 JSONL (native), v4 single-doc
+    JSON, v3 JSON (cached list only, per-comic .json ingest), pre-JSON txt
+    (skips only), stray .skip markers. Leaves the cache dir in a state where
+    only image files and index.jsonl remain.
     """
     manifest = Manifest()
     manifest.skipped |= _adopt_legacy_skip_markers(cache_dir)
 
     index_path = cache_dir / CACHE_INDEX_NAME
-    document: Any = None
     if index_path.exists():
-        try:
-            document = json.loads(index_path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            document = None
-
-    if isinstance(document, dict):
-        version = document.get("version")
-        skipped_raw = document.get("skipped", [])
-        if isinstance(skipped_raw, list):
-            for value in skipped_raw:
-                if isinstance(value, int) and not isinstance(value, bool) and value > 0 and value != 404:
-                    manifest.skipped.add(value)
-
-        if version == CACHE_INDEX_VERSION:
-            latest_raw = document.get("latest")
-            if isinstance(latest_raw, int) and not isinstance(latest_raw, bool) and latest_raw > 0:
-                manifest.latest = latest_raw
-            comics_raw = document.get("comics", {})
-            if isinstance(comics_raw, dict):
-                for key, value in comics_raw.items():
-                    try:
-                        number = int(key)
-                    except (TypeError, ValueError):
-                        continue
-                    if number <= 0 or number == 404:
-                        continue
-                    if not isinstance(value, dict):
-                        continue
-                    ext = value.get("e", "")
-                    url = value.get("u", "")
-                    if not isinstance(ext, str) or ext not in SUPPORTED_EXTENSIONS:
-                        continue
-                    if not isinstance(url, str) or not url:
-                        continue
-                    manifest.comics[number] = ComicMeta(
-                        title=str(value.get("t", "")),
-                        alt=str(value.get("a", "")),
-                        extension=ext,
-                        url=url,
-                    )
+        _load_v5_jsonl(index_path, manifest)
     else:
-        # No usable JSON index yet — try the pre-JSON text index for skips.
-        manifest.skipped |= _read_legacy_txt_index(cache_dir / CACHE_INDEX_LEGACY_TXT)
+        # Try the retired v4 single-document format next.
+        legacy_json = cache_dir / CACHE_INDEX_LEGACY_JSON
+        if not _load_v4_json(legacy_json, manifest):
+            # Nothing usable yet — try the pre-JSON text index for skips.
+            manifest.skipped |= _read_legacy_txt_index(cache_dir / CACHE_INDEX_LEGACY_TXT)
 
-    # Absorb any leftover per-comic .json files (pre-V4 layout).
+    # Absorb any leftover per-comic .json files (pre-v4 layout).
     _ingest_legacy_per_comic_json(cache_dir, manifest)
-    # Drop any pre-JSON txt index so the formats never coexist.
+    # Drop retired sibling files so the formats never coexist.
     (cache_dir / CACHE_INDEX_LEGACY_TXT).unlink(missing_ok=True)
+    (cache_dir / CACHE_INDEX_LEGACY_JSON).unlink(missing_ok=True)
     return manifest
 
 
@@ -429,6 +518,7 @@ def write_manifest(cache_dir: Path, manifest: Manifest) -> None:
     # recreated between load and write.
     (cache_dir / CACHE_INDEX_LEGACY_TXT).unlink(missing_ok=True)
     (cache_dir / CACHE_INDEX_LEGACY_LATEST).unlink(missing_ok=True)
+    (cache_dir / CACHE_INDEX_LEGACY_JSON).unlink(missing_ok=True)
 
 
 def download_image(

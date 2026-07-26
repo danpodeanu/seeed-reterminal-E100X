@@ -117,16 +117,22 @@ class PreloadSdTests(unittest.TestCase):
         )
 
         encoded = preload_sd.encode_manifest(manifest)
-        decoded = json.loads(encoded.decode("utf-8"))
+        lines = encoded.decode("utf-8").rstrip("\n").split("\n")
 
-        self.assertEqual(decoded["version"], 4)
-        self.assertEqual(decoded["latest"], 3)
-        self.assertEqual(decoded["skipped"], [2, 10])
-        # Comic keys are stringified numbers and should preserve every field.
-        self.assertEqual(list(decoded["comics"].keys()), ["1", "3"])
+        # Header line first, then one line per comic in ascending order.
+        header = json.loads(lines[0])
+        self.assertEqual(header["v"], 5)
+        self.assertEqual(header["l"], 3)
+        self.assertEqual(header["s"], [2, 10])
+
+        self.assertEqual(len(lines), 3)
+        first = json.loads(lines[1])
+        second = json.loads(lines[2])
+        self.assertEqual(first["n"], 1)
+        self.assertEqual(second["n"], 3)
         self.assertEqual(
-            decoded["comics"]["1"],
-            {"t": "One", "a": "alt1", "e": ".jpg",
+            first,
+            {"n": 1, "t": "One", "a": "alt1", "e": ".jpg",
              "u": "https://imgs.xkcd.com/comics/one.jpg"},
         )
 
@@ -200,7 +206,10 @@ class PreloadSdTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             cache_dir = Path(temporary)
             v3_index = {"version": 3, "cached": [2], "skipped": [7, 11]}
-            (cache_dir / preload_sd.CACHE_INDEX_NAME).write_text(json.dumps(v3_index))
+            # v3/v4 lived at index.json (the legacy filename); v5 uses .jsonl.
+            (cache_dir / preload_sd.CACHE_INDEX_LEGACY_JSON).write_text(
+                json.dumps(v3_index)
+            )
             (cache_dir / "2.json").write_text(json.dumps({
                 "num": 2, "img": "https://imgs.xkcd.com/comics/example.png",
                 "safe_title": "Example",
@@ -212,6 +221,44 @@ class PreloadSdTests(unittest.TestCase):
             self.assertEqual(manifest.skipped, {7, 11})
             self.assertEqual(set(manifest.comics), {2})
             self.assertFalse((cache_dir / "2.json").exists())
+            self.assertFalse((cache_dir / preload_sd.CACHE_INDEX_LEGACY_JSON).exists())
+
+    def test_v4_json_manifest_upgrades_to_v5_jsonl(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            cache_dir = Path(temporary)
+            v4_document = {
+                "version": 4,
+                "latest": 8,
+                "comics": {
+                    "8": {
+                        "t": "Eight",
+                        "a": "alt8",
+                        "e": ".png",
+                        "u": "https://imgs.xkcd.com/comics/eight.png",
+                    }
+                },
+                "skipped": [11, 42],
+            }
+            (cache_dir / "8.png").write_bytes(_png_bytes())
+            (cache_dir / preload_sd.CACHE_INDEX_LEGACY_JSON).write_text(
+                json.dumps(v4_document)
+            )
+
+            manifest = preload_sd.load_manifest(cache_dir)
+
+            self.assertEqual(manifest.latest, 8)
+            self.assertEqual(set(manifest.comics), {8})
+            self.assertEqual(manifest.comics[8].title, "Eight")
+            self.assertEqual(manifest.skipped, {11, 42})
+            self.assertFalse((cache_dir / preload_sd.CACHE_INDEX_LEGACY_JSON).exists())
+
+            # Round-trip: write and reload to confirm the JSONL path works.
+            preload_sd.write_manifest(cache_dir, manifest)
+            self.assertTrue((cache_dir / preload_sd.CACHE_INDEX_NAME).exists())
+            reloaded = preload_sd.load_manifest(cache_dir)
+            self.assertEqual(reloaded.latest, 8)
+            self.assertEqual(set(reloaded.comics), {8})
+            self.assertEqual(reloaded.skipped, {11, 42})
 
 
 if __name__ == "__main__":

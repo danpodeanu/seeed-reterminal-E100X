@@ -229,13 +229,14 @@ on E1003 or E1004 may still be skipped on the smaller E1001 or E1002 panels.
 
 With an SD card, image originals are stored as `/xkcd/<number>.<ext>` and
 all per-comic metadata (title, alt text, extension, image URL) lives in a
-single manifest at `/xkcd/index.json`. The firmware loads the manifest
-once on wake and never opens a per-comic metadata file during picking or
-rendering, which keeps the cached-selection path to a single SD open per
-comic on FAT32 volumes with thousands of siblings. Scheduled cache
-maintenance verifies image files still exist and drops stale entries.
-Without a card, compressed originals above 2 MiB are skipped to preserve
-enough PSRAM for decoding and rendering.
+single manifest at `/xkcd/index.jsonl`. The firmware loads the manifest
+once on wake, parsing one tiny JSON object per line so the parse tree
+never exceeds a few hundred bytes, and never opens a per-comic metadata
+file during picking or rendering — which keeps the cached-selection path
+to a single SD open per comic on FAT32 volumes with thousands of
+siblings. Scheduled cache maintenance verifies image files still exist
+and drops stale entries. Without a card, compressed originals above 2
+MiB are skipped to preserve enough PSRAM for decoding and rendering.
 
 The firmware cannot reconstruct the manifest on its own — it needs the
 title, alt text, and source URL that only xkcd's info API returns.

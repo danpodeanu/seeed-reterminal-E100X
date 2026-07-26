@@ -16,10 +16,13 @@
 // SD.open() walked the directory entry table, so a single random
 // pick paid ~5 s in directory scans (metadata read + SD.exists()
 // check + image read). The new layout collapses everything into one
-// `/xkcd/index.json` manifest holding title/alt/extension/url per
+// `/xkcd/index.jsonl` manifest holding title/alt/extension/url per
 // comic plus the skip list and latest published number, so the
 // runtime pays exactly one SD open per displayed image and every
-// metadata query is an in-memory lookup.
+// metadata query is an in-memory lookup. The file is JSON Lines so
+// the firmware can parse it with a tiny per-line JsonDocument (no
+// giant parse tree in memory) and use zero-copy string pointers
+// into the slurped buffer.
 namespace xkcd_index {
 
 // Per-comic metadata cached in the manifest.
