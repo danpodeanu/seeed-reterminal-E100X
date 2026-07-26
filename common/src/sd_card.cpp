@@ -6,18 +6,21 @@
 
 #include "app_logger.h"
 #include "board_pins.h"
+#include "epaper_setup.h"
 
 namespace sd_card {
 
 bool mount(SPIClass& spi, const char* cacheDir) {
-  pinMode(board::PIN_SD_ENABLE, OUTPUT);
-  digitalWrite(board::PIN_SD_ENABLE, HIGH);
+  // Enable the shared peripheral power rail and re-init the panel's SPI
+  // bus with a real MISO pin. Historically this was inlined here and
+  // the viewer apps got E1001 panel support as a side effect of mounting
+  // SD; that coupling now lives in epaper_setup so tools without SD can
+  // opt in explicitly. Safe to call twice.
+  epaper_setup::finalize(spi);
+
   pinMode(board::PIN_SD_DETECT, INPUT_PULLUP);
   pinMode(board::PIN_SD_CS, OUTPUT);
   digitalWrite(board::PIN_SD_CS, HIGH);
-
-  spi.end();
-  spi.begin(board::PIN_SD_SCK, board::PIN_SD_MISO, board::PIN_SD_MOSI, -1);
 
   // The SD card needs its VDD rail to settle and its internal power-on
   // reset to finish before it will respond to CMD0. There is no ready

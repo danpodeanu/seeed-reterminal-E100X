@@ -1185,9 +1185,12 @@ void setup() {
   LOG.printf("[wifi] station MAC=%s\n", stationMac.c_str());
 
 #if RETERMINAL_MODEL == 1001
-  // UC8179 Gray4 initialization expects a native 1-bit update first. Rendering
-  // the cold-boot status before switching modes makes that screen the required
-  // first update instead of having the first Gray4 frame disappear.
+  // On a cold boot show a "Connecting to Wi-Fi" splash before switching
+  // into Gray4, so the ~30 s network phase isn't a black hole. This is
+  // pure UX - it used to be documented as a workaround for a UC8179
+  // Gray4 driver quirk, but the actual driver issue was the SPI bus
+  // being brought up without a real MISO pin (see common/include/
+  // epaper_setup.h). Kept here just so the first frame isn't blank.
   if (showConnectionStatus) {
     LOG.println("[display] showing Wi-Fi connection status");
     renderStatus("Connecting to " + String(WIFI_SSID), connectionDetail,
