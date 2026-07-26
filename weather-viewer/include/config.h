@@ -99,8 +99,8 @@ constexpr char QWEATHER_LANG[] = "en";
 //   DEBUG_LOG_JWT:    print the JWT header, payload, and signature that
 //                     the firmware sends. Compare against the tester's
 //                     `tools/test_credentials.py --dump-jwt` output.
-constexpr bool DEBUG_FORCE_NTP = true;
-constexpr bool DEBUG_LOG_JWT = true;
+constexpr bool DEBUG_FORCE_NTP = false;
+constexpr bool DEBUG_LOG_JWT = false;
 
 constexpr char CACHE_DIR[] = "/weather";
 constexpr char FORECAST_CACHE[] = "/weather/forecast.json";
