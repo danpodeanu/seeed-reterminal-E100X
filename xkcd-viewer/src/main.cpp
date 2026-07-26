@@ -438,40 +438,55 @@ bool parseComic(const String& json, Comic& comic) {
   return comic.number > 0 && !comic.imageUrl.isEmpty();
 }
 
-String metadataPath(int number) {
-  return String(config::CACHE_DIR) + "/" + number + ".json";
+bool imageFileExists(int number, const String& extension) {
+  if (!sdReady || number <= 0 || extension.isEmpty()) return false;
+  return SD.exists(String(config::CACHE_DIR) + "/" + number + extension);
 }
 
 bool comicFullyCached(int number) {
   if (!sdReady || number <= 0 || number == 404) return false;
-  String json;
-  Comic comic;
-  if (!sd_card::readFile(metadataPath(number), json, 64U * 1024U) || !parseComic(json, comic))
-    return false;
-  const String extension = net_http::imageExtension(comic.imageUrl);
-  if (extension.isEmpty()) return false;
-  return SD.exists(String(config::CACHE_DIR) + "/" + number + extension);
+  const auto* meta = xkcd_index::metadata(number);
+  if (meta == nullptr || meta->extension.isEmpty()) return false;
+  return SD.exists(String(config::CACHE_DIR) + "/" + number + meta->extension);
 }
 
 bool getComic(int number, bool networkAvailable, Comic& comic) {
   if (xkcd_index::skipped(number)) return false;
-  const String metaPath = metadataPath(number);
-  String json;
-  bool metadataCached = sd_card::readFile(metaPath, json, 64U * 1024U) && parseComic(json, comic);
 
-  if (!metadataCached) {
-    if (!networkAvailable || number == 404) return false;
-    const String url = "https://xkcd.com/" + String(number) + "/info.0.json";
-    if (!net_http::getString(url, json, config::HTTP_TIMEOUT_MS, networkOperationShouldStop, boundedNetworkTimeout) || !parseComic(json, comic)) return false;
-    const String tagged = xkcd_cache::wrapWithSchema(json);
-    if (sd_card::writeFileAtomically(metaPath, tagged)) {
-      LOG.printf("[cache] saved metadata #%d\n", number);
-    } else {
-      sdCacheWritable = false;
-      LOG.printf("[cache] metadata #%d not stored; continuing without it\n",
-                 number);
+  // Manifest hit: title/alt/extension/url are already in memory.
+  // The SD.exists() check here is the ONLY SD lookup on the cached
+  // pick path; the historical per-comic .json read and separate
+  // SD.exists() call are gone.
+  if (const auto* meta = xkcd_index::metadata(number)) {
+    comic.number = number;
+    comic.title = meta->title;
+    comic.alt = meta->alt;
+    comic.imageUrl = meta->url;
+    comic.imagePath =
+        String(config::CACHE_DIR) + "/" + comic.number + meta->extension;
+    if (SD.exists(comic.imagePath)) {
+      LOG.printf("[cache] using %s\n", comic.imagePath.c_str());
+      return true;
     }
+    // Image file went missing since the manifest was written.
+    if (!networkAvailable || !sdCacheWritable || meta->url.isEmpty()) {
+      return false;
+    }
+    LOG.printf("[comic] cached #%d image missing; redownloading from %s\n",
+               comic.number, comic.imageUrl.c_str());
+    if (!net_http::downloadToSd(comic.imageUrl, comic.imagePath, config::HTTP_TIMEOUT_MS, config::DOWNLOAD_IDLE_TIMEOUT_MS, config::MAX_IMAGE_BYTES, networkOperationShouldStop, boundedNetworkTimeout)) {
+      sdCacheWritable = false;
+      return false;
+    }
+    return true;
   }
+
+  // Manifest miss: we've never seen this comic. Requires network to
+  // learn title/alt/url.
+  if (!networkAvailable || number == 404) return false;
+  String json;
+  const String url = "https://xkcd.com/" + String(number) + "/info.0.json";
+  if (!net_http::getString(url, json, config::HTTP_TIMEOUT_MS, networkOperationShouldStop, boundedNetworkTimeout) || !parseComic(json, comic)) return false;
 
   const String extension = net_http::imageExtension(comic.imageUrl);
   if (extension.isEmpty()) {
@@ -480,54 +495,47 @@ bool getComic(int number, bool networkAvailable, Comic& comic) {
     return false;
   }
   comic.imagePath = String(config::CACHE_DIR) + "/" + comic.number + extension;
-  if (!SD.exists(comic.imagePath)) {
-    if (!networkAvailable) return false;
-    if (!sdCacheWritable) {
-      LOG.printf("[cache] skipping image write for #%d after an SD write failure\n",
-                 comic.number);
-      return false;
-    }
-    LOG.printf("[comic] downloading #%d from %s\n", comic.number, comic.imageUrl.c_str());
-    if (!net_http::downloadToSd(comic.imageUrl, comic.imagePath, config::HTTP_TIMEOUT_MS, config::DOWNLOAD_IDLE_TIMEOUT_MS, config::MAX_IMAGE_BYTES, networkOperationShouldStop, boundedNetworkTimeout)) {
-      sdCacheWritable = false;
-      LOG.printf("[cache] image #%d not stored; PSRAM fallback available\n",
-                 comic.number);
-      return false;
-    }
-  } else {
-    LOG.printf("[cache] using %s\n", comic.imagePath.c_str());
+  if (!sdCacheWritable) {
+    LOG.printf("[cache] skipping image write for #%d after an SD write failure\n",
+               comic.number);
+    return false;
   }
+  LOG.printf("[comic] downloading #%d from %s\n", comic.number, comic.imageUrl.c_str());
+  if (!net_http::downloadToSd(comic.imageUrl, comic.imagePath, config::HTTP_TIMEOUT_MS, config::DOWNLOAD_IDLE_TIMEOUT_MS, config::MAX_IMAGE_BYTES, networkOperationShouldStop, boundedNetworkTimeout)) {
+    sdCacheWritable = false;
+    LOG.printf("[cache] image #%d not stored; PSRAM fallback available\n",
+               comic.number);
+    return false;
+  }
+
+  xkcd_index::ComicMeta newMeta;
+  newMeta.title = comic.title;
+  newMeta.alt = comic.alt;
+  newMeta.extension = extension;
+  newMeta.url = comic.imageUrl;
+  xkcd_index::addComic(comic.number, newMeta);
   return true;
 }
 
 bool getLatestNumber(bool networkAvailable, int& latest,
                      bool refreshOnline = false) {
-  String json;
-  Comic comic;
+  const int cached = xkcd_index::latest();
   const bool shouldCheckOnline = networkAvailable &&
-      (refreshOnline || !SD.exists(config::LATEST_CACHE));
+      (refreshOnline || cached <= 0);
   if (shouldCheckOnline) {
+    String json;
+    Comic comic;
     if (net_http::getString(config::XKCD_LATEST_URL, json, config::HTTP_TIMEOUT_MS, networkOperationShouldStop, boundedNetworkTimeout) && parseComic(json, comic)) {
       latest = comic.number;
-      const String tagged = xkcd_cache::wrapWithSchema(json);
-      if (!sd_card::writeFileAtomically(config::LATEST_CACHE, tagged)) {
-        sdCacheWritable = false;
-        LOG.println("[cache] latest metadata not stored; using live value");
-      }
-      if (sdCacheWritable &&
-          !sd_card::writeFileAtomically(metadataPath(latest), tagged)) {
-        sdCacheWritable = false;
-        LOG.printf("[cache] metadata #%d not stored; using live value\n",
-                   latest);
-      }
+      xkcd_index::setLatest(latest);
       LOG.printf("[xkcd] latest is #%d\n", latest);
       totalComicCountForDisplay =
           app_logic::publishedComicCount(latest);
       return true;
     }
   }
-  if (sd_card::readFile(config::LATEST_CACHE, json, 64U * 1024U) && parseComic(json, comic)) {
-    latest = comic.number;
+  if (cached > 0) {
+    latest = cached;
     totalComicCountForDisplay =
         app_logic::publishedComicCount(latest);
     LOG.printf("[xkcd] cached latest is #%d\n", latest);
@@ -540,9 +548,9 @@ void refreshArchiveCache() {
   if (!sdReady || WiFi.status() != WL_CONNECTED) return;
 
   // Maintenance is the authoritative integrity pass. Validate the complete
-  // directory before downloads, then add successful downloads to the clean
-  // in-memory index and persist it without a second directory scan.
-  if (!xkcd_index::rebuild(sdReady, comicFullyCached, networkOperationShouldStop)) {
+  // in-memory index against on-disk images before downloads, then add
+  // successful downloads to the clean index and persist it.
+  if (!xkcd_index::rebuild(sdReady, imageFileExists, networkOperationShouldStop)) {
     if (maintenanceCancellationRequested()) {
       LOG.println("[precache] index maintenance cancelled by button");
     } else if (networkDeadlineReached()) {
@@ -551,8 +559,7 @@ void refreshArchiveCache() {
     return;
   }
 
-  int previousLatest = 0;
-  getLatestNumber(false, previousLatest);
+  const int previousLatest = xkcd_index::latest();
   int latest = 0;
   if (!getLatestNumber(true, latest, true)) {
     if (maintenanceCancellationRequested()) {
@@ -571,7 +578,6 @@ void refreshArchiveCache() {
     Comic newest;
     if (getComic(latest, true, newest) && comicFullyCached(latest)) {
       latestAdded = 1;
-      xkcd_index::addCurrent(latest);
       LOG.printf("[precache] cached newest comic #%d\n", latest);
     }
   }
@@ -591,7 +597,6 @@ void refreshArchiveCache() {
     Comic historical;
     if (getComic(number, true, historical) && comicFullyCached(number)) {
       ++oldAdded;
-      xkcd_index::addCurrent(number);
       LOG.printf("[precache] cached historical comic %u/%u: #%d\n",
                  oldAdded, config::ARCHIVE_OLD_COMICS_PER_REFRESH, number);
     }
@@ -646,22 +651,9 @@ bool getComicWithoutSd(int number, Comic& comic, uint8_t*& compressed,
 
 int pickRandomCachedNumber() {
   if (!xkcd_index::ready() || xkcd_index::entries().empty()) return 0;
-
-  int selected =
-      xkcd_index::entries()[random(static_cast<long>(xkcd_index::entries().size()))];
-  if (comicFullyCached(selected)) return selected;
-
-  LOG.printf("[cache] index entry #%d is no longer complete; rebuilding index\n",
-             selected);
-  if (!xkcd_index::rebuild(sdReady, comicFullyCached) || xkcd_index::entries().empty()) return 0;
-
-  selected =
-      xkcd_index::entries()[random(static_cast<long>(xkcd_index::entries().size()))];
-  if (!comicFullyCached(selected)) {
-    LOG.printf("[cache] rebuilt index entry #%d failed validation\n", selected);
-    return 0;
-  }
-  return selected;
+  // Trust the manifest. If the file is missing on disk, the decode step
+  // will fail and the caller retries with a fresh pick.
+  return xkcd_index::entries()[random(static_cast<long>(xkcd_index::entries().size()))];
 }
 
 ImageLayout calculateLayout(const Comic& comic, int sourceWidth, int sourceHeight) {
@@ -1143,10 +1135,11 @@ void setup() {
   }
 
   if (sdReady && !xkcd_index::load()) {
-    LOG.printf("[cache] %s; creating a fresh comic index\n",
+    LOG.printf("[cache] %s; run tools/preload_sd.py to rebuild the manifest\n",
                coldBoot ? "cold boot found no usable index"
                         : "wake found no usable index");
-    xkcd_index::rebuild(sdReady, comicFullyCached);
+    // rebuild() cannot reconstruct title/alt/url from image files alone;
+    // the app runs in network-only mode until the manifest exists.
   }
   const uint32_t cachedComicCount = sdReady ? xkcd_index::count() : 0;
   cacheStatsAvailable = sdReady;
@@ -1276,10 +1269,11 @@ void setup() {
           : acquireComicWithoutSd(networkAvailable, comic, image, layout);
 
   if (sdReady && networkAvailable && !cacheOnly) {
-    // Before the local-only threshold is reached, live display downloads can
-    // add cache entries outside scheduled maintenance. The archive is still
-    // small here, so rebuild immediately to make those comics selectable.
-    xkcd_index::rebuild(sdReady, comicFullyCached);
+    // acquireComic may have added a new entry to the in-memory manifest via
+    // getComic; flush it so the next boot sees it. Skip the integrity
+    // rebuild (which would SD.exists every entry) since scheduled
+    // maintenance owns that pass.
+    xkcd_index::persist();
     cachedComicCountForDisplay = xkcd_index::count();
   }
 

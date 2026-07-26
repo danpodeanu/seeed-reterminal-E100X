@@ -92,10 +92,10 @@ constexpr int FOOTER_VERTICAL_PADDING = ui(8);
 
 // --- SD-card cache layout ---------------------------------------------------
 constexpr char CACHE_DIR[] = "/xkcd";
-constexpr char LATEST_CACHE[] = "/xkcd/latest.json";
 constexpr char CACHE_INDEX[] = "/xkcd/index.json";
 constexpr char CACHE_INDEX_LEGACY_TXT[] = "/xkcd/index.txt";
-constexpr uint32_t CACHE_INDEX_VERSION = 3;
+constexpr char CACHE_LATEST_LEGACY[] = "/xkcd/latest.json";
+constexpr uint32_t CACHE_INDEX_VERSION = 4;
 constexpr uint32_t MAX_CACHE_INDEX_ENTRIES = 10000;
 constexpr char XKCD_LATEST_URL[] = "https://xkcd.com/info.0.json";
 

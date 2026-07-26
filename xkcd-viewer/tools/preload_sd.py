@@ -3,14 +3,20 @@
 
 The output matches the cache layout used by the XKCD Viewer firmware:
 
-    <SD root>/xkcd/latest.json
-    <SD root>/xkcd/index.txt
-    <SD root>/xkcd/1.json
+    <SD root>/xkcd/index.json   (manifest: version, latest, comics, skipped)
     <SD root>/xkcd/1.png
+    <SD root>/xkcd/2.png
     ...
 
-The command is resumable. Valid metadata and image files already on the card
-are not downloaded again unless --force is used.
+All per-comic metadata (title, alt, extension, image URL) lives in the
+single manifest — the firmware never needs to open a per-comic .json file
+during the hot pick path. Legacy layouts (per-comic `.json`, `latest.json`,
+pre-JSON `index.txt`, stray `.skip` markers) are migrated on first run and
+their files are deleted.
+
+The command is resumable. Images already on the card whose manifest entry
+matches xkcd's current metadata are not downloaded again unless --force
+is used.
 """
 
 from __future__ import annotations
@@ -28,7 +34,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
@@ -44,7 +50,8 @@ CHUNK_SIZE = 128 * 1024
 CACHE_INDEX_NAME = "index.json"
 CACHE_INDEX_LEGACY_TXT = "index.txt"
 CACHE_INDEX_LEGACY_MAGIC = "XKCD_CACHE_INDEX_V2"
-CACHE_INDEX_VERSION = 3
+CACHE_INDEX_LEGACY_LATEST = "latest.json"
+CACHE_INDEX_VERSION = 4
 
 
 class DownloadError(RuntimeError):
@@ -52,10 +59,29 @@ class DownloadError(RuntimeError):
 
 
 @dataclass(frozen=True)
+class ComicMeta:
+    title: str
+    alt: str
+    extension: str
+    url: str
+
+
+@dataclass
 class Result:
     number: int
     status: str
     detail: str
+    meta: ComicMeta | None = None
+
+
+@dataclass
+class Manifest:
+    """In-memory representation of the v4 manifest."""
+
+    version: int = CACHE_INDEX_VERSION
+    latest: int = 0
+    comics: dict[int, ComicMeta] = field(default_factory=dict)
+    skipped: set[int] = field(default_factory=set)
 
 
 def parse_args() -> argparse.Namespace:
@@ -172,11 +198,21 @@ def decode_metadata(raw: bytes, expected_number: int | None = None) -> dict[str,
     return metadata
 
 
-def read_valid_metadata(path: Path, expected_number: int) -> dict[str, Any] | None:
-    try:
-        return decode_metadata(path.read_bytes(), expected_number)
-    except (OSError, ValueError):
+def meta_from_xkcd_json(raw: dict[str, Any]) -> ComicMeta | None:
+    """Extract a ComicMeta from a decoded xkcd info JSON. Returns None if
+    the image URL uses an unsupported extension."""
+    image_url = raw["img"]
+    extension = image_extension(image_url)
+    if not extension:
         return None
+    title = raw.get("safe_title") or raw.get("title") or ""
+    alt = raw.get("alt") or ""
+    return ComicMeta(
+        title=str(title),
+        alt=str(alt),
+        extension=extension,
+        url=str(image_url),
+    )
 
 
 def atomic_write(path: Path, data: bytes) -> None:
@@ -218,52 +254,38 @@ def valid_image_header(path: Path, extension: str) -> bool:
     return False
 
 
-def complete_cached_comics(cache_dir: Path) -> list[int]:
-    """Return sorted comic numbers with valid metadata and image files."""
-    numbers: list[int] = []
-    for metadata_path in cache_dir.glob("*.json"):
-        try:
-            number = int(metadata_path.stem)
-        except ValueError:
-            continue
-        if number <= 0 or number == 404:
-            continue
-        metadata = read_valid_metadata(metadata_path, number)
-        if metadata is None:
-            continue
-        extension = image_extension(metadata["img"])
-        if extension and valid_image_header(
-            cache_dir / f"{number}{extension}", extension
-        ):
-            numbers.append(number)
-    return sorted(set(numbers))
-
-
-def encode_cache_index(cached: list[int], skipped: list[int]) -> bytes:
-    normalized_cached = sorted(set(cached))
-    normalized_skipped = sorted(set(skipped))
-    if any(number <= 0 or number == 404 for number in normalized_cached):
-        raise ValueError("cache index contains an invalid comic number")
-    if any(number <= 0 or number == 404 for number in normalized_skipped):
+def encode_manifest(manifest: Manifest) -> bytes:
+    if manifest.latest < 0:
+        raise ValueError("manifest has an invalid latest number")
+    if any(n <= 0 or n == 404 for n in manifest.comics):
+        raise ValueError("manifest contains an invalid comic number")
+    if any(n <= 0 or n == 404 for n in manifest.skipped):
         raise ValueError("skip list contains an invalid comic number")
-    document = {
+    if any(m.extension not in SUPPORTED_EXTENSIONS for m in manifest.comics.values()):
+        raise ValueError("manifest contains an unsupported image extension")
+
+    comics_out: dict[str, dict[str, str]] = {}
+    for number in sorted(manifest.comics):
+        m = manifest.comics[number]
+        comics_out[str(number)] = {
+            "t": m.title,
+            "a": m.alt,
+            "e": m.extension,
+            "u": m.url,
+        }
+    document: dict[str, Any] = {
         "version": CACHE_INDEX_VERSION,
-        "cached": normalized_cached,
-        "skipped": normalized_skipped,
+        "latest": manifest.latest,
+        "comics": comics_out,
+        "skipped": sorted(manifest.skipped),
     }
-    # Compact separators keep the file small — the firmware parser is
-    # tolerant either way but the SD footprint matters here.
-    return json.dumps(document, separators=(",", ":")).encode("ascii")
+    # Compact separators keep the file small; the firmware parser tolerates
+    # either form but the SD footprint matters.
+    return json.dumps(document, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
 
 
 def _adopt_legacy_skip_markers(cache_dir: Path) -> set[int]:
-    """Convert any leftover `<n>.skip` sentinel files into a skip set.
-
-    The short-lived pre-V2 preloader wrote these files; the current
-    index folds skip verdicts into the index instead. Migrate them
-    once and delete the files so subsequent runs don't need to look
-    at them again.
-    """
+    """Convert any leftover `<n>.skip` sentinel files into a skip set."""
     adopted: set[int] = set()
     for marker in cache_dir.glob("*.skip"):
         try:
@@ -276,91 +298,137 @@ def _adopt_legacy_skip_markers(cache_dir: Path) -> set[int]:
     return adopted
 
 
-def _read_legacy_txt_index(path: Path) -> tuple[set[int], set[int]] | None:
-    """Parse the pre-JSON V2 text index. Returns (cached, skipped) or None."""
+def _read_legacy_txt_index(path: Path) -> set[int]:
+    """Parse the pre-JSON V2 text index. Returns the persisted skip set,
+    or empty if the file is missing/unreadable."""
     if not path.exists():
-        return None
+        return set()
     try:
         lines = path.read_text().splitlines()
     except OSError:
-        return None
+        return set()
     if not lines or lines[0].strip() != CACHE_INDEX_LEGACY_MAGIC:
-        return None
+        return set()
     try:
         cached_count = int(lines[1].strip())
-    except (IndexError, ValueError):
-        return None
-    cached: set[int] = set()
-    for offset in range(cached_count):
-        try:
-            cached.add(int(lines[2 + offset].strip()))
-        except (IndexError, ValueError):
-            return None
-    skip_header_index = 2 + cached_count
-    try:
+        skip_header_index = 2 + cached_count
         skip_count = int(lines[skip_header_index].strip())
     except (IndexError, ValueError):
-        return None
+        return set()
     skipped: set[int] = set()
     for offset in range(skip_count):
         try:
             skipped.add(int(lines[skip_header_index + 1 + offset].strip()))
         except (IndexError, ValueError):
-            return None
-    return cached, skipped
+            return set()
+    return skipped
 
 
-def read_cache_index_skips(cache_dir: Path) -> set[int]:
-    """Return the persisted skip set, or empty if the index is absent.
+def _ingest_legacy_per_comic_json(cache_dir: Path, manifest: Manifest) -> int:
+    """Absorb per-comic <n>.json files into the manifest, then delete them.
 
-    Migrates from the pre-JSON text index and from stray `<n>.skip`
-    sentinel files transparently so an existing cache directory
-    upgrades cleanly on the first run.
+    Returns the number of files migrated. Called on first v4 run so
+    existing SD cards upgrade cleanly.
     """
-    legacy_markers = _adopt_legacy_skip_markers(cache_dir)
-    path = cache_dir / CACHE_INDEX_NAME
-    if path.exists():
+    migrated = 0
+    for metadata_path in cache_dir.glob("*.json"):
+        if metadata_path.name in {CACHE_INDEX_NAME, CACHE_INDEX_LEGACY_LATEST}:
+            continue
         try:
-            document = json.loads(path.read_text())
+            number = int(metadata_path.stem)
+        except ValueError:
+            continue
+        if number <= 0 or number == 404:
+            metadata_path.unlink(missing_ok=True)
+            continue
+        try:
+            raw = decode_metadata(metadata_path.read_bytes(), number)
         except (OSError, ValueError):
-            return legacy_markers
-        if (
-            not isinstance(document, dict)
-            or document.get("version") != CACHE_INDEX_VERSION
-        ):
-            return legacy_markers
-        skipped_raw = document.get("skipped", [])
-        if not isinstance(skipped_raw, list):
-            return legacy_markers
-        skips: set[int] = set(legacy_markers)
-        for value in skipped_raw:
-            if not isinstance(value, int) or isinstance(value, bool):
-                return legacy_markers
-            skips.add(value)
-        return skips
-
-    # No JSON on disk yet — try the pre-JSON txt file.
-    legacy = _read_legacy_txt_index(cache_dir / CACHE_INDEX_LEGACY_TXT)
-    if legacy is None:
-        return legacy_markers
-    _cached, txt_skips = legacy
-    return legacy_markers | txt_skips
+            metadata_path.unlink(missing_ok=True)
+            continue
+        meta = meta_from_xkcd_json(raw)
+        if meta is not None and number not in manifest.comics:
+            image_path = cache_dir / f"{number}{meta.extension}"
+            if valid_image_header(image_path, meta.extension):
+                manifest.comics[number] = meta
+                migrated += 1
+        metadata_path.unlink(missing_ok=True)
+    # latest.json is now dead too.
+    (cache_dir / CACHE_INDEX_LEGACY_LATEST).unlink(missing_ok=True)
+    return migrated
 
 
-def write_cache_index(cache_dir: Path, skipped: set[int] | None = None) -> tuple[list[int], list[int]]:
-    """Regenerate the firmware-compatible index from complete cache entries.
+def load_manifest(cache_dir: Path) -> Manifest:
+    """Load the persisted manifest, migrating from legacy layouts.
 
-    Preserves the persisted skip set when `skipped` is None; pass an explicit
-    set (possibly empty) to overwrite it. Also removes the pre-JSON txt
-    index file so the two formats never coexist on disk.
+    Handles all upgrade paths transparently: v4 (native), v3 JSON (cached
+    list only, per-comic .json ingest), pre-JSON txt (skips only), stray
+    .skip markers. Leaves the cache dir in a state where only image files
+    and index.json remain.
     """
-    cached = complete_cached_comics(cache_dir)
-    if skipped is None:
-        skipped = read_cache_index_skips(cache_dir)
-    skip_list = sorted(number for number in skipped if number > 0 and number != 404)
-    atomic_write(cache_dir / CACHE_INDEX_NAME, encode_cache_index(cached, skip_list))
+    manifest = Manifest()
+    manifest.skipped |= _adopt_legacy_skip_markers(cache_dir)
+
+    index_path = cache_dir / CACHE_INDEX_NAME
+    document: Any = None
+    if index_path.exists():
+        try:
+            document = json.loads(index_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            document = None
+
+    if isinstance(document, dict):
+        version = document.get("version")
+        skipped_raw = document.get("skipped", [])
+        if isinstance(skipped_raw, list):
+            for value in skipped_raw:
+                if isinstance(value, int) and not isinstance(value, bool) and value > 0 and value != 404:
+                    manifest.skipped.add(value)
+
+        if version == CACHE_INDEX_VERSION:
+            latest_raw = document.get("latest")
+            if isinstance(latest_raw, int) and not isinstance(latest_raw, bool) and latest_raw > 0:
+                manifest.latest = latest_raw
+            comics_raw = document.get("comics", {})
+            if isinstance(comics_raw, dict):
+                for key, value in comics_raw.items():
+                    try:
+                        number = int(key)
+                    except (TypeError, ValueError):
+                        continue
+                    if number <= 0 or number == 404:
+                        continue
+                    if not isinstance(value, dict):
+                        continue
+                    ext = value.get("e", "")
+                    url = value.get("u", "")
+                    if not isinstance(ext, str) or ext not in SUPPORTED_EXTENSIONS:
+                        continue
+                    if not isinstance(url, str) or not url:
+                        continue
+                    manifest.comics[number] = ComicMeta(
+                        title=str(value.get("t", "")),
+                        alt=str(value.get("a", "")),
+                        extension=ext,
+                        url=url,
+                    )
+    else:
+        # No usable JSON index yet — try the pre-JSON text index for skips.
+        manifest.skipped |= _read_legacy_txt_index(cache_dir / CACHE_INDEX_LEGACY_TXT)
+
+    # Absorb any leftover per-comic .json files (pre-V4 layout).
+    _ingest_legacy_per_comic_json(cache_dir, manifest)
+    # Drop any pre-JSON txt index so the formats never coexist.
     (cache_dir / CACHE_INDEX_LEGACY_TXT).unlink(missing_ok=True)
-    return cached, skip_list
+    return manifest
+
+
+def write_manifest(cache_dir: Path, manifest: Manifest) -> None:
+    atomic_write(cache_dir / CACHE_INDEX_NAME, encode_manifest(manifest))
+    # Belt and braces: strip any legacy siblings that might have been
+    # recreated between load and write.
+    (cache_dir / CACHE_INDEX_LEGACY_TXT).unlink(missing_ok=True)
+    (cache_dir / CACHE_INDEX_LEGACY_LATEST).unlink(missing_ok=True)
 
 
 def download_image(
@@ -405,49 +473,40 @@ def process_comic(
     retries: int,
     force: bool,
     stop_event: threading.Event,
-    skipped: set[int],
-    skipped_lock: threading.Lock,
+    manifest_snapshot: dict[int, ComicMeta],
+    skipped_snapshot: frozenset[int],
 ) -> Result:
     if stop_event.is_set():
         return Result(number, "cancelled", "stopped")
     if number == 404:
         return Result(number, "skipped", "XKCD #404 intentionally does not exist")
 
-    # `skipped` holds the persisted skip verdicts (unsupported image
-    # format, etc.). It's shared across workers and consulted before
-    # any network work; --force ignores it so a comic can be
-    # re-evaluated if xkcd ever republishes it in a supported format.
-    if not force:
-        with skipped_lock:
-            already_skipped = number in skipped
-        if already_skipped:
-            return Result(number, "skipped", "previously marked non-retriable")
+    if not force and number in skipped_snapshot:
+        return Result(number, "skipped", "previously marked non-retriable")
 
-    metadata_path = cache_dir / f"{number}.json"
-    metadata = None if force else read_valid_metadata(metadata_path, number)
-    metadata_downloaded = metadata is None
+    known = None if force else manifest_snapshot.get(number)
+    metadata_downloaded = False
 
     try:
-        if metadata is None:
+        if known is not None:
+            meta = known
+        else:
             raw_metadata = fetch_bytes(
                 COMIC_METADATA_URL.format(number=number), timeout, retries
             )
-            metadata = decode_metadata(raw_metadata, number)
-            atomic_write(metadata_path, raw_metadata)
+            decoded = decode_metadata(raw_metadata, number)
+            meta = meta_from_xkcd_json(decoded)
+            metadata_downloaded = True
+            if meta is None:
+                return Result(number, "skipped", "unsupported image extension")
 
-        extension = image_extension(metadata["img"])
-        if not extension:
-            with skipped_lock:
-                skipped.add(number)
-            return Result(number, "skipped", "unsupported image extension")
-
-        image_path = cache_dir / f"{number}{extension}"
-        if not force and valid_image_header(image_path, extension):
+        image_path = cache_dir / f"{number}{meta.extension}"
+        if not force and valid_image_header(image_path, meta.extension):
             detail = "metadata refreshed; image already cached" if metadata_downloaded else "cached"
-            return Result(number, "cached", detail)
+            return Result(number, "cached", detail, meta=meta)
 
-        download_image(metadata["img"], image_path, extension, timeout, retries)
-        return Result(number, "downloaded", image_path.name)
+        download_image(meta.url, image_path, meta.extension, timeout, retries)
+        return Result(number, "downloaded", image_path.name, meta=meta)
     except OSError as exc:
         if exc.errno == errno.ENOSPC:
             stop_event.set()
@@ -457,21 +516,27 @@ def process_comic(
         return Result(number, "failed", str(exc))
 
 
-def load_latest(cache_dir: Path, timeout: float, retries: int) -> tuple[dict[str, Any], bytes]:
+def load_latest(cache_dir: Path, timeout: float, retries: int,
+                manifest: Manifest) -> tuple[dict[str, Any] | None, int]:
+    """Fetch the latest comic's metadata. Returns (raw_decoded, number).
+
+    Falls back to the manifest's stored latest number if the network
+    call fails. raw_decoded is None on cache-only fallback.
+    """
     try:
         raw = fetch_bytes(LATEST_URL, timeout, retries)
-        return decode_metadata(raw), raw
+        decoded = decode_metadata(raw)
+        return decoded, int(decoded["num"])
     except (DownloadError, ValueError) as live_error:
-        cached_path = cache_dir / "latest.json"
-        try:
-            raw = cached_path.read_bytes()
-            metadata = decode_metadata(raw)
-        except (OSError, ValueError) as cache_error:
-            raise DownloadError(
-                f"could not retrieve latest XKCD and no valid cache exists: {live_error}"
-            ) from cache_error
-        print(f"Warning: latest lookup failed; resuming from {cached_path}", file=sys.stderr)
-        return metadata, raw
+        if manifest.latest > 0:
+            print(
+                f"Warning: latest lookup failed; resuming from manifest #{manifest.latest} ({live_error})",
+                file=sys.stderr,
+            )
+            return None, manifest.latest
+        raise DownloadError(
+            f"could not retrieve latest XKCD and no cached manifest exists: {live_error}"
+        ) from live_error
 
 
 def main() -> int:
@@ -493,14 +558,28 @@ def main() -> int:
     print(f"Cache:     {cache_dir}")
     print(f"Free space: {free_bytes / (1024 ** 3):.2f} GiB")
 
+    manifest = load_manifest(cache_dir)
+    if args.force:
+        # Re-evaluate every comic and every skip verdict.
+        manifest.comics.clear()
+        manifest.skipped.clear()
+
+    manifest_lock = threading.Lock()
+
     try:
-        latest, raw_latest = load_latest(cache_dir, args.timeout, args.retries)
-        latest_number = int(latest["num"])
-        atomic_write(cache_dir / "latest.json", raw_latest)
-        atomic_write(cache_dir / f"{latest_number}.json", raw_latest)
+        latest_raw, latest_number = load_latest(
+            cache_dir, args.timeout, args.retries, manifest
+        )
     except (DownloadError, OSError) as exc:
         print(f"Error: {exc}", file=sys.stderr)
         return 1
+
+    manifest.latest = latest_number
+    if latest_raw is not None:
+        latest_meta = meta_from_xkcd_json(latest_raw)
+        if latest_meta is not None and (args.force or latest_number not in manifest.comics):
+            # Prime the manifest so process_comic can skip its own metadata fetch.
+            manifest.comics[latest_number] = latest_meta
 
     end = min(args.end, latest_number) if args.end is not None else latest_number
     numbers = [number for number in range(args.start, end + 1) if number != 404]
@@ -512,11 +591,13 @@ def main() -> int:
 
     counts = {"downloaded": 0, "cached": 0, "skipped": 0, "failed": 0, "cancelled": 0}
     stop_event = threading.Event()
-    # Start from whatever skip verdicts were persisted by the previous
-    # run (empty on --force, so every comic in range gets re-evaluated).
-    persisted_skips: set[int] = set() if args.force else read_cache_index_skips(cache_dir)
-    skipped_set: set[int] = set(persisted_skips)
-    skipped_lock = threading.Lock()
+
+    # Snapshot the manifest state that workers need. Workers don't mutate
+    # shared state; the main thread folds their Results back into the
+    # manifest under the lock as they complete.
+    with manifest_lock:
+        comics_snapshot = dict(manifest.comics)
+        skipped_snapshot = frozenset(manifest.skipped)
 
     try:
         with concurrent.futures.ThreadPoolExecutor(max_workers=args.workers) as executor:
@@ -529,8 +610,8 @@ def main() -> int:
                     args.retries,
                     args.force,
                     stop_event,
-                    skipped_set,
-                    skipped_lock,
+                    comics_snapshot,
+                    skipped_snapshot,
                 ): number
                 for number in numbers
             }
@@ -539,6 +620,12 @@ def main() -> int:
                 result = future.result()
                 completed += 1
                 counts[result.status] += 1
+                with manifest_lock:
+                    if result.status in {"downloaded", "cached"} and result.meta is not None:
+                        manifest.comics[result.number] = result.meta
+                    elif result.status == "skipped" and result.detail == "unsupported image extension":
+                        manifest.skipped.add(result.number)
+
                 if result.status in {"failed", "skipped"}:
                     print(
                         f"[{completed}/{len(numbers)}] #{result.number}: "
@@ -556,10 +643,10 @@ def main() -> int:
     except KeyboardInterrupt:
         stop_event.set()
         try:
-            with skipped_lock:
-                indexed, _ = write_cache_index(cache_dir, skipped=set(skipped_set))
-            print(f"Updated cache index with {len(indexed)} complete comics.")
-        except OSError as exc:
+            with manifest_lock:
+                write_manifest(cache_dir, manifest)
+            print(f"Updated cache index with {len(manifest.comics)} complete comics.")
+        except (OSError, ValueError) as exc:
             print(f"Warning: could not update cache index: {exc}", file=sys.stderr)
         print("\nInterrupted; completed files are safe and the command can be rerun.", file=sys.stderr)
         return 130
@@ -569,11 +656,12 @@ def main() -> int:
         + ", ".join(f"{name}={count}" for name, count in counts.items() if count)
     )
     try:
-        with skipped_lock:
-            indexed, skip_list = write_cache_index(cache_dir, skipped=set(skipped_set))
+        with manifest_lock:
+            write_manifest(cache_dir, manifest)
+            indexed_count = len(manifest.comics)
+            skip_count = len(manifest.skipped)
         print(
-            f"Index:     {len(indexed)} complete comics, "
-            f"{len(skip_list)} skipped"
+            f"Index:     {indexed_count} complete comics, {skip_count} skipped"
         )
     except (OSError, ValueError) as exc:
         print(f"Error: could not update cache index: {exc}", file=sys.stderr)

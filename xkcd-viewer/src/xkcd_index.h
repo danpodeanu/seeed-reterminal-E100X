@@ -8,81 +8,107 @@
 
 #include "xkcd_index_pure.h"
 
-// Comic-cache index management. xkcd-viewer keeps a text file on the
-// SD card listing every comic number whose metadata + image are both
-// fully cached; loading/rebuilding/appending to that list used to
-// live inline in main.cpp alongside a small pixel-packing helper for
-// the 4-bit panel. Extracted so main.cpp only holds high-level flow.
+// Consolidated cache manifest for the xkcd-viewer.
+//
+// xkcd-viewer used to keep per-comic metadata as `/xkcd/<n>.json`
+// files alongside a numbers-only `/xkcd/index.json`. On FAT32 with
+// several thousand siblings in one directory, each per-comic
+// SD.open() walked the directory entry table, so a single random
+// pick paid ~5 s in directory scans (metadata read + SD.exists()
+// check + image read). The new layout collapses everything into one
+// `/xkcd/index.json` manifest holding title/alt/extension/url per
+// comic plus the skip list and latest published number, so the
+// runtime pays exactly one SD open per displayed image and every
+// metadata query is an in-memory lookup.
 namespace xkcd_index {
 
-// Callback returning true when the caller believes comic `number` has
-// both its metadata and image cached to SD (matches the semantics of
-// xkcd-viewer's own comicFullyCached helper).
-using ComicCachedFn = bool (*)(int number);
+// Per-comic metadata cached in the manifest.
+struct ComicMeta {
+  String title;
+  String alt;
+  // Lowercase image-file extension including the leading dot
+  // (".png", ".jpg", ".jpeg", ".bmp"). Empty for entries whose
+  // upstream format we cannot decode; those should also appear in
+  // skips().
+  String extension;
+  // Full source URL, used only when refetching an already-known
+  // comic (e.g. after preload_sd.py drops the image file).
+  String url;
+};
+
+// Callback returning true iff comic `number`'s image file exists
+// on the SD card. rebuild() uses this to drop manifest entries
+// whose image file has been deleted since the last write.
+using ImageExistsFn = bool (*)(int number, const String& extension);
 
 // Cancellation callback for rebuild(): returning true from it aborts
-// the scan and preserves whatever index was previously loaded. Pass
-// nullptr to run to completion.
+// the pass and preserves whatever manifest was previously loaded.
 using ShouldAbortFn = bool (*)();
 
-// True once load() or rebuild() has installed an index.
+// True once load() or rebuild() has installed a manifest.
 bool ready();
 
-// Number of entries currently held in the in-memory index (zero
-// before load()/rebuild() populate it).
+// Number of comic entries currently in the manifest (zero before
+// load()/rebuild() have populated it).
 uint32_t count();
 
-// Const view over the sorted, deduplicated comic-number list. Valid
-// only while no other xkcd_index call is in flight.
+// Highest xkcd number recorded in the manifest (may exceed the
+// number of cached entries because "latest" tracks what upstream
+// published, not what we've downloaded). Zero when unknown.
+int latest();
+
+// Overwrite the recorded latest-published number. Does not
+// persist(); the caller decides when to flush.
+void setLatest(int number);
+
+// Sorted, deduplicated list of comic numbers currently in the
+// manifest. Valid only while no other xkcd_index call is in
+// flight.
 const std::vector<int>& entries();
 
-// Const view over the sorted, deduplicated list of comic numbers
-// that have been marked as permanently non-retriable (e.g. they use
-// an image format the firmware cannot decode). Random selectors
-// consult skipped() to avoid wasting attempts on them.
+// Sorted, deduplicated list of comic numbers marked as permanently
+// non-retriable (e.g. GIFs). Random selectors consult skipped()
+// to avoid wasting attempts on them.
 const std::vector<int>& skips();
 
 // O(log n) membership test against the skip list.
 bool skipped(int number);
 
-// Write the given cached + skipped comic-number lists to the SD
-// index file atomically (.part + rename). Called from rebuild() and
-// after the maintenance pass tops up the cache.
-bool writeFile(const std::vector<int>& cached,
-               const std::vector<int>& skipped);
+// O(log n) metadata lookup. Returns null when `number` is not in
+// the manifest. The returned pointer is valid until the next
+// mutating call.
+const ComicMeta* metadata(int number);
 
-// Persist the current in-memory index (both cached and skipped
-// sections) to disk. Convenience wrapper over writeFile() used after
-// live updates like the fill pass or after markSkipped().
-bool persist();
-
-// Load and validate the on-disk index. Returns false and clears the
-// in-memory lists on any format error so the caller can trigger a
-// rebuild.
-bool load();
-
-// Walk the cache directory, keeping every comic whose metadata +
-// image are both present per `isCached`. Requires `sdReady == true`
-// or returns false without touching the in-memory index. The skip
-// list is preserved across rebuilds when this call is entered with a
-// non-empty in-memory skip set; if load() failed and skips() is
-// empty going in, they remain empty and are re-detected lazily.
-bool rebuild(bool sdReady, ComicCachedFn isCached,
-             ShouldAbortFn shouldAbort = nullptr);
-
-// Insert `number` into the sorted in-memory index if it isn't
-// already present. Silently ignored when the index is not ready, or
-// for the reserved comic 404. The change is in-memory only; the
-// caller decides when to persist().
-void addCurrent(int number);
+// Insert or replace `number`'s manifest entry. Silently ignored
+// for 404 or non-positive numbers. Does not persist(); callers
+// batch multiple additions before flushing.
+void addComic(int number, const ComicMeta& meta);
 
 // Insert `number` into the sorted in-memory skip list if it isn't
-// already present, then persist the whole index so the verdict
-// survives power loss. Silently ignored for the reserved comic 404
-// and for non-positive numbers. Returns true when the persist
-// succeeded (or the number was already recorded); false when persist
-// failed.
+// already present, then persist the whole manifest so the verdict
+// survives power loss. Returns true when the persist succeeded
+// (or the number was already recorded); false when persist failed.
 bool markSkipped(int number);
+
+// Persist the current in-memory manifest (comics + skips + latest)
+// to disk atomically (.part + rename).
+bool persist();
+
+// Load and validate the on-disk manifest. Returns false and clears
+// the in-memory state on any format error (missing file, wrong
+// version, malformed entries) so the caller can decide what to do
+// next. Because per-comic metadata now lives inside the manifest
+// itself, the firmware cannot rebuild the manifest from image
+// files alone — a v3 or older cache must be regenerated by
+// re-running tools/preload_sd.py.
+bool load();
+
+// Drop manifest entries whose image file is no longer present on
+// disk, then persist. Requires `sdReady == true`. Skips are
+// preserved. This is the only integrity pass available at runtime;
+// missing metadata cannot be recovered without a network fetch.
+bool rebuild(bool sdReady, ImageExistsFn imageExists,
+             ShouldAbortFn shouldAbort = nullptr);
 
 // Pack an 8bpp indexed image (one byte per pixel, values 0..15) into
 // 4bpp storage in-place, two pixels per byte. `width` must be even.

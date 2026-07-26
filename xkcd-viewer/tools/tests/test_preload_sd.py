@@ -12,10 +12,12 @@ sys.path.insert(0, str(TOOLS_DIR))
 import preload_sd  # noqa: E402
 
 
-def _process(number, cache_dir, *, force=False, skipped=None):
-    """Test helper that fills in the skip-set plumbing."""
+def _process(number, cache_dir, *, force=False, comics=None, skipped=None):
+    """Test helper that fills in the manifest-snapshot plumbing."""
+    if comics is None:
+        comics = {}
     if skipped is None:
-        skipped = set()
+        skipped = frozenset()
     return preload_sd.process_comic(
         number,
         cache_dir,
@@ -23,9 +25,17 @@ def _process(number, cache_dir, *, force=False, skipped=None):
         retries=1,
         force=force,
         stop_event=threading.Event(),
-        skipped=skipped,
-        skipped_lock=threading.Lock(),
+        manifest_snapshot=comics,
+        skipped_snapshot=skipped,
     )
+
+
+def _png_bytes():
+    return b"\x89PNG\r\n\x1a\nvalid"
+
+
+def _jpg_bytes():
+    return b"\xff\xd8\xff\xdbcached"
 
 
 class PreloadSdTests(unittest.TestCase):
@@ -58,16 +68,21 @@ class PreloadSdTests(unittest.TestCase):
     def test_existing_complete_entry_is_resumable_without_network(self):
         with tempfile.TemporaryDirectory() as temporary:
             cache_dir = Path(temporary)
-            metadata = {
-                "num": 1,
-                "img": "https://imgs.xkcd.com/comics/barrel_cropped_(1).jpg",
+            (cache_dir / "1.jpg").write_bytes(_jpg_bytes())
+            snapshot = {
+                1: preload_sd.ComicMeta(
+                    title="Barrel",
+                    alt="alt",
+                    extension=".jpg",
+                    url="https://imgs.xkcd.com/comics/barrel_cropped_(1).jpg",
+                )
             }
-            (cache_dir / "1.json").write_text(json.dumps(metadata))
-            (cache_dir / "1.jpg").write_bytes(b"\xff\xd8\xff\xdbcached")
 
-            result = _process(1, cache_dir)
+            result = _process(1, cache_dir, comics=snapshot)
 
             self.assertEqual(result.status, "cached")
+            self.assertIsNotNone(result.meta)
+            self.assertEqual(result.meta.extension, ".jpg")
 
     def test_missing_comic_404_is_skipped(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -75,116 +90,128 @@ class PreloadSdTests(unittest.TestCase):
 
             self.assertEqual(result.status, "skipped")
 
-    def test_unsupported_extension_records_and_reuses_skip_verdict(self):
+    def test_persisted_skip_short_circuits_before_network(self):
         with tempfile.TemporaryDirectory() as temporary:
             cache_dir = Path(temporary)
-            metadata = {
-                "num": 5,
-                "img": "https://imgs.xkcd.com/comics/example.gif",
-            }
-            (cache_dir / "5.json").write_text(json.dumps(metadata))
-            skipped: set[int] = set()
+            skipped = frozenset({5})
 
-            first = _process(5, cache_dir, skipped=skipped)
-            self.assertEqual(first.status, "skipped")
-            self.assertEqual(first.detail, "unsupported image extension")
-            self.assertIn(5, skipped)
+            result = _process(5, cache_dir, skipped=skipped)
 
-            # A second run must not touch the network; passing an obviously
-            # broken metadata file exercises that path — the persisted skip
-            # short-circuits before decode_metadata is ever called.
-            (cache_dir / "5.json").write_text("not valid json")
+            self.assertEqual(result.status, "skipped")
+            self.assertEqual(result.detail, "previously marked non-retriable")
 
-            second = _process(5, cache_dir, skipped=skipped)
-            self.assertEqual(second.status, "skipped")
-            self.assertEqual(second.detail, "previously marked non-retriable")
-
-    def test_cache_index_contains_only_complete_valid_comics(self):
-        with tempfile.TemporaryDirectory() as temporary:
-            cache_dir = Path(temporary)
-            complete = {
-                "num": 2,
-                "img": "https://imgs.xkcd.com/comics/example.png",
-            }
-            missing_image = {
-                "num": 3,
-                "img": "https://imgs.xkcd.com/comics/missing.png",
-            }
-            (cache_dir / "2.json").write_text(json.dumps(complete))
-            (cache_dir / "2.png").write_bytes(b"\x89PNG\r\n\x1a\nvalid")
-            (cache_dir / "3.json").write_text(json.dumps(missing_image))
-            (cache_dir / "404.json").write_text(
-                json.dumps({"num": 404, "img": "https://example.com/404.png"})
-            )
-
-            cached, skipped = preload_sd.write_cache_index(cache_dir, skipped=set())
-
-            self.assertEqual(cached, [2])
-            self.assertEqual(skipped, [])
-            self.assertEqual(
-                json.loads((cache_dir / preload_sd.CACHE_INDEX_NAME).read_text()),
-                {"version": 3, "cached": [2], "skipped": []},
-            )
-
-    def test_cache_index_encoding_is_sorted_and_unique(self):
-        self.assertEqual(
-            preload_sd.encode_cache_index([7, 1, 7, 3], [10, 2, 2]),
-            b'{"version":3,"cached":[1,3,7],"skipped":[2,10]}',
+    def test_manifest_encoding_is_stable_and_sorted(self):
+        manifest = preload_sd.Manifest(
+            latest=3,
+            comics={
+                3: preload_sd.ComicMeta(
+                    title="Three", alt="alt3", extension=".png",
+                    url="https://imgs.xkcd.com/comics/three.png",
+                ),
+                1: preload_sd.ComicMeta(
+                    title="One", alt="alt1", extension=".jpg",
+                    url="https://imgs.xkcd.com/comics/one.jpg",
+                ),
+            },
+            skipped={10, 2, 2},
         )
 
-    def test_persisted_skip_list_round_trips(self):
+        encoded = preload_sd.encode_manifest(manifest)
+        decoded = json.loads(encoded.decode("utf-8"))
+
+        self.assertEqual(decoded["version"], 4)
+        self.assertEqual(decoded["latest"], 3)
+        self.assertEqual(decoded["skipped"], [2, 10])
+        # Comic keys are stringified numbers and should preserve every field.
+        self.assertEqual(list(decoded["comics"].keys()), ["1", "3"])
+        self.assertEqual(
+            decoded["comics"]["1"],
+            {"t": "One", "a": "alt1", "e": ".jpg",
+             "u": "https://imgs.xkcd.com/comics/one.jpg"},
+        )
+
+    def test_manifest_round_trips_through_disk(self):
         with tempfile.TemporaryDirectory() as temporary:
             cache_dir = Path(temporary)
-            complete = {
-                "num": 8,
-                "img": "https://imgs.xkcd.com/comics/example.png",
-            }
-            (cache_dir / "8.json").write_text(json.dumps(complete))
-            (cache_dir / "8.png").write_bytes(b"\x89PNG\r\n\x1a\nvalid")
-
-            preload_sd.write_cache_index(cache_dir, skipped={11, 42})
-            self.assertEqual(
-                preload_sd.read_cache_index_skips(cache_dir), {11, 42}
+            manifest = preload_sd.Manifest(
+                latest=8,
+                comics={
+                    8: preload_sd.ComicMeta(
+                        title="Eight", alt="", extension=".png",
+                        url="https://imgs.xkcd.com/comics/eight.png",
+                    ),
+                },
+                skipped={11, 42},
             )
 
-            # Rewriting without an explicit skipped argument must
-            # preserve the previously persisted set.
-            preload_sd.write_cache_index(cache_dir)
-            self.assertEqual(
-                preload_sd.read_cache_index_skips(cache_dir), {11, 42}
-            )
+            preload_sd.write_manifest(cache_dir, manifest)
 
-    def test_legacy_v1_index_with_skip_markers_migrates_to_json(self):
+            reloaded = preload_sd.load_manifest(cache_dir)
+            self.assertEqual(reloaded.latest, 8)
+            self.assertEqual(set(reloaded.comics), {8})
+            self.assertEqual(reloaded.comics[8].url,
+                             "https://imgs.xkcd.com/comics/eight.png")
+            self.assertEqual(reloaded.skipped, {11, 42})
+
+    def test_legacy_per_comic_json_and_latest_are_migrated(self):
         with tempfile.TemporaryDirectory() as temporary:
             cache_dir = Path(temporary)
             complete = {
                 "num": 2,
                 "img": "https://imgs.xkcd.com/comics/example.png",
+                "safe_title": "Example",
+                "alt": "alt text",
             }
             (cache_dir / "2.json").write_text(json.dumps(complete))
-            (cache_dir / "2.png").write_bytes(b"\x89PNG\r\n\x1a\nvalid")
-            # A pre-JSON preloader would have left the txt index behind,
-            # possibly alongside stray .skip sentinels from an even
-            # older run.
+            (cache_dir / "2.png").write_bytes(_png_bytes())
+            # A file whose image is missing must NOT be migrated.
+            (cache_dir / "3.json").write_text(
+                json.dumps({"num": 3, "img": "https://imgs.xkcd.com/comics/missing.png"})
+            )
+            (cache_dir / "latest.json").write_text(json.dumps(complete))
+
+            manifest = preload_sd.load_manifest(cache_dir)
+
+            self.assertEqual(set(manifest.comics), {2})
+            self.assertEqual(manifest.comics[2].title, "Example")
+            self.assertEqual(manifest.comics[2].extension, ".png")
+            # Legacy files are gone.
+            self.assertFalse((cache_dir / "2.json").exists())
+            self.assertFalse((cache_dir / "3.json").exists())
+            self.assertFalse((cache_dir / "latest.json").exists())
+
+    def test_legacy_v1_txt_index_and_skip_markers_migrate_to_json(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            cache_dir = Path(temporary)
             (cache_dir / preload_sd.CACHE_INDEX_LEGACY_TXT).write_text(
                 "XKCD_CACHE_INDEX_V2\n1\n2\n1\n7\n"
             )
             (cache_dir / "5.skip").write_text("")
             (cache_dir / "9.skip").write_text("")
 
-            # Reading the legacy state adopts both sources.
-            skips = preload_sd.read_cache_index_skips(cache_dir)
-            self.assertEqual(skips, {5, 7, 9})
+            manifest = preload_sd.load_manifest(cache_dir)
+
+            self.assertEqual(manifest.skipped, {5, 7, 9})
             self.assertFalse((cache_dir / "5.skip").exists())
             self.assertFalse((cache_dir / "9.skip").exists())
-
-            # Persisting writes JSON and removes the txt file.
-            preload_sd.write_cache_index(cache_dir, skipped=skips)
             self.assertFalse((cache_dir / preload_sd.CACHE_INDEX_LEGACY_TXT).exists())
-            self.assertEqual(
-                json.loads((cache_dir / preload_sd.CACHE_INDEX_NAME).read_text()),
-                {"version": 3, "cached": [2], "skipped": [5, 7, 9]},
-            )
+
+    def test_v3_json_index_preserves_skips_and_ingests_per_comic_json(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            cache_dir = Path(temporary)
+            v3_index = {"version": 3, "cached": [2], "skipped": [7, 11]}
+            (cache_dir / preload_sd.CACHE_INDEX_NAME).write_text(json.dumps(v3_index))
+            (cache_dir / "2.json").write_text(json.dumps({
+                "num": 2, "img": "https://imgs.xkcd.com/comics/example.png",
+                "safe_title": "Example",
+            }))
+            (cache_dir / "2.png").write_bytes(_png_bytes())
+
+            manifest = preload_sd.load_manifest(cache_dir)
+
+            self.assertEqual(manifest.skipped, {7, 11})
+            self.assertEqual(set(manifest.comics), {2})
+            self.assertFalse((cache_dir / "2.json").exists())
 
 
 if __name__ == "__main__":
