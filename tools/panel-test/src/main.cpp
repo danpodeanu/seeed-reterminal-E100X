@@ -188,49 +188,44 @@ void drawCastellations(int top, int height) {
 }
 
 void drawFooter(int top, int height) {
-  // Left third: solid black patch for reference.
-  const int leftWidth = PANEL_WIDTH / 3;
-  epaper.fillRect(0, top, leftWidth, height, PANEL_BLACK);
+  // Split the footer into a banner (top 2/3) and a ramp strip (bottom
+  // 1/3). Both span the full panel width so the model name never gets
+  // clipped by neighbouring patches, and the ramp can dedicate all its
+  // real estate to showing every intermediate shade cleanly. Pure black
+  // and pure white are already covered by the color-bars section above,
+  // so no separate reference patches are needed here.
+  const int bannerHeight = (height * 2) / 3;
+  const int rampTop = top + bannerHeight;
+  const int rampHeight = height - bannerHeight;
 
-  // Right third: solid white patch (framed 1px to keep it visible on a
-  // clean e-paper flush).
-  const int rightWidth = PANEL_WIDTH / 3;
-  const int rightX = PANEL_WIDTH - rightWidth;
-  epaper.fillRect(rightX, top, rightWidth, height, PANEL_WHITE);
-  epaper.drawRect(rightX, top, rightWidth, height, PANEL_BLACK);
-
-  // Middle third: banner text over a mid-swatch, plus the ramp along
-  // the bottom edge.
-  const int centerX = leftWidth;
-  const int centerWidth = PANEL_WIDTH - leftWidth - rightWidth;
-  const uint32_t centerBg =
-      (RAMP_COUNT > 2) ? RAMP[RAMP_COUNT / 2] : PANEL_WHITE;
-  const uint32_t centerFg =
-      (centerBg == PANEL_WHITE) ? PANEL_BLACK : PANEL_WHITE;
-  epaper.fillRect(centerX, top, centerWidth, height, centerBg);
-  epaper.setTextColor(centerFg, centerBg, true);
+  epaper.fillRect(0, top, PANEL_WIDTH, bannerHeight, PANEL_WHITE);
+  epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, true);
   selectBannerFont();
   epaper.setTextDatum(MC_DATUM);
-  epaper.drawString(PANEL_LABEL, centerX + centerWidth / 2,
-                    top + height / 2 - height / 6, 1);
+  epaper.drawString(PANEL_LABEL, PANEL_WIDTH / 2,
+                    top + bannerHeight / 2 - bannerHeight / 6, 1);
   selectLabelFont();
-  const String subtitle =
-      String(PALETTE_COUNT) + " colours - " + String(PANEL_WIDTH) + "x" +
-      String(PANEL_HEIGHT);
-  epaper.drawString(subtitle, centerX + centerWidth / 2,
-                    top + height / 2 + height / 8, 1);
+  const String subtitle = String(PALETTE_COUNT) + " colours - " +
+                          String(PANEL_WIDTH) + "x" + String(PANEL_HEIGHT);
+  epaper.drawString(subtitle, PANEL_WIDTH / 2,
+                    top + bannerHeight / 2 + bannerHeight / 4, 1);
 
-  // Bottom ramp strip: on grayscale panels this shows every intermediate
-  // shade, so a dead LUT entry stands out. On six-colour panels the ramp
+  // 1px separator between banner and ramp so the transition reads on
+  // panels where the extreme ramp step is white.
+  epaper.drawFastHLine(0, rampTop, PANEL_WIDTH, PANEL_BLACK);
+
+  // Full-width ramp: on grayscale panels every intermediate shade shows
+  // up, so a dead LUT entry stands out. On six-colour panels the ramp
   // degenerates to black + white and just verifies bit-depth 0 and max.
-  const int rampHeight = height / 4;
-  const int rampTop = top + height - rampHeight;
   const int stepBase = PANEL_WIDTH / RAMP_COUNT;
   const int stepRemainder = PANEL_WIDTH - stepBase * RAMP_COUNT;
   int rx = 0;
   for (int i = 0; i < RAMP_COUNT; ++i) {
     const int stepWidth = stepBase + (i < stepRemainder ? 1 : 0);
-    epaper.fillRect(rx, rampTop, stepWidth, rampHeight, RAMP[i]);
+    epaper.fillRect(rx, rampTop + 1, stepWidth, rampHeight - 1, RAMP[i]);
+    if (i > 0) {
+      epaper.drawFastVLine(rx, rampTop + 1, rampHeight - 1, PANEL_BLACK);
+    }
     rx += stepWidth;
   }
 }
