@@ -3,9 +3,12 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <SD.h>
+#include <esp_heap_caps.h>
 
 #include <algorithm>
-#include <unordered_map>
+#include <cstring>
+#include <memory>
+#include <string>
 #include <vector>
 
 #include "app_logger.h"
@@ -15,9 +18,71 @@
 namespace xkcd_index {
 namespace {
 
+// Stateless std allocator backed by PSRAM. Every allocation goes through
+// heap_caps_malloc(MALLOC_CAP_SPIRAM) so 3000+ per-comic strings can
+// live outside the ~300 KB internal SRAM heap.
+template <class T>
+struct PsramAllocator {
+  using value_type = T;
+  PsramAllocator() = default;
+  template <class U>
+  PsramAllocator(const PsramAllocator<U>&) noexcept {}
+  T* allocate(std::size_t n) {
+    void* p = heap_caps_malloc(n * sizeof(T), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    if (p == nullptr) {
+      // No exceptions on Arduino; a null return from the allocator is
+      // undefined behaviour, so fail loudly instead of corrupting state.
+      LOG.println("[cache] PSRAM allocation failed");
+      abort();
+    }
+    return static_cast<T*>(p);
+  }
+  void deallocate(T* p, std::size_t) noexcept { free(p); }
+};
+template <class T, class U>
+bool operator==(const PsramAllocator<T>&, const PsramAllocator<U>&) noexcept { return true; }
+template <class T, class U>
+bool operator!=(const PsramAllocator<T>&, const PsramAllocator<U>&) noexcept { return false; }
+
+// A `std::string` whose buffer lives in PSRAM.
+using PsString = std::basic_string<char, std::char_traits<char>, PsramAllocator<char>>;
+
+// PSRAM-backed ArduinoJson allocator. Assigns the ~1.5–2 MB parse tree
+// away from the tiny internal SRAM heap.
+class PsramJsonAllocator : public ArduinoJson::Allocator {
+ public:
+  void* allocate(size_t size) override {
+    return heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  }
+  void deallocate(void* ptr) override { free(ptr); }
+  void* reallocate(void* ptr, size_t new_size) override {
+    return heap_caps_realloc(ptr, new_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+  }
+};
+
+// Internal storage for a manifest entry — mirrors the public ComicMeta
+// layout but with PSRAM-backed strings so 3000+ entries don't blow the
+// internal SRAM heap. metadata() converts one entry to the public form
+// on demand.
+struct StoredMeta {
+  PsString title;
+  PsString alt;
+  PsString extension;
+  PsString url;
+};
+
+// g_numbers/g_skips are small (~13 KB and ~30 bytes at 3268 comics) and
+// stay in internal SRAM so the existing `const std::vector<int>&`
+// accessors work unchanged. g_metas is the large one and lives in
+// PSRAM: both the vector's node array and every PsString buffer inside
+// it are PSRAM allocations.
 std::vector<int> g_numbers;
 std::vector<int> g_skips;
-std::unordered_map<int, ComicMeta> g_meta;
+std::vector<StoredMeta, PsramAllocator<StoredMeta>> g_metas;
+// Scratch buffer returned by metadata(); populated on each call so the
+// public API can keep returning `const ComicMeta*`. Valid until the
+// next metadata() call.
+ComicMeta g_metaScratch;
 int g_latest = 0;
 bool g_ready = false;
 
@@ -43,17 +108,28 @@ bool decodeSkipArray(JsonArrayConst array, std::vector<int>& out) {
   return validateSortedUnique(out);
 }
 
-bool extensionIsSupported(const String& extension) {
-  return extension == ".png" || extension == ".jpg" ||
-         extension == ".jpeg" || extension == ".bmp";
+bool extensionIsSupported(const char* extension) {
+  return std::strcmp(extension, ".png") == 0 ||
+         std::strcmp(extension, ".jpg") == 0 ||
+         std::strcmp(extension, ".jpeg") == 0 ||
+         std::strcmp(extension, ".bmp") == 0;
 }
 
 void clearAll() {
   g_numbers.clear();
   g_skips.clear();
-  g_meta.clear();
+  g_metas.clear();
+  g_metas.shrink_to_fit();
   g_latest = 0;
   g_ready = false;
+}
+
+// Locate `number` in the sorted g_numbers vector. Returns g_numbers.end()
+// on miss.
+std::vector<int>::const_iterator findNumber(int number) {
+  const auto it = std::lower_bound(g_numbers.begin(), g_numbers.end(), number);
+  if (it == g_numbers.end() || *it != number) return g_numbers.end();
+  return it;
 }
 
 }  // namespace
@@ -81,37 +157,57 @@ bool skipped(int number) {
 
 const ComicMeta* metadata(int number) {
   if (!g_ready || number <= 0) return nullptr;
-  const auto it = g_meta.find(number);
-  return it == g_meta.end() ? nullptr : &it->second;
+  const auto it = findNumber(number);
+  if (it == g_numbers.end()) return nullptr;
+  const StoredMeta& stored = g_metas[static_cast<size_t>(it - g_numbers.begin())];
+  // Copy PSRAM strings into the Arduino String scratch. Each field is
+  // short (a title/alt line) so the assignment cost is trivial, and
+  // the caller sees a stable API.
+  g_metaScratch.title = stored.title.c_str();
+  g_metaScratch.alt = stored.alt.c_str();
+  g_metaScratch.extension = stored.extension.c_str();
+  g_metaScratch.url = stored.url.c_str();
+  return &g_metaScratch;
 }
 
 void addComic(int number, const ComicMeta& meta) {
   if (number <= 0 || number == 404) return;
   const auto position =
       std::lower_bound(g_numbers.begin(), g_numbers.end(), number);
+  const size_t index = static_cast<size_t>(position - g_numbers.begin());
+  StoredMeta stored;
+  stored.title = meta.title.c_str();
+  stored.alt = meta.alt.c_str();
+  stored.extension = meta.extension.c_str();
+  stored.url = meta.url.c_str();
   if (position == g_numbers.end() || *position != number) {
     g_numbers.insert(position, number);
+    g_metas.insert(g_metas.begin() + index, std::move(stored));
+  } else {
+    g_metas[index] = std::move(stored);
   }
-  g_meta[number] = meta;
   if (number > g_latest) g_latest = number;
   g_ready = true;
 }
 
 bool persist() {
-  JsonDocument doc;
+  PsramJsonAllocator alloc;
+  JsonDocument doc(&alloc);
   doc["version"] = config::CACHE_INDEX_VERSION;
   if (g_latest > 0) doc["latest"] = g_latest;
   JsonObject comics = doc["comics"].to<JsonObject>();
-  for (const int number : g_numbers) {
-    const auto it = g_meta.find(number);
-    if (it == g_meta.end()) continue;
-    // Numeric ArduinoJson keys must be strings, so key by the
-    // decimal representation.
-    JsonObject entry = comics[String(number).c_str()].to<JsonObject>();
-    entry["t"] = it->second.title.c_str();
-    entry["a"] = it->second.alt.c_str();
-    entry["e"] = it->second.extension.c_str();
-    entry["u"] = it->second.url.c_str();
+  for (size_t i = 0; i < g_numbers.size(); ++i) {
+    const int number = g_numbers[i];
+    const StoredMeta& stored = g_metas[i];
+    // Numeric ArduinoJson keys must be strings, so key by the decimal
+    // representation.
+    char keyBuf[12];
+    snprintf(keyBuf, sizeof(keyBuf), "%d", number);
+    JsonObject entry = comics[keyBuf].to<JsonObject>();
+    entry["t"] = stored.title.c_str();
+    entry["a"] = stored.alt.c_str();
+    entry["e"] = stored.extension.c_str();
+    entry["u"] = stored.url.c_str();
   }
   JsonArray skippedArray = doc["skipped"].to<JsonArray>();
   for (const int number : g_skips) skippedArray.add(number);
@@ -154,7 +250,7 @@ bool load() {
   }
 
   // ArduinoJson streaming from a File reads a byte (or a handful) at a
-  // time, which costs seconds on a 650 KB manifest sitting on FAT32.
+  // time, which costs seconds on a 1 MB manifest sitting on FAT32.
   // Slurp the whole file into PSRAM first and parse from memory — one
   // bulk read plus one in-memory parse is an order of magnitude faster.
   const size_t fileSize = file.size();
@@ -164,7 +260,8 @@ bool load() {
                static_cast<unsigned>(fileSize));
     return false;
   }
-  char* const buffer = static_cast<char*>(ps_malloc(fileSize + 1));
+  char* const buffer = static_cast<char*>(
+      heap_caps_malloc(fileSize + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
   if (buffer == nullptr) {
     file.close();
     LOG.println("[cache] comic manifest cannot be buffered in PSRAM");
@@ -181,7 +278,8 @@ bool load() {
   }
   buffer[fileSize] = '\0';
 
-  JsonDocument doc;
+  PsramJsonAllocator jsonAlloc;
+  JsonDocument doc(&jsonAlloc);
   const DeserializationError error = deserializeJson(doc, buffer, fileSize);
   free(buffer);
   if (error) {
@@ -208,12 +306,13 @@ bool load() {
     return false;
   }
 
+  // Build the two loaded views in temporaries so a mid-parse failure
+  // leaves the previously-swapped-in state untouched.
   std::vector<int> loadedNumbers;
   loadedNumbers.reserve(comics.size());
-  std::unordered_map<int, ComicMeta> loadedMeta;
-  loadedMeta.reserve(comics.size());
+  std::vector<StoredMeta, PsramAllocator<StoredMeta>> loadedMetas;
+  loadedMetas.reserve(comics.size());
   for (JsonPairConst kv : comics) {
-    // Parse the string key back to an int.
     const char* key = kv.key().c_str();
     if (key == nullptr || *key == '\0') return false;
     uint32_t parsedNumber = 0;
@@ -225,22 +324,47 @@ bool load() {
     const int number = static_cast<int>(parsedNumber);
     JsonObjectConst entry = kv.value().as<JsonObjectConst>();
     if (entry.isNull()) return false;
-    ComicMeta meta;
-    meta.title = String(entry["t"].as<const char*>() ?: "");
-    meta.alt = String(entry["a"].as<const char*>() ?: "");
-    meta.extension = String(entry["e"].as<const char*>() ?: "");
-    meta.url = String(entry["u"].as<const char*>() ?: "");
-    if (!meta.extension.isEmpty() && !extensionIsSupported(meta.extension)) {
+    const char* rawExt = entry["e"].as<const char*>();
+    if (rawExt == nullptr) rawExt = "";
+    if (*rawExt != '\0' && !extensionIsSupported(rawExt)) {
       LOG.printf("[cache] comic manifest #%d has unsupported extension '%s'\n",
-                 number, meta.extension.c_str());
+                 number, rawExt);
       return false;
     }
+    StoredMeta stored;
+    const char* rawTitle = entry["t"].as<const char*>();
+    const char* rawAlt = entry["a"].as<const char*>();
+    const char* rawUrl = entry["u"].as<const char*>();
+    stored.title = rawTitle == nullptr ? "" : rawTitle;
+    stored.alt = rawAlt == nullptr ? "" : rawAlt;
+    stored.extension = rawExt;
+    stored.url = rawUrl == nullptr ? "" : rawUrl;
     loadedNumbers.push_back(number);
-    loadedMeta.emplace(number, std::move(meta));
+    loadedMetas.push_back(std::move(stored));
   }
-  std::sort(loadedNumbers.begin(), loadedNumbers.end());
-  loadedNumbers.erase(std::unique(loadedNumbers.begin(), loadedNumbers.end()),
-                      loadedNumbers.end());
+  // The JSON object preserves insertion order, but callers rely on
+  // sorted numbers for binary lookup. Sort both vectors together.
+  {
+    std::vector<size_t> perm(loadedNumbers.size());
+    for (size_t i = 0; i < perm.size(); ++i) perm[i] = i;
+    std::sort(perm.begin(), perm.end(),
+              [&](size_t a, size_t b) { return loadedNumbers[a] < loadedNumbers[b]; });
+    std::vector<int> sortedNumbers;
+    sortedNumbers.reserve(loadedNumbers.size());
+    std::vector<StoredMeta, PsramAllocator<StoredMeta>> sortedMetas;
+    sortedMetas.reserve(loadedMetas.size());
+    for (const size_t idx : perm) {
+      if (!sortedNumbers.empty() && sortedNumbers.back() == loadedNumbers[idx]) {
+        // Duplicate keys should never happen in a well-formed manifest;
+        // keep the first occurrence and skip subsequent copies.
+        continue;
+      }
+      sortedNumbers.push_back(loadedNumbers[idx]);
+      sortedMetas.push_back(std::move(loadedMetas[idx]));
+    }
+    loadedNumbers.swap(sortedNumbers);
+    loadedMetas.swap(sortedMetas);
+  }
 
   std::vector<int> loadedSkips;
   if (!decodeSkipArray(doc["skipped"].as<JsonArrayConst>(), loadedSkips)) {
@@ -251,7 +375,7 @@ bool load() {
   const int loadedLatest = doc["latest"].as<int>();
 
   g_numbers.swap(loadedNumbers);
-  g_meta.swap(loadedMeta);
+  g_metas.swap(loadedMetas);
   g_skips.swap(loadedSkips);
   g_latest = loadedLatest > 0 ? loadedLatest : 0;
   if (g_latest == 0 && !g_numbers.empty()) g_latest = g_numbers.back();
@@ -267,9 +391,6 @@ bool rebuild(bool sdReady, ImageExistsFn imageExists,
              ShouldAbortFn shouldAbort) {
   if (!sdReady || imageExists == nullptr) return false;
   if (!g_ready || g_numbers.empty()) {
-    // Nothing loaded — a v3 or older cache cannot be reconstructed
-    // without per-comic metadata. Log actionable guidance instead
-    // of pretending we succeeded.
     LOG.println("[cache] rebuild skipped: no manifest loaded; run "
                 "tools/preload_sd.py");
     return false;
@@ -278,29 +399,29 @@ bool rebuild(bool sdReady, ImageExistsFn imageExists,
 
   std::vector<int> kept;
   kept.reserve(g_numbers.size());
-  std::unordered_map<int, ComicMeta> keptMeta;
-  keptMeta.reserve(g_numbers.size());
+  std::vector<StoredMeta, PsramAllocator<StoredMeta>> keptMetas;
+  keptMetas.reserve(g_numbers.size());
   size_t dropped = 0;
-  for (const int number : g_numbers) {
+  for (size_t i = 0; i < g_numbers.size(); ++i) {
     if (shouldAbort != nullptr && shouldAbort()) {
       LOG.println("[cache] manifest verify cancelled; keeping previous state");
       return false;
     }
-    const auto it = g_meta.find(number);
-    if (it == g_meta.end() || it->second.extension.isEmpty()) {
+    const StoredMeta& stored = g_metas[i];
+    if (stored.extension.empty()) {
       ++dropped;
       continue;
     }
-    if (!imageExists(number, it->second.extension)) {
+    if (!imageExists(g_numbers[i], String(stored.extension.c_str()))) {
       ++dropped;
       continue;
     }
-    kept.push_back(number);
-    keptMeta.emplace(number, it->second);
+    kept.push_back(g_numbers[i]);
+    keptMetas.push_back(stored);
   }
 
   g_numbers.swap(kept);
-  g_meta.swap(keptMeta);
+  g_metas.swap(keptMetas);
 
   if (dropped > 0) {
     LOG.printf("[cache] manifest verify removed %lu stale entries\n",
