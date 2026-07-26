@@ -58,6 +58,8 @@ constexpr const char* PANEL_LABEL = "reTerminal E1001 - Gray4";
 // them right-to-left below.
 constexpr uint32_t PALETTE[] = {TFT_GRAY_3, TFT_GRAY_2, TFT_GRAY_1, TFT_GRAY_0};
 constexpr const char* PALETTE_NAMES[] = {"W", "L", "D", "K"};
+// true = use white text on this swatch; false = use black text.
+constexpr bool PALETTE_DARK[] = {false, false, true, true};
 constexpr uint32_t RAMP[] = {TFT_GRAY_3, TFT_GRAY_2, TFT_GRAY_1, TFT_GRAY_0};
 #elif RETERMINAL_MODEL == 1002
 constexpr int PANEL_WIDTH = 800;
@@ -69,6 +71,7 @@ constexpr const char* PANEL_LABEL = "reTerminal E1002 - Spectra E6";
 constexpr uint32_t PALETTE[] = {TFT_WHITE, TFT_YELLOW, TFT_GREEN,
                                 TFT_BLUE, TFT_RED, TFT_BLACK};
 constexpr const char* PALETTE_NAMES[] = {"W", "Y", "G", "B", "R", "K"};
+constexpr bool PALETTE_DARK[] = {false, false, false, true, true, true};
 constexpr uint32_t RAMP[] = {TFT_WHITE, TFT_BLACK};
 #elif RETERMINAL_MODEL == 1003
 constexpr int PANEL_WIDTH = 1872;
@@ -82,6 +85,10 @@ constexpr uint32_t PALETTE[] = {TFT_GRAY_15, TFT_GRAY_14, TFT_GRAY_13, TFT_GRAY_
                                 TFT_GRAY_3, TFT_GRAY_2, TFT_GRAY_1, TFT_GRAY_0};
 constexpr const char* PALETTE_NAMES[] = {"F", "E", "D", "C", "B", "A", "9", "8",
                                          "7", "6", "5", "4", "3", "2", "1", "0"};
+// Anything at 0x07 or darker uses white ink so the label reads over the
+// swatch; the mid-scale codes stay black-on-gray.
+constexpr bool PALETTE_DARK[] = {false, false, false, false, false, false, false, false,
+                                 true,  true,  true,  true,  true,  true,  true,  true};
 constexpr uint32_t RAMP[] = {TFT_GRAY_15, TFT_GRAY_13, TFT_GRAY_11, TFT_GRAY_9,
                              TFT_GRAY_7, TFT_GRAY_5, TFT_GRAY_3, TFT_GRAY_0};
 #elif RETERMINAL_MODEL == 1004
@@ -93,6 +100,7 @@ constexpr const char* PANEL_LABEL = "reTerminal E1004 - Spectra E6";
 constexpr uint32_t PALETTE[] = {TFT_WHITE, TFT_YELLOW, TFT_GREEN,
                                 TFT_BLUE, TFT_RED, TFT_BLACK};
 constexpr const char* PALETTE_NAMES[] = {"W", "Y", "G", "B", "R", "K"};
+constexpr bool PALETTE_DARK[] = {false, false, false, true, true, true};
 constexpr uint32_t RAMP[] = {TFT_WHITE, TFT_BLACK};
 #else
 #error "RETERMINAL_MODEL must be 1001, 1002, 1003, or 1004"
@@ -137,18 +145,30 @@ void drawColorBars(int top, int height) {
   // generator would treat rounding error.
   const int base = PANEL_WIDTH / PALETTE_COUNT;
   const int remainder = PANEL_WIDTH - base * PALETTE_COUNT;
+  const int labelInset = height / 20;
   int x = 0;
   for (int i = 0; i < PALETTE_COUNT; ++i) {
     const int barWidth = base + (i < remainder ? 1 : 0);
     epaper.fillRect(x, top, barWidth, height, PALETTE[i]);
-    // Label each bar centred at the bottom in the opposite intensity
-    // so it stays legible on both black and white swatches.
-    const uint32_t label = (i == 0) ? PANEL_BLACK : PANEL_WHITE;
+    // Draw a thin black separator between adjacent bars so their edges
+    // read on Gray16 even when neighbouring shades look nearly the same
+    // to a camera. Skip the very first bar (nothing to the left of it).
+    if (i > 0) {
+      epaper.drawFastVLine(x, top, height, PANEL_BLACK);
+    }
+    // Per-bar text contrast: PALETTE_DARK[i] flags the swatches where
+    // black ink would disappear (blue/red/black, plus the darker half
+    // of any grayscale palette).
+    const uint32_t label = PALETTE_DARK[i] ? PANEL_WHITE : PANEL_BLACK;
     epaper.setTextColor(label, PALETTE[i], true);
     selectLabelFont();
+    // Label at both the top and the bottom of the bar so the code stays
+    // findable regardless of where the observer looks.
+    epaper.setTextDatum(TC_DATUM);
+    epaper.drawString(PALETTE_NAMES[i], x + barWidth / 2, top + labelInset, 1);
     epaper.setTextDatum(BC_DATUM);
     epaper.drawString(PALETTE_NAMES[i], x + barWidth / 2,
-                      top + height - height / 32, 1);
+                      top + height - labelInset, 1);
     x += barWidth;
   }
 }
