@@ -199,10 +199,13 @@ bool buildJwt(String& jwt, String& failureReason) {
     LOG.println("[weather] JWT would use a clock that is not NTP-synced");
     return false;
   }
-  const int64_t lifetime = app_logic::clampJwtLifetime(15 * 60);  // 15 min
-  // Back-date iat by 30 seconds so a small clock skew relative to QWeather
-  // does not cause "token not yet valid" rejections.
-  const int64_t iat = static_cast<int64_t>(now) - 30;
+  const int64_t lifetime = app_logic::clampJwtLifetime(2 * 60 * 60);  // 2 h
+  // Back-date iat by 5 minutes so a device clock that has drifted ahead of
+  // QWeather's server (empirically the tighter side of their acceptance
+  // window: even +30s of "iat in the future" gets rejected) still signs a
+  // valid token. Combined with the 2h exp this tolerates roughly -2h to
+  // +5min of drift relative to real time.
+  const int64_t iat = static_cast<int64_t>(now) - 300;
   const int64_t exp = iat + lifetime;
 
   String headerJson;

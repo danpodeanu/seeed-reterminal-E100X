@@ -101,7 +101,7 @@ def _base64url(data: bytes) -> str:
 
 
 def _build_qweather_jwt(sub: str, kid: str, private_key_hex: str,
-                        lifetime_seconds: int = 15 * 60,
+                        lifetime_seconds: int = 2 * 60 * 60,
                         iat_offset_seconds: int = 0) -> str:
     try:
         from cryptography.hazmat.primitives.asymmetric.ed25519 import (
@@ -128,8 +128,9 @@ def _build_qweather_jwt(sub: str, kid: str, private_key_hex: str,
 
     now = int(time.time()) + iat_offset_seconds
     header = {"alg": "EdDSA", "kid": kid}
-    # Match the firmware: iat back-dated 30s, exp = iat + 15 min.
-    payload = {"sub": sub, "iat": now - 30, "exp": now - 30 + lifetime_seconds}
+    # Match the firmware: iat back-dated 300s, exp = iat + 2 h.
+    payload = {"sub": sub, "iat": now - 300,
+               "exp": now - 300 + lifetime_seconds}
 
     encoded_header = _base64url(
         json.dumps(header, separators=(",", ":")).encode())
@@ -332,8 +333,8 @@ def main(argv: Optional[list] = None) -> int:
             print(f"[dump-jwt] missing: {', '.join(missing)}")
             return 2
         now = int(time.time()) + args.iat_offset
-        iat = now - 30
-        exp = iat + 15 * 60
+        iat = now - 300
+        exp = iat + 2 * 60 * 60
         jwt = _build_qweather_jwt(
             sub=secrets["QWEATHER_PROJECT_ID"],
             kid=secrets["QWEATHER_CREDENTIAL_ID"],
