@@ -56,11 +56,10 @@ struct StoredMeta {
 
 const char kEmpty[] = "";
 
-// String storage backing g_metas. Each entry is a PSRAM allocation
-// owned by this module. Element 0 is normally the slurped
-// index.jsonl buffer (with '\0' bytes inserted in place by
-// ArduinoJson's zero-copy parse); subsequent chunks are strdup'd
-// runtime additions from addComic().
+// String storage backing g_metas. Element 0 is normally the
+// stringArena filled during load() (a single PSRAM allocation into
+// which every parsed title/alt/extension/url is copied). Subsequent
+// chunks are per-string PSRAM allocations from addComic() at runtime.
 std::vector<char*, PsramAllocator<char*>> g_stringChunks;
 
 // g_numbers/g_skips are small (a few dozen KB at full archive size)
@@ -313,6 +312,34 @@ bool load() {
   }
   buffer[fileSize] = '\0';
 
+  // ArduinoJson v7 keeps string values in its own StringPool (see
+  // StringBuilder in the library), and JsonDocument::clear() releases
+  // that pool. If we handed out `.as<const char*>()` pointers into
+  // that pool and then reused the doc for the next line, every prior
+  // pointer would dangle. So copy every string into a persistent
+  // PSRAM arena as we go. Total unescaped string bytes cannot exceed
+  // the raw JSON file size (each value in the file is at minimum
+  // wrapped in two quote chars, more than the trailing '\0' we add),
+  // so a single arena sized to fileSize+1 always fits.
+  char* const stringArena = static_cast<char*>(
+      heap_caps_malloc(fileSize + 1, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+  if (stringArena == nullptr) {
+    free(buffer);
+    LOG.println("[cache] comic manifest string arena cannot be allocated");
+    return false;
+  }
+  size_t arenaPos = 0;
+  const size_t arenaCapacity = fileSize + 1;
+  const auto arenaDup = [&](const char* s) -> const char* {
+    if (s == nullptr || *s == '\0') return kEmpty;
+    const size_t len = std::strlen(s) + 1;
+    if (arenaPos + len > arenaCapacity) return kEmpty;
+    char* const dst = stringArena + arenaPos;
+    std::memcpy(dst, s, len);
+    arenaPos += len;
+    return dst;
+  };
+
   // Loaded state built into temporaries so a mid-parse failure leaves
   // any previously-swapped-in state untouched.
   std::vector<int> loadedNumbers;
@@ -333,9 +360,9 @@ bool load() {
   for (size_t i = 0; i <= fileSize; ++i) {
     if (i != fileSize && buffer[i] != '\n') continue;
     // Overwrite the newline (or the sentinel '\0' at fileSize) so the
-    // slice becomes a null-terminated C string in place. All strings
-    // ArduinoJson hands us below are pointers into this same buffer,
-    // which stays alive as g_stringChunks[0] for the whole session.
+    // slice becomes a null-terminated C string in place. Strings
+    // ArduinoJson gives us are copied into stringArena below (v7 keeps
+    // them in its own pool that .clear() releases between lines).
     buffer[i] = '\0';
     char* const linePtr = buffer + lineStart;
     lineStart = i + 1;
@@ -352,6 +379,7 @@ bool load() {
     const DeserializationError error = deserializeJson(line, linePtr);
     if (error) {
       free(buffer);
+      free(stringArena);
       LOG.printf("[cache] comic manifest line %u parse failed: %s\n",
                  static_cast<unsigned>(lineCount), error.c_str());
       return false;
@@ -359,6 +387,7 @@ bool load() {
     JsonObjectConst obj = line.as<JsonObjectConst>();
     if (obj.isNull()) {
       free(buffer);
+      free(stringArena);
       LOG.printf("[cache] comic manifest line %u is not an object\n",
                  static_cast<unsigned>(lineCount));
       return false;
@@ -368,6 +397,7 @@ bool load() {
     if (!obj["n"].is<int>()) {
       if (sawHeader) {
         free(buffer);
+        free(stringArena);
         LOG.println("[cache] comic manifest has more than one header line");
         return false;
       }
@@ -375,6 +405,7 @@ bool load() {
       loadedVersion = obj["v"].as<uint32_t>();
       if (loadedVersion != config::CACHE_INDEX_VERSION) {
         free(buffer);
+        free(stringArena);
         LOG.printf("[cache] comic manifest is version %lu, expected %lu; "
                    "re-run tools/preload_sd.py to upgrade\n",
                    static_cast<unsigned long>(loadedVersion),
@@ -384,6 +415,7 @@ bool load() {
       loadedLatest = obj["l"].as<int>();
       if (!decodeSkipArray(obj["s"].as<JsonArrayConst>(), loadedSkips)) {
         free(buffer);
+        free(stringArena);
         LOG.println("[cache] comic manifest has invalid skipped entries");
         return false;
       }
@@ -393,12 +425,14 @@ bool load() {
     // Comic line.
     if (!sawHeader) {
       free(buffer);
+      free(stringArena);
       LOG.println("[cache] comic manifest is missing its header line");
       return false;
     }
     const int number = obj["n"].as<int>();
     if (number <= 0 || number == 404) {
       free(buffer);
+      free(stringArena);
       LOG.printf("[cache] comic manifest line %u has invalid number %d\n",
                  static_cast<unsigned>(lineCount), number);
       return false;
@@ -407,18 +441,18 @@ bool load() {
     if (rawExt == nullptr) rawExt = kEmpty;
     if (*rawExt != '\0' && !extensionIsSupported(rawExt)) {
       free(buffer);
+      free(stringArena);
       LOG.printf("[cache] comic manifest #%d has unsupported extension '%s'\n",
                  number, rawExt);
       return false;
     }
     StoredMeta stored;
-    const char* rawTitle = obj["t"].as<const char*>();
-    const char* rawAlt = obj["a"].as<const char*>();
-    const char* rawUrl = obj["u"].as<const char*>();
-    stored.title = rawTitle == nullptr ? kEmpty : rawTitle;
-    stored.alt = rawAlt == nullptr ? kEmpty : rawAlt;
-    stored.extension = rawExt;
-    stored.url = rawUrl == nullptr ? kEmpty : rawUrl;
+    // Copy every string out of ArduinoJson's pool now, before the next
+    // line.clear() releases it.
+    stored.title = arenaDup(obj["t"].as<const char*>());
+    stored.alt = arenaDup(obj["a"].as<const char*>());
+    stored.extension = arenaDup(rawExt);
+    stored.url = arenaDup(obj["u"].as<const char*>());
     loadedNumbers.push_back(number);
     loadedMetas.push_back(stored);
   }
@@ -426,6 +460,7 @@ bool load() {
 
   if (!sawHeader) {
     free(buffer);
+    free(stringArena);
     LOG.println("[cache] comic manifest is empty");
     return false;
   }
@@ -455,9 +490,11 @@ bool load() {
   }
   const uint32_t tSortEnd = millis();
 
-  // Buffer becomes the first (and usually only) chunk in the string
-  // pool. Every StoredMeta.* pointer above already aliases into it.
-  g_stringChunks.push_back(buffer);
+  // Slurp buffer is no longer needed — every string lives in
+  // stringArena now. Arena becomes the first (and usually only) chunk
+  // in the string pool; every StoredMeta.* pointer aliases into it.
+  free(buffer);
+  g_stringChunks.push_back(stringArena);
   g_numbers.swap(loadedNumbers);
   g_metas.swap(loadedMetas);
   g_skips.swap(loadedSkips);
