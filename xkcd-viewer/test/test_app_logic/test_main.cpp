@@ -4,6 +4,9 @@
 #include <string.h>
 
 #include <string>
+#include <vector>
+
+#include <ArduinoJson.h>
 
 #include "app_logic.h"
 #include "xkcd_cache_schema.h"
@@ -232,6 +235,109 @@ void test_cache_schema_wrap_passthrough_when_not_object() {
       "not json", xkcd_cache::wrapWithSchema("not json").c_str());
 }
 
+// Regression test for the JSONL manifest loader (see xkcd_index.cpp
+// commit 871e10f). ArduinoJson v7 stores parsed string values in the
+// JsonDocument's internal StringPool, NOT in the input buffer -- see
+// ArduinoJson/Memory/StringBuilder.hpp, which memcpy's each character
+// into a StringNode owned by the doc's ResourceManager. Reusing a
+// single JsonDocument across JSONL lines and saving `.as<const char*>()`
+// pointers would dangle every prior pointer as soon as `.clear()` fires
+// on the next line, because clear() releases the pool.
+//
+// The manifest loader avoids this by memcpy'ing every string into a
+// separate arena immediately after each parse. This test exercises
+// that pattern end-to-end: parse several lines with one reused doc,
+// snapshot strings into an arena, force many .clear() cycles, then
+// verify the snapshots still read as originally parsed.
+void test_reused_json_doc_dangles_pool_but_arena_copy_survives() {
+  const char* kLines[] = {
+      "{\"n\":1,\"t\":\"Barrel - Part 1\",\"a\":\"Don't we all.\","
+      "\"e\":\".png\",\"u\":\"https://imgs.xkcd.com/comics/barrel_cropped_(1).jpg\"}",
+      "{\"n\":42,\"t\":\"Geico\",\"a\":\"An alt with a \\\"quote\\\".\","
+      "\"e\":\".png\",\"u\":\"https://imgs.xkcd.com/comics/geico.png\"}",
+      "{\"n\":3276,\"t\":\"Latest\",\"a\":\"Alt \\u00e9 text.\","
+      "\"e\":\".jpg\",\"u\":\"https://imgs.xkcd.com/comics/latest.jpg\"}",
+  };
+  const size_t kLineCount = sizeof(kLines) / sizeof(kLines[0]);
+  const int kExpectedNumbers[kLineCount] = {1, 42, 3276};
+  const char* kExpectedTitles[kLineCount] = {
+      "Barrel - Part 1", "Geico", "Latest"};
+  const char* kExpectedAlts[kLineCount] = {
+      "Don't we all.", "An alt with a \"quote\".", "Alt \xc3\xa9 text."};
+  const char* kExpectedExts[kLineCount] = {".png", ".png", ".jpg"};
+
+  // Simulate the arena: one contiguous buffer, bump-allocated.
+  std::vector<char> arena(4096, 0);
+  size_t arenaPos = 0;
+  auto arenaCopy = [&](const char* s) -> const char* {
+    if (s == nullptr) return "";
+    const size_t len = strlen(s) + 1;
+    TEST_ASSERT_TRUE_MESSAGE(arenaPos + len <= arena.size(),
+                             "test arena too small");
+    char* dst = arena.data() + arenaPos;
+    memcpy(dst, s, len);
+    arenaPos += len;
+    return dst;
+  };
+
+  struct StoredMeta {
+    int number;
+    const char* title;
+    const char* alt;
+    const char* extension;
+    const char* url;
+  };
+  std::vector<StoredMeta> stored;
+
+  // The critical bit: one JsonDocument reused across every line, with
+  // .clear() between them -- exactly the pattern in xkcd_index.cpp.
+  JsonDocument doc;
+  for (size_t i = 0; i < kLineCount; ++i) {
+    doc.clear();
+    // Copy line into a mutable buffer so we exercise the same
+    // deserializeJson(doc, char*) overload the production loader uses.
+    std::vector<char> lineBuf(kLines[i], kLines[i] + strlen(kLines[i]) + 1);
+    const DeserializationError err = deserializeJson(doc, lineBuf.data());
+    TEST_ASSERT_TRUE_MESSAGE(!err, err.c_str());
+    StoredMeta meta;
+    meta.number = doc["n"].as<int>();
+    meta.title = arenaCopy(doc["t"].as<const char*>());
+    meta.alt = arenaCopy(doc["a"].as<const char*>());
+    meta.extension = arenaCopy(doc["e"].as<const char*>());
+    meta.url = arenaCopy(doc["u"].as<const char*>());
+    stored.push_back(meta);
+  }
+  // Drop the doc's last-parse pool so any surviving direct-into-pool
+  // pointers would be dangling. Then parse a bunch of throwaway blobs
+  // so the released pool bytes are actively reused -- this way a
+  // regression that skipped arenaCopy() would deterministically read
+  // scrambled memory and fail the assertions below, rather than being
+  // saved by "the freed memory happens to still contain the string".
+  doc.clear();
+  for (int i = 0; i < 128; ++i) {
+    doc.clear();
+    char junk[96];
+    snprintf(junk, sizeof(junk),
+             "{\"j\":\"XXXXXXXXXXXXXXXXXXXXXXXXXXXXXXXX\",\"k\":%d}", i);
+    (void)deserializeJson(doc, junk);
+  }
+  doc.clear();
+
+  for (size_t i = 0; i < kLineCount; ++i) {
+    TEST_ASSERT_EQUAL_INT(kExpectedNumbers[i], stored[i].number);
+    TEST_ASSERT_EQUAL_STRING(kExpectedTitles[i], stored[i].title);
+    TEST_ASSERT_EQUAL_STRING(kExpectedAlts[i], stored[i].alt);
+    TEST_ASSERT_EQUAL_STRING(kExpectedExts[i], stored[i].extension);
+  }
+
+  // Belt-and-braces: no stored extension should be empty, since that
+  // was the surface symptom of the original bug (SD.exists() missed
+  // 100% of the time because the built path had no ".png"/".jpg" tail).
+  for (size_t i = 0; i < kLineCount; ++i) {
+    TEST_ASSERT_TRUE(stored[i].extension[0] != '\0');
+  }
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_startup_beep_only_for_cold_boot_and_button_wake);
@@ -253,5 +359,6 @@ int main(int, char**) {
   RUN_TEST(test_cache_schema_wrap_handles_empty_object);
   RUN_TEST(test_cache_schema_wrap_preserves_leading_whitespace);
   RUN_TEST(test_cache_schema_wrap_passthrough_when_not_object);
+  RUN_TEST(test_reused_json_doc_dangles_pool_but_arena_copy_survives);
   return UNITY_END();
 }
