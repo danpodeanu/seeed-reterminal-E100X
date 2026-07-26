@@ -1016,6 +1016,14 @@ void setup() {
     LOG.println("[ntp] using PCF8563 fallback after synchronization failure");
     rtcRestored = rtc_sync::restoreSystemClock();
   }
+  if (coldBoot && ntpDue && !ntpSynchronized) {
+    LOG.println("[display] cold boot NTP unavailable; warning user about clock");
+    const String warning =
+        config::WEATHER_PROVIDER == config::WeatherProvider::QWeather
+            ? "Clock not synced - times inaccurate, QWeather may fail"
+            : "Clock not synced - displayed times may be inaccurate";
+    renderStatus("Connecting to " + String(WIFI_SSID), warning, stationMac);
+  }
   local_time::configureTimezone(config::TIMEZONE);
   quiet_hours::configure({config::QUIET_HOURS_ENABLED,
                           config::QUIET_START_HOUR,
