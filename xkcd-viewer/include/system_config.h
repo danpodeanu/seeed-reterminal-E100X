@@ -94,7 +94,7 @@ constexpr int FOOTER_VERTICAL_PADDING = ui(8);
 constexpr char CACHE_DIR[] = "/xkcd";
 constexpr char LATEST_CACHE[] = "/xkcd/latest.json";
 constexpr char CACHE_INDEX[] = "/xkcd/index.txt";
-constexpr char CACHE_INDEX_MAGIC[] = "XKCD_CACHE_INDEX_V1";
+constexpr char CACHE_INDEX_MAGIC[] = "XKCD_CACHE_INDEX_V2";
 constexpr uint32_t MAX_CACHE_INDEX_ENTRIES = 10000;
 constexpr char XKCD_LATEST_URL[] = "https://xkcd.com/info.0.json";
 

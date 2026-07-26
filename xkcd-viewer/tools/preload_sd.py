@@ -42,7 +42,7 @@ USER_AGENT = (
 )
 CHUNK_SIZE = 128 * 1024
 CACHE_INDEX_NAME = "index.txt"
-CACHE_INDEX_MAGIC = "XKCD_CACHE_INDEX_V1"
+CACHE_INDEX_MAGIC = "XKCD_CACHE_INDEX_V2"
 
 
 class DownloadError(RuntimeError):
@@ -237,20 +237,62 @@ def complete_cached_comics(cache_dir: Path) -> list[int]:
     return sorted(set(numbers))
 
 
-def encode_cache_index(numbers: list[int]) -> bytes:
-    normalized = sorted(set(numbers))
-    if any(number <= 0 or number == 404 for number in normalized):
+def encode_cache_index(cached: list[int], skipped: list[int]) -> bytes:
+    normalized_cached = sorted(set(cached))
+    normalized_skipped = sorted(set(skipped))
+    if any(number <= 0 or number == 404 for number in normalized_cached):
         raise ValueError("cache index contains an invalid comic number")
-    lines = [CACHE_INDEX_MAGIC, str(len(normalized))]
-    lines.extend(str(number) for number in normalized)
+    if any(number <= 0 or number == 404 for number in normalized_skipped):
+        raise ValueError("skip list contains an invalid comic number")
+    lines = [CACHE_INDEX_MAGIC, str(len(normalized_cached))]
+    lines.extend(str(number) for number in normalized_cached)
+    lines.append(str(len(normalized_skipped)))
+    lines.extend(str(number) for number in normalized_skipped)
     return ("\n".join(lines) + "\n").encode("ascii")
 
 
-def write_cache_index(cache_dir: Path) -> list[int]:
-    """Regenerate the firmware-compatible index from complete cache entries."""
-    numbers = complete_cached_comics(cache_dir)
-    atomic_write(cache_dir / CACHE_INDEX_NAME, encode_cache_index(numbers))
-    return numbers
+def read_cache_index_skips(cache_dir: Path) -> set[int]:
+    """Return the persisted skip set from a V2 index, or empty if missing."""
+    path = cache_dir / CACHE_INDEX_NAME
+    if not path.exists():
+        return set()
+    try:
+        lines = path.read_text().splitlines()
+    except OSError:
+        return set()
+    if not lines or lines[0].strip() != CACHE_INDEX_MAGIC:
+        return set()
+    try:
+        cached_count = int(lines[1].strip())
+    except (IndexError, ValueError):
+        return set()
+    skip_header_index = 2 + cached_count
+    try:
+        skip_count = int(lines[skip_header_index].strip())
+    except (IndexError, ValueError):
+        return set()
+    skips: set[int] = set()
+    for offset in range(skip_count):
+        line_index = skip_header_index + 1 + offset
+        try:
+            skips.add(int(lines[line_index].strip()))
+        except (IndexError, ValueError):
+            return set()
+    return skips
+
+
+def write_cache_index(cache_dir: Path, skipped: set[int] | None = None) -> tuple[list[int], list[int]]:
+    """Regenerate the firmware-compatible index from complete cache entries.
+
+    Preserves the persisted skip set when `skipped` is None; pass an explicit
+    set (possibly empty) to overwrite it.
+    """
+    cached = complete_cached_comics(cache_dir)
+    if skipped is None:
+        skipped = read_cache_index_skips(cache_dir)
+    skip_list = sorted(number for number in skipped if number > 0 and number != 404)
+    atomic_write(cache_dir / CACHE_INDEX_NAME, encode_cache_index(cached, skip_list))
+    return cached, skip_list
 
 
 def download_image(
@@ -288,10 +330,6 @@ def download_image(
     raise DownloadError(f"{url}: {last_error}") from last_error
 
 
-def skip_marker_path(cache_dir: Path, number: int) -> Path:
-    return cache_dir / f"{number}.skip"
-
-
 def process_comic(
     number: int,
     cache_dir: Path,
@@ -299,22 +337,23 @@ def process_comic(
     retries: int,
     force: bool,
     stop_event: threading.Event,
+    skipped: set[int],
+    skipped_lock: threading.Lock,
 ) -> Result:
     if stop_event.is_set():
         return Result(number, "cancelled", "stopped")
     if number == 404:
         return Result(number, "skipped", "XKCD #404 intentionally does not exist")
 
-    # A ".skip" marker records a permanent, non-retriable verdict (e.g.
-    # the comic uses an image format the firmware cannot decode). Once
-    # written, future runs bail out immediately instead of re-parsing
-    # the metadata. --force ignores and clears any existing marker so a
-    # comic can be re-evaluated if xkcd ever republishes it.
-    skip_marker = skip_marker_path(cache_dir, number)
-    if force:
-        skip_marker.unlink(missing_ok=True)
-    elif skip_marker.exists():
-        return Result(number, "skipped", "previously marked non-retriable")
+    # `skipped` holds the persisted skip verdicts (unsupported image
+    # format, etc.). It's shared across workers and consulted before
+    # any network work; --force ignores it so a comic can be
+    # re-evaluated if xkcd ever republishes it in a supported format.
+    if not force:
+        with skipped_lock:
+            already_skipped = number in skipped
+        if already_skipped:
+            return Result(number, "skipped", "previously marked non-retriable")
 
     metadata_path = cache_dir / f"{number}.json"
     metadata = None if force else read_valid_metadata(metadata_path, number)
@@ -330,7 +369,8 @@ def process_comic(
 
         extension = image_extension(metadata["img"])
         if not extension:
-            atomic_write(skip_marker, b"unsupported image extension\n")
+            with skipped_lock:
+                skipped.add(number)
             return Result(number, "skipped", "unsupported image extension")
 
         image_path = cache_dir / f"{number}{extension}"
@@ -404,6 +444,11 @@ def main() -> int:
 
     counts = {"downloaded": 0, "cached": 0, "skipped": 0, "failed": 0, "cancelled": 0}
     stop_event = threading.Event()
+    # Start from whatever skip verdicts were persisted by the previous
+    # run (empty on --force, so every comic in range gets re-evaluated).
+    persisted_skips: set[int] = set() if args.force else read_cache_index_skips(cache_dir)
+    skipped_set: set[int] = set(persisted_skips)
+    skipped_lock = threading.Lock()
 
     try:
         with concurrent.futures.ThreadPoolExecutor(max_workers=args.workers) as executor:
@@ -416,6 +461,8 @@ def main() -> int:
                     args.retries,
                     args.force,
                     stop_event,
+                    skipped_set,
+                    skipped_lock,
                 ): number
                 for number in numbers
             }
@@ -441,7 +488,8 @@ def main() -> int:
     except KeyboardInterrupt:
         stop_event.set()
         try:
-            indexed = write_cache_index(cache_dir)
+            with skipped_lock:
+                indexed, _ = write_cache_index(cache_dir, skipped=set(skipped_set))
             print(f"Updated cache index with {len(indexed)} complete comics.")
         except OSError as exc:
             print(f"Warning: could not update cache index: {exc}", file=sys.stderr)
@@ -453,8 +501,12 @@ def main() -> int:
         + ", ".join(f"{name}={count}" for name, count in counts.items() if count)
     )
     try:
-        indexed = write_cache_index(cache_dir)
-        print(f"Index:     {len(indexed)} complete comics")
+        with skipped_lock:
+            indexed, skip_list = write_cache_index(cache_dir, skipped=set(skipped_set))
+        print(
+            f"Index:     {len(indexed)} complete comics, "
+            f"{len(skip_list)} skipped"
+        )
     except (OSError, ValueError) as exc:
         print(f"Error: could not update cache index: {exc}", file=sys.stderr)
         return 1

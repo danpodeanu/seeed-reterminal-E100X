@@ -12,6 +12,22 @@ sys.path.insert(0, str(TOOLS_DIR))
 import preload_sd  # noqa: E402
 
 
+def _process(number, cache_dir, *, force=False, skipped=None):
+    """Test helper that fills in the skip-set plumbing."""
+    if skipped is None:
+        skipped = set()
+    return preload_sd.process_comic(
+        number,
+        cache_dir,
+        timeout=0.01,
+        retries=1,
+        force=force,
+        stop_event=threading.Event(),
+        skipped=skipped,
+        skipped_lock=threading.Lock(),
+    )
+
+
 class PreloadSdTests(unittest.TestCase):
     def test_metadata_validation(self):
         raw = json.dumps(
@@ -49,31 +65,17 @@ class PreloadSdTests(unittest.TestCase):
             (cache_dir / "1.json").write_text(json.dumps(metadata))
             (cache_dir / "1.jpg").write_bytes(b"\xff\xd8\xff\xdbcached")
 
-            result = preload_sd.process_comic(
-                1,
-                cache_dir,
-                timeout=0.01,
-                retries=1,
-                force=False,
-                stop_event=threading.Event(),
-            )
+            result = _process(1, cache_dir)
 
             self.assertEqual(result.status, "cached")
 
     def test_missing_comic_404_is_skipped(self):
         with tempfile.TemporaryDirectory() as temporary:
-            result = preload_sd.process_comic(
-                404,
-                Path(temporary),
-                timeout=0.01,
-                retries=1,
-                force=False,
-                stop_event=threading.Event(),
-            )
+            result = _process(404, Path(temporary))
 
             self.assertEqual(result.status, "skipped")
 
-    def test_unsupported_extension_writes_skip_marker_and_is_reused(self):
+    def test_unsupported_extension_records_and_reuses_skip_verdict(self):
         with tempfile.TemporaryDirectory() as temporary:
             cache_dir = Path(temporary)
             metadata = {
@@ -81,32 +83,19 @@ class PreloadSdTests(unittest.TestCase):
                 "img": "https://imgs.xkcd.com/comics/example.gif",
             }
             (cache_dir / "5.json").write_text(json.dumps(metadata))
+            skipped: set[int] = set()
 
-            first = preload_sd.process_comic(
-                5,
-                cache_dir,
-                timeout=0.01,
-                retries=1,
-                force=False,
-                stop_event=threading.Event(),
-            )
+            first = _process(5, cache_dir, skipped=skipped)
             self.assertEqual(first.status, "skipped")
             self.assertEqual(first.detail, "unsupported image extension")
-            self.assertTrue((cache_dir / "5.skip").exists())
+            self.assertIn(5, skipped)
 
             # A second run must not touch the network; passing an obviously
-            # broken metadata file exercises that path — the skip marker
+            # broken metadata file exercises that path — the persisted skip
             # short-circuits before decode_metadata is ever called.
             (cache_dir / "5.json").write_text("not valid json")
 
-            second = preload_sd.process_comic(
-                5,
-                cache_dir,
-                timeout=0.01,
-                retries=1,
-                force=False,
-                stop_event=threading.Event(),
-            )
+            second = _process(5, cache_dir, skipped=skipped)
             self.assertEqual(second.status, "skipped")
             self.assertEqual(second.detail, "previously marked non-retriable")
 
@@ -128,19 +117,42 @@ class PreloadSdTests(unittest.TestCase):
                 json.dumps({"num": 404, "img": "https://example.com/404.png"})
             )
 
-            numbers = preload_sd.write_cache_index(cache_dir)
+            cached, skipped = preload_sd.write_cache_index(cache_dir, skipped=set())
 
-            self.assertEqual(numbers, [2])
+            self.assertEqual(cached, [2])
+            self.assertEqual(skipped, [])
             self.assertEqual(
                 (cache_dir / preload_sd.CACHE_INDEX_NAME).read_text(),
-                "XKCD_CACHE_INDEX_V1\n1\n2\n",
+                "XKCD_CACHE_INDEX_V2\n1\n2\n0\n",
             )
 
     def test_cache_index_encoding_is_sorted_and_unique(self):
         self.assertEqual(
-            preload_sd.encode_cache_index([7, 1, 7, 3]),
-            b"XKCD_CACHE_INDEX_V1\n3\n1\n3\n7\n",
+            preload_sd.encode_cache_index([7, 1, 7, 3], [10, 2, 2]),
+            b"XKCD_CACHE_INDEX_V2\n3\n1\n3\n7\n2\n2\n10\n",
         )
+
+    def test_persisted_skip_list_round_trips(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            cache_dir = Path(temporary)
+            complete = {
+                "num": 8,
+                "img": "https://imgs.xkcd.com/comics/example.png",
+            }
+            (cache_dir / "8.json").write_text(json.dumps(complete))
+            (cache_dir / "8.png").write_bytes(b"\x89PNG\r\n\x1a\nvalid")
+
+            preload_sd.write_cache_index(cache_dir, skipped={11, 42})
+            self.assertEqual(
+                preload_sd.read_cache_index_skips(cache_dir), {11, 42}
+            )
+
+            # Rewriting without an explicit skipped argument must
+            # preserve the previously persisted set.
+            preload_sd.write_cache_index(cache_dir)
+            self.assertEqual(
+                preload_sd.read_cache_index_skips(cache_dir), {11, 42}
+            )
 
 
 if __name__ == "__main__":

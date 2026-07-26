@@ -36,6 +36,15 @@ uint32_t count();
 // only while no other xkcd_index call is in flight.
 const std::vector<int>& entries();
 
+// Const view over the sorted, deduplicated list of comic numbers
+// that have been marked as permanently non-retriable (e.g. they use
+// an image format the firmware cannot decode). Random selectors
+// consult skipped() to avoid wasting attempts on them.
+const std::vector<int>& skips();
+
+// O(log n) membership test against the skip list.
+bool skipped(int number);
+
 // Parse a single decimal line from the on-disk index (accepts a
 // value up to 100000). Returns false on malformed input or on 0 when
 // `allowZero` is false (used for the count-line prefix vs entry
@@ -43,24 +52,28 @@ const std::vector<int>& entries();
 bool parseUnsignedLine(String line, uint32_t& value,
                        bool allowZero = false);
 
-// Write the given comic-number list to the SD index file atomically
-// (.part + rename). Called from rebuild() and after the maintenance
-// pass tops up the cache.
-bool writeFile(const std::vector<int>& numbers);
+// Write the given cached + skipped comic-number lists to the SD
+// index file atomically (.part + rename). Called from rebuild() and
+// after the maintenance pass tops up the cache.
+bool writeFile(const std::vector<int>& cached,
+               const std::vector<int>& skipped);
 
-// Persist the current in-memory index to disk. Convenience wrapper
-// over writeFile(entries()) used after live updates like the fill
-// pass.
+// Persist the current in-memory index (both cached and skipped
+// sections) to disk. Convenience wrapper over writeFile() used after
+// live updates like the fill pass or after markSkipped().
 bool persist();
 
 // Load and validate the on-disk index. Returns false and clears the
-// in-memory list on any format error so the caller can trigger a
+// in-memory lists on any format error so the caller can trigger a
 // rebuild.
 bool load();
 
 // Walk the cache directory, keeping every comic whose metadata +
 // image are both present per `isCached`. Requires `sdReady == true`
-// or returns false without touching the in-memory index.
+// or returns false without touching the in-memory index. The skip
+// list is preserved across rebuilds when this call is entered with a
+// non-empty in-memory skip set; if load() failed and skips() is
+// empty going in, they remain empty and are re-detected lazily.
 bool rebuild(bool sdReady, ComicCachedFn isCached,
              ShouldAbortFn shouldAbort = nullptr);
 
@@ -69,6 +82,14 @@ bool rebuild(bool sdReady, ComicCachedFn isCached,
 // for the reserved comic 404. The change is in-memory only; the
 // caller decides when to persist().
 void addCurrent(int number);
+
+// Insert `number` into the sorted in-memory skip list if it isn't
+// already present, then persist the whole index so the verdict
+// survives power loss. Silently ignored for the reserved comic 404
+// and for non-positive numbers. Returns true when the persist
+// succeeded (or the number was already recorded); false when persist
+// failed.
+bool markSkipped(int number);
 
 // Pack an 8bpp indexed image (one byte per pixel, values 0..15) into
 // 4bpp storage in-place, two pixels per byte. `width` must be even.
