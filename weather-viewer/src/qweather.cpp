@@ -434,6 +434,55 @@ bool parseQWeather(const String& body, WeatherData& weather) {
     }
   }
 
+  // Severe-weather alerts. warning_env is optional (older cache files or a
+  // failed warning fetch leave it null / with an empty list). We pick a single
+  // alert with the highest severity rank; ties keep the first occurrence, so
+  // the display is deterministic across refreshes with the same alert set.
+  weather.alertTitle = "";
+  weather.alertSeverity = "";
+  weather.alertOtherCount = 0;
+  JsonObject warningEnv = document["warning_env"];
+  if (!warningEnv.isNull()) {
+    const char* warningCode = warningEnv["code"] | "";
+    if (!app_logic::qweatherResponseOk(warningCode)) {
+      LOG.printf("[weather] QWeather warning code=%s (ignored)\n",
+                 warningCode);
+    } else {
+      JsonArray warnings = warningEnv["warning"];
+      int total = 0;
+      int bestRank = -1;
+      String bestTitle;
+      String bestSeverity;
+      for (JsonObject alert : warnings) {
+        const char* title = alert["title"] | "";
+        if (title[0] == '\0') continue;
+        ++total;
+        const char* severity = alert["severity"] | "";
+        const int rank = app_logic::qweatherAlertSeverityRank(severity);
+        if (rank > bestRank) {
+          bestRank = rank;
+          bestTitle = title;
+          bestSeverity = severity;
+        }
+      }
+      if (total > 0 && !bestTitle.isEmpty()) {
+        weather.alertTitle = bestTitle;
+        weather.alertSeverity = bestSeverity;
+        weather.alertOtherCount = total - 1;
+        LOG.printf("[weather] alert (%s): %s%s\n",
+                   weather.alertSeverity.isEmpty()
+                       ? "unknown"
+                       : weather.alertSeverity.c_str(),
+                   weather.alertTitle.c_str(),
+                   weather.alertOtherCount > 0
+                       ? (String(" (+") +
+                          String(weather.alertOtherCount) + " more)")
+                             .c_str()
+                       : "");
+      }
+    }
+  }
+
   weather.valid = isfinite(weather.temperatureC) &&
                   isfinite(weather.apparentC) &&
                   isfinite(weather.humidityPct) &&
@@ -484,14 +533,28 @@ bool fetchQWeather(WeatherData& weather, String& responseBody,
                      failureReason, bypassHttpCache)) {
     return false;
   }
+  // Warnings are best-effort: an alert fetch failure must never fail the whole
+  // weather refresh (many locations simply have no active alerts and QWeather
+  // still returns HTTP 200 with an empty `warning` array). We stitch a
+  // placeholder envelope so the parser can rely on `warning_env` being present.
+  String warningBody;
+  String warningFailureReason;
+  if (!fetchEndpoint(endpointUrl("/v7/warning/now"), bearerToken, warningBody,
+                     warningFailureReason, bypassHttpCache)) {
+    LOG.printf("[weather] warning fetch failed (continuing): %s\n",
+               warningFailureReason.c_str());
+    warningBody = "{\"code\":\"200\",\"warning\":[]}";
+  }
   responseBody.reserve(nowBody.length() + dailyBody.length() +
-                       hourlyBody.length() + 64);
+                       hourlyBody.length() + warningBody.length() + 96);
   responseBody = "{\"now_env\":";
   responseBody += nowBody;
   responseBody += ",\"daily_env\":";
   responseBody += dailyBody;
   responseBody += ",\"hourly_env\":";
   responseBody += hourlyBody;
+  responseBody += ",\"warning_env\":";
+  responseBody += warningBody;
   responseBody += "}";
   constexpr int kMaxEnvelopeBytes = 384 * 1024;
   if (static_cast<int>(responseBody.length()) > kMaxEnvelopeBytes) {

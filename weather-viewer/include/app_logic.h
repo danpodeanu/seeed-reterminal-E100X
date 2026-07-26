@@ -2,6 +2,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <string.h>
 
 #include "app_logic_core.h"
 #include "secrets_normalise.h"
@@ -133,6 +134,18 @@ constexpr bool rainSlotQualifies(float liquidMm, int probabilityPct,
 constexpr bool qweatherResponseOk(const char* code) {
   return code != nullptr && code[0] == '2' && code[1] == '0' &&
          code[2] == '0' && code[3] == '\0';
+}
+
+// Rank a QWeather warning severity string so we can pick the "worst" active
+// alert in a list. Higher is more severe; unknown / null / empty severities
+// map to 0 so they never win over a labelled entry.
+inline int qweatherAlertSeverityRank(const char* severity) {
+  if (severity == nullptr || severity[0] == '\0') return 0;
+  if (strcmp(severity, "Extreme") == 0) return 4;
+  if (strcmp(severity, "Severe") == 0) return 3;
+  if (strcmp(severity, "Moderate") == 0) return 2;
+  if (strcmp(severity, "Minor") == 0) return 1;
+  return 0;
 }
 
 // Map a QWeather icon code (see https://dev.qweather.com/docs/resource/icons/)

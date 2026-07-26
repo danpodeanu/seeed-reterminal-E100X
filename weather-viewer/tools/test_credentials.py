@@ -183,6 +183,13 @@ def _http_get_json(url: str, headers: Optional[Dict[str, str]] = None,
     return json.loads(text)
 
 
+def _qweather_severity_rank(severity: str) -> int:
+    """Mirror app_logic::qweatherAlertSeverityRank so the tester picks the
+    same 'top' alert the firmware would display."""
+    return {"Extreme": 4, "Severe": 3, "Moderate": 2, "Minor": 1}.get(
+        severity or "", 0)
+
+
 def test_qweather(secrets: Dict[str, str], latitude: float,
                   longitude: float, lang: str,
                   iat_offset_seconds: int = 0) -> bool:
@@ -235,6 +242,43 @@ def test_qweather(secrets: Dict[str, str], latitude: float,
     now = body.get("now", {})
     _safe_print(f"[qweather] OK -- {now.get('temp')}C {now.get('text')} "
                 f"(obsTime={now.get('obsTime')})")
+
+    # Best-effort probe of the warnings endpoint used by the firmware alert
+    # feature. A 200 with an empty ``warning`` array is the normal case for
+    # most locations; any HTTP error here is logged but must not fail the
+    # credentials check.
+    warning_url = (f"https://{host}/v7/warning/now?"
+                   + urllib.parse.urlencode(
+                       {"location": location, "lang": lang}))
+    print(f"[qweather] GET {warning_url}")
+    try:
+        warning_body = _http_get_json(
+            warning_url,
+            headers={"Authorization": f"Bearer {jwt}"})
+    except urllib.error.HTTPError as exc:
+        detail = _decode_body(exc.read(),
+                              exc.headers.get("Content-Encoding", ""))
+        _safe_print(f"[qweather] warning FAIL -- HTTP {exc.code}: "
+                    f"{detail[:200]}")
+        return True
+    except urllib.error.URLError as exc:
+        print(f"[qweather] warning FAIL -- network error: {exc.reason}")
+        return True
+    if warning_body.get("code") != "200":
+        print(f"[qweather] warning code={warning_body.get('code')} (ignored)")
+        return True
+    warnings_list = warning_body.get("warning") or []
+    if not warnings_list:
+        print("[qweather] warning OK -- no active alerts")
+    else:
+        top = max(warnings_list,
+                  key=lambda w: _qweather_severity_rank(w.get("severity", "")))
+        extras = len(warnings_list) - 1
+        suffix = f" (+{extras} more)" if extras > 0 else ""
+        _safe_print(
+            f"[qweather] warning OK -- "
+            f"{top.get('severity') or 'Unknown'}: "
+            f"{top.get('title', '')}{suffix}")
     return True
 
 

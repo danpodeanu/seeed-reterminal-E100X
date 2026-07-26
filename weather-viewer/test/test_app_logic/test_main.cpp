@@ -198,6 +198,22 @@ void test_qweather_icon_night_flag_only_covers_150_range() {
   TEST_ASSERT_FALSE(app_logic::qweatherIconIsNight(501));
 }
 
+void test_qweather_alert_severity_rank_orders_worst_first() {
+  TEST_ASSERT_EQUAL_INT(4, app_logic::qweatherAlertSeverityRank("Extreme"));
+  TEST_ASSERT_EQUAL_INT(3, app_logic::qweatherAlertSeverityRank("Severe"));
+  TEST_ASSERT_EQUAL_INT(2, app_logic::qweatherAlertSeverityRank("Moderate"));
+  TEST_ASSERT_EQUAL_INT(1, app_logic::qweatherAlertSeverityRank("Minor"));
+  // Any unknown / null / empty severity ranks as 0 so a labelled entry
+  // always wins the "pick highest" comparison in qweather.cpp.
+  TEST_ASSERT_EQUAL_INT(0, app_logic::qweatherAlertSeverityRank("Unknown"));
+  TEST_ASSERT_EQUAL_INT(0, app_logic::qweatherAlertSeverityRank(""));
+  TEST_ASSERT_EQUAL_INT(0, app_logic::qweatherAlertSeverityRank(nullptr));
+  // Case-sensitive: QWeather always emits the capitalised form; anything
+  // else falls back to 0 so we never mis-rank a rogue value.
+  TEST_ASSERT_EQUAL_INT(0, app_logic::qweatherAlertSeverityRank("extreme"));
+  TEST_ASSERT_EQUAL_INT(0, app_logic::qweatherAlertSeverityRank("SEVERE"));
+}
+
 void test_rain_slot_threshold_is_shared_by_both_providers() {
   constexpr float minMm = 0.1f;
   constexpr int minProb = 30;
@@ -596,6 +612,7 @@ int main(int, char**) {
   RUN_TEST(test_qweather_response_code_accepts_only_200);
   RUN_TEST(test_qweather_icon_maps_to_wmo_buckets);
   RUN_TEST(test_qweather_icon_night_flag_only_covers_150_range);
+  RUN_TEST(test_qweather_alert_severity_rank_orders_worst_first);
   RUN_TEST(test_rain_slot_threshold_is_shared_by_both_providers);
   RUN_TEST(test_hex_decode_round_trips_known_bytes_and_rejects_bad_input);
   RUN_TEST(test_normalize_hex_digits_strips_common_key_formats);

@@ -29,5 +29,11 @@ struct WeatherData {
   int nextRainProbability = -1;
   int weatherCode = -1;
   bool isDay = true;
+  // Provider-supplied severe weather alert. alertTitle is empty when no
+  // alert is active or the provider does not expose alerts. alertOtherCount
+  // is the number of *additional* alerts beyond the one we display.
+  String alertTitle;
+  String alertSeverity;
+  int alertOtherCount = 0;
   DailyForecast days[config::FORECAST_DAYS];
 };

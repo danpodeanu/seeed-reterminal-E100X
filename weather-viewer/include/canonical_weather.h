@@ -66,6 +66,15 @@ inline bool serialize(const WeatherData& weather, String& out) {
   }
   detail::writeFloat(doc, "nextRainMm", weather.nextRainMm);
   detail::writeInt(doc, "nextRainProbability", weather.nextRainProbability);
+  if (weather.alertTitle.length() > 0) {
+    doc["alertTitle"] = weather.alertTitle;
+    if (weather.alertSeverity.length() > 0) {
+      doc["alertSeverity"] = weather.alertSeverity;
+    }
+    if (weather.alertOtherCount > 0) {
+      doc["alertOtherCount"] = weather.alertOtherCount;
+    }
+  }
   JsonArray days = doc["days"].to<JsonArray>();
   for (size_t i = 0; i < config::FORECAST_DAYS; ++i) {
     const DailyForecast& d = weather.days[i];
@@ -114,6 +123,10 @@ inline bool parse(const String& body, WeatherData& weather) {
   weather.nextRainMm = detail::readFloat(doc["nextRainMm"]);
   weather.nextRainProbability =
       detail::readInt(doc["nextRainProbability"]);
+  weather.alertTitle = doc["alertTitle"] | "";
+  weather.alertSeverity = doc["alertSeverity"] | "";
+  weather.alertOtherCount = detail::readInt(doc["alertOtherCount"], 0);
+  if (weather.alertOtherCount < 0) weather.alertOtherCount = 0;
   JsonArrayConst days = doc["days"].as<JsonArrayConst>();
   size_t i = 0;
   for (JsonObjectConst d : days) {

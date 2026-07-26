@@ -762,9 +762,30 @@ void renderFooter() {
                     labelY, 1);
 }
 
+void drawAlertBar(const WeatherData& weather) {
+  if (weather.alertTitle.isEmpty()) return;
+  const int top = config::ui(46);
+  const int height = config::ui(22);
+  epaper.fillRect(0, top, config::PANEL_WIDTH, height, PANEL_LIGHT);
+  epaper.drawFastHLine(config::ui(10), top + height,
+                       config::PANEL_WIDTH - config::ui(20), PANEL_MUTED);
+  epaper.setTextColor(PANEL_BLACK, PANEL_LIGHT, true);
+  epaper.setTextDatum(MC_DATUM);
+  selectSmallFont();
+  String line = "! Alert: " + weather.alertTitle;
+  if (weather.alertOtherCount > 0) {
+    line += " (+" + String(weather.alertOtherCount) + " more)";
+  }
+  epaper.drawString(
+      text_render::ellipsize(epaper, line,
+                             config::PANEL_WIDTH - config::ui(24)),
+      config::PANEL_WIDTH / 2, top + height / 2, 1);
+}
+
 void renderWeather(const WeatherData& weather) {
   epaper.fillSprite(PANEL_WHITE);
   drawHeader(weather);
+  drawAlertBar(weather);
 #if RETERMINAL_MODEL == 1004
   renderPortrait(weather);
 #else
