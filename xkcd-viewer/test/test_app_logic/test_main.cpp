@@ -98,6 +98,27 @@ void test_archive_maintenance_requires_timer_and_sd() {
   TEST_ASSERT_FALSE(app_logic::archiveMaintenanceDue(true, true, false));
 }
 
+void test_live_recovery_only_when_sd_present_and_offline_and_empty() {
+  // The one case we WANT to trigger the live retry: SD is there, we
+  // failed to get a comic locally, and the radio isn't already on.
+  TEST_ASSERT_TRUE(app_logic::liveRecoveryAllowed(true, false, false));
+
+  // Already got a comic -- nothing to recover.
+  TEST_ASSERT_FALSE(app_logic::liveRecoveryAllowed(true, true, false));
+  TEST_ASSERT_FALSE(app_logic::liveRecoveryAllowed(true, true, true));
+
+  // Wi-Fi is already up: the initial acquireComic already had network
+  // access, so retrying with the same network wouldn't help.
+  TEST_ASSERT_FALSE(app_logic::liveRecoveryAllowed(true, false, true));
+
+  // No SD card: acquireComicWithoutSd owns the network path; we don't
+  // want to re-enter Wi-Fi bring-up here.
+  TEST_ASSERT_FALSE(app_logic::liveRecoveryAllowed(false, false, false));
+  TEST_ASSERT_FALSE(app_logic::liveRecoveryAllowed(false, false, true));
+  TEST_ASSERT_FALSE(app_logic::liveRecoveryAllowed(false, true, false));
+  TEST_ASSERT_FALSE(app_logic::liveRecoveryAllowed(false, true, true));
+}
+
 void test_deadline_comparison_survives_millis_wrap() {
   TEST_ASSERT_FALSE(app_logic::deadlineReached(100, 200));
   TEST_ASSERT_TRUE(app_logic::deadlineReached(200, 200));
@@ -348,6 +369,7 @@ int main(int, char**) {
   RUN_TEST(test_published_comic_count_excludes_missing_404);
   RUN_TEST(test_cache_only_threshold_controls_network);
   RUN_TEST(test_archive_maintenance_requires_timer_and_sd);
+  RUN_TEST(test_live_recovery_only_when_sd_present_and_offline_and_empty);
   RUN_TEST(test_deadline_comparison_survives_millis_wrap);
   RUN_TEST(test_pre_sync_quiet_suppression_lets_maintenance_run);
   RUN_TEST(test_post_sync_quiet_suppression_matches_pre_sync_minus_ntp);

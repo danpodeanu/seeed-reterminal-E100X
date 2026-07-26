@@ -1277,10 +1277,14 @@ void setup() {
     cachedComicCountForDisplay = xkcd_index::count();
   }
 
-  // A replaced/empty/corrupt card may have no usable local comic even when
-  // the six-hour maintenance interval has not elapsed. Recover live once only
-  // while the card is still below the cache-only threshold.
-  if (!acquired && sdReady && !cacheOnly && !networkAvailable) {
+  // If we have SD but no usable comic yet, spend one Wi-Fi wake trying
+  // to download something. Runs even in cache-only mode: a corrupt
+  // manifest or bad SD is the exact case where the local pool is
+  // unreadable but the network can save the refresh, and rendering
+  // "no comic" is the worse failure. Cost is one extra radio-on cycle
+  // per broken wake, which is bounded to once because a successful
+  // download flips `acquired`.
+  if (app_logic::liveRecoveryAllowed(sdReady, acquired, networkAvailable)) {
     LOG.println("[cache] no usable local comic; trying one live refresh");
     networkAvailable = wifi_sta::connectStation(WIFI_SSID, WIFI_PASSWORD, config::WIFI_TIMEOUT_MS, nullptr, networkOperationShouldStop);
     if (networkAvailable) {

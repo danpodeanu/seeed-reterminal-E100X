@@ -36,6 +36,18 @@ constexpr bool archiveMaintenanceDue(bool sdReady, bool timerWake,
   return sdReady && timerWake && refreshIsDue;
 }
 
+// After the initial acquireComic pass, should we attempt one live
+// recovery (bring Wi-Fi up and try to download a comic)? Fires whenever
+// SD is present, we already tried once and failed, and the radio isn't
+// already on. This includes cache-only mode: if the local pool is
+// unreadable (bad card, corrupt manifest, dangling pointers, ...) we'd
+// otherwise render the "no usable" status forever, so trading one
+// battery-costly wake for a real comic is the better failure mode.
+constexpr bool liveRecoveryAllowed(bool sdReady, bool alreadyAcquired,
+                                   bool networkAlreadyUp) {
+  return sdReady && !alreadyAcquired && !networkAlreadyUp;
+}
+
 // Should the pre-clock-sync path short-sleep until end-of-quiet instead of
 // proceeding to display and maintenance work?
 //
