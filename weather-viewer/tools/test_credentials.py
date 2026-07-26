@@ -311,6 +311,54 @@ def test_open_meteo(latitude: float, longitude: float) -> bool:
     return True
 
 
+def test_nws_alerts(latitude: float, longitude: float) -> bool:
+    """Probe the US NWS alerts endpoint that the firmware calls when
+    ``NWS_ALERTS_ENABLED`` is true and the active provider is Open-Meteo.
+    Coverage is US-only, so a request from outside the US returns an empty
+    features list (or an HTTP error) -- treat either as "not applicable".
+    Never fails the overall credentials check.
+    """
+    print("[nws] checking severe-weather alerts endpoint (US only)...")
+    url = ("https://api.weather.gov/alerts/active?"
+           + urllib.parse.urlencode(
+               {"point": f"{latitude:.4f},{longitude:.4f}"}))
+    print(f"[nws] GET {url}")
+    try:
+        body = _http_get_json(
+            url,
+            headers={
+                "User-Agent":
+                    "reterminal-weather-tester/1.0 "
+                    "(https://github.com/danpodeanu/seeed-reterminal-E100X)",
+                "Accept": "application/geo+json",
+            })
+    except urllib.error.HTTPError as exc:
+        detail = _decode_body(exc.read(),
+                              exc.headers.get("Content-Encoding", ""))
+        _safe_print(f"[nws] HTTP {exc.code} (likely outside US coverage): "
+                    f"{detail[:200]}")
+        return True
+    except urllib.error.URLError as exc:
+        print(f"[nws] network error: {exc.reason}")
+        return True
+
+    features = body.get("features") or []
+    if not features:
+        print("[nws] OK -- no active alerts (or point outside US)")
+        return True
+    top = max(
+        features,
+        key=lambda f: _qweather_severity_rank(
+            (f.get("properties") or {}).get("severity", "")))
+    props = top.get("properties") or {}
+    extras = len(features) - 1
+    suffix = f" (+{extras} more)" if extras > 0 else ""
+    _safe_print(
+        f"[nws] OK -- {props.get('severity') or 'Unknown'}: "
+        f"{props.get('event', '')}{suffix}")
+    return True
+
+
 def _self_test() -> None:
     """Parity check between this tester and the firmware normaliser.
 
@@ -395,6 +443,7 @@ def main(argv: Optional[list] = None) -> int:
     qweather_ok = test_qweather(secrets, latitude, longitude, lang,
                                 iat_offset_seconds=args.iat_offset)
     open_meteo_ok = test_open_meteo(latitude, longitude)
+    test_nws_alerts(latitude, longitude)
 
     print()
     print(f"[summary] qweather   = {'ok' if qweather_ok else 'FAIL'}")

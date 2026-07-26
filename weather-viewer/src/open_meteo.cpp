@@ -36,6 +36,109 @@ String forecastUrl() {
   return url;
 }
 
+// Fill weather.alert* from the US National Weather Service. Best-effort:
+// any failure clears the alert fields and returns without disturbing the
+// forecast result. NWS uses the same "Extreme > Severe > Moderate > Minor
+// > Unknown" severity taxonomy as QWeather, so we reuse the shared rank
+// helper in app_logic. api.weather.gov requires a descriptive User-Agent.
+void fetchNwsAlerts(WeatherData& weather) {
+  weather.alertTitle = "";
+  weather.alertSeverity = "";
+  weather.alertOtherCount = 0;
+
+  WiFiClientSecure client;
+  client.setInsecure();
+  client.setTimeout(config::HTTP_TIMEOUT_MS);
+  HTTPClient http;
+  http.setConnectTimeout(config::HTTP_TIMEOUT_MS);
+  http.setTimeout(config::HTTP_TIMEOUT_MS);
+  http.setReuse(false);
+  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+  String url = "https://api.weather.gov/alerts/active?point=";
+  url += String(config::LATITUDE, 4);
+  url += ",";
+  url += String(config::LONGITUDE, 4);
+  if (!http.begin(client, url)) {
+    LOG.println("[weather] NWS alerts: could not start HTTPS request");
+    return;
+  }
+  // NWS requires a descriptive User-Agent; anonymous requests return 403.
+  http.addHeader("User-Agent",
+                 "reterminal-weather-viewer/1.0 "
+                 "(https://github.com/danpodeanu/seeed-reterminal-E100X)");
+  http.addHeader("Accept", "application/geo+json");
+  const int status = http.GET();
+  if (status != HTTP_CODE_OK) {
+    LOG.printf("[weather] NWS alerts: HTTP GET -> %d (continuing)\n", status);
+    http.end();
+    return;
+  }
+  // Alert bodies for a single point are tiny (typically < 8 KiB even during
+  // active severe weather). Cap generously at 64 KiB to catch runaway
+  // responses without exhausting heap.
+  constexpr int kMaxAlertBytes = 64 * 1024;
+  const int declaredSize = http.getSize();
+  if (declaredSize > kMaxAlertBytes) {
+    LOG.printf("[weather] NWS alerts: response too large: %d bytes\n",
+               declaredSize);
+    http.end();
+    return;
+  }
+  const String body = http.getString();
+  http.end();
+  if (static_cast<int>(body.length()) > kMaxAlertBytes) {
+    LOG.printf("[weather] NWS alerts: streamed too large: %u bytes\n",
+               static_cast<unsigned>(body.length()));
+    return;
+  }
+
+  JsonDocument doc;
+  const DeserializationError error = deserializeJson(doc, body);
+  if (error) {
+    LOG.printf("[weather] NWS alerts JSON: %s\n", error.c_str());
+    return;
+  }
+  JsonArray features = doc["features"];
+  int total = 0;
+  int bestRank = -1;
+  String bestTitle;
+  String bestSeverity;
+  for (JsonObject feature : features) {
+    JsonObject props = feature["properties"];
+    if (props.isNull()) continue;
+    // Prefer "event" over "headline" for the display line -- "event" is a
+    // compact phrase like "Tornado Warning" whereas "headline" is a long
+    // sentence like "Tornado Warning issued August 26 at 4:15 PM EDT ...".
+    const char* title = props["event"] | (props["headline"] | "");
+    if (title[0] == '\0') continue;
+    ++total;
+    const char* severity = props["severity"] | "";
+    const int rank = app_logic::qweatherAlertSeverityRank(severity);
+    if (rank > bestRank) {
+      bestRank = rank;
+      bestTitle = title;
+      bestSeverity = severity;
+    }
+  }
+  if (total > 0 && !bestTitle.isEmpty()) {
+    weather.alertTitle = bestTitle;
+    weather.alertSeverity = bestSeverity;
+    weather.alertOtherCount = total - 1;
+    LOG.printf("[weather] NWS alert (%s): %s%s\n",
+               weather.alertSeverity.isEmpty()
+                   ? "unknown"
+                   : weather.alertSeverity.c_str(),
+               weather.alertTitle.c_str(),
+               weather.alertOtherCount > 0
+                   ? (String(" (+") +
+                      String(weather.alertOtherCount) + " more)")
+                         .c_str()
+                   : "");
+  } else {
+    LOG.println("[weather] NWS alerts: no active alerts");
+  }
+}
+
 }  // namespace
 
 bool parseOpenMeteo(const String& body, WeatherData& weather) {
@@ -213,6 +316,12 @@ bool fetchOpenMeteo(WeatherData& weather, String& responseBody,
   if (!parseOpenMeteo(responseBody, weather)) {
     failureReason = "Weather service returned invalid data";
     return false;
+  }
+  // parseOpenMeteo does not touch the alert fields (Open-Meteo itself has
+  // no alerts endpoint). Populate them from the US NWS when enabled and
+  // the point is inside NWS coverage; failures are non-fatal.
+  if (config::NWS_ALERTS_ENABLED) {
+    fetchNwsAlerts(weather);
   }
   return true;
 }

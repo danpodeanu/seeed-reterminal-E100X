@@ -100,6 +100,15 @@ constexpr char QWEATHER_LANG[] = "en";
 // time per refresh). Has no effect when the active provider is Open-Meteo.
 constexpr bool QWEATHER_ALERTS_ENABLED = true;
 
+// Whether to fetch severe-weather alerts from the US National Weather
+// Service (api.weather.gov/alerts/active) on every refresh. Free, no key,
+// but the coverage is US only -- flip to true if the device sits in a
+// US state or territory. Non-US requests return an empty features list
+// so leaving it on would just waste ~1s per refresh. Has no effect when
+// the active provider is QWeather. Open-Meteo itself does not expose a
+// government-alerts endpoint.
+constexpr bool NWS_ALERTS_ENABLED = false;
+
 // Debug knobs for QWeather 401 triage. Both default to false. Enable one
 // or both temporarily to diagnose auth failures:
 //   DEBUG_FORCE_NTP:  ignore the "24h refresh" gate and re-sync every wake
