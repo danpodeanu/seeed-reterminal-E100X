@@ -24,6 +24,7 @@
 // reset button (or unplug/replug USB) to redraw.
 
 #include <Arduino.h>
+#include <SPI.h>
 #include <TFT_eSPI.h>
 #include <driver/rtc_io.h>
 #include <esp_sleep.h>
@@ -301,6 +302,20 @@ void setup() {
              PANEL_HEIGHT, PALETTE_COUNT);
 
   epaper.begin();
+  // Weather-viewer / xkcd-viewer both call sd_card::mount() right after
+  // epaper.begin(), which as a side effect (a) drives PIN_SD_ENABLE high
+  // and (b) does spi.end(); spi.begin(SCK, MISO, MOSI, -1) on the same
+  // SPI instance the panel uses. On E1001 in particular this matters:
+  // Setup520 declares TFT_MISO=-1 so epaper.begin() sets the bus up
+  // without MISO, and the large Gray4 push that follows just silently
+  // vanishes. Re-init the bus with the real MISO pin and enable the
+  // shared peripheral rail here so panel-test gets the same starting
+  // state as the viewer apps without pulling SD into the tool.
+  pinMode(board::PIN_SD_ENABLE, OUTPUT);
+  digitalWrite(board::PIN_SD_ENABLE, HIGH);
+  auto& panelSpi = epaper.getSPIinstance();
+  panelSpi.end();
+  panelSpi.begin(board::PIN_SD_SCK, board::PIN_SD_MISO, board::PIN_SD_MOSI, -1);
 #if RETERMINAL_MODEL == 1001
   // UC8179 (E1001) quirk: the first update() after initGrayMode(4)
   // never reaches the panel - it just gets swallowed by the driver.
