@@ -147,7 +147,7 @@ the POSIX timezone and NTP servers in the same file:
 constexpr char TIMEZONE[] = "GMT0BST,M3.5.0/1,M10.5.0";
 constexpr char NTP_SERVER_PRIMARY[] = "pool.ntp.org";
 constexpr char NTP_SERVER_SECONDARY[] = "time.cloudflare.com";
-constexpr uint32_t NTP_DHCP_TIMEOUT_MS = 4000;
+constexpr uint32_t NTP_DHCP_TIMEOUT_MS = 1000;
 ```
 
 The firmware requests NTP servers through DHCP option 42 before acquiring its
