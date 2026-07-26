@@ -49,7 +49,7 @@ constexpr uint32_t WIFI_TIMEOUT_MS = 30000;
 constexpr uint32_t HTTP_TIMEOUT_MS = 25000;
 constexpr uint32_t NTP_DHCP_TIMEOUT_MS = 4000;
 constexpr uint32_t NTP_SYNC_TIMEOUT_MS = 10000;
-constexpr uint32_t NTP_REFRESH_SECONDS = 24UL * 60UL * 60UL;
+constexpr uint32_t NTP_REFRESH_SECONDS = 6UL * 60UL * 60UL;
 constexpr uint32_t DOWNLOAD_IDLE_TIMEOUT_MS = 10000;
 
 // --- Sensors and buttons ----------------------------------------------------
