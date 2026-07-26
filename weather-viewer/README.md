@@ -247,7 +247,7 @@ same format intentionally shows a 1970 date.
   SD card mounted, the newly rendered weather frame is written as an indexed
   BMP to `/screenshot.bmp`, replacing the previous screenshot. Remove the card
   and open that file on a computer to retrieve it.
-- NTP runs on cold boot and at most once daily. DHCP-provided NTP is tried
+- NTP runs on cold boot and at most once every six hours. DHCP-provided NTP is tried
   first, followed by the configured public servers. NTP failure is logged but
   does not block the weather request.
 - From 01:00 until 07:00 by default, timer wakes return directly to sleep. The

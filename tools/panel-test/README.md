@@ -35,8 +35,11 @@ All patterns use the standard SMPTE layout:
   panel code so no dither can mask a dead colour.
 - Middle 1/12: "castellations" strip - each bar reversed against black,
   which surfaces obvious refresh artefacts.
-- Bottom 1/4: model banner, solid black patch, solid white patch, and a
-  grey ramp along the bottom edge (grayscale panels only).
+- Bottom 1/4: full-width white banner with model name and geometry
+  (top 2/3), then a full-width shade ramp (bottom 1/3) separated by a
+  1px black hairline. On Gray4/Gray16 panels every intermediate LUT
+  entry is visible; on six-colour panels the ramp collapses to black
+  and white, which still verifies the extreme bit-depth codes.
 
 ## Build & flash
 
@@ -56,7 +59,7 @@ Serial output on UART1 (`GPIO43/44`, same as the viewer apps):
 [panel-test] reTerminal E1003 - Gray16
 [panel-test] 1872 x 1404, 16 palette entries
 [panel-test] refreshing panel
-[panel-test] done; entering deep sleep - press reset to redraw
+[panel-test] done; sleeping - press any front button to redraw
 ```
 
 ## Reference

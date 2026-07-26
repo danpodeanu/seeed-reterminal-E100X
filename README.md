@@ -54,9 +54,11 @@ different framework or architecture where that better suits their use case.
 ```text
 .
 ├── .github/workflows/    # Repository-level build checks
+├── common/               # Shared driver, board pin, and helper code (e-paper setup, SD, RTC, sensors)
 ├── xkcd-viewer/          # Standalone XKCD display firmware
 ├── weather-viewer/       # Standalone weather display firmware
 ├── photo-viewer/         # SD-card photo-frame firmware and preparation tool
+├── tools/                # Diagnostic sketches (i2c-scan, panel-test)
 └── README.md             # This project index
 ```
 

@@ -27,7 +27,7 @@ not match.
 - A cold boot/reset displays the device MAC address, Wi-Fi SSID, SD-card photo
   count, battery level, and onboard temperature/humidity while connecting.
 - The device obtains its address and optional NTP servers through DHCP.
-- It synchronizes the clock on cold boot and once every 24 hours. DHCP-provided
+- It synchronizes the clock on cold boot and at most once every six hours. DHCP-provided
   NTP is tried first, followed by `pool.ntp.org` and
   `time.cloudflare.com`.
 - Successful NTP synchronization stores UTC in the onboard PCF8563. On a later
@@ -141,7 +141,7 @@ Run the native unit tests:
 pio test -c platformio-test.ini -e native_test
 ```
 
-The tests cover quiet-hour timing, daily NTP scheduling, button direction,
+The tests cover quiet-hour timing, NTP scheduling, button direction,
 and photo-index wrapping. GitHub Actions runs them alongside all four
 firmware builds.
 
@@ -183,6 +183,6 @@ up to `MAX_PHOTO_ATTEMPTS`; the next wake tries again.
 
 ## Privacy and network use
 
-Photos never leave the SD card. The only normal outbound traffic is the daily
-NTP synchronization; there is no photo service, cloud account, telemetry, or
-background upload.
+Photos never leave the SD card. The only normal outbound traffic is the
+periodic NTP synchronization (at most once every six hours); there is no
+photo service, cloud account, telemetry, or background upload.

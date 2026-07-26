@@ -68,7 +68,7 @@ Edit `include/secrets.h` and set `WIFI_SSID` and `WIFI_PASSWORD`. The real file
 is excluded by `.gitignore`; only the placeholder example belongs in version
 control.
 
-The clock synchronizes on cold boot and then at most once daily. Time settings
+The clock synchronizes on cold boot and then at most once every six hours. Time settings
 are in `include/config.h`:
 
 ```cpp
@@ -190,7 +190,7 @@ PIO_PYTHON="$(head -n 1 "$(command -v pio)" | sed 's/^#!//')"
   acknowledgement may take up to a few seconds.
 - Any front button wakes the device and immediately selects another comic. A
   short GPIO45 beep acknowledges a button wake.
-- NTP runs on cold boot and at most once daily. DHCP-provided NTP is tried
+- NTP runs on cold boot and at most once every six hours. DHCP-provided NTP is tried
   first, followed by the configured public servers. A failed NTP request is
   logged but does not prevent a comic refresh.
 - From 01:00 until 07:00 by default, timer wakes return directly to sleep. The
