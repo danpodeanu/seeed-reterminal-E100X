@@ -205,10 +205,27 @@ void drawStatusBadges() {
           : "--.-C  --%";
   epaper.drawString(climate, edgeInset, centerY, 1);
 
-  const String battery =
+  // Battery gauge layout mirrors weather/xkcd: percentage text sits
+  // just left of the gauge icon, which itself carries the charging
+  // bolt overlay when external power is present.
+  const String percent =
       sensorReadings.batteryPct >= 0 ? String(sensorReadings.batteryPct) + "%" : "--%";
+  const int w = config::ui(22);
+  const int h = config::ui(12);
+  const int terminalWidth = max(3, config::ui(5));
+  const int x = config::PANEL_WIDTH - edgeInset - terminalWidth - w;
+  const int gaugeCenterY = centerY + 2;
+  const int y = gaugeCenterY - h / 2;
+  const int outline = max(1, config::ui(1));
+  const int terminalHeight = max(3, config::ui(5));
+
   epaper.setTextDatum(MR_DATUM);
-  epaper.drawString(battery, config::PANEL_WIDTH - edgeInset, centerY, 1);
+  const int percentRightX = x - config::ui(9);
+  epaper.drawString(percent, percentRightX, centerY, 1);
+  text_render::drawBatteryGauge(
+      epaper, x, y, w, h, sensorReadings.batteryPct, outline, terminalWidth,
+      terminalHeight, PANEL_BLACK, PANEL_WHITE,
+      sensorReadings.chargerValid && sensorReadings.externalPower);
   epaper.setFreeFont(nullptr);
   epaper.setTextFont(2);
 }
