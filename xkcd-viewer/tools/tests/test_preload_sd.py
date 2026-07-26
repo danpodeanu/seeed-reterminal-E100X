@@ -154,6 +154,35 @@ class PreloadSdTests(unittest.TestCase):
                 preload_sd.read_cache_index_skips(cache_dir), {11, 42}
             )
 
+    def test_legacy_v1_index_with_skip_markers_migrates_to_v2(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            cache_dir = Path(temporary)
+            complete = {
+                "num": 2,
+                "img": "https://imgs.xkcd.com/comics/example.png",
+            }
+            (cache_dir / "2.json").write_text(json.dumps(complete))
+            (cache_dir / "2.png").write_bytes(b"\x89PNG\r\n\x1a\nvalid")
+            # A pre-V2 preloader run would have left these behind.
+            (cache_dir / preload_sd.CACHE_INDEX_NAME).write_text(
+                "XKCD_CACHE_INDEX_V1\n1\n2\n"
+            )
+            (cache_dir / "5.skip").write_text("")
+            (cache_dir / "9.skip").write_text("")
+
+            # Reading the legacy index adopts and consumes the .skip files.
+            skips = preload_sd.read_cache_index_skips(cache_dir)
+            self.assertEqual(skips, {5, 9})
+            self.assertFalse((cache_dir / "5.skip").exists())
+            self.assertFalse((cache_dir / "9.skip").exists())
+
+            # Persisting them produces a clean V2 file with both sections.
+            preload_sd.write_cache_index(cache_dir, skipped=skips)
+            self.assertEqual(
+                (cache_dir / preload_sd.CACHE_INDEX_NAME).read_text(),
+                "XKCD_CACHE_INDEX_V2\n1\n2\n2\n5\n9\n",
+            )
+
 
 if __name__ == "__main__":
     unittest.main()

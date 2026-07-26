@@ -251,33 +251,57 @@ def encode_cache_index(cached: list[int], skipped: list[int]) -> bytes:
     return ("\n".join(lines) + "\n").encode("ascii")
 
 
+def _adopt_legacy_skip_markers(cache_dir: Path) -> set[int]:
+    """Convert any leftover `<n>.skip` sentinel files into a skip set.
+
+    The short-lived pre-V2 preloader wrote these files; V2 folds skip
+    verdicts into the index instead. Migrate them once and delete the
+    files so subsequent runs don't need to look at them again.
+    """
+    adopted: set[int] = set()
+    for marker in cache_dir.glob("*.skip"):
+        try:
+            number = int(marker.stem)
+        except ValueError:
+            continue
+        if number > 0 and number != 404:
+            adopted.add(number)
+        marker.unlink(missing_ok=True)
+    return adopted
+
+
 def read_cache_index_skips(cache_dir: Path) -> set[int]:
-    """Return the persisted skip set from a V2 index, or empty if missing."""
+    """Return the persisted skip set from a V2 index, or empty if missing.
+
+    Also adopts any legacy `<n>.skip` sentinel files so an existing V1
+    cache directory upgrades cleanly on the first V2 run.
+    """
+    legacy = _adopt_legacy_skip_markers(cache_dir)
     path = cache_dir / CACHE_INDEX_NAME
     if not path.exists():
-        return set()
+        return legacy
     try:
         lines = path.read_text().splitlines()
     except OSError:
-        return set()
+        return legacy
     if not lines or lines[0].strip() != CACHE_INDEX_MAGIC:
-        return set()
+        return legacy
     try:
         cached_count = int(lines[1].strip())
     except (IndexError, ValueError):
-        return set()
+        return legacy
     skip_header_index = 2 + cached_count
     try:
         skip_count = int(lines[skip_header_index].strip())
     except (IndexError, ValueError):
-        return set()
-    skips: set[int] = set()
+        return legacy
+    skips: set[int] = set(legacy)
     for offset in range(skip_count):
         line_index = skip_header_index + 1 + offset
         try:
             skips.add(int(lines[line_index].strip()))
         except (IndexError, ValueError):
-            return set()
+            return legacy
     return skips
 
 
