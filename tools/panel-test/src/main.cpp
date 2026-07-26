@@ -312,29 +312,6 @@ void setup() {
   panelSpi.end();
   panelSpi.begin(board::PIN_SD_SCK, board::PIN_SD_MISO, board::PIN_SD_MOSI, -1);
 #if RETERMINAL_MODEL == 1001
-  // UC8179 (E1001) quirk: the first update() after initGrayMode(4)
-  // never reaches the panel - it just gets swallowed by the driver.
-  // xkcd-viewer works around this by rendering its Wi-Fi connection
-  // status screen in native 1-bit mode BEFORE switching to Gray4, so
-  // that "lost" first Gray4 frame is actually the second panel refresh
-  // and everything the app really wants to show lands on the third.
-  // Panel-test only ever draws one screen per wake, so without this
-  // priming render the SMPTE pattern would silently vanish and the
-  // panel would stay stuck on whatever the previous app left behind.
-  LOG.println("[panel-test] priming 1-bit refresh (UC8179 workaround)");
-  epaper.fillSprite(TFT_WHITE);
-  epaper.setTextColor(TFT_BLACK, TFT_WHITE, true);
-  epaper.setTextDatum(MC_DATUM);
-  epaper.setTextFont(2);
-  epaper.drawString("panel-test", PANEL_WIDTH / 2, PANEL_HEIGHT / 2 - 12, 1);
-  epaper.drawString(PANEL_LABEL, PANEL_WIDTH / 2, PANEL_HEIGHT / 2 + 12, 1);
-  epaper.update();
-  // Weather-viewer only survives this mode transition because seconds of
-  // Wi-Fi / NTP / weather-fetch work sit between its priming render and
-  // the first Gray4 update. Panel-test has no such work, so give the
-  // UC8179 an explicit breather - without it the first Gray4 frame is
-  // silently discarded and the panel stays showing the priming render.
-  delay(1500);
   epaper.initGrayMode(GRAY_LEVEL4);
 #elif RETERMINAL_MODEL == 1003
   epaper.initGrayMode(GRAY_LEVEL16);
