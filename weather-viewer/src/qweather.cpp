@@ -260,6 +260,14 @@ bool buildJwt(String& jwt, String& failureReason) {
   jwt = signingInput;
   jwt += ".";
   jwt += encodedSignature;
+  if (config::DEBUG_LOG_JWT) {
+    LOG.printf("[debug] JWT iat=%lld exp=%lld\n",
+               static_cast<long long>(iat), static_cast<long long>(exp));
+    LOG.printf("[debug] JWT header=%s\n", encodedHeader);
+    LOG.printf("[debug] JWT payload=%s\n", encodedPayload);
+    LOG.printf("[debug] JWT signature=%s\n", encodedSignature);
+    LOG.printf("[debug] JWT full=%s\n", jwt.c_str());
+  }
   return true;
 }
 

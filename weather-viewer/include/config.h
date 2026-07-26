@@ -92,6 +92,16 @@ constexpr WeatherProvider WEATHER_PROVIDER = WeatherProvider::QWeather;
 // resource/language/ for the full list.
 constexpr char QWEATHER_LANG[] = "en";
 
+// Debug knobs for QWeather 401 triage. Both default to false. Enable one
+// or both temporarily to diagnose auth failures:
+//   DEBUG_FORCE_NTP:  ignore the "24h refresh" gate and re-sync every wake
+//                     so JWT iat/exp always use fresh NTP time.
+//   DEBUG_LOG_JWT:    print the JWT header, payload, and signature that
+//                     the firmware sends. Compare against the tester's
+//                     `tools/test_credentials.py --dump-jwt` output.
+constexpr bool DEBUG_FORCE_NTP = false;
+constexpr bool DEBUG_LOG_JWT = false;
+
 constexpr char CACHE_DIR[] = "/weather";
 constexpr char FORECAST_CACHE[] = "/weather/forecast.json";
 

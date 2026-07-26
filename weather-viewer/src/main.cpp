@@ -935,7 +935,11 @@ void setup() {
   }
 
   bool wakeEventLogged = wake_report::logWakeEvent(wakeCause, wakePins, false);
-  const bool ntpDue = local_time::refreshDue(coldBoot, lastNtpSyncEpoch, config::NTP_REFRESH_SECONDS);
+  const bool ntpDue = config::DEBUG_FORCE_NTP ||
+      local_time::refreshDue(coldBoot, lastNtpSyncEpoch, config::NTP_REFRESH_SECONDS);
+  if (config::DEBUG_FORCE_NTP) {
+    LOG.println("[debug] DEBUG_FORCE_NTP=true, resyncing every wake");
+  }
   struct tm localTime = {};
   const bool haveLocalTime = local_time::localClock(localTime);
   if (app_logic::suppressForQuietHours(

@@ -280,6 +280,11 @@ def main(argv: Optional[list] = None) -> int:
         "--include-dir", type=Path, default=Path("include"),
         help="Path to the weather-viewer include/ directory "
              "(default: ./include, run from weather-viewer/).")
+    parser.add_argument(
+        "--dump-jwt", action="store_true",
+        help="Print the JWT header, payload, and signature (base64url "
+             "segments) that would be sent to QWeather. Use to compare "
+             "against firmware output when DEBUG_LOG_JWT is enabled.")
     args = parser.parse_args(argv)
 
     secrets_path = args.include_dir / "secrets.h"
@@ -306,6 +311,28 @@ def main(argv: Optional[list] = None) -> int:
     print(f"[config] latitude={latitude} longitude={longitude}")
     lang = _parse_config_string(config_path, "QWEATHER_LANG") or "en"
     print(f"[config] qweather lang={lang}")
+
+    if args.dump_jwt:
+        required = ("QWEATHER_PROJECT_ID", "QWEATHER_CREDENTIAL_ID",
+                    "QWEATHER_PRIVATE_KEY_HEX")
+        missing = [k for k in required if not secrets.get(k)]
+        if missing:
+            print(f"[dump-jwt] missing: {', '.join(missing)}")
+            return 2
+        now = int(time.time())
+        iat = now - 30
+        exp = iat + 15 * 60
+        jwt = _build_qweather_jwt(
+            sub=secrets["QWEATHER_PROJECT_ID"],
+            kid=secrets["QWEATHER_CREDENTIAL_ID"],
+            private_key_hex=secrets["QWEATHER_PRIVATE_KEY_HEX"],
+        )
+        header, payload, signature = jwt.split(".")
+        print(f"[dump-jwt] iat={iat} exp={exp}")
+        print(f"[dump-jwt] header={header}")
+        print(f"[dump-jwt] payload={payload}")
+        print(f"[dump-jwt] signature={signature}")
+        print(f"[dump-jwt] full={jwt}")
 
     qweather_ok = test_qweather(secrets, latitude, longitude, lang)
     open_meteo_ok = test_open_meteo(latitude, longitude)
