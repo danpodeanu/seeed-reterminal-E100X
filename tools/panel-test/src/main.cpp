@@ -31,6 +31,7 @@
 #include "app_logger.h"
 #include "board_pins.h"
 #include "driver.h"
+#include "hardware.h"
 
 #ifndef EPAPER_ENABLE
 #error "Seeed_GFX did not select a reTerminal E-series driver; check common/include/driver.h"
@@ -289,6 +290,11 @@ void powerDownAndSleep() {
 void setup() {
   LOG.begin(115200, SERIAL_8N1, board::PIN_LOG_RX, board::PIN_LOG_TX);
   delay(50);
+
+  // Beep once as soon as we know we've booted, so a user pressing a
+  // button gets audible confirmation even before the panel refreshes.
+  hardware::beep();
+
   LOG.println();
   LOG.printf("[panel-test] %s\n", PANEL_LABEL);
   LOG.printf("[panel-test] %d x %d, %d palette entries\n", PANEL_WIDTH,
@@ -309,9 +315,18 @@ void setup() {
   // right after begin() works cleanly on the 16-level driver.
   epaper.initGrayMode(GRAY_LEVEL16);
 #endif
+  // E1002 (ED2208) and E1004 (T133A01) drive their six-colour palettes
+  // straight out of epaper.begin() - no gray-mode init, matching how
+  // the viewer apps hand them off directly to draw calls.
   renderPattern();
   LOG.println("[panel-test] refreshing panel");
   epaper.update();
+
+  // A second, higher-pitched beep marks a completed refresh. Together
+  // the pair makes it obvious over serial-less USB whether we made it
+  // through the (multi-second) e-paper update.
+  hardware::beep();
+
   LOG.println("[panel-test] done; sleeping - press any front button to redraw");
   powerDownAndSleep();
 }
