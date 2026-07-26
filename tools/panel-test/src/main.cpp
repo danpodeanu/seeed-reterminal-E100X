@@ -296,12 +296,17 @@ void setup() {
 
   epaper.begin();
 #if RETERMINAL_MODEL == 1001
-  // Enable 4-level greyscale mode; without this the UC8179 driver runs
-  // in 1-bit mode and every non-zero code renders as white.
+  // The UC8179 (E1001) needs a 1-bit refresh in its default mode before
+  // switching to grayscale, otherwise the first gray-mode update never
+  // reaches the panel. Weather-viewer gets this for free via its cold-
+  // boot renderStatus() call; here we do it explicitly with an all-white
+  // priming flush.
+  epaper.fillSprite(TFT_WHITE);
+  epaper.update();
   epaper.initGrayMode(GRAY_LEVEL4);
 #elif RETERMINAL_MODEL == 1003
-  // Enable 16-level greyscale mode on the ED103TC2 driver. Same trap
-  // as E1001 - default is 1-bit and swallows all intermediate shades.
+  // ED103TC2 (E1003) does not need the priming refresh - initGrayMode
+  // right after begin() works cleanly on the 16-level driver.
   epaper.initGrayMode(GRAY_LEVEL16);
 #endif
   renderPattern();
