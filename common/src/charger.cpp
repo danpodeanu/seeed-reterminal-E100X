@@ -34,9 +34,15 @@ Status readSy6974b() {
   uint8_t sysStatus = 0;
   if (!readRegister(REG_SYSTEM_STATUS, sysStatus)) {
     // Older E1001/E1002 shipped with an ETA6003 that does not respond
-    // on 0x6A. Log once at INFO so the absence isn't confusing, then
-    // let callers render as if the charger state is unknown.
-    LOG.println("[charger] SY6974B not present (older revision or absent)");
+    // on 0x6A. Log once per cold boot (the flag lives in RTC memory and
+    // is cleared by the loader on power-on, so we do not spam the log
+    // on every deep-sleep wake) then let callers render as if the
+    // charger state is unknown.
+    static RTC_DATA_ATTR bool absenceLogged = false;
+    if (!absenceLogged) {
+      LOG.println("[charger] SY6974B not present (older revision or absent)");
+      absenceLogged = true;
+    }
     return status;
   }
   status.valid = true;
