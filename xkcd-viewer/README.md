@@ -205,6 +205,10 @@ PIO_PYTHON="$(head -n 1 "$(command -v pio)" | sed 's/^#!//')"
 - The cold-boot Wi-Fi screen reports the number of complete comics in the SD
   cache. Cached files remain available when XKCD or the network cannot be
   reached, and the cache is never pruned.
+- If a timer wake in cache-only mode cannot read any usable comic from the
+  local cache (for example, a corrupt SD manifest or a swapped-in blank
+  card), the firmware spends one extra Wi-Fi bring-up per wake to download
+  and display a fresh comic instead of rendering the failure status.
 - If the SD card is full or a cache write fails, the firmware logs the failure
   and downloads the selected comic into PSRAM for that refresh without
   caching it. Existing cache entries are left intact.
