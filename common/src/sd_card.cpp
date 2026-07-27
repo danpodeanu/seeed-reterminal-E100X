@@ -10,6 +10,64 @@
 
 namespace sd_card {
 
+namespace {
+
+// Number of attempts to make an SD operation succeed before giving up.
+// The reTerminal shares one SPI bus between the e-paper controller and
+// the SD card. Under load (right after Wi-Fi teardown, big HTTPS
+// transfers, or large panel refreshes) SD.open() / SD.exists() /
+// SD.rename() have all been observed to spuriously fail on a file/path
+// that is definitely present and would succeed on a re-attempt. Treat
+// every SPI SD op as retryable so a single glitch doesn't propagate
+// into "missing font", "cache write dropped", etc.
+constexpr int kSdOpRetries = 3;
+constexpr uint32_t kSdOpRetryDelayMs = 20;
+
+// Try opening `path` in `mode` up to kSdOpRetries times. Returns the
+// first non-falsy File; the caller inherits ownership (call close()).
+File retryingOpen(const String& path, const char* mode) {
+  File file = SD.open(path, mode);
+  for (int attempt = 1; !file && attempt < kSdOpRetries; ++attempt) {
+    delay(kSdOpRetryDelayMs);
+    file = SD.open(path, mode);
+  }
+  return file;
+}
+
+// Try SD.rename until it succeeds or we've burned through kSdOpRetries.
+bool retryingRename(const String& from, const String& to) {
+  for (int attempt = 0; attempt < kSdOpRetries; ++attempt) {
+    if (SD.rename(from, to)) return true;
+    delay(kSdOpRetryDelayMs);
+  }
+  return false;
+}
+
+// Try SD.mkdir. mkdir on an existing directory returns false, so the
+// caller should probe fileExists() first; this only handles the "SPI
+// hiccup dropped the mkdir" case.
+bool retryingMkdir(const char* path) {
+  for (int attempt = 0; attempt < kSdOpRetries; ++attempt) {
+    if (SD.mkdir(path)) return true;
+    delay(kSdOpRetryDelayMs);
+  }
+  return false;
+}
+
+}  // namespace
+
+File openForRead(const String& path) {
+  return retryingOpen(path, FILE_READ);
+}
+
+File openForWrite(const String& path) {
+  return retryingOpen(path, FILE_WRITE);
+}
+
+bool renameFile(const String& from, const String& to) {
+  return retryingRename(from, to);
+}
+
 bool mount(SPIClass& spi, const char* cacheDir) {
   // Enable the shared peripheral power rail and re-init the panel's SPI
   // bus with a real MISO pin. Historically this was inlined here and
@@ -45,7 +103,7 @@ bool mount(SPIClass& spi, const char* cacheDir) {
     digitalWrite(board::PIN_SD_ENABLE, LOW);
     return false;
   }
-  if (!fileExists(cacheDir) && !SD.mkdir(cacheDir)) {
+  if (!fileExists(cacheDir) && !retryingMkdir(cacheDir)) {
     LOG.printf("[sd] could not create %s\n", cacheDir);
     SD.end();
     digitalWrite(board::PIN_SD_ENABLE, LOW);
@@ -58,7 +116,7 @@ bool mount(SPIClass& spi, const char* cacheDir) {
 }
 
 bool readFile(const String& path, String& out, size_t maxBytes) {
-  File file = SD.open(path, FILE_READ);
+  File file = openForRead(path);
   if (!file) return false;
   if (file.size() > maxBytes) {
     LOG.printf("[cache] refusing to read oversized %s (%lu bytes)\n",
@@ -74,7 +132,7 @@ bool readFile(const String& path, String& out, size_t maxBytes) {
 bool writeFileAtomically(const String& path, const String& contents) {
   const String temporary = path + ".part";
   SD.remove(temporary);
-  File file = SD.open(temporary, FILE_WRITE);
+  File file = openForWrite(temporary);
   if (!file) {
     LOG.printf("[cache] could not create %s\n", temporary.c_str());
     return false;
@@ -88,7 +146,7 @@ bool writeFileAtomically(const String& path, const String& contents) {
     return false;
   }
   SD.remove(path);
-  if (!SD.rename(temporary, path)) {
+  if (!renameFile(temporary, path)) {
     LOG.printf("[cache] could not install %s\n", path.c_str());
     SD.remove(temporary);
     return false;
@@ -97,7 +155,7 @@ bool writeFileAtomically(const String& path, const String& contents) {
 }
 
 bool fileExists(const String& path) {
-  File probe = SD.open(path, FILE_READ);
+  File probe = openForRead(path);
   if (!probe) return false;
   probe.close();
   return true;

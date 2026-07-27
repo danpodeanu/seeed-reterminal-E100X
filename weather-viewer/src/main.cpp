@@ -169,16 +169,7 @@ static void rememberSmoothFontSizeVerified(int size) {
 
 static bool smoothFontFileExists(int size) {
   if (!sdReady) return false;
-  const String path = String("/fonts/sans_bold_") + size + ".vlw";
-  // SD.open() over SPI is not perfectly reliable on the reTerminal (the
-  // e-paper shares the bus and the timing after Wi-Fi shutdown has been
-  // observed to make a single probe return false on a file that is
-  // actually present). Retry a few times before believing "missing".
-  for (int attempt = 0; attempt < 3; ++attempt) {
-    if (sd_card::fileExists(path)) return true;
-    delay(20);
-  }
-  return false;
+  return sd_card::fileExists(String("/fonts/sans_bold_") + size + ".vlw");
 }
 
 static void unloadSmoothFontIfLoaded() {

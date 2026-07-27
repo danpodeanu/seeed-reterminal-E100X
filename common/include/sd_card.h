@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Arduino.h>
+#include <FS.h>
 #include <SPI.h>
 #include <stddef.h>
 
@@ -9,6 +10,14 @@
 // the epaper SPI bus, create a cache directory), and two of them repeat
 // a bounded-size read plus an atomic write. Keep the retry/error paths
 // in one place so future changes need only touch one file.
+//
+// Every SPI SD op below retries a few times on transient failure. The
+// reTerminal shares one SPI bus between the e-paper controller and the
+// SD card, and observed real-world glitches after Wi-Fi teardown, big
+// HTTPS transfers, or panel refreshes make single SD.open()/SD.exists()
+// /SD.rename() calls unreliable. Centralising the retry policy here
+// stops each caller from open-coding it (or, worse, from treating a
+// one-shot false as an authoritative "missing").
 namespace sd_card {
 
 // Bring up the SD card on the same SPI bus that the e-paper uses. On
@@ -32,5 +41,14 @@ bool fileExists(const String& path);
 // existing file at `path` is replaced only after the write succeeds and
 // the byte count matches. Returns false on any I/O error.
 bool writeFileAtomically(const String& path, const String& contents);
+
+// Retry-aware wrappers for the raw SD ops. Callers that manage their
+// own File handle (e.g. streaming HTTP downloads to disk, screenshot
+// BMP writers, xkcd index atomic writes) should use these instead of
+// SD.open()/SD.rename() directly so a single SPI hiccup does not fail
+// their operation.
+File openForRead(const String& path);
+File openForWrite(const String& path);
+bool renameFile(const String& from, const String& to);
 
 }  // namespace sd_card

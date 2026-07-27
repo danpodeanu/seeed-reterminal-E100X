@@ -7,6 +7,7 @@
 #include <WiFiClientSecure.h>
 
 #include "app_logger.h"
+#include "sd_card.h"
 
 namespace net_http {
 namespace {
@@ -80,7 +81,7 @@ bool downloadToSd(const String& url, const String& destination,
 
   const String temporary = destination + ".part";
   SD.remove(temporary);
-  File file = SD.open(temporary, FILE_WRITE);
+  File file = sd_card::openForWrite(temporary);
   if (!file) {
     LOG.printf("[cache] could not create %s\n", temporary.c_str());
     http.end();
@@ -150,7 +151,7 @@ bool downloadToSd(const String& url, const String& destination,
     return false;
   }
   SD.remove(destination);
-  if (!SD.rename(temporary, destination)) {
+  if (!sd_card::renameFile(temporary, destination)) {
     LOG.printf("[cache] could not install %s\n", destination.c_str());
     SD.remove(temporary);
     return false;

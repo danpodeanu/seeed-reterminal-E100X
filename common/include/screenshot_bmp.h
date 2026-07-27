@@ -7,6 +7,7 @@
 #include <stdlib.h>
 
 #include "app_logger.h"
+#include "sd_card.h"
 
 // Screenshot BMP writer shared by the xkcd and weather viewers (photo does
 // not export screenshots). The palette matches the panel color mode
@@ -77,7 +78,7 @@ inline bool saveScreenshotBmp(EPaper& epaper, uint32_t width, uint32_t height,
   }
 
   SD.remove(temporaryPath);
-  File file = SD.open(temporaryPath, FILE_WRITE);
+  File file = sd_card::openForWrite(temporaryPath);
   if (!file) {
     LOG.println("[screenshot] could not create temporary BMP");
     free(row);
@@ -133,7 +134,7 @@ inline bool saveScreenshotBmp(EPaper& epaper, uint32_t width, uint32_t height,
   }
 
   SD.remove(screenshotPath);
-  if (!SD.rename(temporaryPath, screenshotPath)) {
+  if (!sd_card::renameFile(temporaryPath, screenshotPath)) {
     LOG.println("[screenshot] could not install /screenshot.bmp");
     SD.remove(temporaryPath);
     return false;

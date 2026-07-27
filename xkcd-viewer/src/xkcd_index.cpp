@@ -11,6 +11,7 @@
 
 #include "app_logger.h"
 #include "config.h"
+#include "sd_card.h"
 #include "xkcd_index_pure.h"
 #include "xkcd_manifest_serialize.h"
 
@@ -232,7 +233,7 @@ bool writeJsonlComic(File& file, int number, const StoredMeta& stored) {
 bool persist() {
   const String temporary = String(config::CACHE_INDEX) + ".part";
   SD.remove(temporary);
-  File file = SD.open(temporary, FILE_WRITE);
+  File file = sd_card::openForWrite(temporary);
   if (!file) return false;
 
   bool ok = writeJsonlHeader(file);
@@ -247,7 +248,7 @@ bool persist() {
   }
 
   SD.remove(config::CACHE_INDEX);
-  if (!SD.rename(temporary, config::CACHE_INDEX)) {
+  if (!sd_card::renameFile(temporary, config::CACHE_INDEX)) {
     SD.remove(temporary);
     return false;
   }
@@ -264,7 +265,7 @@ bool load() {
   // v4 .json (single-doc) is superseded; drop it so it never shadows
   // the new .jsonl file if the SD card still has both.
   SD.remove(config::CACHE_INDEX_LEGACY_JSON);
-  File file = SD.open(config::CACHE_INDEX, FILE_READ);
+  File file = sd_card::openForRead(config::CACHE_INDEX);
   if (!file) {
     LOG.println("[cache] comic manifest is missing");
     return false;

@@ -322,7 +322,7 @@ bool photoPathAt(uint32_t ordinal, String& path) {
 }
 
 bool renderPreparedBmp(const String& path) {
-  File file = SD.open(path, FILE_READ);
+  File file = sd_card::openForRead(path);
   if (!file) return false;
 
   uint8_t fileHeader[14] = {};
