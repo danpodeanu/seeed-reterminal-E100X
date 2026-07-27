@@ -314,8 +314,16 @@ static void applySmoothFont(int size, const GFXfont* fallback) {
     return;
   }
   epaper.setFreeFont(nullptr);
-  epaper.loadFont(String("sans_bold_") + size, SD);
+  const uint32_t t0 = millis();
+  // TFT_eSPI::loadFont builds "/" + name + ".vlw" internally, so pass
+  // the subdir as part of the name to get "/fonts/sans_bold_XX.vlw".
+  epaper.loadFont(String("fonts/sans_bold_") + size, SD);
   g_currentSmoothSize = size;
+  LOG.printf("[font] loaded sans_bold_%d in %lu ms (yAdvance=%u ascent=%u descent=%u)\n",
+             size, (unsigned long)(millis() - t0),
+             (unsigned)epaper.gFont.yAdvance,
+             (unsigned)epaper.gFont.ascent,
+             (unsigned)epaper.gFont.descent);
 }
 
 void selectStatusFont() {
@@ -886,7 +894,7 @@ bool acquireComic(bool networkAvailable, Comic& comic, RgbImage& image,
   }
 
   for (uint8_t attempt = 0; attempt < config::MAX_COMIC_ATTEMPTS; ++attempt) {
-    const int number = 1647;  // HACK: pin to a Unicode comic for smooth-font testing
+    const int number = pickRandomCachedNumber();
     if (number <= 0 || number == 404) continue;
     LOG.printf("[cache] random local attempt %u: #%d\n", attempt + 1, number);
     if (loadUsableComic(number, false, comic, image, layout)) return true;
