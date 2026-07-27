@@ -169,7 +169,16 @@ static void rememberSmoothFontSizeVerified(int size) {
 
 static bool smoothFontFileExists(int size) {
   if (!sdReady) return false;
-  return sd_card::fileExists(String("/fonts/sans_bold_") + size + ".vlw");
+  const String path = String("/fonts/sans_bold_") + size + ".vlw";
+  // SD.open() over SPI is not perfectly reliable on the reTerminal (the
+  // e-paper shares the bus and the timing after Wi-Fi shutdown has been
+  // observed to make a single probe return false on a file that is
+  // actually present). Retry a few times before believing "missing".
+  for (int attempt = 0; attempt < 3; ++attempt) {
+    if (sd_card::fileExists(path)) return true;
+    delay(20);
+  }
+  return false;
 }
 
 static void unloadSmoothFontIfLoaded() {
@@ -196,9 +205,12 @@ static void applySmoothFont(int size, const GFXfont* fallback) {
     g_currentSmoothSize = 0;
   }
   if (!smoothFontSizeVerified(size) && !smoothFontFileExists(size)) {
-    LOG.printf("[font] /fonts/sans_bold_%d.vlw missing; falling back to GFX font\n",
+    LOG.printf("[font] /fonts/sans_bold_%d.vlw probe failed; falling back to GFX font for this call\n",
                size);
-    g_smoothFontsUnavailable = true;
+    // Do NOT set g_smoothFontsUnavailable: a probe miss on the SPI SD is
+    // often transient. Latching it here converts one SD hiccup into
+    // "the whole boot renders without Unicode", which is much worse
+    // than a one-frame fallback. Later calls will retry the probe.
     epaper.setFreeFont(fallback);
     return;
   }
