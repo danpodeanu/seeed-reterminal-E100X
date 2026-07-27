@@ -12,6 +12,7 @@
 #include "app_logger.h"
 #include "config.h"
 #include "xkcd_index_pure.h"
+#include "xkcd_manifest_serialize.h"
 
 namespace xkcd_index {
 namespace {
@@ -212,24 +213,18 @@ namespace {
 // file. The whole file never exists as a single in-memory document,
 // so persist() is O(1) memory in the number of comics.
 bool writeJsonlHeader(File& file) {
-  JsonDocument doc;
-  doc["v"] = config::CACHE_INDEX_VERSION;
-  if (g_latest > 0) doc["l"] = g_latest;
-  JsonArray skipArray = doc["s"].to<JsonArray>();
-  for (const int n : g_skips) skipArray.add(n);
-  if (serializeJson(doc, file) == 0) return false;
-  return file.print('\n') == 1;
+  std::vector<int> skips(g_skips.begin(), g_skips.end());
+  const std::string line = xkcd_manifest::buildJsonlHeader(
+      config::CACHE_INDEX_VERSION, g_latest, skips);
+  return file.write(reinterpret_cast<const uint8_t*>(line.data()),
+                    line.size()) == line.size();
 }
 
 bool writeJsonlComic(File& file, int number, const StoredMeta& stored) {
-  JsonDocument doc;
-  doc["n"] = number;
-  doc["t"] = stored.title;
-  doc["a"] = stored.alt;
-  doc["e"] = stored.extension;
-  doc["u"] = stored.url;
-  if (serializeJson(doc, file) == 0) return false;
-  return file.print('\n') == 1;
+  const std::string line = xkcd_manifest::buildJsonlComic(
+      number, stored.title, stored.alt, stored.extension, stored.url);
+  return file.write(reinterpret_cast<const uint8_t*>(line.data()),
+                    line.size()) == line.size();
 }
 
 }  // namespace

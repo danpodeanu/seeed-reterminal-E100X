@@ -12,6 +12,7 @@
 #include "text_render_pure.h"
 #include "xkcd_cache_schema.h"
 #include "xkcd_index_pure.h"
+#include "xkcd_manifest_serialize.h"
 
 void setUp() {}
 void tearDown() {}
@@ -415,6 +416,137 @@ void test_display_text_drops_4byte_utf8_sequences() {
   TEST_ASSERT_EQUAL_STRING("hi caf\xC3\xA9", out.c_str());
 }
 
+// -- xkcd_manifest JSONL round-trip ------------------------------------------
+// Model what persist() emits when addComic() inserts a new entry into
+// an existing cache. The production writer streams one line per record;
+// the tests reconstruct the same stream via the pure builders and check
+// the shape of the manifest.
+
+namespace {
+std::vector<std::string> splitLines(const std::string& blob) {
+  std::vector<std::string> out;
+  size_t start = 0;
+  for (size_t i = 0; i < blob.size(); ++i) {
+    if (blob[i] == '\n') {
+      out.emplace_back(blob.substr(start, i - start));
+      start = i + 1;
+    }
+  }
+  if (start < blob.size()) out.emplace_back(blob.substr(start));
+  return out;
+}
+}  // namespace
+
+void test_manifest_header_omits_latest_when_zero_and_includes_skips() {
+  const std::string line = xkcd_manifest::buildJsonlHeader(5, 0, {404, 1608});
+  TEST_ASSERT_TRUE(line.size() > 0);
+  TEST_ASSERT_EQUAL_CHAR('\n', line.back());
+  JsonDocument doc;
+  TEST_ASSERT_EQUAL(DeserializationError::Ok,
+                    deserializeJson(doc, line.c_str(), line.size() - 1).code());
+  TEST_ASSERT_EQUAL_UINT32(5U, doc["v"].as<uint32_t>());
+  TEST_ASSERT_TRUE(doc["l"].isNull());
+  JsonArray skips = doc["s"].as<JsonArray>();
+  TEST_ASSERT_EQUAL(2, static_cast<int>(skips.size()));
+  TEST_ASSERT_EQUAL(404, skips[0].as<int>());
+  TEST_ASSERT_EQUAL(1608, skips[1].as<int>());
+}
+
+void test_manifest_header_emits_latest_when_positive() {
+  const std::string line = xkcd_manifest::buildJsonlHeader(5, 3276, {});
+  JsonDocument doc;
+  TEST_ASSERT_EQUAL(DeserializationError::Ok,
+                    deserializeJson(doc, line.c_str(), line.size() - 1).code());
+  TEST_ASSERT_EQUAL(3276, doc["l"].as<int>());
+  TEST_ASSERT_EQUAL(0, static_cast<int>(doc["s"].as<JsonArray>().size()));
+}
+
+void test_manifest_comic_preserves_all_fields_and_terminates_with_newline() {
+  const std::string line = xkcd_manifest::buildJsonlComic(
+      2493, "Consequences", "Two-by-fours are not that heavy.", ".png",
+      "https://imgs.xkcd.com/comics/consequences.png");
+  TEST_ASSERT_EQUAL_CHAR('\n', line.back());
+  JsonDocument doc;
+  TEST_ASSERT_EQUAL(DeserializationError::Ok,
+                    deserializeJson(doc, line.c_str(), line.size() - 1).code());
+  TEST_ASSERT_EQUAL(2493, doc["n"].as<int>());
+  TEST_ASSERT_EQUAL_STRING("Consequences", doc["t"].as<const char*>());
+  TEST_ASSERT_EQUAL_STRING("Two-by-fours are not that heavy.",
+                           doc["a"].as<const char*>());
+  TEST_ASSERT_EQUAL_STRING(".png", doc["e"].as<const char*>());
+  TEST_ASSERT_EQUAL_STRING("https://imgs.xkcd.com/comics/consequences.png",
+                           doc["u"].as<const char*>());
+}
+
+void test_manifest_comic_serializes_null_field_pointers_as_empty_strings() {
+  // StoredMeta fields are const char* and can legitimately point at a
+  // shared empty-string constant. Passing raw nullptr should also work
+  // so the persist path stays defensive against future churn.
+  const std::string line =
+      xkcd_manifest::buildJsonlComic(42, nullptr, nullptr, nullptr, nullptr);
+  JsonDocument doc;
+  TEST_ASSERT_EQUAL(DeserializationError::Ok,
+                    deserializeJson(doc, line.c_str(), line.size() - 1).code());
+  TEST_ASSERT_EQUAL(42, doc["n"].as<int>());
+  TEST_ASSERT_EQUAL_STRING("", doc["t"].as<const char*>());
+  TEST_ASSERT_EQUAL_STRING("", doc["a"].as<const char*>());
+  TEST_ASSERT_EQUAL_STRING("", doc["e"].as<const char*>());
+  TEST_ASSERT_EQUAL_STRING("", doc["u"].as<const char*>());
+}
+
+void test_manifest_comic_escapes_special_json_characters() {
+  // Titles occasionally contain quotes and backslashes ("Star Wars \"Ep IV\"").
+  // The serializer must escape them so the resulting line is still valid JSON.
+  const std::string line = xkcd_manifest::buildJsonlComic(
+      1, "back\\slash \"quote\"", "line\nfeed", ".png", "http://x/y");
+  JsonDocument doc;
+  TEST_ASSERT_EQUAL(DeserializationError::Ok,
+                    deserializeJson(doc, line.c_str(), line.size() - 1).code());
+  TEST_ASSERT_EQUAL_STRING("back\\slash \"quote\"",
+                           doc["t"].as<const char*>());
+  TEST_ASSERT_EQUAL_STRING("line\nfeed", doc["a"].as<const char*>());
+}
+
+void test_manifest_append_new_comic_produces_expected_jsonl_stream() {
+  // Simulate what persist() writes when addComic() has just recorded a
+  // freshly downloaded comic on top of a warmed-up cache. Concatenating
+  // the header + each comic line reproduces the on-disk format that
+  // load() will consume on the next boot.
+  std::string blob;
+  blob += xkcd_manifest::buildJsonlHeader(5, 4, {404});
+  blob += xkcd_manifest::buildJsonlComic(1, "Barrel - Part 1", "Don't we all.",
+                                         ".jpg", "https://x/1.jpg");
+  blob += xkcd_manifest::buildJsonlComic(2, "Petit Trees", "'Tis a beautiful.",
+                                         ".jpg", "https://x/2.jpg");
+  blob += xkcd_manifest::buildJsonlComic(3, "Island", "Watch out.", ".jpg",
+                                         "https://x/3.jpg");
+  // The "new" line -- what addComic(4) + persist() appends on the wire.
+  blob += xkcd_manifest::buildJsonlComic(4, "Landscape", "Mountains ahoy.",
+                                         ".png", "https://x/4.png");
+
+  const std::vector<std::string> lines = splitLines(blob);
+  TEST_ASSERT_EQUAL(5, static_cast<int>(lines.size()));
+  // Header must sit on line 0 and carry the new latest=4.
+  JsonDocument header;
+  TEST_ASSERT_EQUAL(DeserializationError::Ok,
+                    deserializeJson(header, lines[0]).code());
+  TEST_ASSERT_EQUAL(5, header["v"].as<int>());
+  TEST_ASSERT_EQUAL(4, header["l"].as<int>());
+  TEST_ASSERT_EQUAL(1, static_cast<int>(header["s"].as<JsonArray>().size()));
+  // Comics 1..4 must appear in order, and the last one is the freshly
+  // downloaded #4 with the .png extension.
+  for (int i = 0; i < 4; ++i) {
+    JsonDocument doc;
+    TEST_ASSERT_EQUAL(DeserializationError::Ok,
+                      deserializeJson(doc, lines[i + 1]).code());
+    TEST_ASSERT_EQUAL(i + 1, doc["n"].as<int>());
+  }
+  JsonDocument tail;
+  deserializeJson(tail, lines[4]);
+  TEST_ASSERT_EQUAL_STRING(".png", tail["e"].as<const char*>());
+  TEST_ASSERT_EQUAL_STRING("Landscape", tail["t"].as<const char*>());
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_startup_beep_only_for_cold_boot_and_button_wake);
@@ -443,5 +575,11 @@ int main(int, char**) {
   RUN_TEST(test_cache_schema_wrap_preserves_leading_whitespace);
   RUN_TEST(test_cache_schema_wrap_passthrough_when_not_object);
   RUN_TEST(test_reused_json_doc_dangles_pool_but_arena_copy_survives);
+  RUN_TEST(test_manifest_header_omits_latest_when_zero_and_includes_skips);
+  RUN_TEST(test_manifest_header_emits_latest_when_positive);
+  RUN_TEST(test_manifest_comic_preserves_all_fields_and_terminates_with_newline);
+  RUN_TEST(test_manifest_comic_serializes_null_field_pointers_as_empty_strings);
+  RUN_TEST(test_manifest_comic_escapes_special_json_characters);
+  RUN_TEST(test_manifest_append_new_comic_produces_expected_jsonl_stream);
   return UNITY_END();
 }
