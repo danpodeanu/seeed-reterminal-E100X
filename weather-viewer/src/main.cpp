@@ -700,12 +700,13 @@ void drawForecastCard(const DailyForecast& day, uint8_t index,
       String(static_cast<int>(roundf(day.minimumC))) + "C  /  " +
       String(static_cast<int>(roundf(day.maximumC))) + "C";
   epaper.drawString(range, centerX, top + config::ui(107), 1);
-  selectSmallLightFont();
+  epaper.setTextColor(PANEL_MUTED, PANEL_WHITE, true);
   const String extra =
       "Rain " + String(day.precipitationProbability) + "%   UV " +
       String(day.uvMaximum, 1) + " " + uvDescription(day.uvMaximum);
   epaper.drawString(text_render::ellipsize(epaper, extra, width - config::ui(12)), centerX,
                     top + config::ui(130), 1);
+  epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, true);
 }
 
 void renderLandscape(const WeatherData& weather) {
@@ -729,14 +730,14 @@ void renderLandscape(const WeatherData& weather) {
 
   drawLargeTemperature(weather.temperatureC, temperatureX,
                        mainCenterY - config::ui(13));
+  // "Outdoor temperature" is dropped -- the giant number next to the
+  // weather icon already communicates the same thing.  The condition
+  // name takes its slot in bold black instead.
   epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, true);
   epaper.setTextDatum(TC_DATUM);
   selectSmallFont();
-  epaper.drawString("Outdoor temperature", temperatureX,
-                    mainCenterY + config::ui(57), 1);
-  selectSmallLightFont();
   epaper.drawString(app_logic::conditionName(weather.weatherCode), temperatureX,
-                    mainCenterY + config::ui(82), 1);
+                    mainCenterY + config::ui(57), 1);
 
   epaper.drawFastVLine(config::PANEL_WIDTH * 66 / 100,
                        mainTop + config::ui(12),
@@ -746,26 +747,33 @@ void renderLandscape(const WeatherData& weather) {
   epaper.drawString(
       String(static_cast<int>(roundf(weather.apparentC))) + "C",
       detailX, mainCenterY - config::ui(66), 1);
+  // Secondary captions and secondary detail lines: bold but drawn in a
+  // muted grey so hierarchy comes from tone, not weight.  Keeps the
+  // page from feeling shouty without dropping to the anaemic-looking
+  // FreeSans Regular bitmap face.
+  epaper.setTextColor(PANEL_MUTED, PANEL_WHITE, true);
   selectSmallFont();
   epaper.drawString("Feels like", detailX,
                     mainCenterY - config::ui(40), 1);
 
+  epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, true);
   selectMediumFont();
   epaper.drawString(
       String(static_cast<int>(roundf(weather.humidityPct))) + "%",
       detailX, mainCenterY + config::ui(5), 1);
+  epaper.setTextColor(PANEL_MUTED, PANEL_WHITE, true);
   selectSmallFont();
   epaper.drawString("Outdoor humidity", detailX,
                     mainCenterY + config::ui(31), 1);
 
   const int detailWidth = config::PANEL_WIDTH * 31 / 100;
-  selectSmallLightFont();
   epaper.drawString(
       text_render::ellipsize(epaper, rainSummary(weather), detailWidth),
       detailX, mainCenterY + config::ui(67), 1);
   epaper.drawString(
       "Wind " + String(weather.windKmh, 0) + " km/h", detailX,
       mainCenterY + config::ui(101), 1);
+  epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, true);
 
   epaper.drawFastHLine(config::ui(10), mainBottom,
                        config::PANEL_WIDTH - config::ui(20), PANEL_MUTED);
