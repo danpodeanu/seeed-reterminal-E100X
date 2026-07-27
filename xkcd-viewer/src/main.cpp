@@ -1034,7 +1034,7 @@ bool renderComic(const Comic& comic, RgbImage& image, ImageLayout layout) {
                       !PANEL_STATUS_DITHERED);
   epaper.setTextDatum(MC_DATUM);
   int footerY =
-      (layout.footerDividerY + config::FOOTER_BOTTOM) / 2 -
+      (layout.footerDividerY + config::PANEL_HEIGHT) / 2 -
       (layout.footerLineCount - 1) * layout.footerLineHeightPx / 2;
   const int footerYAdjust = smoothCenterYAdjust();
   for (int i = 0; i < layout.footerLineCount; ++i) {
