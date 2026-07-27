@@ -19,8 +19,8 @@ details.
 
 | Application | Description | Status |
 | --- | --- | --- |
-| [XKCD Viewer](xkcd-viewer/) | A battery-powered random XKCD display with model-aware scaling, optional SD caching, environmental readings, and deep sleep. | Available |
-| [Weather Viewer](weather-viewer/) | A low-power current-conditions and three-day forecast display using Open-Meteo, local environmental readings, and deep sleep. | Available |
+| [XKCD Viewer](xkcd-viewer/) | A battery-powered random XKCD display with model-aware scaling, optional SD caching, Unicode titles, environmental readings, and deep sleep. | Available |
+| [Weather Viewer](weather-viewer/) | A low-power current-conditions and three-day forecast display using QWeather or Open-Meteo, with local environmental readings, severe-weather alerts, Unicode location names, and deep sleep. | Available |
 | [Photo Viewer](photo-viewer/) | A private, SD-card photo frame with panel-native preprocessing, full model-specific color, quiet hours, daily time sync, and deep sleep. | Available |
 
 ## XKCD Viewer example
