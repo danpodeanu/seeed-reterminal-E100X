@@ -3,6 +3,10 @@
 #include <Arduino.h>
 #include <stdint.h>
 
+#include <string>
+
+#include "text_render_pure.h"
+
 // Text rendering helpers shared by every viewer app. Kept template-only
 // so common/ doesn't need to depend on Seeed_GFX / TFT_eSPI headers -
 // the caller's `EPaper` type just has to expose the textWidth() and
@@ -11,7 +15,11 @@ namespace text_render {
 
 // Truncate `text` so it fits inside `maxWidth` pixels when rendered
 // with the given TFT_eSPI font id, appending "..." when a truncation
-// happens. When the text already fits it is returned unchanged.
+// happens. When the text already fits it is returned unchanged.  Bytes
+// are removed one at a time from the tail, but UTF-8 continuation
+// bytes (0x80-0xBF) are always removed together with their lead byte
+// so we never leave a truncated codepoint dangling in front of the
+// "..." suffix.
 template <typename EPaper>
 inline String ellipsize(EPaper& epaper, String text, int maxWidth,
                         uint8_t font = 1) {
@@ -20,44 +28,32 @@ inline String ellipsize(EPaper& epaper, String text, int maxWidth,
   while (text.length() > 1 &&
          epaper.textWidth(text + suffix, font) > maxWidth) {
     text.remove(text.length() - 1);
+    // Also drop trailing UTF-8 continuation bytes so the string
+    // never ends mid-codepoint.
+    while (text.length() > 0 &&
+           (static_cast<uint8_t>(text[text.length() - 1]) & 0xC0) == 0x80) {
+      text.remove(text.length() - 1);
+    }
   }
   text.trim();
   return text + suffix;
 }
 
-// Normalize an arbitrary Unicode string down to printable ASCII so the
-// built-in TFT_eSPI fonts (which don't support Latin-1 or UTF-8) render
-// something sensible. HTML entities that appear in xkcd feeds are
-// unescaped; any run of whitespace collapses to a single space; every
-// non-ASCII byte becomes a single '?'.
-inline String displayText(String value) {
-  value.replace("&quot;", "\"");
-  value.replace("&apos;", "'");
-  value.replace("&#39;", "'");
-  value.replace("&lt;", "<");
-  value.replace("&gt;", ">");
-  value.replace("&amp;", "&");
-
-  String ascii;
-  ascii.reserve(value.length());
-  bool lastWasSpace = false;
-  for (size_t i = 0; i < value.length(); ++i) {
-    const uint8_t c = static_cast<uint8_t>(value[i]);
-    if (c >= 32 && c <= 126) {
-      const bool isSpace = c == ' ' || c == '\t' || c == '\r' || c == '\n';
-      if (isSpace) {
-        if (!lastWasSpace) ascii += ' ';
-      } else {
-        ascii += static_cast<char>(c);
-      }
-      lastWasSpace = isSpace;
-    } else if (!lastWasSpace) {
-      ascii += '?';
-      lastWasSpace = false;
-    }
-  }
-  ascii.trim();
-  return ascii;
+// Normalize an arbitrary Unicode string for on-panel rendering:
+// unescape HTML entities that appear in xkcd/weather feeds, strip
+// control bytes, collapse whitespace runs, and trim both ends.  Valid
+// UTF-8 sequences are preserved so a loaded smooth font (.vlw) can
+// render Unicode glyphs; the built-in TFT_eSPI bitmap fonts still ignore
+// bytes >= 0x80, so those callers see a single glyph slot per multi-byte
+// codepoint - but this is a strict improvement over the previous
+// "replace every non-ASCII byte with '?'" behavior.
+//
+// The byte-level logic lives in text_render_pure.h so the native test
+// env can exercise it without pulling in Arduino headers.
+inline String displayText(const String& value) {
+  const std::string normalized = text_render::pure::displayText(
+      std::string(value.c_str(), value.length()));
+  return String(normalized.c_str());
 }
 
 // Word-wrap `source` into `lines[0..maxLines)` so each line fits in

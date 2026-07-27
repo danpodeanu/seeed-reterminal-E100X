@@ -38,7 +38,7 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 
 LATEST_URL = "https://xkcd.com/info.0.json"
@@ -55,6 +55,11 @@ CACHE_INDEX_LEGACY_TXT = "index.txt"
 CACHE_INDEX_LEGACY_MAGIC = "XKCD_CACHE_INDEX_V2"
 CACHE_INDEX_LEGACY_LATEST = "latest.json"
 CACHE_INDEX_VERSION = 5
+
+# Smooth-font sizes the firmware looks for at /fonts/xkcd_<size>.vlw.
+# Must stay in sync with SMOOTH_FONT_TITLE_PX / SMOOTH_FONT_FOOTER_PX in main.cpp.
+FONT_SIZES_PX = (13, 17, 25, 33)
+DEFAULT_TTF = Path(__file__).parent / "fonts" / "DejaVuSans-Bold.ttf"
 
 
 class DownloadError(RuntimeError):
@@ -132,6 +137,24 @@ def parse_args() -> argparse.Namespace:
         "--force",
         action="store_true",
         help="redownload files that already pass validation",
+    )
+    parser.add_argument(
+        "--with-fonts",
+        action="store_true",
+        help=(
+            "also generate /fonts/xkcd_<size>.vlw smooth-font files from "
+            "tools/fonts/DejaVuSans-Bold.ttf. Required for on-device UTF-8 "
+            "rendering; safe to omit if the fonts are already on the card."
+        ),
+    )
+    parser.add_argument(
+        "--fonts-ttf",
+        type=Path,
+        default=DEFAULT_TTF,
+        help=(
+            "TTF/OTF source for --with-fonts (default: "
+            "tools/fonts/DejaVuSans-Bold.ttf)"
+        ),
     )
     args = parser.parse_args()
 
@@ -629,6 +652,28 @@ def load_latest(cache_dir: Path, timeout: float, retries: int,
         ) from live_error
 
 
+def install_fonts(sd_root: Path, ttf_path: Path, sizes: Iterable[int] = FONT_SIZES_PX) -> None:
+    """Generate /fonts/xkcd_<size>.vlw on the SD card from a TTF.
+
+    Imports build_vlw() from make_vlw.py so a Pillow/fontTools install is
+    still required, but no external tool run.
+    """
+    from make_vlw import build_vlw  # local import: avoid Pillow dep unless requested
+
+    if not ttf_path.is_file():
+        raise FileNotFoundError(f"font source not found: {ttf_path}")
+    fonts_dir = sd_root / "fonts"
+    fonts_dir.mkdir(exist_ok=True)
+    for size in sizes:
+        out_path = fonts_dir / f"xkcd_{size}.vlw"
+        print(f"Fonts:     building {out_path.name} from {ttf_path.name}...", flush=True)
+        data = build_vlw(ttf_path, size)
+        tmp = out_path.with_suffix(out_path.suffix + ".tmp")
+        tmp.write_bytes(data)
+        tmp.replace(out_path)
+        print(f"           wrote {out_path} ({len(data):,} bytes)")
+
+
 def main() -> int:
     args = parse_args()
     sd_root = args.sd_root.expanduser().resolve()
@@ -647,6 +692,13 @@ def main() -> int:
     print(f"SD root:   {sd_root}")
     print(f"Cache:     {cache_dir}")
     print(f"Free space: {free_bytes / (1024 ** 3):.2f} GiB")
+
+    if args.with_fonts:
+        try:
+            install_fonts(sd_root, args.fonts_ttf.expanduser().resolve())
+        except (FileNotFoundError, OSError, ImportError) as exc:
+            print(f"Error: font install failed: {exc}", file=sys.stderr)
+            return 2
 
     manifest = load_manifest(cache_dir)
     if args.force:

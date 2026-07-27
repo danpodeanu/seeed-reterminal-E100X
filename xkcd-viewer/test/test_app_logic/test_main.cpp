@@ -9,6 +9,7 @@
 #include <ArduinoJson.h>
 
 #include "app_logic.h"
+#include "text_render_pure.h"
 #include "xkcd_cache_schema.h"
 #include "xkcd_index_pure.h"
 
@@ -359,9 +360,51 @@ void test_reused_json_doc_dangles_pool_but_arena_copy_survives() {
   }
 }
 
+void test_display_text_preserves_utf8_and_normalizes() {
+  // "Café — piñata" round-trips (é, em-dash, ñ are all multi-byte).
+  // Note the "" boundaries: C++ hex escapes are greedy so \xB1a would
+  // otherwise be interpreted as one 3-digit hex value.
+  const std::string in =
+      "  Caf\xC3\xA9""  \xE2\x80\x94""   pi\xC3\xB1""ata   ";
+  const std::string out = text_render::pure::displayText(in);
+  TEST_ASSERT_EQUAL_STRING(
+      "Caf\xC3\xA9"" \xE2\x80\x94"" pi\xC3\xB1""ata", out.c_str());
+}
+
+void test_display_text_strips_control_bytes() {
+  // C0 controls (excluding whitespace) and DEL are removed silently;
+  // tab/newline/CR collapse to a single space between words.
+  const std::string in =
+      "line\x01\x02""one\ttwo\r\nthree\x7F""done";
+  const std::string out = text_render::pure::displayText(in);
+  TEST_ASSERT_EQUAL_STRING("lineone two threedone", out.c_str());
+}
+
+void test_display_text_html_unescape() {
+  const std::string in =
+      "Ren\xC3\xA9"" &amp; C&#39;t &quot;quoted&quot; &lt;tag&gt;";
+  const std::string out = text_render::pure::displayText(in);
+  TEST_ASSERT_EQUAL_STRING(
+      "Ren\xC3\xA9"" & C't \"quoted\" <tag>", out.c_str());
+}
+
+void test_display_text_rejects_malformed_utf8() {
+  // 0xC3 is a valid 2-byte lead but must be followed by a continuation
+  // byte (0x80-0xBF). Here it is followed by 'x' (0x78), so the lead
+  // byte must be dropped rather than emitted verbatim and 'x' must
+  // survive. Similarly the isolated 0xFF is dropped.
+  const std::string in = "bad\xC3""xnext\xFF""end";
+  const std::string out = text_render::pure::displayText(in);
+  TEST_ASSERT_EQUAL_STRING("badxnextend", out.c_str());
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_startup_beep_only_for_cold_boot_and_button_wake);
+  RUN_TEST(test_display_text_preserves_utf8_and_normalizes);
+  RUN_TEST(test_display_text_strips_control_bytes);
+  RUN_TEST(test_display_text_html_unescape);
+  RUN_TEST(test_display_text_rejects_malformed_utf8);
   RUN_TEST(test_quiet_hours_boundaries);
   RUN_TEST(test_quiet_hours_can_wrap_midnight);
   RUN_TEST(test_refresh_due_handles_boundaries_and_clock_rollback);
