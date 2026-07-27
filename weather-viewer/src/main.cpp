@@ -108,6 +108,19 @@ void selectSmallFont() {
 #endif
 }
 
+void selectSmallLightFont() {
+  // Non-bold sibling of selectSmallFont for secondary labels that we
+  // don't want to shout (e.g. "Overcast", forecast card details).
+  epaper.setTextSize(1);
+#if RETERMINAL_MODEL == 1003
+  epaper.setFreeFont(&FreeSans18pt7b);
+#elif RETERMINAL_MODEL == 1004
+  epaper.setFreeFont(&FreeSans12pt7b);
+#else
+  epaper.setFreeFont(&FreeSans9pt7b);
+#endif
+}
+
 // Optional smooth-font support for the footer location name (which may
 // contain non-ASCII characters like "München", "São Paulo").  The font
 // files live at /fonts/sans_bold_<size>.vlw on the SD card (shared with
@@ -568,7 +581,13 @@ void drawWeatherIcon(int cx, int cy, int size, int code, bool isDay = true) {
     return;
   }
 
-  drawCloud(cx, cy - size / 8, size);
+  // Only shift the cloud up when precipitation strokes render below
+  // it; for a plain overcast/fog code the cloud stays centered on cy.
+  const bool hasPrecipBelow =
+      (code >= 51 && code <= 67) || (code >= 71 && code <= 77) ||
+      (code >= 80 && code <= 86) || (code >= 95);
+  const int cloudCy = hasPrecipBelow ? cy - size / 8 : cy;
+  drawCloud(cx, cloudCy, size);
   if (code == 45 || code == 48) {
     for (int i = 0; i < 3; ++i) {
       const int y = cy + size / 4 + i * max(3, size / 8);
@@ -673,7 +692,7 @@ void drawForecastCard(const DailyForecast& day, uint8_t index,
   drawWeatherIcon(centerX, top + config::ui(55), iconSize,
                   day.weatherCode, true);
 
-  selectSmallFont();
+  selectSmallLightFont();
   epaper.drawString(
       text_render::ellipsize(epaper, app_logic::conditionName(day.weatherCode), width - config::ui(12)),
       centerX, top + config::ui(83), 1);
@@ -714,6 +733,7 @@ void renderLandscape(const WeatherData& weather) {
   selectSmallFont();
   epaper.drawString("Outdoor temperature", temperatureX,
                     mainCenterY + config::ui(57), 1);
+  selectSmallLightFont();
   epaper.drawString(app_logic::conditionName(weather.weatherCode), temperatureX,
                     mainCenterY + config::ui(82), 1);
 
@@ -738,6 +758,7 @@ void renderLandscape(const WeatherData& weather) {
                     mainCenterY + config::ui(31), 1);
 
   const int detailWidth = config::PANEL_WIDTH * 31 / 100;
+  selectSmallLightFont();
   epaper.drawString(
       text_render::ellipsize(epaper, rainSummary(weather), detailWidth),
       detailX, mainCenterY + config::ui(67), 1);
