@@ -276,11 +276,12 @@ the script reports completion.
 
 ### Unicode titles and alt text (smooth fonts)
 
-Some xkcd titles and alt strings contain non-ASCII characters (e.g. #2912
-uses accents and curly quotes). To render those correctly, the firmware
-loads TFT_eSPI `.vlw` smooth fonts from the SD card at
-`/fonts/sans_bold_<size>.vlw` (sizes 13, 17, 25, 33 px). The pixel sizes are
-selected per model to match the previous GFX FreeFont sizes visually.
+Some xkcd titles and alt strings contain non-ASCII characters (e.g. #1647
+"forté", #2071 uses em dashes and curly quotes). To render those correctly,
+the firmware loads TFT_eSPI `.vlw` smooth fonts from the SD card at
+`/fonts/sans_bold_<size>.vlw` (sizes 18, 24, 36, 48 px). The pixel sizes
+are selected per model so the cap-height matches the previous GFX FreeFont
+sizes.
 
 Generate the fonts with the preloader:
 
@@ -289,13 +290,13 @@ python3 tools/preload_sd.py /Volumes/XKCD --with-fonts
 ```
 
 `--with-fonts` bakes the `.vlw` files from
-`tools/fonts/DejaVuSans-Bold.ttf` (~8.5 MB total, ~5,900 glyphs each);
+`tools/fonts/DejaVuSans-Bold.ttf` (~16.5 MB total, ~5,900 glyphs each);
 `--fonts-ttf <path>` overrides the source. The generator is also
 available as a standalone tool:
 
 ```bash
 python3 tools/make_vlw.py --ttf tools/fonts/DejaVuSans-Bold.ttf \
-    --size 13 --size 17 --size 25 --size 33 \
+    --size 18 --size 24 --size 36 --size 48 \
     --out-dir /Volumes/XKCD/fonts
 ```
 
@@ -312,6 +313,11 @@ DejaVu Sans is licensed under the Bitstream Vera Fonts License; see
 firmware falls back to the built-in GFX FreeFonts for that size — text
 still renders, but any non-ASCII codepoints in the title or alt strings
 are dropped.
+
+**4-byte UTF-8.** Codepoints above U+FFFF (e.g. the math-italic script
+letters in #2912) are dropped from title and alt rendering. TFT_eSPI's
+UTF-8 decoder handles only 1-3 byte sequences, and DejaVu Sans Bold
+covers only a small fraction of that block anyway.
 
 ## Configuration
 
