@@ -16,7 +16,7 @@ namespace config {
 // --- Location ---------------------------------------------------------------
 // Edit these values for the forecast location. QWeather rounds to two
 // decimals; Open-Meteo uses the full precision.
-constexpr char LOCATION_NAME[] = "München";  // HACK: Unicode pin for smooth-font testing
+constexpr char LOCATION_NAME[] = "Suzhou";
 constexpr double LATITUDE = 31.31361;
 constexpr double LONGITUDE = 120.69167;
 
