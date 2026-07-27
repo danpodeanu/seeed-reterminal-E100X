@@ -32,6 +32,7 @@
 #include "sd_card.h"
 #include "text_render.h"
 #include "units.h"
+#include "weather_format.h"
 #include "quiet_hours.h"
 #include "sensors.h"
 #include "pcf8563_utc.h"
@@ -259,9 +260,8 @@ void drawBadges(uint32_t background = PANEL_WHITE,
   epaper.setTextDatum(ML_DATUM);
   String climate = String("--.-") + units::temperatureLabel() + "  --%";
   if (sensorReadings.climateValid) {
-    climate = String(units::temperatureDisplay(sensorReadings.temperatureC), 1) +
-              units::temperatureLabel() + "  " +
-              String(sensorReadings.humidityPct, 0) + "%";
+    climate = weather_format::temperature(sensorReadings.temperatureC, 1) +
+              "  " + String(sensorReadings.humidityPct, 0) + "%";
   }
   epaper.drawString(climate, edgeInset, statusCenterY, 1);
 
@@ -625,6 +625,13 @@ void drawWeatherIcon(int cx, int cy, int size, int code, bool isDay = true) {
 }
 
 void drawLargeTemperature(float celsius, int cx, int cy) {
+  if (!isfinite(celsius)) {
+    epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, true);
+    epaper.setTextDatum(MC_DATUM);
+    selectMediumFont();
+    epaper.drawString(weather_format::kMissing, cx, cy, 1);
+    return;
+  }
   const int rounded = static_cast<int>(roundf(units::temperatureDisplay(celsius)));
   const bool negative = rounded < 0;
   const String value = String(abs(rounded));
@@ -700,17 +707,18 @@ void drawForecastCard(const DailyForecast& day, uint8_t index,
       text_render::ellipsize(epaper, app_logic::conditionName(day.weatherCode), width - config::ui(12)),
       centerX, top + config::ui(83), 1);
   const String range =
-      String(static_cast<int>(roundf(units::temperatureDisplay(day.minimumC)))) + units::temperatureLabel() + "  /  " +
-      String(static_cast<int>(roundf(units::temperatureDisplay(day.maximumC)))) + units::temperatureLabel();
+      weather_format::temperature(day.minimumC) + "  /  " +
+      weather_format::temperature(day.maximumC);
   epaper.drawString(range, centerX, top + config::ui(107), 1);
   if (!config::CLUTTER_FREE_MODE) {
     epaper.setTextColor(PANEL_MUTED, PANEL_WHITE, true);
     String extra;
     if (day.precipitationProbability >= 0) {
-      extra = "Rain " + String(day.precipitationProbability) + "%   UV " +
-              String(day.uvMaximum, 1) + " " + uvDescription(day.uvMaximum);
+      extra = "Rain " + weather_format::integer(day.precipitationProbability) +
+              "%   UV " + weather_format::number(day.uvMaximum, 1) + " " +
+              uvDescription(day.uvMaximum);
     } else {
-      extra = "UV " + String(day.uvMaximum, 1) + " " +
+      extra = "UV " + weather_format::number(day.uvMaximum, 1) + " " +
               uvDescription(day.uvMaximum);
     }
     epaper.drawString(text_render::ellipsize(epaper, extra, width - config::ui(12)), centerX,
@@ -755,7 +763,7 @@ void renderLandscape(const WeatherData& weather) {
   epaper.setTextDatum(MC_DATUM);
   selectMediumFont();
   epaper.drawString(
-      String(static_cast<int>(roundf(units::temperatureDisplay(weather.apparentC)))) + units::temperatureLabel(),
+      weather_format::temperature(weather.apparentC),
       detailX, mainCenterY - config::ui(66), 1);
   // Primary captions ("Feels like", "Outdoor humidity") stay bold black so
   // they read cleanly next to the big numbers.  The rain / wind line below
@@ -766,16 +774,16 @@ void renderLandscape(const WeatherData& weather) {
 
   selectMediumFont();
   epaper.drawString(
-      String(static_cast<int>(roundf(weather.humidityPct))) + "%",
+      isfinite(weather.humidityPct)
+          ? String(static_cast<int>(roundf(weather.humidityPct))) + "%"
+          : String(weather_format::kMissing),
       detailX, mainCenterY + config::ui(5), 1);
   selectSmallFont();
   epaper.drawString("Outdoor humidity", detailX,
                     mainCenterY + config::ui(31), 1);
 
   const int detailWidth = config::PANEL_WIDTH * 31 / 100;
-  const String windLine =
-      "Wind " + String(units::windSpeedDisplay(weather.windKmh), 0) + " " +
-      units::windSpeedLabel();
+  const String windLine = "Wind " + weather_format::windSpeed(weather.windKmh);
   String rainLine = rainSummary(weather);
   const bool rainLineIsWind = rainLine.length() == 0;
   if (rainLineIsWind) {
@@ -836,10 +844,10 @@ void drawPortraitForecastRow(const DailyForecast& day, uint8_t index,
   if (!config::CLUTTER_FREE_MODE) {
     String extra;
     if (day.precipitationProbability >= 0) {
-      extra = "Rain " + String(day.precipitationProbability) + "%  UV " +
-              String(day.uvMaximum, 1);
+      extra = "Rain " + weather_format::integer(day.precipitationProbability) +
+              "%  UV " + weather_format::number(day.uvMaximum, 1);
     } else {
-      extra = "UV " + String(day.uvMaximum, 1);
+      extra = "UV " + weather_format::number(day.uvMaximum, 1);
     }
     epaper.drawString(extra, textX, centerY + config::ui(31), 1);
   }
@@ -847,8 +855,8 @@ void drawPortraitForecastRow(const DailyForecast& day, uint8_t index,
   epaper.setTextDatum(MC_DATUM);
   selectMediumFont();
   epaper.drawString(
-      String(static_cast<int>(roundf(units::temperatureDisplay(day.minimumC)))) + units::temperatureLabel() + " / " +
-          String(static_cast<int>(roundf(units::temperatureDisplay(day.maximumC)))) + units::temperatureLabel(),
+      weather_format::temperature(day.minimumC) + " / " +
+          weather_format::temperature(day.maximumC),
       valuesX, centerY - config::ui(8), 1);
   selectSmallFont();
   epaper.drawString("Low / High", valuesX,
@@ -877,11 +885,9 @@ void renderPortrait(const WeatherData& weather) {
                     mainCenterY + config::ui(72), 1);
   selectSmallFont();
   const String details =
-      "Feels " + String(units::temperatureDisplay(weather.apparentC), 0) +
-      units::temperatureLabel() + "   Humidity " +
-      String(weather.humidityPct, 0) + "%   Wind " +
-      String(units::windSpeedDisplay(weather.windKmh), 0) + " " +
-      units::windSpeedLabel();
+      "Feels " + weather_format::temperature(weather.apparentC) +
+      "   Humidity " + String(weather.humidityPct, 0) + "%   Wind " +
+      weather_format::windSpeed(weather.windKmh);
   epaper.drawString(
       text_render::ellipsize(epaper, details, config::PANEL_WIDTH - config::ui(40)),
       config::PANEL_WIDTH / 2, mainCenterY + config::ui(108), 1);
