@@ -137,6 +137,8 @@ struct ImageLayout {
   int y = 0;
   int footerDividerY = 0;
   int footerLineCount = 0;
+  int footerLineHeightPx = 0;
+  int footerBandPaddingPx = 0;
   String footerLines[config::FOOTER_MAX_LINES];
   float scale = 0.0f;
 };
@@ -770,12 +772,24 @@ ImageLayout calculateLayout(const Comic& comic, int sourceWidth, int sourceHeigh
   layout.footerLineCount = text_render::wrapText(epaper, footer, layout.footerLines,
                                     config::FOOTER_MAX_LINES,
                                     config::PANEL_WIDTH - config::ui(24), 1);
+  // Size the footer band from the smooth font's actual yAdvance so the
+  // strip hugs the text.  Fall back to the compile-time constants when
+  // the smooth font failed to load (GFX path preserves legacy sizing).
+  const int smoothYA = static_cast<int>(epaper.gFont.yAdvance);
+  layout.footerLineHeightPx =
+      (g_currentSmoothSize > 0 && smoothYA > 0)
+          ? smoothYA + config::ui(2)
+          : config::FOOTER_LINE_HEIGHT;
+  layout.footerBandPaddingPx =
+      (g_currentSmoothSize > 0 && smoothYA > 0)
+          ? config::ui(4)
+          : config::FOOTER_VERTICAL_PADDING;
   applyGfxFont(nullptr);
   epaper.setTextFont(2);
   layout.footerDividerY =
       config::FOOTER_BOTTOM -
-      layout.footerLineCount * config::FOOTER_LINE_HEIGHT -
-      2 * config::FOOTER_VERTICAL_PADDING;
+      layout.footerLineCount * layout.footerLineHeightPx -
+      2 * layout.footerBandPaddingPx;
   const int maxWidth = config::PANEL_WIDTH - 2 * config::CONTENT_MARGIN_X;
   const int maxHeight = layout.footerDividerY - config::CONTENT_TOP - config::ui(6);
   // Contain the comic in this model's actual content rectangle. Unlike the
@@ -1029,11 +1043,11 @@ bool renderComic(const Comic& comic, RgbImage& image, ImageLayout layout) {
   epaper.setTextDatum(MC_DATUM);
   int footerY =
       (layout.footerDividerY + config::FOOTER_BOTTOM) / 2 -
-      (layout.footerLineCount - 1) * config::FOOTER_LINE_HEIGHT / 2;
+      (layout.footerLineCount - 1) * layout.footerLineHeightPx / 2;
   const int footerYAdjust = smoothCenterYAdjust();
   for (int i = 0; i < layout.footerLineCount; ++i) {
     epaper.drawString(layout.footerLines[i], config::PANEL_WIDTH / 2, footerY + footerYAdjust, 1);
-    footerY += config::FOOTER_LINE_HEIGHT;
+    footerY += layout.footerLineHeightPx;
   }
   applyGfxFont(nullptr);
   epaper.setTextFont(2);

@@ -838,7 +838,11 @@ void renderPortrait(const WeatherData& weather) {
 
 void renderFooter() {
   const int top = config::PANEL_HEIGHT - config::ui(30);
-  const int labelY = config::PANEL_HEIGHT - config::ui(17);
+  // Anchor the label baseline to the actual band vertical center so the
+  // text visually sits in the middle of the strip (previously the label
+  // was 2 px above centre for a 30 px band, which was noticeable on
+  // solid backgrounds).
+  const int labelY = (top + config::PANEL_HEIGHT) / 2;
   text_render::fillStatusBackground(epaper, top, config::PANEL_HEIGHT - top, config::PANEL_WIDTH, config::PANEL_HEIGHT, PANEL_STATUS_BACKGROUND, PANEL_STATUS_DITHERED, PANEL_STATUS_DITHER_COLOR, PANEL_STATUS_DITHER_THRESHOLD);
   epaper.drawFastHLine(config::ui(10), top,
                        config::PANEL_WIDTH - config::ui(20), PANEL_MUTED);
