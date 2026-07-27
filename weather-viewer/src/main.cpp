@@ -773,11 +773,13 @@ void renderLandscape(const WeatherData& weather) {
   if (rainLineIsWind) {
     rainLine = windLine;
   }
-  epaper.setTextColor(PANEL_MUTED, PANEL_WHITE, true);
+  epaper.setTextColor(rainLineIsWind ? PANEL_BLACK : PANEL_MUTED,
+                      PANEL_WHITE, true);
   epaper.drawString(
       text_render::ellipsize(epaper, rainLine, detailWidth),
       detailX, mainCenterY + config::ui(67), 1);
   if (!rainLineIsWind) {
+    epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, true);
     epaper.drawString(windLine, detailX,
                       mainCenterY + config::ui(101), 1);
   }
