@@ -172,7 +172,7 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
-        "--out-dir", required=True, type=Path,
+        "out_dir", type=Path, metavar="OUT_DIR",
         help="Directory to write <basename>_<size>.vlw files into.",
     )
     parser.add_argument(

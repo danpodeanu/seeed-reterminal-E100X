@@ -295,7 +295,7 @@ each); `--fonts-ttf <path>` overrides the source. The generator is also
 available as a standalone tool at the repo root:
 
 ```bash
-python3 ../tools/fonts/make_vlw.py --out-dir /Volumes/XKCD/fonts
+python3 ../tools/fonts/make_vlw.py /Volumes/XKCD/fonts
 ```
 
 By default the generator uses `../tools/fonts/DejaVuSans-Bold.ttf` and
