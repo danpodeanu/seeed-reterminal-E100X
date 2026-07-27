@@ -454,9 +454,34 @@ String weatherAgeText(const String& isoTime) {
   return age + " ago";
 }
 
+// Full weekday name derived from an ISO "YYYY-MM-DD" date string.  Uses
+// mktime() to let libc normalize the calendar (so leap years / month
+// lengths are handled without a lookup table).  Returns "" for malformed
+// input so callers can fall back to a shorter format.
+String weekdayName(const String& date) {
+  if (date.length() < 10) return "";
+  const int y = date.substring(0, 4).toInt();
+  const int m = date.substring(5, 7).toInt();
+  const int d = date.substring(8, 10).toInt();
+  if (y == 0 || m == 0 || d == 0) return "";
+  struct tm t = {};
+  t.tm_year = y - 1900;
+  t.tm_mon = m - 1;
+  t.tm_mday = d;
+  t.tm_hour = 12;  // avoid DST-boundary weirdness at midnight
+  if (mktime(&t) == static_cast<time_t>(-1)) return "";
+  static const char* kNames[] = {"Sunday",   "Monday", "Tuesday",
+                                 "Wednesday", "Thursday", "Friday",
+                                 "Saturday"};
+  if (t.tm_wday < 0 || t.tm_wday > 6) return "";
+  return String(kNames[t.tm_wday]);
+}
+
 String dayLabel(uint8_t index, const String& date) {
   if (index == 0) return "Today";
   if (index == 1) return "Tomorrow";
+  const String weekday = weekdayName(date);
+  if (weekday.length() > 0) return weekday;
   if (date.length() >= 10) return date.substring(5);
   return "Day " + String(index + 1);
 }
