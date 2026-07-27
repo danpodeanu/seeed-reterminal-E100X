@@ -56,10 +56,10 @@ VLW_VERSION = 11
 
 # Default pixel sizes generated when --size is not passed.  These cover
 # every role across every board in this repo:
-#   xkcd-viewer title/footer: 18/24/36/48 depending on model
+#   xkcd-viewer title/footer: 16/20/30/40 depending on model
 #   weather-viewer footer:    18/24/36 depending on model
 # Kept in sync with SMOOTH_FONT_*_PX in each app's main.cpp.
-DEFAULT_SIZES_PX = (18, 24, 36, 48)
+DEFAULT_SIZES_PX = (16, 20, 30, 40)
 
 # Default TTF source lives alongside this script.
 DEFAULT_TTF = Path(__file__).resolve().parent / "DejaVuSans-Bold.ttf"

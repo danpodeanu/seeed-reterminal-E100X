@@ -279,7 +279,7 @@ the script reports completion.
 Some xkcd titles and alt strings contain non-ASCII characters (e.g. #1647
 "forté", #2071 uses em dashes and curly quotes). To render those correctly,
 the firmware loads TFT_eSPI `.vlw` smooth fonts from the SD card at
-`/fonts/sans_bold_<size>.vlw` (sizes 18, 24, 36, 48 px). The pixel sizes
+`/fonts/sans_bold_<size>.vlw` (sizes 16, 20, 30, 40 px). The pixel sizes
 are selected per model so the cap-height matches the previous GFX FreeFont
 sizes.
 
@@ -290,7 +290,7 @@ python3 tools/preload_sd.py /Volumes/XKCD --with-fonts
 ```
 
 `--with-fonts` bakes the `.vlw` files from
-`../tools/fonts/DejaVuSans-Bold.ttf` (~16.5 MB total, ~5,900 glyphs
+`../tools/fonts/DejaVuSans-Bold.ttf` (~11.5 MB total, ~5,900 glyphs
 each); `--fonts-ttf <path>` overrides the source. The generator is also
 available as a standalone tool at the repo root:
 
@@ -299,7 +299,7 @@ python3 ../tools/fonts/make_vlw.py /Volumes/XKCD/fonts
 ```
 
 By default the generator uses `../tools/fonts/DejaVuSans-Bold.ttf` and
-writes all four sizes the firmware needs (18, 24, 36, 48 px). Pass
+writes all four sizes the firmware needs (16, 20, 30, 40 px). Pass
 `--ttf <path>` or `--size <n>` (repeatable) to override.
 
 Both paths require Pillow and fontTools:
