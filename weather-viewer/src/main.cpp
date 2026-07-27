@@ -700,7 +700,7 @@ void drawForecastCard(const DailyForecast& day, uint8_t index,
       String(static_cast<int>(roundf(day.minimumC))) + "C  /  " +
       String(static_cast<int>(roundf(day.maximumC))) + "C";
   epaper.drawString(range, centerX, top + config::ui(107), 1);
-  epaper.setTextColor(PANEL_MUTED, PANEL_WHITE, true);
+  epaper.setTextColor(PANEL_SECONDARY_TEXT, PANEL_WHITE, true);
   const String extra =
       "Rain " + String(day.precipitationProbability) + "%   UV " +
       String(day.uvMaximum, 1) + " " + uvDescription(day.uvMaximum);
@@ -751,7 +751,7 @@ void renderLandscape(const WeatherData& weather) {
   // muted grey so hierarchy comes from tone, not weight.  Keeps the
   // page from feeling shouty without dropping to the anaemic-looking
   // FreeSans Regular bitmap face.
-  epaper.setTextColor(PANEL_MUTED, PANEL_WHITE, true);
+  epaper.setTextColor(PANEL_SECONDARY_TEXT, PANEL_WHITE, true);
   selectSmallFont();
   epaper.drawString("Feels like", detailX,
                     mainCenterY - config::ui(40), 1);
@@ -761,7 +761,7 @@ void renderLandscape(const WeatherData& weather) {
   epaper.drawString(
       String(static_cast<int>(roundf(weather.humidityPct))) + "%",
       detailX, mainCenterY + config::ui(5), 1);
-  epaper.setTextColor(PANEL_MUTED, PANEL_WHITE, true);
+  epaper.setTextColor(PANEL_SECONDARY_TEXT, PANEL_WHITE, true);
   selectSmallFont();
   epaper.drawString("Outdoor humidity", detailX,
                     mainCenterY + config::ui(31), 1);
