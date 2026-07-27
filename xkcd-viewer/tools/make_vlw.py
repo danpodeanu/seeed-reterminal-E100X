@@ -156,7 +156,7 @@ def parse_args() -> argparse.Namespace:
         help="Directory to write <basename>_<size>.vlw files into.",
     )
     parser.add_argument(
-        "--basename", default="xkcd",
+        "--basename", default="sans_bold",
         help="Filename prefix for the generated .vlw files.",
     )
     return parser.parse_args()

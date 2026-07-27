@@ -279,7 +279,7 @@ the script reports completion.
 Some xkcd titles and alt strings contain non-ASCII characters (e.g. #2912
 uses accents and curly quotes). To render those correctly, the firmware
 loads TFT_eSPI `.vlw` smooth fonts from the SD card at
-`/fonts/xkcd_<size>.vlw` (sizes 13, 17, 25, 33 px). The pixel sizes are
+`/fonts/sans_bold_<size>.vlw` (sizes 13, 17, 25, 33 px). The pixel sizes are
 selected per model to match the previous GFX FreeFont sizes visually.
 
 Generate the fonts with the preloader:
@@ -299,12 +299,16 @@ python3 tools/make_vlw.py --ttf tools/fonts/DejaVuSans-Bold.ttf \
     --out-dir /Volumes/XKCD/fonts
 ```
 
-Both paths require Pillow and fontTools (`pip install pillow fonttools`).
+Both paths require Pillow and fontTools:
+
+```bash
+pip install pillow fonttools
+```
 
 DejaVu Sans is licensed under the Bitstream Vera Fonts License; see
 `tools/fonts/LICENSE.dejavu`.
 
-**Fallback.** If `/fonts/xkcd_<size>.vlw` is missing on the card, the
+**Fallback.** If `/fonts/sans_bold_<size>.vlw` is missing on the card, the
 firmware falls back to the built-in GFX FreeFonts for that size — text
 still renders, but any non-ASCII codepoints in the title or alt strings
 are dropped.
