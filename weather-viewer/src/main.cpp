@@ -728,7 +728,7 @@ void drawHeader(const WeatherData& weather) {
   selectSmallSmoothFont();
   epaper.drawString(
       text_render::ellipsize(epaper, text_render::displayText(heading), config::PANEL_WIDTH - config::ui(380)),
-      config::PANEL_WIDTH / 2, config::ui(27) + smoothCenterYAdjust(), 1);
+      config::PANEL_WIDTH / 2, config::ui(25) + smoothCenterYAdjust(), 1);
   // Unload before returning: the main-body renders that follow use GFX
   // fonts, but TFT_eSPI's drawString stays on the smooth-font path as
   // long as one is loaded, which would shrink e.g. the large outdoor
