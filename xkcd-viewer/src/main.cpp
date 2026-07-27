@@ -275,7 +275,14 @@ static bool g_smoothFontsUnavailable = false;
 
 static bool smoothFontFileExists(int size) {
   if (!sdReady) return false;
-  return SD.exists(String("/fonts/sans_bold_") + size + ".vlw");
+  // SD.exists() is known to spuriously return false on this ESP-IDF SD
+  // stack even for files that were just successfully read on the
+  // previous boot.  Fall back to opening the file, which is authoritative.
+  const String path = String("/fonts/sans_bold_") + size + ".vlw";
+  File probe = SD.open(path, FILE_READ);
+  if (!probe) return false;
+  probe.close();
+  return true;
 }
 
 static void unloadSmoothFontIfLoaded() {
