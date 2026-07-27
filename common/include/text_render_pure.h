@@ -118,6 +118,14 @@ inline std::string displayText(const std::string& input) {
       ++i;
       continue;
     }
+    // Seeed_GFX / TFT_eSPI's decodeUTF8() only handles up to 3-byte (16-bit)
+    // codepoints - 4-byte sequences fall back to per-byte extended-ASCII and
+    // render as several wrong glyphs each.  Drop them so the renderer never
+    // sees them; the alternative would be tofu-style garbled output.
+    if (len == 4) {
+      i += len;
+      continue;
+    }
     out.append(input, i, len);
     lastWasSpace = false;
     i += len;

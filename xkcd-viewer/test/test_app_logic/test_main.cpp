@@ -398,6 +398,23 @@ void test_display_text_rejects_malformed_utf8() {
   TEST_ASSERT_EQUAL_STRING("badxnextend", out.c_str());
 }
 
+void test_display_text_drops_4byte_utf8_sequences() {
+  // Seeed_GFX's decodeUTF8 doesn't decode 4-byte (BMP-out) codepoints.
+  // xkcd #2912's alt is entirely U+1D400-U+1D7FF (math script letters),
+  // encoded as 4-byte UTF-8. Passing them through would render as tofu,
+  // so displayText must strip them. Surrounding ASCII/2/3-byte chars must
+  // survive.
+  // U+1D4D8 (MATH SCRIPT CAPITAL I) = F0 9D 93 98
+  // U+1D4EE (MATH SCRIPT SMALL S)   = F0 9D 93 AE
+  // U+00E9  (LATIN SMALL LETTER E WITH ACUTE) = C3 A9 -- must survive
+  const std::string in =
+      "hi \xF0\x9D\x93\x98\xF0\x9D\x93\xAE caf\xC3\xA9";
+  const std::string out = text_render::pure::displayText(in);
+  // The two 4-byte sequences vanish; leading/inner spaces around the
+  // dropped range collapse to a single space (nice UX).
+  TEST_ASSERT_EQUAL_STRING("hi caf\xC3\xA9", out.c_str());
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_startup_beep_only_for_cold_boot_and_button_wake);
@@ -405,6 +422,7 @@ int main(int, char**) {
   RUN_TEST(test_display_text_strips_control_bytes);
   RUN_TEST(test_display_text_html_unescape);
   RUN_TEST(test_display_text_rejects_malformed_utf8);
+  RUN_TEST(test_display_text_drops_4byte_utf8_sequences);
   RUN_TEST(test_quiet_hours_boundaries);
   RUN_TEST(test_quiet_hours_can_wrap_midnight);
   RUN_TEST(test_refresh_due_handles_boundaries_and_clock_rollback);

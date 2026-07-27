@@ -58,7 +58,9 @@ CACHE_INDEX_VERSION = 5
 
 # Smooth-font sizes the firmware looks for at /fonts/sans_bold_<size>.vlw.
 # Must stay in sync with SMOOTH_FONT_TITLE_PX / SMOOTH_FONT_FOOTER_PX in main.cpp.
-FONT_SIZES_PX = (13, 17, 25, 33)
+# Sizes are PIL/FreeType em-sizes; DejaVu Sans's cap-height is ~0.73x em, so
+# these are picked so cap-heights visually match the FreeSansBold*pt7b fonts.
+FONT_SIZES_PX = (18, 24, 36, 48)
 DEFAULT_TTF = Path(__file__).parent / "fonts" / "DejaVuSans-Bold.ttf"
 
 
