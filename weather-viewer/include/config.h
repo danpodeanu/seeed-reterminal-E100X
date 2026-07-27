@@ -97,6 +97,13 @@ constexpr bool QWEATHER_ALERTS_ENABLED = true;
 // government-alerts endpoint.
 constexpr bool NWS_ALERTS_ENABLED = false;
 
+// --- Presentation -----------------------------------------------------------
+// Clutter-free mode hides the per-day Rain % / UV summary line on each
+// forecast card. The condition name and min/max are still shown; only the
+// small grey secondary line is suppressed. Turn off to bring the numbers
+// back.
+constexpr bool CLUTTER_FREE_MODE = true;
+
 // --- Debug knobs ------------------------------------------------------------
 // Show the diagnostic last-refresh badge in the top-right corner.
 // Handy while iterating on refresh cadence and provider behaviour;

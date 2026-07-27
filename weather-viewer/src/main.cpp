@@ -485,8 +485,9 @@ String rainSummary(const WeatherData& weather) {
     return summary;
   }
   if (weather.rainTimingAvailable) {
-    return "No rain forecast in " +
-           String(config::RAIN_FORECAST_HOURS) + "h";
+    // Hidden entirely in default clutter-free display; the caller falls
+    // back to showing wind on this line instead.
+    return "";
   }
   return "";
 }
@@ -700,13 +701,15 @@ void drawForecastCard(const DailyForecast& day, uint8_t index,
       String(static_cast<int>(roundf(day.minimumC))) + "C  /  " +
       String(static_cast<int>(roundf(day.maximumC))) + "C";
   epaper.drawString(range, centerX, top + config::ui(107), 1);
-  epaper.setTextColor(PANEL_MUTED, PANEL_WHITE, true);
-  const String extra =
-      "Rain " + String(day.precipitationProbability) + "%   UV " +
-      String(day.uvMaximum, 1) + " " + uvDescription(day.uvMaximum);
-  epaper.drawString(text_render::ellipsize(epaper, extra, width - config::ui(12)), centerX,
-                    top + config::ui(130), 1);
-  epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, true);
+  if (!config::CLUTTER_FREE_MODE) {
+    epaper.setTextColor(PANEL_MUTED, PANEL_WHITE, true);
+    const String extra =
+        "Rain " + String(day.precipitationProbability) + "%   UV " +
+        String(day.uvMaximum, 1) + " " + uvDescription(day.uvMaximum);
+    epaper.drawString(text_render::ellipsize(epaper, extra, width - config::ui(12)), centerX,
+                      top + config::ui(130), 1);
+    epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, true);
+  }
 }
 
 void renderLandscape(const WeatherData& weather) {
@@ -735,9 +738,9 @@ void renderLandscape(const WeatherData& weather) {
   // name takes its slot in bold black instead.
   epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, true);
   epaper.setTextDatum(TC_DATUM);
-  selectSmallFont();
+  selectMediumFont();
   epaper.drawString(app_logic::conditionName(weather.weatherCode), temperatureX,
-                    mainCenterY + config::ui(57), 1);
+                    mainCenterY + config::ui(53), 1);
 
   epaper.drawFastVLine(config::PANEL_WIDTH * 66 / 100,
                        mainTop + config::ui(12),
@@ -747,32 +750,37 @@ void renderLandscape(const WeatherData& weather) {
   epaper.drawString(
       String(static_cast<int>(roundf(weather.apparentC))) + "C",
       detailX, mainCenterY - config::ui(66), 1);
-  // Secondary captions and secondary detail lines: bold but drawn in a
-  // muted grey so hierarchy comes from tone, not weight.  Keeps the
-  // page from feeling shouty without dropping to the anaemic-looking
-  // FreeSans Regular bitmap face.
-  epaper.setTextColor(PANEL_MUTED, PANEL_WHITE, true);
+  // Primary captions ("Feels like", "Outdoor humidity") stay bold black so
+  // they read cleanly next to the big numbers.  The rain / wind line below
+  // is the only secondary detail rendered in muted grey.
   selectSmallFont();
   epaper.drawString("Feels like", detailX,
                     mainCenterY - config::ui(40), 1);
 
-  epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, true);
   selectMediumFont();
   epaper.drawString(
       String(static_cast<int>(roundf(weather.humidityPct))) + "%",
       detailX, mainCenterY + config::ui(5), 1);
-  epaper.setTextColor(PANEL_MUTED, PANEL_WHITE, true);
   selectSmallFont();
   epaper.drawString("Outdoor humidity", detailX,
                     mainCenterY + config::ui(31), 1);
 
   const int detailWidth = config::PANEL_WIDTH * 31 / 100;
+  const String windLine =
+      "Wind " + String(weather.windKmh, 0) + " km/h";
+  String rainLine = rainSummary(weather);
+  const bool rainLineIsWind = rainLine.length() == 0;
+  if (rainLineIsWind) {
+    rainLine = windLine;
+  }
+  epaper.setTextColor(PANEL_MUTED, PANEL_WHITE, true);
   epaper.drawString(
-      text_render::ellipsize(epaper, rainSummary(weather), detailWidth),
+      text_render::ellipsize(epaper, rainLine, detailWidth),
       detailX, mainCenterY + config::ui(67), 1);
-  epaper.drawString(
-      "Wind " + String(weather.windKmh, 0) + " km/h", detailX,
-      mainCenterY + config::ui(101), 1);
+  if (!rainLineIsWind) {
+    epaper.drawString(windLine, detailX,
+                      mainCenterY + config::ui(101), 1);
+  }
   epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, true);
 
   epaper.drawFastHLine(config::ui(10), mainBottom,
@@ -815,10 +823,12 @@ void drawPortraitForecastRow(const DailyForecast& day, uint8_t index,
       text_render::ellipsize(epaper, app_logic::conditionName(day.weatherCode),
                 config::PANEL_WIDTH * 36 / 100),
       textX, centerY + config::ui(4), 1);
-  epaper.drawString(
-      "Rain " + String(day.precipitationProbability) + "%  UV " +
-          String(day.uvMaximum, 1),
-      textX, centerY + config::ui(31), 1);
+  if (!config::CLUTTER_FREE_MODE) {
+    epaper.drawString(
+        "Rain " + String(day.precipitationProbability) + "%  UV " +
+            String(day.uvMaximum, 1),
+        textX, centerY + config::ui(31), 1);
+  }
 
   epaper.setTextDatum(MC_DATUM);
   selectMediumFont();
