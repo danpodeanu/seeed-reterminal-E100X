@@ -98,6 +98,22 @@ constexpr bool QWEATHER_ALERTS_ENABLED = true;
 constexpr bool NWS_ALERTS_ENABLED = false;
 
 // --- Presentation -----------------------------------------------------------
+// Display units. Weather providers always report in metric (Celsius, km/h);
+// these knobs choose how numbers are formatted for the panel. Each unit is
+// selected independently so metric-with-Fahrenheit or similar mixes are
+// possible.
+enum class TemperatureUnit {
+  Celsius,
+  Fahrenheit,
+};
+constexpr TemperatureUnit TEMPERATURE_UNIT = TemperatureUnit::Fahrenheit;
+
+enum class WindSpeedUnit {
+  KilometresPerHour,
+  MilesPerHour,
+};
+constexpr WindSpeedUnit WIND_SPEED_UNIT = WindSpeedUnit::MilesPerHour;
+
 // Clutter-free mode hides the per-day Rain % / UV summary line on each
 // forecast card. The condition name and min/max are still shown; only the
 // small grey secondary line is suppressed. Turn off to bring the numbers
