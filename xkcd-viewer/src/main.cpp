@@ -275,14 +275,7 @@ static bool g_smoothFontsUnavailable = false;
 
 static bool smoothFontFileExists(int size) {
   if (!sdReady) return false;
-  // SD.exists() is known to spuriously return false on this ESP-IDF SD
-  // stack even for files that were just successfully read on the
-  // previous boot.  Fall back to opening the file, which is authoritative.
-  const String path = String("/fonts/sans_bold_") + size + ".vlw";
-  File probe = SD.open(path, FILE_READ);
-  if (!probe) return false;
-  probe.close();
-  return true;
+  return sd_card::fileExists(String("/fonts/sans_bold_") + size + ".vlw");
 }
 
 static void unloadSmoothFontIfLoaded() {
@@ -556,23 +549,23 @@ bool parseComic(const String& json, Comic& comic) {
 
 bool imageFileExists(int number, const String& extension) {
   if (!sdReady || number <= 0 || extension.isEmpty()) return false;
-  return SD.exists(String(config::CACHE_DIR) + "/" + number + extension);
+  return sd_card::fileExists(String(config::CACHE_DIR) + "/" + number + extension);
 }
 
 bool comicFullyCached(int number) {
   if (!sdReady || number <= 0 || number == 404) return false;
   const auto* meta = xkcd_index::metadata(number);
   if (meta == nullptr || meta->extension.isEmpty()) return false;
-  return SD.exists(String(config::CACHE_DIR) + "/" + number + meta->extension);
+  return sd_card::fileExists(String(config::CACHE_DIR) + "/" + number + meta->extension);
 }
 
 bool getComic(int number, bool networkAvailable, Comic& comic) {
   if (xkcd_index::skipped(number)) return false;
 
   // Manifest hit: title/alt/extension/url are already in memory.
-  // The SD.exists() check here is the ONLY SD lookup on the cached
+  // The fileExists() check here is the ONLY SD lookup on the cached
   // pick path; the historical per-comic .json read and separate
-  // SD.exists() call are gone.
+  // existence call are gone.
   if (const auto* meta = xkcd_index::metadata(number)) {
     comic.number = number;
     comic.title = meta->title;
@@ -580,7 +573,7 @@ bool getComic(int number, bool networkAvailable, Comic& comic) {
     comic.imageUrl = meta->url;
     comic.imagePath =
         String(config::CACHE_DIR) + "/" + comic.number + meta->extension;
-    if (SD.exists(comic.imagePath)) {
+    if (sd_card::fileExists(comic.imagePath)) {
       LOG.printf("[cache] using %s\n", comic.imagePath.c_str());
       return true;
     }

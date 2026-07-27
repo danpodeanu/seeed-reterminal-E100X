@@ -131,15 +131,7 @@ static bool g_smoothFontsUnavailable = false;
 
 static bool smoothFontFileExists(int size) {
   if (!sdReady) return false;
-  // SD.exists() is known to spuriously return false on this ESP-IDF SD
-  // stack even for files that were just successfully read (observed on
-  // an E1001 wake that had loaded the same .vlw twice on the previous
-  // boot).  Fall back to opening the file, which is authoritative.
-  const String path = String("/fonts/sans_bold_") + size + ".vlw";
-  File probe = SD.open(path, FILE_READ);
-  if (!probe) return false;
-  probe.close();
-  return true;
+  return sd_card::fileExists(String("/fonts/sans_bold_") + size + ".vlw");
 }
 
 static void unloadSmoothFontIfLoaded() {
@@ -355,7 +347,7 @@ bool loadCachedWeather(WeatherData& weather, String& failureReason,
     failureReason = "No SD forecast cache is available";
     return false;
   }
-  if (!SD.exists(config::FORECAST_CACHE)) {
+  if (!sd_card::fileExists(config::FORECAST_CACHE)) {
     failureReason = "No saved forecast is available";
     return false;
   }

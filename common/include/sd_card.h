@@ -21,6 +21,13 @@ bool mount(SPIClass& spi, const char* cacheDir);
 // Returns false on missing files, oversized files, or empty content.
 bool readFile(const String& path, String& out, size_t maxBytes);
 
+// Reliable existence probe.  SD.exists() on the ESP-IDF SD stack is
+// known to return spurious false-negatives even for files that were
+// successfully read on the previous boot (observed with .vlw fonts on
+// E1001), which then poisons cache/miss decisions.  Open+close is
+// authoritative.  Callers should prefer this over `SD.exists()`.
+bool fileExists(const String& path);
+
 // Write `contents` to `path` via a `.part` temporary + rename. Any
 // existing file at `path` is replaced only after the write succeeds and
 // the byte count matches. Returns false on any I/O error.

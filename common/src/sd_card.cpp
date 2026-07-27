@@ -45,7 +45,7 @@ bool mount(SPIClass& spi, const char* cacheDir) {
     digitalWrite(board::PIN_SD_ENABLE, LOW);
     return false;
   }
-  if (!SD.exists(cacheDir) && !SD.mkdir(cacheDir)) {
+  if (!fileExists(cacheDir) && !SD.mkdir(cacheDir)) {
     LOG.printf("[sd] could not create %s\n", cacheDir);
     SD.end();
     digitalWrite(board::PIN_SD_ENABLE, LOW);
@@ -93,6 +93,13 @@ bool writeFileAtomically(const String& path, const String& contents) {
     SD.remove(temporary);
     return false;
   }
+  return true;
+}
+
+bool fileExists(const String& path) {
+  File probe = SD.open(path, FILE_READ);
+  if (!probe) return false;
+  probe.close();
   return true;
 }
 

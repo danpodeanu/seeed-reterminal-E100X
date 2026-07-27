@@ -264,12 +264,11 @@ bool load() {
   // v4 .json (single-doc) is superseded; drop it so it never shadows
   // the new .jsonl file if the SD card still has both.
   SD.remove(config::CACHE_INDEX_LEGACY_JSON);
-  if (!SD.exists(config::CACHE_INDEX)) {
+  File file = SD.open(config::CACHE_INDEX, FILE_READ);
+  if (!file) {
     LOG.println("[cache] comic manifest is missing");
     return false;
   }
-
-  File file = SD.open(config::CACHE_INDEX, FILE_READ);
   if (!file) {
     LOG.println("[cache] comic manifest could not be opened");
     return false;
