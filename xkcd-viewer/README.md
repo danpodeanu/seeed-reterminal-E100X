@@ -295,10 +295,12 @@ each); `--fonts-ttf <path>` overrides the source. The generator is also
 available as a standalone tool at the repo root:
 
 ```bash
-python3 ../tools/fonts/make_vlw.py --ttf ../tools/fonts/DejaVuSans-Bold.ttf \
-    --size 18 --size 24 --size 36 --size 48 \
-    --out-dir /Volumes/XKCD/fonts
+python3 ../tools/fonts/make_vlw.py --out-dir /Volumes/XKCD/fonts
 ```
+
+By default the generator uses `../tools/fonts/DejaVuSans-Bold.ttf` and
+writes all four sizes the firmware needs (18, 24, 36, 48 px). Pass
+`--ttf <path>` or `--size <n>` (repeatable) to override.
 
 Both paths require Pillow and fontTools:
 

@@ -56,15 +56,17 @@ CACHE_INDEX_LEGACY_MAGIC = "XKCD_CACHE_INDEX_V2"
 CACHE_INDEX_LEGACY_LATEST = "latest.json"
 CACHE_INDEX_VERSION = 5
 
-# Smooth-font sizes the firmware looks for at /fonts/sans_bold_<size>.vlw.
-# Must stay in sync with SMOOTH_FONT_TITLE_PX / SMOOTH_FONT_FOOTER_PX in main.cpp.
-# Sizes are PIL/FreeType em-sizes; DejaVu Sans's cap-height is ~0.73x em, so
-# these are picked so cap-heights visually match the FreeSansBold*pt7b fonts.
-FONT_SIZES_PX = (18, 24, 36, 48)
 # Shared /tools/fonts folder at the repo root - used by every app that
 # needs a smooth-font on the SD card.  preload_sd.py lives at
 # <repo>/xkcd-viewer/tools/preload_sd.py, so parents[2] = <repo>.
-DEFAULT_TTF = Path(__file__).resolve().parents[2] / "tools" / "fonts" / "DejaVuSans-Bold.ttf"
+_TOOLS_FONTS_DIR = Path(__file__).resolve().parents[2] / "tools" / "fonts"
+if str(_TOOLS_FONTS_DIR) not in sys.path:
+    sys.path.insert(0, str(_TOOLS_FONTS_DIR))
+# Re-export the canonical size list and TTF path from make_vlw so they
+# can't drift.  make_vlw only depends on the stdlib until build_vlw()
+# is actually called, so this import is cheap.
+from make_vlw import DEFAULT_SIZES_PX as FONT_SIZES_PX  # noqa: E402
+from make_vlw import DEFAULT_TTF  # noqa: E402
 
 
 class DownloadError(RuntimeError):

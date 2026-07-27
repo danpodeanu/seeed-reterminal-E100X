@@ -48,20 +48,33 @@ import sys
 from pathlib import Path
 from typing import Iterable
 
-from PIL import Image, ImageDraw, ImageFont
-from fontTools.ttLib import TTFont
+# PIL and fontTools are only needed when we actually build a font; keep
+# them out of module import so callers that just want the constants
+# (e.g. preload_sd re-exporting DEFAULT_SIZES_PX) don't pay for them.
 
 VLW_VERSION = 11
 
+# Default pixel sizes generated when --size is not passed.  These cover
+# every role across every board in this repo:
+#   xkcd-viewer title/footer: 18/24/36/48 depending on model
+#   weather-viewer footer:    18/24/36 depending on model
+# Kept in sync with SMOOTH_FONT_*_PX in each app's main.cpp.
+DEFAULT_SIZES_PX = (18, 24, 36, 48)
+
+# Default TTF source lives alongside this script.
+DEFAULT_TTF = Path(__file__).resolve().parent / "DejaVuSans-Bold.ttf"
+
 
 def enumerate_codepoints(ttf_path: Path) -> list[int]:
+    from fontTools.ttLib import TTFont
     font = TTFont(str(ttf_path))
     cmap = font.getBestCmap()
     return sorted(cp for cp in cmap.keys() if cp >= 0x20)
 
 
-def render_glyph(font: ImageFont.FreeTypeFont, codepoint: int):
+def render_glyph(font, codepoint: int):
     """Return (bitmap_bytes, width, height, dX, dY, xAdvance) or None."""
+    from PIL import Image, ImageDraw
     ch = chr(codepoint)
 
     try:
@@ -100,6 +113,7 @@ def render_glyph(font: ImageFont.FreeTypeFont, codepoint: int):
 
 
 def build_vlw(ttf_path: Path, pixel_size: int) -> bytes:
+    from PIL import ImageFont
     font = ImageFont.truetype(str(ttf_path), pixel_size)
     ascent_px, descent_px = font.getmetrics()
 
@@ -145,11 +159,17 @@ def build_vlw(ttf_path: Path, pixel_size: int) -> bytes:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--ttf", required=True, type=Path,
-                        help="Path to source TTF/OTF")
     parser.add_argument(
-        "--size", action="append", type=int, required=True,
-        help="Pixel size to render (may be repeated).",
+        "--ttf", type=Path, default=DEFAULT_TTF,
+        help=f"Path to source TTF/OTF (default: {DEFAULT_TTF.name} next to this script).",
+    )
+    parser.add_argument(
+        "--size", action="append", type=int, default=None,
+        help=(
+            "Pixel size to render (may be repeated). Defaults to "
+            f"{', '.join(str(s) for s in DEFAULT_SIZES_PX)} which cover "
+            "every board and app in this repo."
+        ),
     )
     parser.add_argument(
         "--out-dir", required=True, type=Path,
@@ -159,7 +179,10 @@ def parse_args() -> argparse.Namespace:
         "--basename", default="sans_bold",
         help="Filename prefix for the generated .vlw files.",
     )
-    return parser.parse_args()
+    args = parser.parse_args()
+    if args.size is None:
+        args.size = list(DEFAULT_SIZES_PX)
+    return args
 
 
 def main() -> int:
