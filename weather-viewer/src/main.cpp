@@ -692,7 +692,7 @@ void drawForecastCard(const DailyForecast& day, uint8_t index,
   drawWeatherIcon(centerX, top + config::ui(55), iconSize,
                   day.weatherCode, true);
 
-  selectSmallLightFont();
+  selectSmallFont();
   epaper.drawString(
       text_render::ellipsize(epaper, app_logic::conditionName(day.weatherCode), width - config::ui(12)),
       centerX, top + config::ui(83), 1);
@@ -700,6 +700,7 @@ void drawForecastCard(const DailyForecast& day, uint8_t index,
       String(static_cast<int>(roundf(day.minimumC))) + "C  /  " +
       String(static_cast<int>(roundf(day.maximumC))) + "C";
   epaper.drawString(range, centerX, top + config::ui(107), 1);
+  selectSmallLightFont();
   const String extra =
       "Rain " + String(day.precipitationProbability) + "%   UV " +
       String(day.uvMaximum, 1) + " " + uvDescription(day.uvMaximum);
