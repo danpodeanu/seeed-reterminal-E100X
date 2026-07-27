@@ -784,8 +784,8 @@ ImageLayout calculateLayout(const Comic& comic, int sourceWidth, int sourceHeigh
       (g_currentSmoothSize > 0 && smoothYA > 0)
           ? config::ui(4)
           : config::FOOTER_VERTICAL_PADDING;
-  applyGfxFont(nullptr);
-  epaper.setTextFont(2);
+  // Leave the smooth footer font loaded so renderComic can reuse it
+  // without paying another ~2 s SD read for the same size.
   layout.footerDividerY =
       config::FOOTER_BOTTOM -
       layout.footerLineCount * layout.footerLineHeightPx -
@@ -1019,17 +1019,6 @@ bool renderComic(const Comic& comic, RgbImage& image, ImageLayout layout) {
 
   epaper.fillRect(0, 0, config::PANEL_WIDTH, config::ui(44), PANEL_WHITE);
   text_render::fillStatusBackground(epaper, layout.footerDividerY, config::PANEL_HEIGHT - layout.footerDividerY, config::PANEL_WIDTH, config::PANEL_HEIGHT, PANEL_STATUS_BACKGROUND, PANEL_STATUS_DITHERED, PANEL_STATUS_DITHER_COLOR, PANEL_STATUS_DITHER_THRESHOLD);
-  epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, true);
-  epaper.setTextDatum(MC_DATUM);
-  const String heading =
-      quietSleepNotice
-          ? "XKCD #" + String(comic.number) + " - sleeping until " +
-                quiet_hours::endLabel()
-          : "XKCD #" + String(comic.number) + " - " + comic.title;
-  selectTitleFont();
-  epaper.drawString(text_render::ellipsize(epaper, text_render::displayText(heading), config::PANEL_WIDTH - config::ui(380), 1),
-                    config::PANEL_WIDTH / 2, config::ui(24) + smoothCenterYAdjust(), 1);
-  applyGfxFont(nullptr);
   epaper.drawFastHLine(config::CONTENT_MARGIN_X, config::ui(43),
                        config::PANEL_WIDTH - 2 * config::CONTENT_MARGIN_X,
                        PANEL_BLACK);
@@ -1037,6 +1026,9 @@ bool renderComic(const Comic& comic, RgbImage& image, ImageLayout layout) {
                        config::PANEL_WIDTH - 2 * config::CONTENT_MARGIN_X,
                        PANEL_BLACK);
 
+  // Render the footer first: calculateLayout left the footer smooth
+  // font loaded, so this reuses it (no SD reload).  Loading the title
+  // font afterwards costs one load instead of two.
   selectFooterFont();
   epaper.setTextColor(PANEL_BLACK, PANEL_STATUS_BACKGROUND,
                       !PANEL_STATUS_DITHERED);
@@ -1049,6 +1041,17 @@ bool renderComic(const Comic& comic, RgbImage& image, ImageLayout layout) {
     epaper.drawString(layout.footerLines[i], config::PANEL_WIDTH / 2, footerY + footerYAdjust, 1);
     footerY += layout.footerLineHeightPx;
   }
+
+  epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, true);
+  epaper.setTextDatum(MC_DATUM);
+  const String heading =
+      quietSleepNotice
+          ? "XKCD #" + String(comic.number) + " - sleeping until " +
+                quiet_hours::endLabel()
+          : "XKCD #" + String(comic.number) + " - " + comic.title;
+  selectTitleFont();
+  epaper.drawString(text_render::ellipsize(epaper, text_render::displayText(heading), config::PANEL_WIDTH - config::ui(380), 1),
+                    config::PANEL_WIDTH / 2, config::ui(24) + smoothCenterYAdjust(), 1);
   applyGfxFont(nullptr);
   epaper.setTextFont(2);
   String refreshTime;

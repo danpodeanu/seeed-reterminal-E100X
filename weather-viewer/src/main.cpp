@@ -651,7 +651,8 @@ void drawHeader(const WeatherData& weather) {
   epaper.drawString(
       text_render::ellipsize(epaper, text_render::displayText(heading), config::PANEL_WIDTH - config::ui(380)),
       config::PANEL_WIDTH / 2, config::ui(24) + smoothCenterYAdjust(), 1);
-  unloadSmoothFontIfLoaded();
+  // Leave the smooth font loaded: renderFooter uses the same size and
+  // would otherwise pay another ~2 s SD read to load it again.
   epaper.drawFastHLine(config::ui(10), config::ui(44),
                        config::PANEL_WIDTH - config::ui(20), PANEL_BLACK);
 }
