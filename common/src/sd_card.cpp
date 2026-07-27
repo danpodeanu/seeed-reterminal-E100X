@@ -21,7 +21,7 @@ namespace {
 // every SPI SD op as retryable so a single glitch doesn't propagate
 // into "missing font", "cache write dropped", etc.
 constexpr int kSdOpRetries = 3;
-constexpr uint32_t kSdOpRetryDelayMs = 20;
+constexpr uint32_t kSdOpRetryDelayMs = 50;
 
 // Try opening `path` in `mode` up to kSdOpRetries times. Returns the
 // first non-falsy File; the caller inherits ownership (call close()).
