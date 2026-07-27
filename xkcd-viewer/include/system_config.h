@@ -78,9 +78,14 @@ constexpr uint32_t ARCHIVE_MAINTENANCE_DEADLINE_MS = 5UL * 60UL * 1000UL;
 constexpr uint32_t ARCHIVE_CANCEL_POLL_TIMEOUT_MS = 2000;
 
 // --- Legibility and rendering -----------------------------------------------
-// Extremely narrow results can still be illegible on high-resolution panels
-// even when little or no downscaling is required.
-constexpr int MIN_RENDERED_WIDTH = PANEL_WIDTH / 4;
+// A tall comic on a landscape panel is height-limited: even a mild downscale
+// (which MIN_DISPLAY_SCALE happily accepts) leaves the render only a slim
+// vertical strip of the panel width, and the text inside it is too small to
+// read at arm's length. XKCD #3063 ("Planet Definitions", 653x1435) is the
+// canonical offender on E1003. Requiring the rendered image to take at least
+// a third of the panel width rejects those without excluding normal comics,
+// which comfortably fill or overflow the width budget.
+constexpr int MIN_RENDERED_WIDTH = PANEL_WIDTH / 3;
 constexpr float DITHER_GAMMA = 1.0f;
 
 constexpr int CONTENT_MARGIN_X = ui(10);
