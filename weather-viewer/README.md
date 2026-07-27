@@ -69,6 +69,16 @@ constexpr double LONGITUDE = -0.1278;
 The same latitude / longitude are used regardless of which weather
 provider you pick below.
 
+`LOCATION_NAME` may contain non-ASCII characters (e.g. "München",
+"São Paulo") - the footer renders it via a TFT_eSPI `.vlw` smooth font
+loaded from `/fonts/sans_bold_<size>.vlw` on the SD card. Those files
+are shared with the xkcd viewer; generate them once with
+`xkcd-viewer/tools/preload_sd.py --with-fonts` or
+`xkcd-viewer/tools/make_vlw.py`. Without the SD card (or the font
+file), the location name falls back to the built-in GFX FreeSansBold
+font and any non-ASCII bytes render as garbage; the rest of the panel
+is unaffected.
+
 ### Choosing a weather provider
 
 Two providers are supported. Select one in `include/config.h`:

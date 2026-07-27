@@ -7,6 +7,7 @@
 
 #include "app_logic.h"
 #include "local_time.h"
+#include "text_render_pure.h"
 
 #ifdef _WIN32
 static inline struct tm* gmtime_r(const time_t* t, struct tm* out) {
@@ -597,6 +598,31 @@ void test_gzip_deflate_span_rejects_malformed_inputs() {
       truncatedName, sizeof(truncatedName), &start, &length));
 }
 
+// LOCATION_NAME can contain 2-byte UTF-8 (e.g. "München", "São Paulo").
+// displayText must pass those bytes through untouched so a smooth VLW
+// font on the device can render the diacritic glyphs.
+void test_display_text_preserves_utf8_city_names() {
+  TEST_ASSERT_EQUAL_STRING("M\xC3\xBCnchen",
+      text_render::pure::displayText("M\xC3\xBCnchen").c_str());
+  TEST_ASSERT_EQUAL_STRING("S\xC3\xA3o Paulo",
+      text_render::pure::displayText("S\xC3\xA3o Paulo").c_str());
+  TEST_ASSERT_EQUAL_STRING("Z\xC3\xBCrich",
+      text_render::pure::displayText("Z\xC3\xBCrich").c_str());
+  TEST_ASSERT_EQUAL_STRING("Bogot\xC3\xA1",
+      text_render::pure::displayText("Bogot\xC3\xA1").c_str());
+  TEST_ASSERT_EQUAL_STRING("K\xC3\xB8benhavn",
+      text_render::pure::displayText("K\xC3\xB8benhavn").c_str());
+}
+
+// 3-byte UTF-8 (e.g. CJK city names) must survive normalization as well,
+// even though DejaVu Sans Bold doesn't cover most of that range - the
+// on-device fallback simply misses glyphs; it shouldn't corrupt bytes.
+void test_display_text_preserves_3byte_utf8_city_names() {
+  // "Beijing" 北京 - two 3-byte codepoints U+5317 U+4EAC
+  TEST_ASSERT_EQUAL_STRING("\xE5\x8C\x97\xE4\xBA\xAC",
+      text_render::pure::displayText("\xE5\x8C\x97\xE4\xBA\xAC").c_str());
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_startup_beep_only_for_cold_boot_and_button_wake);
@@ -627,5 +653,7 @@ int main(int, char**) {
   RUN_TEST(test_open_meteo_weathercode_to_condition_name);
   RUN_TEST(test_gzip_deflate_span_parses_minimal_and_full_headers);
   RUN_TEST(test_gzip_deflate_span_rejects_malformed_inputs);
+  RUN_TEST(test_display_text_preserves_utf8_city_names);
+  RUN_TEST(test_display_text_preserves_3byte_utf8_city_names);
   return UNITY_END();
 }
