@@ -339,6 +339,22 @@ void selectStatusFont() {
   );
 }
 
+// TFT_eSPI's MC/ML/MR datums center the smooth font's yAdvance box on
+// the requested y, but DejaVu Sans Bold's ascent (~28 at 30px) is
+// much larger than its descent (~8), so the visual cap-center sits a
+// few pixels above the box center.  This helper returns the y offset
+// (in pixels) needed to align the cap-center with the caller's y.
+// Returns 0 when a smooth font is not loaded so GFX callers are
+// unaffected.
+static int smoothCenterYAdjust() {
+  if (g_currentSmoothSize == 0) return 0;
+  const int yA = static_cast<int>(epaper.gFont.yAdvance);
+  const int mA = static_cast<int>(epaper.gFont.maxAscent);
+  const int a  = static_cast<int>(epaper.gFont.ascent);
+  // Approximate cap-height as ascent * 0.78 (DejaVu Sans Bold).
+  return (yA / 2) - mA + (a * 78 / 200);
+}
+
 void selectCacheStatsFont() {
 #if RETERMINAL_MODEL == 1003
   applyGfxFont(&FreeSans9pt7b);
@@ -998,7 +1014,7 @@ bool renderComic(const Comic& comic, RgbImage& image, ImageLayout layout) {
           : "XKCD #" + String(comic.number) + " - " + comic.title;
   selectTitleFont();
   epaper.drawString(text_render::ellipsize(epaper, text_render::displayText(heading), config::PANEL_WIDTH - config::ui(380), 1),
-                    config::PANEL_WIDTH / 2, config::ui(24), 1);
+                    config::PANEL_WIDTH / 2, config::ui(24) + smoothCenterYAdjust(), 1);
   applyGfxFont(nullptr);
   epaper.drawFastHLine(config::CONTENT_MARGIN_X, config::ui(43),
                        config::PANEL_WIDTH - 2 * config::CONTENT_MARGIN_X,
@@ -1014,8 +1030,9 @@ bool renderComic(const Comic& comic, RgbImage& image, ImageLayout layout) {
   int footerY =
       (layout.footerDividerY + config::FOOTER_BOTTOM) / 2 -
       (layout.footerLineCount - 1) * config::FOOTER_LINE_HEIGHT / 2;
+  const int footerYAdjust = smoothCenterYAdjust();
   for (int i = 0; i < layout.footerLineCount; ++i) {
-    epaper.drawString(layout.footerLines[i], config::PANEL_WIDTH / 2, footerY, 1);
+    epaper.drawString(layout.footerLines[i], config::PANEL_WIDTH / 2, footerY + footerYAdjust, 1);
     footerY += config::FOOTER_LINE_HEIGHT;
   }
   applyGfxFont(nullptr);

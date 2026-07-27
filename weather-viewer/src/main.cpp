@@ -186,6 +186,21 @@ void selectSmallSmoothFont() {
   applySmoothFont(SMOOTH_FONT_SMALL_PX, SMALL_SMOOTH_FALLBACK_FONT);
 }
 
+// TFT_eSPI's MC/ML/MR datums center the smooth font's yAdvance box on
+// the requested y, but DejaVu Sans Bold's ascent is much larger than
+// its descent, so the visual cap-center sits a few pixels above the
+// box center.  This helper returns the y offset (in pixels) needed to
+// align the cap-center with the caller's y.  Returns 0 when a smooth
+// font is not loaded so GFX callers are unaffected.
+static int smoothCenterYAdjust() {
+  if (g_currentSmoothSize == 0) return 0;
+  const int yA = static_cast<int>(epaper.gFont.yAdvance);
+  const int mA = static_cast<int>(epaper.gFont.maxAscent);
+  const int a  = static_cast<int>(epaper.gFont.ascent);
+  // Approximate cap-height as ascent * 0.78 (DejaVu Sans Bold).
+  return (yA / 2) - mA + (a * 78 / 200);
+}
+
 void selectUpdateTimeFont() {
 #if RETERMINAL_MODEL == 1003 || RETERMINAL_MODEL == 1004
   epaper.setFreeFont(&FreeSans9pt7b);
@@ -635,7 +650,7 @@ void drawHeader(const WeatherData& weather) {
   selectSmallSmoothFont();
   epaper.drawString(
       text_render::ellipsize(epaper, text_render::displayText(heading), config::PANEL_WIDTH - config::ui(380)),
-      config::PANEL_WIDTH / 2, config::ui(24), 1);
+      config::PANEL_WIDTH / 2, config::ui(24) + smoothCenterYAdjust(), 1);
   unloadSmoothFontIfLoaded();
   epaper.drawFastHLine(config::ui(10), config::ui(44),
                        config::PANEL_WIDTH - config::ui(20), PANEL_BLACK);
@@ -835,13 +850,14 @@ void renderFooter() {
   // rectangles through the dither pattern; on solid bars we fill for
   // crisp edges.
   epaper.setTextColor(PANEL_BLACK, PANEL_STATUS_BACKGROUND, !PANEL_STATUS_DITHERED);
+  const int footerYAdjust = smoothCenterYAdjust();
   epaper.setTextDatum(ML_DATUM);
   epaper.drawString(text_render::displayText(String("Weather data: ") + weather_provider::name()),
-                    config::ui(12), labelY, 1);
+                    config::ui(12), labelY + footerYAdjust, 1);
   epaper.setTextDatum(MR_DATUM);
   epaper.drawString(text_render::displayText(String(config::LOCATION_NAME)),
                     config::PANEL_WIDTH - config::ui(12),
-                    labelY, 1);
+                    labelY + footerYAdjust, 1);
   // Restore the GFX small font in case any later footer additions rely
   // on it; also releases the .vlw resources so the next full-panel
   // repaint doesn't hold onto them.
