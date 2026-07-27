@@ -31,11 +31,6 @@ inline constexpr uint32_t PANEL_WHITE = TFT_GRAY_3;
 inline constexpr uint32_t PANEL_BLACK = TFT_GRAY_0;
 inline constexpr uint32_t PANEL_LIGHT = TFT_GRAY_2;
 inline constexpr uint32_t PANEL_MUTED = TFT_GRAY_1;
-// One step lighter than PANEL_MUTED for secondary labels that should
-// recede without disappearing.  On Gray4 that lands on GRAY_2, the
-// same tone we use for backgrounds like dividers -- still discernible
-// against PANEL_WHITE (GRAY_3) but noticeably softer than GRAY_1.
-inline constexpr uint32_t PANEL_SECONDARY_TEXT = TFT_GRAY_2;
 inline constexpr uint32_t PANEL_STATUS_BACKGROUND = TFT_GRAY_3;
 inline constexpr bool     PANEL_STATUS_DITHERED = true;
 inline constexpr uint32_t PANEL_STATUS_DITHER_COLOR = TFT_GRAY_2;
@@ -49,9 +44,6 @@ inline constexpr uint32_t PANEL_WHITE = TFT_WHITE;
 inline constexpr uint32_t PANEL_BLACK = TFT_BLACK;
 inline constexpr uint32_t PANEL_LIGHT = TFT_WHITE;
 inline constexpr uint32_t PANEL_MUTED = TFT_BLACK;
-// Six-color panels don't have intermediate greys, so secondary text
-// falls back to solid black just like PANEL_MUTED.
-inline constexpr uint32_t PANEL_SECONDARY_TEXT = TFT_BLACK;
 inline constexpr uint32_t PANEL_STATUS_BACKGROUND = TFT_WHITE;
 inline constexpr bool     PANEL_STATUS_DITHERED = true;
 inline constexpr uint32_t PANEL_STATUS_DITHER_COLOR = TFT_BLACK;
@@ -65,9 +57,6 @@ inline constexpr uint32_t PANEL_WHITE = TFT_GRAY_15;
 inline constexpr uint32_t PANEL_BLACK = TFT_GRAY_0;
 inline constexpr uint32_t PANEL_LIGHT = TFT_GRAY_12;
 inline constexpr uint32_t PANEL_MUTED = TFT_GRAY_6;
-// Roughly halfway between PANEL_MUTED and PANEL_WHITE so secondary
-// labels sit clearly below primary text without becoming ghostly.
-inline constexpr uint32_t PANEL_SECONDARY_TEXT = TFT_GRAY_10;
 inline constexpr uint32_t PANEL_STATUS_BACKGROUND = TFT_GRAY_13;
 inline constexpr bool     PANEL_STATUS_DITHERED = false;
 inline constexpr uint32_t PANEL_STATUS_DITHER_COLOR = TFT_GRAY_13;
@@ -81,7 +70,6 @@ inline constexpr uint32_t PANEL_WHITE = TFT_WHITE;
 inline constexpr uint32_t PANEL_BLACK = TFT_BLACK;
 inline constexpr uint32_t PANEL_LIGHT = TFT_WHITE;
 inline constexpr uint32_t PANEL_MUTED = TFT_BLACK;
-inline constexpr uint32_t PANEL_SECONDARY_TEXT = TFT_BLACK;
 inline constexpr uint32_t PANEL_STATUS_BACKGROUND = TFT_WHITE;
 inline constexpr bool     PANEL_STATUS_DITHERED = true;
 inline constexpr uint32_t PANEL_STATUS_DITHER_COLOR = TFT_BLACK;
