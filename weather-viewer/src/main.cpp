@@ -836,6 +836,10 @@ void renderFooter() {
                     config::ui(12), labelY, 1);
   epaper.setTextDatum(MR_DATUM);
   selectLocationFont();
+  // Smooth fonts always anti-alias against an explicit background color;
+  // in transparent mode (bgFill=false) the AA blender still needs the
+  // correct bg or every glyph collapses to solid PANEL_BLACK.
+  epaper.setTextColor(PANEL_BLACK, PANEL_STATUS_BACKGROUND, !PANEL_STATUS_DITHERED);
   epaper.drawString(text_render::displayText(String(config::LOCATION_NAME)),
                     config::PANEL_WIDTH - config::ui(12),
                     labelY, 1);
