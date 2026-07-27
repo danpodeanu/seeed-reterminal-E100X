@@ -121,6 +121,20 @@ void selectSmallLightFont() {
 #endif
 }
 
+void selectRainForecastFont() {
+  // FreeSerif at the same size as selectSmallLightFont, used only for
+  // the rain-forecast line so it stands out from the surrounding
+  // sans-serif secondary text.
+  epaper.setTextSize(1);
+#if RETERMINAL_MODEL == 1003
+  epaper.setFreeFont(&FreeSerif18pt7b);
+#elif RETERMINAL_MODEL == 1004
+  epaper.setFreeFont(&FreeSerif12pt7b);
+#else
+  epaper.setFreeFont(&FreeSerif9pt7b);
+#endif
+}
+
 // Optional smooth-font support for the footer location name (which may
 // contain non-ASCII characters like "München", "São Paulo").  The font
 // files live at /fonts/sans_bold_<size>.vlw on the SD card (shared with
@@ -759,10 +773,11 @@ void renderLandscape(const WeatherData& weather) {
                     mainCenterY + config::ui(31), 1);
 
   const int detailWidth = config::PANEL_WIDTH * 31 / 100;
-  selectSmallLightFont();
+  selectRainForecastFont();
   epaper.drawString(
       text_render::ellipsize(epaper, rainSummary(weather), detailWidth),
       detailX, mainCenterY + config::ui(67), 1);
+  selectSmallLightFont();
   epaper.drawString(
       "Wind " + String(weather.windKmh, 0) + " km/h", detailX,
       mainCenterY + config::ui(101), 1);
@@ -851,6 +866,7 @@ void renderPortrait(const WeatherData& weather) {
   epaper.drawString(
       text_render::ellipsize(epaper, details, config::PANEL_WIDTH - config::ui(40)),
       config::PANEL_WIDTH / 2, mainCenterY + config::ui(108), 1);
+  selectRainForecastFont();
   epaper.drawString(
       text_render::ellipsize(epaper, rainSummary(weather),
                 config::PANEL_WIDTH - config::ui(40)),
