@@ -16,12 +16,12 @@ namespace config {
 // --- Location ---------------------------------------------------------------
 // Edit these values for the forecast location. QWeather rounds to two
 // decimals; Open-Meteo uses the full precision.
-constexpr char LOCATION_NAME[] = "Suzhou";
-constexpr double LATITUDE = 31.31361;
-constexpr double LONGITUDE = 120.69167;
+constexpr char LOCATION_NAME[] = "München";
+constexpr double LATITUDE = 48.13743;
+constexpr double LONGITUDE = 11.57549;
 
 // POSIX TZ notation uses the opposite sign: CST-8 means UTC+8.
-constexpr char TIMEZONE[] = "CST-8";
+constexpr char TIMEZONE[] = "CET-1CEST,M3.5.0,M10.5.0/3";
 
 // --- Refresh cadence --------------------------------------------------------
 // How long the device sleeps between automatic refreshes. Shorter = fresher
