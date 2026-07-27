@@ -61,7 +61,10 @@ CACHE_INDEX_VERSION = 5
 # Sizes are PIL/FreeType em-sizes; DejaVu Sans's cap-height is ~0.73x em, so
 # these are picked so cap-heights visually match the FreeSansBold*pt7b fonts.
 FONT_SIZES_PX = (18, 24, 36, 48)
-DEFAULT_TTF = Path(__file__).parent / "fonts" / "DejaVuSans-Bold.ttf"
+# Shared /tools/fonts folder at the repo root - used by every app that
+# needs a smooth-font on the SD card.  preload_sd.py lives at
+# <repo>/xkcd-viewer/tools/preload_sd.py, so parents[2] = <repo>.
+DEFAULT_TTF = Path(__file__).resolve().parents[2] / "tools" / "fonts" / "DejaVuSans-Bold.ttf"
 
 
 class DownloadError(RuntimeError):
@@ -145,8 +148,9 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help=(
             "also generate /fonts/sans_bold_<size>.vlw smooth-font files from "
-            "tools/fonts/DejaVuSans-Bold.ttf. Required for on-device UTF-8 "
-            "rendering; safe to omit if the fonts are already on the card."
+            "<repo>/tools/fonts/DejaVuSans-Bold.ttf. Required for on-device "
+            "UTF-8 rendering; safe to omit if the fonts are already on the "
+            "card."
         ),
     )
     parser.add_argument(
@@ -155,7 +159,7 @@ def parse_args() -> argparse.Namespace:
         default=DEFAULT_TTF,
         help=(
             "TTF/OTF source for --with-fonts (default: "
-            "tools/fonts/DejaVuSans-Bold.ttf)"
+            "<repo>/tools/fonts/DejaVuSans-Bold.ttf)"
         ),
     )
     args = parser.parse_args()
@@ -657,9 +661,15 @@ def load_latest(cache_dir: Path, timeout: float, retries: int,
 def install_fonts(sd_root: Path, ttf_path: Path, sizes: Iterable[int] = FONT_SIZES_PX) -> None:
     """Generate /fonts/sans_bold_<size>.vlw on the SD card from a TTF.
 
-    Imports build_vlw() from make_vlw.py so a Pillow/fontTools install is
-    still required, but no external tool run.
+    Imports build_vlw() from tools/fonts/make_vlw.py so a Pillow /
+    fontTools install is still required, but no external tool run.
     """
+    # make_vlw.py lives at <repo>/tools/fonts/ - add it to sys.path so
+    # the import resolves without requiring the caller to configure
+    # PYTHONPATH.
+    make_vlw_dir = Path(__file__).resolve().parents[2] / "tools" / "fonts"
+    if str(make_vlw_dir) not in sys.path:
+        sys.path.insert(0, str(make_vlw_dir))
     from make_vlw import build_vlw  # local import: avoid Pillow dep unless requested
 
     if not ttf_path.is_file():

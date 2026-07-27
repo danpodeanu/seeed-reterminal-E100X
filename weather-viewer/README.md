@@ -74,7 +74,7 @@ provider you pick below.
 loaded from `/fonts/sans_bold_<size>.vlw` on the SD card. Those files
 are shared with the xkcd viewer; generate them once with
 `xkcd-viewer/tools/preload_sd.py --with-fonts` or
-`xkcd-viewer/tools/make_vlw.py`. Without the SD card (or the font
+`tools/fonts/make_vlw.py`. Without the SD card (or the font
 file), the location name falls back to the built-in GFX FreeSansBold
 font and any non-ASCII bytes render as garbage; the rest of the panel
 is unaffected.

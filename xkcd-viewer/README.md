@@ -290,12 +290,12 @@ python3 tools/preload_sd.py /Volumes/XKCD --with-fonts
 ```
 
 `--with-fonts` bakes the `.vlw` files from
-`tools/fonts/DejaVuSans-Bold.ttf` (~16.5 MB total, ~5,900 glyphs each);
-`--fonts-ttf <path>` overrides the source. The generator is also
-available as a standalone tool:
+`../tools/fonts/DejaVuSans-Bold.ttf` (~16.5 MB total, ~5,900 glyphs
+each); `--fonts-ttf <path>` overrides the source. The generator is also
+available as a standalone tool at the repo root:
 
 ```bash
-python3 tools/make_vlw.py --ttf tools/fonts/DejaVuSans-Bold.ttf \
+python3 ../tools/fonts/make_vlw.py --ttf ../tools/fonts/DejaVuSans-Bold.ttf \
     --size 18 --size 24 --size 36 --size 48 \
     --out-dir /Volumes/XKCD/fonts
 ```
@@ -307,7 +307,7 @@ pip install pillow fonttools
 ```
 
 DejaVu Sans is licensed under the Bitstream Vera Fonts License; see
-`tools/fonts/LICENSE.dejavu`.
+`../tools/fonts/LICENSE.dejavu`.
 
 **Fallback.** If `/fonts/sans_bold_<size>.vlw` is missing on the card, the
 firmware falls back to the built-in GFX FreeFonts for that size — text
