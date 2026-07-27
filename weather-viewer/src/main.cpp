@@ -705,9 +705,14 @@ void drawForecastCard(const DailyForecast& day, uint8_t index,
   epaper.drawString(range, centerX, top + config::ui(107), 1);
   if (!config::CLUTTER_FREE_MODE) {
     epaper.setTextColor(PANEL_MUTED, PANEL_WHITE, true);
-    const String extra =
-        "Rain " + String(day.precipitationProbability) + "%   UV " +
-        String(day.uvMaximum, 1) + " " + uvDescription(day.uvMaximum);
+    String extra;
+    if (day.precipitationProbability >= 0) {
+      extra = "Rain " + String(day.precipitationProbability) + "%   UV " +
+              String(day.uvMaximum, 1) + " " + uvDescription(day.uvMaximum);
+    } else {
+      extra = "UV " + String(day.uvMaximum, 1) + " " +
+              uvDescription(day.uvMaximum);
+    }
     epaper.drawString(text_render::ellipsize(epaper, extra, width - config::ui(12)), centerX,
                       top + config::ui(130), 1);
     epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, true);
@@ -829,10 +834,14 @@ void drawPortraitForecastRow(const DailyForecast& day, uint8_t index,
                 config::PANEL_WIDTH * 36 / 100),
       textX, centerY + config::ui(4), 1);
   if (!config::CLUTTER_FREE_MODE) {
-    epaper.drawString(
-        "Rain " + String(day.precipitationProbability) + "%  UV " +
-            String(day.uvMaximum, 1),
-        textX, centerY + config::ui(31), 1);
+    String extra;
+    if (day.precipitationProbability >= 0) {
+      extra = "Rain " + String(day.precipitationProbability) + "%  UV " +
+              String(day.uvMaximum, 1);
+    } else {
+      extra = "UV " + String(day.uvMaximum, 1);
+    }
+    epaper.drawString(extra, textX, centerY + config::ui(31), 1);
   }
 
   epaper.setTextDatum(MC_DATUM);
