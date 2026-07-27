@@ -143,6 +143,29 @@ constexpr const GFXfont* SMALL_SMOOTH_FALLBACK_FONT = &FreeSansBold9pt7b;
 
 static int g_currentSmoothSize = 0;
 static bool g_smoothFontsUnavailable = false;
+// Sizes we have already opened successfully at least once this boot. Set
+// entries let a later applySmoothFont() call skip the SD.exists()/open()
+// probe and go straight to loadFont(), which avoids a rare SD flake
+// between the header and footer causing the footer to silently drop to
+// the GFX fallback.
+static int g_smoothFontVerifiedSizes[4] = {0, 0, 0, 0};
+
+static bool smoothFontSizeVerified(int size) {
+  for (int slot : g_smoothFontVerifiedSizes) {
+    if (slot == size) return true;
+  }
+  return false;
+}
+
+static void rememberSmoothFontSizeVerified(int size) {
+  for (int& slot : g_smoothFontVerifiedSizes) {
+    if (slot == size) return;
+    if (slot == 0) {
+      slot = size;
+      return;
+    }
+  }
+}
 
 static bool smoothFontFileExists(int size) {
   if (!sdReady) return false;
@@ -172,7 +195,7 @@ static void applySmoothFont(int size, const GFXfont* fallback) {
     epaper.unloadFont();
     g_currentSmoothSize = 0;
   }
-  if (!smoothFontFileExists(size)) {
+  if (!smoothFontSizeVerified(size) && !smoothFontFileExists(size)) {
     LOG.printf("[font] /fonts/sans_bold_%d.vlw missing; falling back to GFX font\n",
                size);
     g_smoothFontsUnavailable = true;
@@ -185,6 +208,7 @@ static void applySmoothFont(int size, const GFXfont* fallback) {
   // the subdir as part of the name to get "/fonts/sans_bold_XX.vlw".
   epaper.loadFont(String("fonts/sans_bold_") + size, SD);
   g_currentSmoothSize = size;
+  rememberSmoothFontSizeVerified(size);
   LOG.printf("[font] loaded sans_bold_%d in %lu ms (yAdvance=%u ascent=%u descent=%u)\n",
              size, (unsigned long)(millis() - t0),
              (unsigned)epaper.gFont.yAdvance,
