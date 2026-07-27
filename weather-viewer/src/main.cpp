@@ -651,8 +651,11 @@ void drawHeader(const WeatherData& weather) {
   epaper.drawString(
       text_render::ellipsize(epaper, text_render::displayText(heading), config::PANEL_WIDTH - config::ui(380)),
       config::PANEL_WIDTH / 2, config::ui(24) + smoothCenterYAdjust(), 1);
-  // Leave the smooth font loaded: renderFooter uses the same size and
-  // would otherwise pay another ~2 s SD read to load it again.
+  // Unload before returning: the main-body renders that follow use GFX
+  // fonts, but TFT_eSPI's drawString stays on the smooth-font path as
+  // long as one is loaded, which would shrink e.g. the large outdoor
+  // temperature down to 16 px.  renderFooter reloads the same size.
+  unloadSmoothFontIfLoaded();
   epaper.drawFastHLine(config::ui(10), config::ui(44),
                        config::PANEL_WIDTH - config::ui(20), PANEL_BLACK);
 }
@@ -689,15 +692,18 @@ void renderLandscape(const WeatherData& weather) {
   const int mainTop = config::ui(48);
   const int mainBottom = config::PANEL_HEIGHT * 62 / 100;
   const int mainCenterY = (mainTop + mainBottom) / 2;
-  const int iconX = config::PANEL_WIDTH * 19 / 100;
+  const int leftDividerX = config::PANEL_WIDTH * 34 / 100;
+  // Center the hero icon inside the left pane (0 .. leftDividerX)
+  // instead of at a hard-coded 19% offset that was slightly off.
+  const int iconX = leftDividerX / 2;
   const int temperatureX = config::PANEL_WIDTH * 49 / 100;
   const int detailX = config::PANEL_WIDTH * 83 / 100;
 
-  drawWeatherIcon(iconX, mainCenterY - config::ui(4),
+  drawWeatherIcon(iconX, mainCenterY,
                   min(config::PANEL_WIDTH * 27 / 100,
                       (mainBottom - mainTop) * 72 / 100),
                   weather.weatherCode, weather.isDay);
-  epaper.drawFastVLine(config::PANEL_WIDTH * 34 / 100,
+  epaper.drawFastVLine(leftDividerX,
                        mainTop + config::ui(12),
                        mainBottom - mainTop - config::ui(24), PANEL_MUTED);
 
