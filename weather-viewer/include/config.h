@@ -106,13 +106,13 @@ enum class TemperatureUnit {
   Celsius,
   Fahrenheit,
 };
-constexpr TemperatureUnit TEMPERATURE_UNIT = TemperatureUnit::Fahrenheit;
+constexpr TemperatureUnit TEMPERATURE_UNIT = TemperatureUnit::Celsius;
 
 enum class WindSpeedUnit {
   KilometresPerHour,
   MilesPerHour,
 };
-constexpr WindSpeedUnit WIND_SPEED_UNIT = WindSpeedUnit::MilesPerHour;
+constexpr WindSpeedUnit WIND_SPEED_UNIT = WindSpeedUnit::KilometresPerHour;
 
 // Clutter-free mode hides the per-day Rain % / UV summary line on each
 // forecast card. The condition name and min/max are still shown; only the
