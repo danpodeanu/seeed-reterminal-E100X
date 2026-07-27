@@ -54,12 +54,13 @@ from typing import Iterable
 
 VLW_VERSION = 11
 
-# Default pixel sizes generated when --size is not passed.  These cover
-# every role across every board in this repo:
-#   xkcd-viewer title/footer: 16/20/30/40 depending on model
-#   weather-viewer footer:    18/24/36 depending on model
-# Kept in sync with SMOOTH_FONT_*_PX in each app's main.cpp.
-DEFAULT_SIZES_PX = (16, 20, 30, 40)
+# Default pixel sizes generated when --size is not passed.  We generate
+# every integer size from 12 to 48 so future tweaks to
+# SMOOTH_FONT_*_PX in either app's main.cpp don't require regenerating
+# the SD card - any size we might reasonably pick is already there.
+# ~5,900 glyphs per size makes this ~110 MB total, which is well below
+# the SD card capacity used by xkcd caches and weather history.
+DEFAULT_SIZES_PX = tuple(range(12, 49))
 
 # Default TTF source lives alongside this script.
 DEFAULT_TTF = Path(__file__).resolve().parent / "DejaVuSans-Bold.ttf"
@@ -166,9 +167,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--size", action="append", type=int, default=None,
         help=(
-            "Pixel size to render (may be repeated). Defaults to "
-            f"{', '.join(str(s) for s in DEFAULT_SIZES_PX)} which cover "
-            "every board and app in this repo."
+            "Pixel size to render (may be repeated). Defaults to every "
+            f"integer from {DEFAULT_SIZES_PX[0]} to {DEFAULT_SIZES_PX[-1]} "
+            "so future tweaks to the firmware do not require regenerating "
+            "the SD card."
         ),
     )
     parser.add_argument(
