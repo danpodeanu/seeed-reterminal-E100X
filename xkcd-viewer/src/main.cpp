@@ -31,6 +31,7 @@
 #include "climate_sensor.h"
 #include "sd_card.h"
 #include "net_http.h"
+#include "log_sd_sink.h"
 #include "text_render.h"
 #include "xkcd_index.h"
 #include "xkcd_cache_schema.h"
@@ -1157,6 +1158,10 @@ bool renderComic(const Comic& comic, RgbImage& image, ImageLayout layout) {
 // NTP sync helpers now live in common/include/ntp_sync.h. The wrapper below
 void powerDownAndSleep(uint64_t sleepSeconds = config::SLEEP_SECONDS) {
   wifi_sta::disable();
+  // Close the log file before SD.end() so its FAT/directory update
+  // hits disk cleanly. Safe to call unconditionally -- no-ops when no
+  // sink is attached.
+  appLog.detachSdSink();
   if (sdReady) SD.end();
   pinMode(PIN_SD_ENABLE, OUTPUT);
   digitalWrite(PIN_SD_ENABLE, LOW);
@@ -1336,6 +1341,9 @@ void setup() {
 
   epaper.begin();
   sdReady = sd_card::mount(epaper.getSPIinstance(), config::CACHE_DIR);
+  if (sdReady && config::LOG_TO_SD) {
+    log_sd_sink::install(appLog);
+  }
   if (screenshotRequested && !sdReady) {
     LOG.println("[screenshot] request ignored: SD card is unavailable");
     screenshotRequested = false;

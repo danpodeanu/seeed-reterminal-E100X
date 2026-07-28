@@ -49,6 +49,10 @@ bool writeFileAtomically(const String& path, const String& contents);
 // their operation.
 File openForRead(const String& path);
 File openForWrite(const String& path);
+// Open for append: existing file is preserved and writes go to end.
+// Missing files are created empty. Used by the SD log sink, which
+// keeps a rolling boot log under /logs/.
+File openForAppend(const String& path);
 bool renameFile(const String& from, const String& to);
 
 }  // namespace sd_card

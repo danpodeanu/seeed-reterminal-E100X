@@ -52,6 +52,13 @@ static_assert(QUIET_START_MINUTE < 60 && QUIET_END_MINUTE < 60,
 constexpr char NTP_SERVER_PRIMARY[] = "pool.ntp.org";
 constexpr char NTP_SERVER_SECONDARY[] = "time.cloudflare.com";
 
+// Flip to `true` to tee every serial log line into a rolling file on
+// the SD card (/logs/current.log, with the previous boot preserved as
+// /logs/previous.log). Off by default -- fsync-per-line adds several
+// seconds of SD I/O to each refresh, so only enable while
+// troubleshooting a specific misbehaviour.
+constexpr bool LOG_TO_SD = false;
+
 }  // namespace config
 
 // System-level constants (hardware model, timeouts, sensor tuning,

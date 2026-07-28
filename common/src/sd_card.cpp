@@ -64,6 +64,10 @@ File openForWrite(const String& path) {
   return retryingOpen(path, FILE_WRITE);
 }
 
+File openForAppend(const String& path) {
+  return retryingOpen(path, FILE_APPEND);
+}
+
 bool renameFile(const String& from, const String& to) {
   return retryingRename(from, to);
 }

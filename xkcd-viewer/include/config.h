@@ -72,6 +72,13 @@ enum class DateLocale {
 };
 constexpr DateLocale DATE_LOCALE = DateLocale::DMY;
 
+// Flip to `true` to tee every serial log line into a rolling file on
+// the SD card (/logs/current.log, with the previous boot preserved as
+// /logs/previous.log). Off by default -- fsync-per-line adds several
+// seconds of SD I/O to each refresh, so only enable while
+// troubleshooting a specific misbehaviour.
+constexpr bool LOG_TO_SD = true;
+
 }  // namespace config
 
 // System-level constants (hardware model, timeouts, cache layout, image

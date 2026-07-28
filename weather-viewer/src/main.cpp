@@ -30,6 +30,7 @@
 #include "wifi_sta.h"
 #include "climate_sensor.h"
 #include "sd_card.h"
+#include "log_sd_sink.h"
 #include "text_render.h"
 #include "units.h"
 #include "weather_format.h"
@@ -1031,6 +1032,10 @@ void renderWeather(const WeatherData& weather) {
 void powerDownAndSleep(uint64_t sleepSeconds = config::SLEEP_SECONDS,
                        bool timerWakeEnabled = true) {
   wifi_sta::disable();
+  // Close the log file before SD.end() so its FAT/directory update
+  // hits disk cleanly. Safe to call unconditionally -- no-ops when no
+  // sink is attached.
+  appLog.detachSdSink();
   if (sdReady) SD.end();
   pinMode(PIN_SD_ENABLE, OUTPUT);
   digitalWrite(PIN_SD_ENABLE, LOW);
@@ -1211,6 +1216,9 @@ void setup() {
   }
   epaper.begin();
   sdReady = sd_card::mount(epaper.getSPIinstance(), config::CACHE_DIR);
+  if (sdReady && config::LOG_TO_SD) {
+    log_sd_sink::install(appLog);
+  }
   if (screenshotRequested && !sdReady) {
     LOG.println("[screenshot] request ignored: SD card is unavailable");
     screenshotRequested = false;

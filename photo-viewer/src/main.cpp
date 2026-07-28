@@ -28,6 +28,7 @@
 #include "wifi_sta.h"
 #include "climate_sensor.h"
 #include "sd_card.h"
+#include "log_sd_sink.h"
 #include "text_render.h"
 #include "photo_manifest.h"
 #include "quiet_hours.h"
@@ -515,6 +516,10 @@ bool renderPhoto(const String& path) {
 // NTP sync helpers now live in common/include/ntp_sync.h. The wrapper below
 void powerDownAndSleep(uint64_t sleepSeconds = config::SLEEP_SECONDS) {
   wifi_sta::disable();
+  // Close the log file before SD.end() so its FAT/directory update
+  // hits disk cleanly. Safe to call unconditionally -- no-ops when no
+  // sink is attached.
+  appLog.detachSdSink();
   if (sdReady) SD.end();
   pinMode(PIN_SD_ENABLE, OUTPUT);
   digitalWrite(PIN_SD_ENABLE, LOW);
@@ -635,6 +640,9 @@ void setup() {
   }
   epaper.begin();
   sdReady = sd_card::mount(epaper.getSPIinstance(), config::PHOTO_DIR);
+  if (sdReady && config::LOG_TO_SD) {
+    log_sd_sink::install(appLog);
+  }
   const uint32_t photoCount = countPhotos();
   LOG.printf("[photo] %lu supported files in %s\n",
              static_cast<unsigned long>(photoCount), config::PHOTO_DIR);
