@@ -661,7 +661,17 @@ def process_comic(
     metadata_downloaded = False
 
     try:
-        if known is not None:
+        # A pre-existing manifest entry may be missing publication-date
+        # fields (v5 files written before the y/m/d plumbing landed). If
+        # so, refetch the upstream JSON so we can backfill the date --
+        # the image download is still skipped separately below when the
+        # cached file is intact, so this only costs one small JSON GET
+        # per stale entry.
+        needs_date_backfill = (
+            known is not None
+            and (known.year == 0 or known.month == 0 or known.day == 0)
+        )
+        if known is not None and not needs_date_backfill:
             meta = known
         else:
             raw_metadata = fetch_bytes(
