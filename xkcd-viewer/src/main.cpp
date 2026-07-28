@@ -345,6 +345,24 @@ void selectStatusFont() {
   );
 }
 
+// One size below selectStatusFont on the larger E1003/E1004 panels so
+// the publication date reads as a subtle annotation rather than
+// competing with the battery percentage. On the smaller E1001/E1002
+// panels the status font already sits at the smallest bold size we
+// ship, so we drop to the non-bold 9pt cut for the same visual step
+// down.
+void selectComicDateFont() {
+  applyGfxFont(
+#if RETERMINAL_MODEL == 1003
+      &FreeSansBold12pt7b
+#elif RETERMINAL_MODEL == 1004
+      &FreeSansBold9pt7b
+#else
+      &FreeSans9pt7b
+#endif
+  );
+}
+
 // TFT_eSPI's MC/ML/MR datums center the smooth font's yAdvance box on
 // the requested y, but DejaVu Sans Bold's ascent (~28 at 30px) is
 // much larger than its descent (~8), so the visual cap-center sits a
@@ -1103,11 +1121,12 @@ bool renderComic(const Comic& comic, RgbImage& image, ImageLayout layout) {
   epaper.setTextFont(2);
 
   // Publication date: bottom-right of the image area, just above the
-  // footer divider, in the same GFX bold font as the battery percentage
-  // so it reads as part of the panel chrome rather than the comic art.
+  // footer divider, in a compact sans font tuned per device so it reads
+  // as a small annotation rather than competing with the battery
+  // percentage or comic art.
   const String publishedDate = formatComicDate(comic);
   if (!publishedDate.isEmpty()) {
-    selectStatusFont();
+    selectComicDateFont();
     epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, true);
     epaper.setTextDatum(BR_DATUM);
     epaper.drawString(publishedDate,
