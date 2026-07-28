@@ -75,6 +75,9 @@ class PreloadSdTests(unittest.TestCase):
                     alt="alt",
                     extension=".jpg",
                     url="https://imgs.xkcd.com/comics/barrel_cropped_(1).jpg",
+                    year=2006,
+                    month=1,
+                    day=1,
                 )
             }
 
@@ -83,6 +86,113 @@ class PreloadSdTests(unittest.TestCase):
             self.assertEqual(result.status, "cached")
             self.assertIsNotNone(result.meta)
             self.assertEqual(result.meta.extension, ".jpg")
+            # Backfill must not clobber a date that's already present.
+            self.assertEqual(result.meta.year, 2006)
+
+    def test_missing_publication_date_triggers_metadata_refetch(self):
+        # A v5-manifest ComicMeta has no y/m/d. process_comic must
+        # refetch info.0.json so the JSONL entry gains the date, but
+        # must NOT redownload the image when it's already on disk.
+        fetched_urls: list[str] = []
+
+        def fake_fetch(url, timeout, retries):
+            fetched_urls.append(url)
+            return json.dumps(
+                {
+                    "num": 1,
+                    "img": "https://imgs.xkcd.com/comics/barrel.jpg",
+                    "safe_title": "Barrel",
+                    "alt": "alt",
+                    "year": "2006",
+                    "month": "1",
+                    "day": "1",
+                }
+            ).encode()
+
+        with tempfile.TemporaryDirectory() as temporary:
+            cache_dir = Path(temporary)
+            (cache_dir / "1.jpg").write_bytes(_jpg_bytes())
+            snapshot = {
+                1: preload_sd.ComicMeta(
+                    title="Barrel",
+                    alt="alt",
+                    extension=".jpg",
+                    url="https://imgs.xkcd.com/comics/barrel.jpg",
+                )
+            }
+
+            original_fetch = preload_sd.fetch_bytes
+            preload_sd.fetch_bytes = fake_fetch
+            try:
+                result = _process(1, cache_dir, comics=snapshot)
+            finally:
+                preload_sd.fetch_bytes = original_fetch
+
+            self.assertEqual(result.status, "cached")
+            self.assertEqual(result.meta.year, 2006)
+            self.assertEqual(result.meta.month, 1)
+            self.assertEqual(result.meta.day, 1)
+            # Exactly one refetch: the tiny info.0.json, never the image.
+            self.assertEqual(len(fetched_urls), 1)
+            self.assertIn("info.0.json", fetched_urls[0])
+
+    def test_meta_from_xkcd_json_extracts_publication_date(self):
+        # xkcd JSON returns date components sometimes as strings and
+        # sometimes as ints; meta_from_xkcd_json must handle both.
+        meta = preload_sd.meta_from_xkcd_json(
+            {
+                "img": "https://imgs.xkcd.com/comics/x.png",
+                "safe_title": "X",
+                "alt": "a",
+                "year": "2021",
+                "month": 6,
+                "day": "25",
+            }
+        )
+        self.assertEqual((meta.year, meta.month, meta.day), (2021, 6, 25))
+
+    def test_meta_from_xkcd_json_zeroes_out_implausible_dates(self):
+        # A missing or garbage date must collapse to 0/0/0 so we never
+        # emit "y":"" or a nonsense month into the JSONL manifest.
+        meta = preload_sd.meta_from_xkcd_json(
+            {
+                "img": "https://imgs.xkcd.com/comics/x.png",
+                "safe_title": "X",
+                "alt": "a",
+                "year": "",
+                "month": "13",
+                "day": "0",
+            }
+        )
+        self.assertEqual((meta.year, meta.month, meta.day), (0, 0, 0))
+
+    def test_manifest_encoding_includes_publication_date_when_set(self):
+        manifest = preload_sd.Manifest(
+            latest=2,
+            comics={
+                1: preload_sd.ComicMeta(
+                    title="Dated", alt="a", extension=".png",
+                    url="https://x/1.png",
+                    year=2010, month=3, day=15,
+                ),
+                2: preload_sd.ComicMeta(
+                    title="Undated", alt="b", extension=".png",
+                    url="https://x/2.png",
+                ),
+            },
+        )
+
+        lines = preload_sd.encode_manifest(manifest).decode().rstrip("\n").split("\n")
+        first = json.loads(lines[1])
+        second = json.loads(lines[2])
+
+        self.assertEqual(first["y"], 2010)
+        self.assertEqual(first["m"], 3)
+        self.assertEqual(first["d"], 15)
+        # Undated comics still round-trip without the triplet.
+        self.assertNotIn("y", second)
+        self.assertNotIn("m", second)
+        self.assertNotIn("d", second)
 
     def test_missing_comic_404_is_skipped(self):
         with tempfile.TemporaryDirectory() as temporary:
