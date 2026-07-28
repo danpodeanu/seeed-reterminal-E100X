@@ -44,18 +44,26 @@ inline std::string buildJsonlHeader(uint32_t version, int latest,
   return out;
 }
 
-// Per-comic line: {"n":N,"t":"...","a":"...","e":"...","u":"..."}
+// Per-comic line: {"n":N,"t":"...","a":"...","e":"...","u":"...","y":Y,"m":M,"d":D}
 // Null pointers are serialized as empty strings so the parser round-trip
 // stays symmetric with StoredMeta whose fields default to empty String.
+// The "y"/"m"/"d" publication-date triplet is omitted when year is zero,
+// so v5 files upgraded in place without dates stay compact.
 inline std::string buildJsonlComic(int number, const char* title,
                                    const char* alt, const char* extension,
-                                   const char* url) {
+                                   const char* url, int year = 0,
+                                   int month = 0, int day = 0) {
   JsonDocument doc;
   doc["n"] = number;
   doc["t"] = title != nullptr ? title : "";
   doc["a"] = alt != nullptr ? alt : "";
   doc["e"] = extension != nullptr ? extension : "";
   doc["u"] = url != nullptr ? url : "";
+  if (year > 0 && month > 0 && day > 0) {
+    doc["y"] = year;
+    doc["m"] = month;
+    doc["d"] = day;
+  }
   std::string out = detail::serializeToString(doc);
   out.push_back('\n');
   return out;

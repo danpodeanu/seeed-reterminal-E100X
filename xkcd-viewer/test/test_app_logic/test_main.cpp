@@ -507,6 +507,31 @@ void test_manifest_comic_escapes_special_json_characters() {
   TEST_ASSERT_EQUAL_STRING("line\nfeed", doc["a"].as<const char*>());
 }
 
+void test_manifest_comic_emits_publication_date_when_provided() {
+  const std::string line = xkcd_manifest::buildJsonlComic(
+      2493, "Consequences", "alt", ".png",
+      "https://imgs.xkcd.com/comics/consequences.png", 2021, 6, 25);
+  JsonDocument doc;
+  TEST_ASSERT_EQUAL(DeserializationError::Ok,
+                    deserializeJson(doc, line.c_str(), line.size() - 1).code());
+  TEST_ASSERT_EQUAL(2021, doc["y"].as<int>());
+  TEST_ASSERT_EQUAL(6, doc["m"].as<int>());
+  TEST_ASSERT_EQUAL(25, doc["d"].as<int>());
+}
+
+void test_manifest_comic_omits_date_when_any_component_is_zero() {
+  // year=0 alone is enough to suppress the whole triplet -- the
+  // firmware treats "unknown" as an atomic property.
+  const std::string line = xkcd_manifest::buildJsonlComic(
+      1, "Barrel", "alt", ".jpg", "http://x/y", 0, 6, 25);
+  JsonDocument doc;
+  TEST_ASSERT_EQUAL(DeserializationError::Ok,
+                    deserializeJson(doc, line.c_str(), line.size() - 1).code());
+  TEST_ASSERT_FALSE(doc["y"].is<int>());
+  TEST_ASSERT_FALSE(doc["m"].is<int>());
+  TEST_ASSERT_FALSE(doc["d"].is<int>());
+}
+
 void test_manifest_append_new_comic_produces_expected_jsonl_stream() {
   // Simulate what persist() writes when addComic() has just recorded a
   // freshly downloaded comic on top of a warmed-up cache. Concatenating
@@ -580,6 +605,8 @@ int main(int, char**) {
   RUN_TEST(test_manifest_comic_preserves_all_fields_and_terminates_with_newline);
   RUN_TEST(test_manifest_comic_serializes_null_field_pointers_as_empty_strings);
   RUN_TEST(test_manifest_comic_escapes_special_json_characters);
+  RUN_TEST(test_manifest_comic_emits_publication_date_when_provided);
+  RUN_TEST(test_manifest_comic_omits_date_when_any_component_is_zero);
   RUN_TEST(test_manifest_append_new_comic_produces_expected_jsonl_stream);
   return UNITY_END();
 }

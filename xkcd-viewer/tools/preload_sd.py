@@ -79,6 +79,13 @@ class ComicMeta:
     alt: str
     extension: str
     url: str
+    # Publication date. Zero means "unknown" -- the JSONL entry then
+    # omits the "y"/"m"/"d" keys. This matches how the firmware writes
+    # entries when it fetches a comic live but the upstream JSON is
+    # missing date fields.
+    year: int = 0
+    month: int = 0
+    day: int = 0
 
 
 @dataclass
@@ -232,6 +239,26 @@ def decode_metadata(raw: bytes, expected_number: int | None = None) -> dict[str,
     return metadata
 
 
+def _coerce_date_component(value: Any) -> int:
+    """XKCD JSON returns year/month/day sometimes as ints and sometimes
+    as decimal strings. Older entries also use "" for unknown. Return 0
+    for anything that isn't a positive integer."""
+    if isinstance(value, bool):
+        return 0
+    if isinstance(value, int):
+        return value if value > 0 else 0
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return 0
+        try:
+            parsed = int(stripped)
+        except ValueError:
+            return 0
+        return parsed if parsed > 0 else 0
+    return 0
+
+
 def meta_from_xkcd_json(raw: dict[str, Any]) -> ComicMeta | None:
     """Extract a ComicMeta from a decoded xkcd info JSON. Returns None if
     the image URL uses an unsupported extension."""
@@ -241,11 +268,21 @@ def meta_from_xkcd_json(raw: dict[str, Any]) -> ComicMeta | None:
         return None
     title = raw.get("safe_title") or raw.get("title") or ""
     alt = raw.get("alt") or ""
+    year = _coerce_date_component(raw.get("year"))
+    month = _coerce_date_component(raw.get("month"))
+    day = _coerce_date_component(raw.get("day"))
+    # Only publish the date when all three components look plausible;
+    # this mirrors the firmware's guard so we never render bogus dates.
+    if not (1900 <= year <= 2999 and 1 <= month <= 12 and 1 <= day <= 31):
+        year = month = day = 0
     return ComicMeta(
         title=str(title),
         alt=str(alt),
         extension=extension,
         url=str(image_url),
+        year=year,
+        month=month,
+        day=day,
     )
 
 
@@ -318,6 +355,10 @@ def encode_manifest(manifest: Manifest) -> bytes:
             "e": m.extension,
             "u": m.url,
         }
+        if m.year and m.month and m.day:
+            entry["y"] = m.year
+            entry["m"] = m.month
+            entry["d"] = m.day
         lines.append(json.dumps(entry, separators=(",", ":"), ensure_ascii=False))
     # Trailing newline so tools like `tail` see the final entry.
     return ("\n".join(lines) + "\n").encode("utf-8")
@@ -408,11 +449,22 @@ def _ingest_comic_dict(value: Any, manifest: Manifest, number: int) -> None:
         return
     if not isinstance(url, str) or not url:
         return
+    year = value.get("y")
+    month = value.get("m")
+    day = value.get("d")
+    y_int = year if isinstance(year, int) and not isinstance(year, bool) else 0
+    m_int = month if isinstance(month, int) and not isinstance(month, bool) else 0
+    d_int = day if isinstance(day, int) and not isinstance(day, bool) else 0
+    if not (1900 <= y_int <= 2999 and 1 <= m_int <= 12 and 1 <= d_int <= 31):
+        y_int = m_int = d_int = 0
     manifest.comics[number] = ComicMeta(
         title=str(value.get("t", "")),
         alt=str(value.get("a", "")),
         extension=ext,
         url=url,
+        year=y_int,
+        month=m_int,
+        day=d_int,
     )
 
 

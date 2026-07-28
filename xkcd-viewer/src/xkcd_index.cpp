@@ -54,6 +54,9 @@ struct StoredMeta {
   const char* alt;
   const char* extension;
   const char* url;
+  int16_t year;
+  uint8_t month;
+  uint8_t day;
 };
 
 const char kEmpty[] = "";
@@ -185,6 +188,9 @@ const ComicMeta* metadata(int number) {
   g_metaScratch.alt = stored.alt;
   g_metaScratch.extension = stored.extension;
   g_metaScratch.url = stored.url;
+  g_metaScratch.year = stored.year;
+  g_metaScratch.month = stored.month;
+  g_metaScratch.day = stored.day;
   return &g_metaScratch;
 }
 
@@ -198,6 +204,9 @@ void addComic(int number, const ComicMeta& meta) {
   stored.alt = dupString(meta.alt.c_str());
   stored.extension = dupString(meta.extension.c_str());
   stored.url = dupString(meta.url.c_str());
+  stored.year = meta.year;
+  stored.month = meta.month;
+  stored.day = meta.day;
   if (position == g_numbers.end() || *position != number) {
     g_numbers.insert(position, number);
     g_metas.insert(g_metas.begin() + index, stored);
@@ -223,7 +232,8 @@ bool writeJsonlHeader(File& file) {
 
 bool writeJsonlComic(File& file, int number, const StoredMeta& stored) {
   const std::string line = xkcd_manifest::buildJsonlComic(
-      number, stored.title, stored.alt, stored.extension, stored.url);
+      number, stored.title, stored.alt, stored.extension, stored.url,
+      stored.year, stored.month, stored.day);
   return file.write(reinterpret_cast<const uint8_t*>(line.data()),
                     line.size()) == line.size();
 }
@@ -448,6 +458,22 @@ bool load() {
     stored.alt = arenaDup(obj["a"].as<const char*>());
     stored.extension = arenaDup(rawExt);
     stored.url = arenaDup(obj["u"].as<const char*>());
+    // Publication date is optional -- v5 manifests from older firmwares
+    // omit it entirely. Range-check defensively so a hand-edited or
+    // corrupt line doesn't produce out-of-range dates in the UI.
+    const int rawYear = obj["y"].as<int>();
+    const int rawMonth = obj["m"].as<int>();
+    const int rawDay = obj["d"].as<int>();
+    if (rawYear >= 1900 && rawYear <= 2999 && rawMonth >= 1 &&
+        rawMonth <= 12 && rawDay >= 1 && rawDay <= 31) {
+      stored.year = static_cast<int16_t>(rawYear);
+      stored.month = static_cast<uint8_t>(rawMonth);
+      stored.day = static_cast<uint8_t>(rawDay);
+    } else {
+      stored.year = 0;
+      stored.month = 0;
+      stored.day = 0;
+    }
     loadedNumbers.push_back(number);
     loadedMetas.push_back(stored);
   }

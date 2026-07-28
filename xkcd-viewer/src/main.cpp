@@ -612,6 +612,9 @@ bool getComic(int number, bool networkAvailable, Comic& comic) {
     comic.title = meta->title;
     comic.alt = meta->alt;
     comic.imageUrl = meta->url;
+    comic.year = meta->year;
+    comic.month = meta->month;
+    comic.day = meta->day;
     comic.imagePath =
         String(config::CACHE_DIR) + "/" + comic.number + meta->extension;
     if (sd_card::fileExists(comic.imagePath)) {
@@ -663,6 +666,9 @@ bool getComic(int number, bool networkAvailable, Comic& comic) {
   newMeta.alt = comic.alt;
   newMeta.extension = extension;
   newMeta.url = comic.imageUrl;
+  newMeta.year = static_cast<int16_t>(comic.year);
+  newMeta.month = static_cast<uint8_t>(comic.month);
+  newMeta.day = static_cast<uint8_t>(comic.day);
   xkcd_index::addComic(comic.number, newMeta);
   return true;
 }

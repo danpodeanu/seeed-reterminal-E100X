@@ -37,6 +37,13 @@ struct ComicMeta {
   // Full source URL, used only when refetching an already-known
   // comic (e.g. after preload_sd.py drops the image file).
   String url;
+  // Publication date (year/month/day) from the upstream JSON. Zero
+  // means "unknown" -- the manifest file simply omits the three
+  // "y"/"m"/"d" keys on such entries. Callers should honour the
+  // zero sentinel and suppress any UI that relies on the date.
+  int16_t year = 0;
+  uint8_t month = 0;
+  uint8_t day = 0;
 };
 
 // Callback returning true iff comic `number`'s image file exists
