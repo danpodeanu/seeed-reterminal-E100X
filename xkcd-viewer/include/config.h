@@ -60,6 +60,18 @@ constexpr bool DEBUG_SHOW_STATUS_BADGES = true;
 // hang on a known-bad comic; leave at 0 for normal operation.
 constexpr int DEBUG_FORCE_COMIC = 0;
 
+// --- Date format ------------------------------------------------------------
+// The comic's publication date (year, month, day) is drawn at the bottom-
+// right corner of the image area, just above the footer band. Choose which
+// order the three components appear in; the separator is always '-' and
+// day/month are zero-padded to two digits.
+enum class DateLocale {
+  DMY,  // 14-03-2025 (European default)
+  MDY,  // 03-14-2025 (US)
+  YMD,  // 2025-03-14 (ISO / East Asia)
+};
+constexpr DateLocale DATE_LOCALE = DateLocale::DMY;
+
 }  // namespace config
 
 // System-level constants (hardware model, timeouts, cache layout, image

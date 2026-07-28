@@ -124,6 +124,9 @@ constexpr uint8_t MAINTENANCE_BUTTON_LEFT = 1U << 2;
 
 struct Comic {
   int number = 0;
+  int year = 0;
+  int month = 0;
+  int day = 0;
   String title;
   String alt;
   String imageUrl;
@@ -384,6 +387,31 @@ void selectFooterFont() {
 void selectStatusMessageTitleFont() { applyGfxFont(TITLE_FALLBACK_FONT); }
 void selectStatusMessageDetailFont() { applyGfxFont(FOOTER_FALLBACK_FONT); }
 
+// Formats a comic's publication date as a fixed "AA-BB-CCCC" (or
+// "CCCC-AA-BB" for YMD) string, honouring config::DATE_LOCALE. Returns an
+// empty string when any component is zero (unknown), so callers can skip
+// rendering silently on malformed metadata rather than showing "0-0-0".
+String formatComicDate(const Comic& comic) {
+  if (comic.year <= 0 || comic.month <= 0 || comic.day <= 0) return String();
+  char buf[16];
+  switch (config::DATE_LOCALE) {
+    case config::DateLocale::MDY:
+      snprintf(buf, sizeof(buf), "%02d-%02d-%04d", comic.month, comic.day,
+               comic.year);
+      break;
+    case config::DateLocale::YMD:
+      snprintf(buf, sizeof(buf), "%04d-%02d-%02d", comic.year, comic.month,
+               comic.day);
+      break;
+    case config::DateLocale::DMY:
+    default:
+      snprintf(buf, sizeof(buf), "%02d-%02d-%04d", comic.day, comic.month,
+               comic.year);
+      break;
+  }
+  return String(buf);
+}
+
 void drawBadges(uint32_t background = PANEL_WHITE,
                 bool fillTextBackground = true,
                 const String* lastRefreshTime = nullptr) {
@@ -539,6 +567,18 @@ bool parseComic(const String& json, Comic& comic) {
     }
   }
   comic.number = document["num"] | 0;
+  // xkcd's info.0.json stores year/month/day as JSON strings (e.g. "2025",
+  // "3", "14") but occasionally as bare numbers on very old comics. Read
+  // them permissively as ints; zeros mean "unknown" and suppress the date.
+  comic.year = document["year"].is<int>()
+                   ? document["year"].as<int>()
+                   : atoi(document["year"] | "0");
+  comic.month = document["month"].is<int>()
+                    ? document["month"].as<int>()
+                    : atoi(document["month"] | "0");
+  comic.day = document["day"].is<int>()
+                  ? document["day"].as<int>()
+                  : atoi(document["day"] | "0");
   const char* title = document["safe_title"];
   if (!title || !*title) title = document["title"];
   if (!title || !*title) title = "xkcd";
@@ -1055,6 +1095,22 @@ bool renderComic(const Comic& comic, RgbImage& image, ImageLayout layout) {
                     config::PANEL_WIDTH / 2, config::ui(24) + smoothCenterYAdjust(), 1);
   applyGfxFont(nullptr);
   epaper.setTextFont(2);
+
+  // Publication date: bottom-right of the image area, just above the
+  // footer divider, in the same GFX bold font as the battery percentage
+  // so it reads as part of the panel chrome rather than the comic art.
+  const String publishedDate = formatComicDate(comic);
+  if (!publishedDate.isEmpty()) {
+    selectStatusFont();
+    epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, true);
+    epaper.setTextDatum(BR_DATUM);
+    epaper.drawString(publishedDate,
+                      config::PANEL_WIDTH - config::CONTENT_MARGIN_X,
+                      layout.footerDividerY - config::ui(2), 1);
+    applyGfxFont(nullptr);
+    epaper.setTextFont(2);
+  }
+
   String refreshTime;
   if (local_time::clockIsValid()) {
     struct tm now = {};

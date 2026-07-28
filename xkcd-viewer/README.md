@@ -346,6 +346,11 @@ them.
   will accept before a comic is considered illegible and skipped. Raise
   toward `1.0` to be pickier; lower toward `0.5` to display more comics
   at the cost of readability.
+- `DATE_LOCALE`: order for the publication date shown at the bottom-
+  right of the image area. `DateLocale::DMY` (default) renders
+  `14-03-2025`, `DateLocale::MDY` renders `03-14-2025`, and
+  `DateLocale::YMD` renders `2025-03-14`. Day and month are always
+  zero-padded and the separator is always `-`.
 - `DEBUG_FORCE_COMIC`: when non-zero, the next cold-boot pick short-
   circuits random selection and loads that specific comic straight from
   the local cache. Intended only for reproducing a render bug on a
