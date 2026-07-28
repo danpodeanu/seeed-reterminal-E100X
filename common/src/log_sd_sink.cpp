@@ -2,6 +2,7 @@
 
 #include <SD.h>
 
+#include "app_logger.h"
 #include "sd_card.h"
 
 namespace log_sd_sink {
@@ -26,8 +27,16 @@ void install(TimestampedLogger& logger) {
   // this is normally a fresh empty file; if rotation failed we simply
   // continue appending to the old current.log rather than losing lines.
   File sink = sd_card::openForAppend(kCurrentLogPath);
-  if (!sink) return;
+  if (!sink) {
+    LOG.printf("[log-sink] failed to open %s; SD logging disabled\n",
+               kCurrentLogPath);
+    return;
+  }
   logger.attachSdSink(std::move(sink));
+  // First line into the new current.log (via the tee) doubles as a
+  // marker so a triage reader can see where each boot's log starts.
+  LOG.printf("[log-sink] tee enabled -> %s (previous boot: %s)\n",
+             kCurrentLogPath, kPreviousLogPath);
 }
 
 }  // namespace log_sd_sink
