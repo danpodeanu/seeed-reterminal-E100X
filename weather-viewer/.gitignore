@@ -21,3 +21,7 @@ venv/
 
 # Local logs
 *.log
+
+# Auto-regenerated per build by tools/pre_generate_icons.py; the SVG
+# sources under icons/svg/ are the source of truth.
+src/generated/

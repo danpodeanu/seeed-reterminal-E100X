@@ -43,6 +43,7 @@
 #include "weather_data.h"
 #include "weather_provider.h"
 #include "canonical_weather.h"
+#include "weather_icons.h"
 
 #if RETERMINAL_MODEL == 1003
 #include "fonts/Roboto_Bold90pt7b.h"
@@ -584,97 +585,12 @@ void thickLine(int x1, int y1, int x2, int y2, int thickness,
                       x2 + px, y2 + py, color);
 }
 
-void drawSun(int cx, int cy, int radius, uint32_t color) {
-  // Keep the solar disc open and bright, with the panel color used only for
-  // its outline and rays.
-  epaper.fillCircle(cx, cy, radius, PANEL_WHITE);
-  const int outline = max(1, radius / 12);
-  for (int inset = 0; inset < outline; ++inset) {
-    epaper.drawCircle(cx, cy, radius - inset, color);
-  }
-  const int inner = radius + max(3, radius / 2);
-  const int outer = radius + max(7, radius);
-  const int thickness = max(1, radius / 8);
-  for (int angle = 0; angle < 360; angle += 45) {
-    const float radians = angle * PI / 180.0f;
-    thickLine(cx + cosf(radians) * inner, cy + sinf(radians) * inner,
-              cx + cosf(radians) * outer, cy + sinf(radians) * outer,
-              thickness, color);
-  }
-}
-
-void drawMoon(int cx, int cy, int radius) {
-  epaper.fillCircle(cx, cy, radius, PANEL_BLACK);
-  epaper.fillCircle(cx + radius / 2, cy - radius / 3, radius, PANEL_WHITE);
-}
-
-void drawCloud(int cx, int cy, int size) {
-  const int baseY = cy + size / 7;
-  epaper.fillCircle(cx - size / 5, cy, size / 5, PANEL_LIGHT);
-  epaper.fillCircle(cx + size / 10, cy - size / 8, size / 4, PANEL_LIGHT);
-  epaper.fillCircle(cx + size / 3, cy + size / 20, size / 6, PANEL_LIGHT);
-  epaper.fillRect(cx - size / 3, cy, size * 2 / 3, size / 4, PANEL_LIGHT);
-  epaper.drawCircle(cx - size / 5, cy, size / 5, PANEL_BLACK);
-  epaper.drawCircle(cx + size / 10, cy - size / 8, size / 4, PANEL_BLACK);
-  epaper.drawCircle(cx + size / 3, cy + size / 20, size / 6, PANEL_BLACK);
-  thickLine(cx - size / 3, baseY, cx + size / 2, baseY,
-            max(1, size / 25), PANEL_BLACK);
-}
-
 void drawWeatherIcon(int cx, int cy, int size, int code, bool isDay = true) {
-  // For a clear sky, the ray tips now span approximately the full requested
-  // size instead of occupying less than half of the icon box.
-  const int radius = max(4, size / 4);
-  if (code == 0) {
-    if (isDay) drawSun(cx, cy, radius, COLOR_SUN);
-    else drawMoon(cx, cy, radius);
-    return;
-  }
-  if (code == 1 || code == 2) {
-    drawSun(cx - size / 5, cy - size / 5, max(3, radius * 3 / 4),
-            COLOR_SUN);
-    drawCloud(cx + size / 10, cy + size / 10, size);
-    return;
-  }
-
-  // Only shift the cloud up when precipitation strokes render below
-  // it; for a plain overcast/fog code the cloud stays centered on cy.
-  const bool hasPrecipBelow =
-      (code >= 51 && code <= 67) || (code >= 71 && code <= 77) ||
-      (code >= 80 && code <= 86) || (code >= 95);
-  const int cloudCy = hasPrecipBelow ? cy - size / 8 : cy;
-  drawCloud(cx, cloudCy, size);
-  if (code == 45 || code == 48) {
-    for (int i = 0; i < 3; ++i) {
-      const int y = cy + size / 4 + i * max(3, size / 8);
-      thickLine(cx - size / 3, y, cx + size / 3, y,
-                max(1, size / 30), PANEL_MUTED);
-    }
-  } else if ((code >= 51 && code <= 67) ||
-             (code >= 80 && code <= 82)) {
-    for (int i = -1; i <= 1; ++i) {
-      const int x = cx + i * size / 4;
-      thickLine(x, cy + size / 5, x - size / 12, cy + size / 2,
-                max(1, size / 24), COLOR_RAIN);
-    }
-  } else if ((code >= 71 && code <= 77) ||
-             (code >= 85 && code <= 86)) {
-    for (int i = -1; i <= 1; ++i) {
-      const int x = cx + i * size / 4;
-      const int y = cy + size / 3;
-      thickLine(x - size / 12, y, x + size / 12, y,
-                max(1, size / 30), COLOR_RAIN);
-      thickLine(x, y - size / 12, x, y + size / 12,
-                max(1, size / 30), COLOR_RAIN);
-    }
-  } else if (code >= 95) {
-    const int top = cy + size / 8;
-    epaper.fillTriangle(cx, top, cx - size / 8, top + size / 4,
-                        cx + size / 16, top + size / 4, COLOR_ALERT);
-    epaper.fillTriangle(cx + size / 16, top + size / 4,
-                        cx - size / 16, top + size / 2,
-                        cx + size / 5, top + size / 5, COLOR_ALERT);
-  }
+  // Blit one of the 26 baked Meteocons sprites (see weather_icons.h and
+  // tools/generate_weather_icons.py). The sprite table is generated
+  // per-board at three sizes; pickSprite picks the closest and blit
+  // nearest-neighbour scales to the requested size.
+  weather_icons::draw(epaper, cx, cy, size, code, isDay, PANEL_BLACK);
 }
 
 void drawLargeTemperature(float celsius, int cx, int cy) {
