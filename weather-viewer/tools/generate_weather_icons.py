@@ -71,15 +71,14 @@ SIZES_BY_MODEL = {
     1004: (48, 64, 420),   # 1200x1600 portrait, 3/2 scale
 }
 
-# Bits per pixel. 2 bpp gives 4 alpha levels: level 3 = solid stroke,
-# levels 1 and 2 = anti-aliased edge (dithered at blit time), level 0 =
-# transparent. Applied to every model so 6-colour panels get the same
-# dithered soft edges as the greyscale ones.
+# Bits per pixel per model. Grey-capable panels get 2 bpp so their edges
+# anti-alias through a per-model ink palette. Palette panels stay at
+# 1 bpp because the extra bit has no distinct shade to paint with.
 BPP_BY_MODEL = {
     1001: 2,
-    1002: 2,
+    1002: 1,
     1003: 2,
-    1004: 2,
+    1004: 1,
 }
 
 
