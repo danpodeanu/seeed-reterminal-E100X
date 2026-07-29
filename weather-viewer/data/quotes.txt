@@ -1,0 +1,337 @@
+# Weather-themed proverbs and sayings, bucketed by condition.
+# 4-6 words each. Traditional English, maritime, and farmer's-almanac
+# proverbs, most pre-1900 and unambiguously public domain. Any modern
+# idioms are common-usage phrases with no single copyright owner.
+#
+# The buckets map directly onto the WMO codes rendered by the weather
+# viewer, so at runtime the footer can pull a proverb that matches the
+# current condition instead of picking one at random.
+#
+# WMO -> bucket mapping (see weather_icons::wmoToIcon):
+#   0                 -> CLEAR
+#   1, 2              -> PARTLY_CLOUDY
+#   3                 -> OVERCAST
+#   45                -> FOG
+#   48                -> HAZE
+#   51-55             -> DRIZZLE
+#   56, 57, 66, 67    -> SLEET (freezing precipitation)
+#   61-65             -> RAIN
+#   71-77, 85, 86     -> SNOW
+#   80-82             -> SHOWERS
+#   95-99             -> THUNDERSTORM
+# Plus condition-agnostic buckets: WIND, COLD, HEAT, NIGHT, UNIVERSAL.
+
+
+# =========================================================================
+# [CLEAR] - clear sky, sunny day (WMO 0)
+# =========================================================================
+Make hay while the sun shines.
+A ray of sunshine on the water.
+The sun is the best painter.
+Nothing new under the sun.
+A place in the sun.
+Sunshine follows the rain.
+Blue skies, calm minds.
+Fair weather feeds fair thoughts.
+Clear skies bring cold nights.
+The sun shines even after rain.
+Every dawn is a new gift.
+No shadow without light.
+Follow the sun, forget the clouds.
+Sunlight is the best disinfectant.
+A cloudless sky, a cloudless mind.
+Bright sun, bright hopes.
+Where sun goes, shadows follow.
+Even the sun has spots.
+The morning sun never lasts a day.
+Sun after storm tastes sweetest.
+Under the sun, no secret keeps.
+A sunny day makes the burden light.
+
+
+# =========================================================================
+# [PARTLY_CLOUDY] - a few clouds passing, sun still winning (WMO 1, 2)
+# =========================================================================
+Every cloud has a silver lining.
+A cloud no bigger than a hand.
+Mackerel sky, mackerel sky, wind soon.
+Clouds pass, sky remains.
+No sky is bluer than after clouds.
+Chase clouds, catch shadows.
+Head in the clouds, feet on ground.
+Small clouds, small trouble.
+A gathering cloud gathers rain.
+White clouds are travellers of the sky.
+The sun peeks between the clouds.
+Look up, the clouds are moving.
+Clouds are not the sky.
+Every cloud drops its shadow.
+Behind the cloud, the sun waits.
+Wandering clouds, wandering thoughts.
+Clouds cannot hide the mountain long.
+Cloud castles fall in the wind.
+A single cloud does not hide sun.
+
+
+# =========================================================================
+# [OVERCAST] - solid grey, the sun has given up (WMO 3)
+# =========================================================================
+Grey skies, quiet thoughts.
+A dull sky invites a quiet mind.
+Beneath a leaden sky, roots grow.
+Overcast days sharpen colours below.
+Even grey skies water the garden.
+The sky rests before the storm.
+Not every grey day brings rain.
+A soft light for tender eyes.
+Overcast, but not overwrought.
+Slate skies teach patience.
+Clouds hide the sun, not the day.
+No shadow in the shadow of clouds.
+A quiet sky, a quiet field.
+Under grey skies, the sea shines.
+A dim sky, a bright fire.
+Cover of cloud, calm of mind.
+Even grey has a hundred shades.
+The world is softer without shadow.
+
+
+# =========================================================================
+# [FOG] - fog, low visibility (WMO 45)
+# =========================================================================
+Fog before seven, gone by eleven.
+A morning fog, an afternoon sun.
+The fog thickens where paths meet.
+Fog clears the loudest voices.
+Walk carefully, the fog is old.
+Even a fog has an edge.
+Fog blankets the small mistakes.
+When fog lifts, the road appears.
+Fog is the sea come inland.
+Every step forward, one more visible.
+Slow steps in thick fog.
+A fog in autumn, a mild winter.
+Sound travels far in a low fog.
+Fog is a cloud that fell.
+Fog on the hill, rain in the valley.
+The lantern is bravest in fog.
+
+
+# =========================================================================
+# [HAZE] - haze, thin veiling of the sky (WMO 48)
+# =========================================================================
+A hazy sky, a hazy plan.
+Distant hills wear haze like a coat.
+Haze softens what light hardens.
+Behind the haze, the mountain waits.
+Summer haze, hidden heat.
+Haze at sunset, rain by morning.
+The world at rest wears haze.
+A veil of haze, a hush of birds.
+Long views need patient eyes.
+Even hazy days cast shadows.
+Hazy morning, clearing afternoon.
+Haze on the water, wind at sea.
+
+
+# =========================================================================
+# [DRIZZLE] - light steady precipitation (WMO 51-55)
+# =========================================================================
+Small rain lays great dust.
+A drizzle waters more than a downpour.
+Steady rain fills the deepest well.
+Even fine rain wets you through.
+Slow rain, quiet growth.
+A misty rain, a mossy stone.
+Drizzle in the morning, sun by noon.
+Gentle rain, gentle rivers.
+The drizzle knows no hurry.
+Drops make the river.
+A silver rain on a green field.
+Kind rain feeds a kind harvest.
+Under a soft rain, roots reach deep.
+Drizzle before wind, storm behind.
+The lightest rain lasts longest.
+
+
+# =========================================================================
+# [RAIN] - proper rain, downpour (WMO 61-65)
+# =========================================================================
+It never rains but it pours.
+Save it for a rainy day.
+Come rain or shine.
+Rain before seven, fine by eleven.
+Into each life some rain must fall.
+Right as rain.
+Chase rainbows, find pots of gold.
+After rain comes fair weather.
+Rain washes what a broom cannot.
+No rain, no rainbows.
+When it rains, look for rainbows.
+A rainy day is good for reading.
+The rain falls on just and unjust.
+Rain on the tin roof, sleep on the couch.
+Not all who wander mind the rain.
+Long foretold, long last.
+Short notice, soon past.
+The rain lets the river remember.
+Rain sings on every roof.
+Rain in the field, coins in the barn.
+A soft rain heals a hard year.
+The rain is the sky returning gifts.
+Rain and patience break the drought.
+Rain makes friends of frogs.
+Deep rain, deep roots.
+Rain sharpens the smell of pines.
+A wet spring, a fine summer.
+Rain does not fall for one flower.
+
+
+# =========================================================================
+# [SHOWERS] - passing showers, sun & rain mixed (WMO 80-82)
+# =========================================================================
+April showers bring May flowers.
+Between showers, the world sparkles.
+A rainbow follows the shower.
+Sun and rain make the field green.
+The devil is beating his wife.
+Shower over, road shining.
+Quick shower, quick rainbow.
+A shower a day fills the harvest.
+Puddles catch the sky in pieces.
+Passing rain, permanent green.
+When the sun shines through the rain.
+Ten minutes of rain, ten new colours.
+
+
+# =========================================================================
+# [THUNDERSTORM] - thunder, lightning, hail (WMO 95-99)
+# =========================================================================
+The calm before the storm.
+Any port in a storm.
+Weather the storm.
+Steal someone's thunder.
+Every storm runs out of rain.
+After the storm comes the calm.
+Lightning never strikes twice.
+When it thunders, the miller cannot hear.
+Thunder in the east, expect wind.
+No storm lasts a hundred years.
+The oak fears the storm most.
+Thunder over the mountain, rain in the valley.
+A summer storm, a winter grudge.
+Lightning writes on the dark sky.
+The storm sorts the tall grass.
+Bend, or break, in the wind.
+Between two thunders, count your breaths.
+The barn stands, the storm passes.
+A storm at sea, a story ashore.
+Thunder is the sky clearing its throat.
+Even a great storm ends in silence.
+
+
+# =========================================================================
+# [SNOW] - snow, snow showers (WMO 71-77, 85-86)
+# =========================================================================
+Snowed under.
+Snowball's chance in a heatwave.
+March comes in like a lion.
+Whose woods these are I think I know.
+A quiet as fresh snow.
+Snow is the sky's white blanket.
+Snow before the frost, wheat at last.
+Each snowflake falls in its own place.
+A white morning, a black harvest.
+When snow falls, the field rests.
+Slow footprints in fresh snow.
+Snow melts, the mountain remains.
+The tallest tree carries the most snow.
+Every snowflake pleads not guilty.
+Snow softens the hardest fields.
+Under snow, seeds keep faith.
+A late snow, a long spring.
+Silent as snow, patient as ice.
+Snow is winter's kindness.
+White fields, quiet crows.
+
+
+# =========================================================================
+# [SLEET] - freezing rain, ice pellets (WMO 56, 57, 66, 67)
+# =========================================================================
+Ice on the road, patience at the wheel.
+A glaze of ice, a careful step.
+Sleet at dusk, ice by dawn.
+Freezing rain writes on every wire.
+When sleet falls, the pines lean low.
+Under a coat of ice, the bud waits.
+Ice storms are the sky's punctuation.
+Sleet on the window, tea on the stove.
+Beware the smiling ice.
+Frozen rain, sharpened wind.
+
+
+# =========================================================================
+# [WIND] - windy weather (condition-agnostic supplement)
+# =========================================================================
+An ill wind blows no good.
+Straws show which way the wind blows.
+It's an ill wind indeed.
+The wind sows and the storm reaps.
+A high wind, an empty barn.
+Wind before rain, sail set again.
+Trees bend, but do not break.
+The wind cannot read, but turns pages.
+No wind, no ripple.
+The pine complains most in wind.
+Follow the wind, find the sea.
+North wind sharp, south wind kind.
+A calm wind carries far.
+The wind writes what the sand keeps.
+
+
+# =========================================================================
+# [COLD] - cold days (condition-agnostic supplement)
+# =========================================================================
+Cold hands, warm heart.
+A cold wind, a warm hearth.
+Frost on the pumpkin, harvest done.
+A frost in May burns more than snow.
+Winter finds what summer hid.
+The colder the night, the brighter the stars.
+The stove knows every winter guest.
+Cold sharpens the appetite.
+Winter is a slow question.
+A hard frost, a fine soup.
+
+
+# =========================================================================
+# [HEAT] - hot days (condition-agnostic supplement)
+# =========================================================================
+A hot day, a slow river.
+The heat teaches patience.
+Shade is the summer's gift.
+No wind, no shade, no thanks.
+Under a hot sun, take small steps.
+A wet cloth beats a warm complaint.
+Dog days, long shadows.
+Heat cracks the field, water heals it.
+Summer nights are shortest.
+Cicadas measure the heat.
+
+
+# =========================================================================
+# [UNIVERSAL] - fits any weather (fallback bucket)
+# =========================================================================
+Under the weather.
+Fair-weather friend.
+Rain or shine.
+Wind and weather, all together.
+No two skies are the same.
+Every sky tells a story.
+The weather is a poor prophet.
+Whatever the weather, we move together.
+Above the clouds, the sun still shines.
+Look at the sky, then plan the day.
+The barometer knows before you do.
+There is no bad weather, only clothes.
+Watch the sky, not the calendar.

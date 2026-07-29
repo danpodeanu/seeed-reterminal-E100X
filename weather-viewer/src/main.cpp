@@ -44,6 +44,7 @@
 #include "weather_provider.h"
 #include "canonical_weather.h"
 #include "weather_icons.h"
+#include "weather_quotes.h"
 
 #if RETERMINAL_MODEL == 1003
 #include "fonts/Roboto_Bold90pt7b.h"
@@ -874,7 +875,7 @@ void renderPortrait(const WeatherData& weather) {
   }
 }
 
-void renderFooter() {
+void renderFooter(const WeatherData& weather) {
   const int top = config::PANEL_HEIGHT - config::ui(30);
   // Anchor the label baseline to the actual band vertical center so the
   // text visually sits in the middle of the strip (previously the label
@@ -893,13 +894,45 @@ void renderFooter() {
   // crisp edges.
   epaper.setTextColor(PANEL_BLACK, PANEL_STATUS_BACKGROUND, !PANEL_STATUS_DITHERED);
   const int footerYAdjust = smoothCenterYAdjust();
+
+  // Left: provider name. Measure its width first so we know where the
+  // available middle band ends.
+  const String providerText =
+      text_render::displayText(String(weather_provider::name()));
+  const int leftPad = config::ui(12);
+  const int providerRight = leftPad + epaper.textWidth(providerText);
   epaper.setTextDatum(ML_DATUM);
-  epaper.drawString(text_render::displayText(String(weather_provider::name())),
-                    config::ui(12), labelY + footerYAdjust, 1);
+  epaper.drawString(providerText, leftPad, labelY + footerYAdjust, 1);
+
+  // Right: location name. Measure similarly to know where the middle
+  // band starts.
+  const String locationText =
+      text_render::displayText(String(config::LOCATION_NAME));
+  const int rightPad = config::ui(12);
+  const int locationLeft = config::PANEL_WIDTH - rightPad
+                           - epaper.textWidth(locationText);
   epaper.setTextDatum(MR_DATUM);
-  epaper.drawString(text_render::displayText(String(config::LOCATION_NAME)),
-                    config::PANEL_WIDTH - config::ui(12),
+  epaper.drawString(locationText, config::PANEL_WIDTH - rightPad,
                     labelY + footerYAdjust, 1);
+
+  // Centre: weather-themed proverb whose bucket matches the current
+  // WMO code. Random per refresh via esp_random(); if no proverb in
+  // the primary bucket (or the UNIVERSAL fallback) fits the gap, skip
+  // silently so nothing collides with the fixed left/right labels.
+  const int gapPad = config::ui(12);
+  const int availStart = providerRight + gapPad;
+  const int availEnd = locationLeft - gapPad;
+  const int availPx = availEnd - availStart;
+  if (availPx > config::ui(40)) {
+    const char* quote = weather_quotes::pickForWmo(
+        weather.weatherCode, esp_random(), epaper, availPx);
+    if (quote != nullptr) {
+      epaper.setTextDatum(MC_DATUM);
+      epaper.drawString(quote, (availStart + availEnd) / 2,
+                        labelY + footerYAdjust, 1);
+    }
+  }
+
   // Restore the GFX small font in case any later footer additions rely
   // on it; also releases the .vlw resources so the next full-panel
   // repaint doesn't hold onto them.
@@ -936,7 +969,7 @@ void renderWeather(const WeatherData& weather) {
 #else
   renderLandscape(weather);
 #endif
-  renderFooter();
+  renderFooter(weather);
   epaper.setTextSize(1);
   epaper.setFreeFont(nullptr);
   epaper.setTextFont(2);

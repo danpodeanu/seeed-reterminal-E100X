@@ -8,6 +8,7 @@
 #include "app_logic.h"
 #include "local_time.h"
 #include "text_render_pure.h"
+#include "weather_quotes_bucket.h"
 
 #ifdef _WIN32
 static inline struct tm* gmtime_r(const time_t* t, struct tm* out) {
@@ -623,6 +624,70 @@ void test_display_text_preserves_3byte_utf8_city_names() {
       text_render::pure::displayText("\xE5\x8C\x97\xE4\xBA\xAC").c_str());
 }
 
+// The footer proverb's bucket for a given WMO code MUST match the
+// bucket ranges used by weather_icons::wmoToIcon; otherwise the hero
+// icon (e.g. showing rain) and the proverb (e.g. talking about snow)
+// disagree on the current condition. The mapping is duplicated because
+// the icon module doesn't depend on the quotes module -- this test
+// pins the ranges so drift is caught before it ships.
+void test_wmo_to_bucket_covers_shared_ranges() {
+  using namespace weather_quotes::pure;
+
+  // Single-code buckets that mirror wmoToIcon's switch head.
+  TEST_ASSERT_EQUAL(IDX_CLEAR, wmoToBucketIndex(0));
+  TEST_ASSERT_EQUAL(IDX_PARTLY_CLOUDY, wmoToBucketIndex(1));
+  TEST_ASSERT_EQUAL(IDX_PARTLY_CLOUDY, wmoToBucketIndex(2));
+  TEST_ASSERT_EQUAL(IDX_OVERCAST, wmoToBucketIndex(3));
+  TEST_ASSERT_EQUAL(IDX_FOG, wmoToBucketIndex(45));
+  TEST_ASSERT_EQUAL(IDX_HAZE, wmoToBucketIndex(48));
+
+  // Drizzle 51-55, freezing drizzle 56/57 goes to sleet.
+  for (int c = 51; c <= 55; ++c) {
+    TEST_ASSERT_EQUAL(IDX_DRIZZLE, wmoToBucketIndex(c));
+  }
+  TEST_ASSERT_EQUAL(IDX_SLEET, wmoToBucketIndex(56));
+  TEST_ASSERT_EQUAL(IDX_SLEET, wmoToBucketIndex(57));
+
+  // Rain 61-65, freezing rain 66/67 also sleet.
+  for (int c = 61; c <= 65; ++c) {
+    TEST_ASSERT_EQUAL(IDX_RAIN, wmoToBucketIndex(c));
+  }
+  TEST_ASSERT_EQUAL(IDX_SLEET, wmoToBucketIndex(66));
+  TEST_ASSERT_EQUAL(IDX_SLEET, wmoToBucketIndex(67));
+
+  // Snow 71-77 and 85/86 (snow showers) share the SNOW bucket.
+  for (int c = 71; c <= 77; ++c) {
+    TEST_ASSERT_EQUAL(IDX_SNOW, wmoToBucketIndex(c));
+  }
+  TEST_ASSERT_EQUAL(IDX_SNOW, wmoToBucketIndex(85));
+  TEST_ASSERT_EQUAL(IDX_SNOW, wmoToBucketIndex(86));
+
+  // Rain showers 80-82 map to SHOWERS.
+  for (int c = 80; c <= 82; ++c) {
+    TEST_ASSERT_EQUAL(IDX_SHOWERS, wmoToBucketIndex(c));
+  }
+
+  // Thunderstorms 95-99.
+  for (int c = 95; c <= 99; ++c) {
+    TEST_ASSERT_EQUAL(IDX_THUNDERSTORM, wmoToBucketIndex(c));
+  }
+}
+
+// Codes outside any known WMO group must fall back to the
+// condition-agnostic UNIVERSAL bucket so callers never end up with a
+// nullptr sub-array. Negative sentinels used by the providers
+// (weather.weatherCode=-1 for "unknown") are the common case here.
+void test_wmo_to_bucket_falls_back_to_universal_for_unknown() {
+  using namespace weather_quotes::pure;
+  TEST_ASSERT_EQUAL(IDX_UNIVERSAL, wmoToBucketIndex(-1));
+  TEST_ASSERT_EQUAL(IDX_UNIVERSAL, wmoToBucketIndex(4));   // no code 4
+  TEST_ASSERT_EQUAL(IDX_UNIVERSAL, wmoToBucketIndex(50));  // gap
+  TEST_ASSERT_EQUAL(IDX_UNIVERSAL, wmoToBucketIndex(70));  // gap
+  TEST_ASSERT_EQUAL(IDX_UNIVERSAL, wmoToBucketIndex(87));  // gap
+  TEST_ASSERT_EQUAL(IDX_UNIVERSAL, wmoToBucketIndex(94));  // gap
+  TEST_ASSERT_EQUAL(IDX_UNIVERSAL, wmoToBucketIndex(100)); // above range
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_startup_beep_only_for_cold_boot_and_button_wake);
@@ -655,5 +720,7 @@ int main(int, char**) {
   RUN_TEST(test_gzip_deflate_span_rejects_malformed_inputs);
   RUN_TEST(test_display_text_preserves_utf8_city_names);
   RUN_TEST(test_display_text_preserves_3byte_utf8_city_names);
+  RUN_TEST(test_wmo_to_bucket_covers_shared_ranges);
+  RUN_TEST(test_wmo_to_bucket_falls_back_to_universal_for_unknown);
   return UNITY_END();
 }
