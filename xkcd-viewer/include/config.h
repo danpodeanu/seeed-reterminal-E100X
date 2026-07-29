@@ -77,7 +77,7 @@ constexpr DateLocale DATE_LOCALE = DateLocale::DMY;
 // /logs/previous.log). Off by default -- fsync-per-line adds several
 // seconds of SD I/O to each refresh, so only enable while
 // troubleshooting a specific misbehaviour.
-constexpr bool LOG_TO_SD = true;
+constexpr bool LOG_TO_SD = false;
 
 }  // namespace config
 
