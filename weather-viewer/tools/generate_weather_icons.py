@@ -1,25 +1,11 @@
 #!/usr/bin/env python3
-"""Rasterise the Meteocons line SVGs into a header of packed sprites.
+"""Rasterise the Meteocons line SVGs into a header of packed 1-bit sprites.
 
 The header is regenerated per-build against the active RETERMINAL_MODEL and
 included from weather_icons.cpp. Each of the 26 icons is emitted at three
 sizes (small / mid / large) tuned to the drawWeatherIcon call-sites on that
-board.
-
-Sprites are stored as either 1 or 2 bits per pixel depending on what the
-target panel can actually display:
-
-  * 1001 (Gray4)   -> 2 bpp: 4 alpha levels quantise to native greys, so
-                             edges anti-alias instead of staircasing.
-  * 1003 (Gray16)  -> 2 bpp: same story with even smoother greys.
-  * 1002, 1004 (6-color) -> 1 bpp: no native greys available, so the extra
-                                   bit would be wasted.
-
-Bit layout for 1 bpp: MSB-first, row-padded to whole bytes.
-Bit layout for 2 bpp: 4 pixels per byte, top pair first (bits 7-6 = first
-pixel, 5-4 = second, ...); row-padded to whole bytes. Value 0 is
-transparent (skip), values 1..3 index the runtime ink palette from lightest
-to darkest.
+board. Sprites are alpha-as-ink packed 1-bit, MSB-first, row-padded to
+whole bytes.
 
 Usage:
     python generate_weather_icons.py <MODEL> <output-header>
@@ -61,24 +47,12 @@ BUCKETS = [
 #   landscape hero = min(PANEL_WIDTH*27/100, ...)
 #   portrait main  = min(PANEL_WIDTH*35/100, ...)
 # The largest slot for each board sets the "large" entry; small/mid cover
-# the smaller call-sites without runtime downscaling artefacts. E1003 hero
-# is bumped down from 512 -> 480 to keep the 2 bpp storage under the app
-# partition ceiling.
+# the smaller call-sites without runtime downscaling artefacts.
 SIZES_BY_MODEL = {
     1001: (32, 48, 216),   # 800x480 landscape, 1:1 scale
     1002: (32, 48, 216),   # same panel dimensions as 1001
-    1003: (72, 96, 480),   # 1872x1404 Gray16, 9/4 scale
+    1003: (72, 96, 512),   # 1872x1404 Gray16, 9/4 scale
     1004: (48, 64, 420),   # 1200x1600 portrait, 3/2 scale
-}
-
-# Bits per pixel per model. Grey-capable panels get 2 bpp so their edges
-# anti-alias through a per-model ink palette. Palette panels stay at
-# 1 bpp because the extra bit has no distinct shade to paint with.
-BPP_BY_MODEL = {
-    1001: 2,
-    1002: 1,
-    1003: 2,
-    1004: 1,
 }
 
 
@@ -111,25 +85,6 @@ def pack_1bit(alpha: bytes, size: int, threshold: int = 128) -> bytes:
     return bytes(out)
 
 
-def pack_2bit(alpha: bytes, size: int) -> bytes:
-    """Pack an alpha buffer into a 2-bit-per-pixel bitmap, 4 pixels per
-    byte, top pair first. Alpha is quantised into 4 buckets (0..63 = 0,
-    64..127 = 1, 128..191 = 2, 192..255 = 3). Value 0 stays transparent
-    at blit time; 1..3 index the runtime ink palette lightest -> darkest.
-    Rows are aligned to whole bytes."""
-    row_bytes = (size * 2 + 7) // 8
-    out = bytearray(row_bytes * size)
-    for y in range(size):
-        row_off = y * row_bytes
-        row_src = y * size
-        for x in range(size):
-            v = alpha[row_src + x] >> 6  # 0..3
-            if v:
-                shift = 6 - 2 * (x & 3)
-                out[row_off + (x >> 2)] |= v << shift
-    return bytes(out)
-
-
 def to_c_identifier(name: str) -> str:
     return name.replace("-", "_")
 
@@ -148,8 +103,6 @@ def generate(model: int, out_path: Path) -> None:
     if model not in SIZES_BY_MODEL:
         raise SystemExit(f"Unsupported RETERMINAL_MODEL={model}")
     small, mid, large = SIZES_BY_MODEL[model]
-    bpp = BPP_BY_MODEL[model]
-    pack = pack_2bit if bpp == 2 else pack_1bit
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     with out_path.open("w", encoding="utf-8", newline="\n") as w:
@@ -161,7 +114,6 @@ def generate(model: int, out_path: Path) -> None:
             "//\n"
             f"// Model: {model}\n"
             f"// Sizes: small={small}, mid={mid}, large={large}\n"
-            f"// Bits per pixel: {bpp}\n"
             "//\n"
             "// Icons derived from basmilius/weather-icons (MIT). See\n"
             "// LICENSES/METEOCONS.txt for the upstream license.\n"
@@ -179,7 +131,6 @@ def generate(model: int, out_path: Path) -> None:
             f"inline constexpr uint16_t kSmallPx = {small};\n"
             f"inline constexpr uint16_t kMidPx   = {mid};\n"
             f"inline constexpr uint16_t kLargePx = {large};\n"
-            f"inline constexpr uint8_t  kBpp     = {bpp};\n"
             "\n"
         )
 
@@ -191,7 +142,7 @@ def generate(model: int, out_path: Path) -> None:
                 raise SystemExit(f"Missing SVG: {svg}")
             for suffix, size in (("s", small), ("m", mid), ("l", large)):
                 alpha = rasterise_alpha(svg, size)
-                bits = pack(alpha, size)
+                bits = pack_1bit(alpha, size)
                 emit_c_array(w, f"kBits_{ident}_{suffix}", bits)
 
         # Emit a Sprite / IconTriple table for lookup.
