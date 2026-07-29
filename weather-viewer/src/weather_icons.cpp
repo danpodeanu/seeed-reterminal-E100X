@@ -23,39 +23,47 @@ namespace {
 // kBpp == 1 and this table is unused -- the `color` argument to draw()
 // is honored directly instead.
 //
-// A previous iteration mapped value 1 to TFT_GRAY_2 (Gray4) / TFT_GRAY_10
-// (Gray16) so lightest edges blended toward white. That looked
-// staircased in practice because those shades are almost
-// indistinguishable from the panel background at single-pixel edge
-// widths.
+// AA strategy for 2 bpp sources depends on how many usable grey shades
+// the panel has:
 //
-// The second iteration used a single grey shade for value 1 and dropped
-// values 2/3 to solid black. That produced only ~170 grey pixels on the
-// 216 px hero (0.36% of area) while ~3300 pixels were solid black --
-// visually indistinguishable from the pure 1-bit render. This palette
-// promotes value 2 to the same visibly-grey shade as value 1, tripling
-// the AA pixel count so edges actually read as anti-aliased.
-#if RETERMINAL_MODEL == 1001
-// Gray4: only three ink shades. Both AA levels use the dark-grey shade
-// (same tone the footer text uses, which is definitely visible on the
-// panel); only fully opaque sprite pixels stay solid black.
-constexpr uint32_t kInkPalette[3] = {
-    TFT_GRAY_1,  // value 1: dark grey (edge AA, light band)
-    TFT_GRAY_1,  // value 2: dark grey (edge AA, mid band)
-    TFT_GRAY_0,  // value 3: solid black (stroke interior)
-};
-#elif RETERMINAL_MODEL == 1003
-// Gray16: enough shades to give a genuine gradient. Broaden the edge
-// bands too so more sprite pixels contribute to the AA look.
+// * E1001 (UC8179 Gray4) has only three visible ink levels and, in
+//   practice, single-pixel dots at a mid-grey shade get lost among the
+//   solid-black stroke on this panel -- the eye reads the icons as
+//   pure 1-bit ink even when the framebuffer clearly has grey pixels.
+//   Two earlier palette-based iterations both failed this test. We now
+//   ordered-dither the AA bands to pure black speckles on a white
+//   background instead: the local density (25% for value 1, 50% for
+//   value 2) reads as grey at any distance because it is actual
+//   black/white contrast rather than a fragile grey shade.
+//
+// * E1003 (Gray16) has enough shades that a proper grey gradient is
+//   perceptibly smoother than dither. Palette is preferred here.
+//
+// * E1002 / E1004 (colour panels) build with kBpp == 1 and don't hit
+//   this table at all.
+
+#if RETERMINAL_MODEL == 1003
 constexpr uint32_t kInkPalette[3] = {
     TFT_GRAY_4,  // value 1: mid grey (light edge band)
     TFT_GRAY_1,  // value 2: near-black (mid edge band)
     TFT_GRAY_0,  // value 3: solid black (stroke interior)
 };
 #else
-// 1002 / 1004 build with kBpp == 1 and never index this table; keep a
-// stub so the array symbol resolves.
+// Kept so the symbol resolves on E1001 / E1002 / E1004; unused when
+// dither is on and value 3 is always solid.
 constexpr uint32_t kInkPalette[3] = {0, 0, 0};
+#endif
+
+#if RETERMINAL_MODEL == 1001
+// 4x4 Bayer matrix, values 0..15. A pixel with source value v is
+// painted solid black when bayer[y%4][x%4] < threshold(v). Threshold 4
+// yields ~25% density, threshold 8 yields ~50% density.
+constexpr uint8_t kBayer4[4][4] = {
+    { 0,  8,  2, 10},
+    {12,  4, 14,  6},
+    { 3, 11,  1,  9},
+    {15,  7, 13,  5},
+};
 #endif
 
 // Pick the sprite from `triple` whose native size is closest to
@@ -99,9 +107,23 @@ void blit(TFT_eSPI& epaper, int cx, int cy, int targetSize,
         const uint8_t byte = pgm_read_byte(row + (sx >> 2));
         const uint8_t shift = 6 - 2 * (sx & 3);
         const uint8_t v = (byte >> shift) & 0x3;
-        if (v) {
-          epaper.drawPixel(x0 + dx, y0 + dy, kInkPalette[v - 1]);
+        if (!v) continue;  // transparent
+#if RETERMINAL_MODEL == 1001
+        // Ordered dither: paint solid black when the Bayer cell falls
+        // below the threshold for this source value. Value 3 always
+        // paints. Otherwise leave the pixel untouched (white background
+        // shows through), which the eye reads as a grey band.
+        if (v == 3) {
+          epaper.drawPixel(x0 + dx, y0 + dy, color);
+        } else {
+          const uint8_t threshold = (v == 2) ? 8 : 4;
+          if (kBayer4[dy & 3][dx & 3] < threshold) {
+            epaper.drawPixel(x0 + dx, y0 + dy, color);
+          }
         }
+#else
+        epaper.drawPixel(x0 + dx, y0 + dy, kInkPalette[v - 1]);
+#endif
       } else {
         const uint8_t byte = pgm_read_byte(row + (sx >> 3));
         if (byte & (0x80 >> (sx & 7))) {
