@@ -18,31 +18,18 @@ using SpriteRef = Sprite;
 
 namespace {
 
-// Ink palette for 2 bpp sprites, indexed by sprite value 1..3 (lightest
-// -> darkest). Panels that only have two native colors compile with
-// kBpp == 1 and this table is unused -- the `color` argument to draw()
-// is honored directly instead. Kept alongside the theme palette so
-// `overcast` cloud edges wash into the panel background naturally.
-#if RETERMINAL_MODEL == 1001
-// Gray4: only three ink shades, so we spend them all here.
-constexpr uint32_t kInkPalette[3] = {
-    TFT_GRAY_2,  // value 1: light ink (edge AA)
-    TFT_GRAY_1,  // value 2: mid ink
-    TFT_GRAY_0,  // value 3: solid black
+// 4x4 Bayer matrix (values 0..15) used to dither anti-aliased edge
+// pixels into a black/white pattern. Compared to `v * 4` at blit time:
+// level 3 always paints (solid stroke interior), level 2 paints ~50%
+// of pixels (mid-grey stipple), level 1 paints ~25% (light stipple),
+// level 0 stays transparent. Reads as a soft grey edge from arm's
+// length even on the 6-colour panels that have no native grey shade.
+constexpr uint8_t kBayer4x4[16] = {
+     0,  8,  2, 10,
+    12,  4, 14,  6,
+     3, 11,  1,  9,
+    15,  7, 13,  5,
 };
-#elif RETERMINAL_MODEL == 1003
-// Gray16: plenty of headroom, so bias values 1 and 2 lighter for a
-// subtler blend against the near-white background.
-constexpr uint32_t kInkPalette[3] = {
-    TFT_GRAY_10, // value 1: light ink
-    TFT_GRAY_4,  // value 2: mid ink
-    TFT_GRAY_0,  // value 3: solid black
-};
-#else
-// 1002 / 1004 build with kBpp == 1 and never index this table; keep a
-// stub so the array symbol resolves.
-constexpr uint32_t kInkPalette[3] = {0, 0, 0};
-#endif
 
 // Pick the sprite from `triple` whose native size is closest to
 // `requested`. Ties go to the larger sprite (upscaling from a slightly
@@ -58,11 +45,11 @@ const SpriteRef& pickSprite(const IconTriple& triple, int requested) {
 }
 
 // Draw the packed sprite centered at (cx, cy) with nearest-neighbour
-// scaling to `targetSize`. For 1 bpp sources set bits paint `color`;
-// for 2 bpp sources non-zero values look up kInkPalette (see above) so
-// panel-native grey shades anti-alias the strokes. Transparent pixels
-// are left untouched so the icon composites over the existing
-// background.
+// scaling to `targetSize`. For 2 bpp sources the sprite value
+// (0=transparent, 1=light AA, 2=mid AA, 3=solid) selects how densely
+// `color` is stamped through the Bayer matrix. For 1 bpp sources any
+// set bit paints unconditionally. Transparent / unset pixels are left
+// untouched so the icon composites over the existing background.
 void blit(TFT_eSPI& epaper, int cx, int cy, int targetSize,
           const SpriteRef& sprite, uint32_t color) {
   if (targetSize <= 0 || sprite.w == 0 || sprite.h == 0) return;
@@ -78,6 +65,7 @@ void blit(TFT_eSPI& epaper, int cx, int cy, int targetSize,
     const int sy = static_cast<int>(
         (static_cast<uint32_t>(dy) * sh) / static_cast<uint32_t>(targetSize));
     const uint8_t* row = sprite.bits + sy * stride;
+    const int py = y0 + dy;
     for (int dx = 0; dx < targetSize; ++dx) {
       const int sx = static_cast<int>(
           (static_cast<uint32_t>(dx) * sw) / static_cast<uint32_t>(targetSize));
@@ -86,13 +74,20 @@ void blit(TFT_eSPI& epaper, int cx, int cy, int targetSize,
         const uint8_t byte = pgm_read_byte(row + (sx >> 2));
         const uint8_t shift = 6 - 2 * (sx & 3);
         const uint8_t v = (byte >> shift) & 0x3;
-        if (v) {
-          epaper.drawPixel(x0 + dx, y0 + dy, kInkPalette[v - 1]);
+        if (v == 0) continue;
+        if (v == 3) {
+          epaper.drawPixel(x0 + dx, py, color);
+        } else {
+          const int px = x0 + dx;
+          const uint8_t threshold = kBayer4x4[(py & 3) * 4 + (px & 3)];
+          if (threshold < v * 4) {
+            epaper.drawPixel(px, py, color);
+          }
         }
       } else {
         const uint8_t byte = pgm_read_byte(row + (sx >> 3));
         if (byte & (0x80 >> (sx & 7))) {
-          epaper.drawPixel(x0 + dx, y0 + dy, color);
+          epaper.drawPixel(x0 + dx, py, color);
         }
       }
     }
