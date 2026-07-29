@@ -894,7 +894,7 @@ void renderFooter() {
   epaper.setTextColor(PANEL_BLACK, PANEL_STATUS_BACKGROUND, !PANEL_STATUS_DITHERED);
   const int footerYAdjust = smoothCenterYAdjust();
   epaper.setTextDatum(ML_DATUM);
-  epaper.drawString(text_render::displayText(String("Weather data: ") + weather_provider::name()),
+  epaper.drawString(text_render::displayText(String(weather_provider::name())),
                     config::ui(12), labelY + footerYAdjust, 1);
   epaper.setTextDatum(MR_DATUM);
   epaper.drawString(text_render::displayText(String(config::LOCATION_NAME)),
