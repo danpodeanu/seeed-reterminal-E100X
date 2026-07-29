@@ -1,11 +1,10 @@
 @echo off
 REM Build, upload and monitor the current viewer app on the reTerminal.
-setlocal
+setlocal EnableDelayedExpansion
 
 set "SCRIPT=%~nx0"
 set "BOARD=%~1"
 set "PORT=%~2"
-if "%PORT%"=="" set "PORT=COM3"
 
 set "VALID=0"
 if /I "%BOARD%"=="e1001" set "VALID=1"
@@ -34,6 +33,28 @@ if errorlevel 1 (
     exit /b 1
 )
 
+REM Auto-detect a single USB serial device when the caller didn't name one.
+REM Shared logic with monitor.bat -- see that script for details on the
+REM OK#/ERR# protocol between the python helper and the batch parser.
+if "%PORT%"=="" (
+    set "DETECT="
+    for /f "usebackq delims=" %%p in (`pio device list --json-output 2^>nul ^| python -c "import json,sys; d=json.load(sys.stdin); m=[p['port'] for p in d if (p.get('hwid') or '').upper().startswith('USB') and 'bluetooth' not in (p.get('description') or '').lower()]; print(('OK#'+m[0]) if len(m)==1 else (('ERR#no USB serial devices found') if not m else ('ERR#multiple candidates: '+', '.join(m))))"`) do set "DETECT=%%p"
+    set "PREFIX=!DETECT:~0,3!"
+    if "!PREFIX!"=="OK#" (
+        set "PORT=!DETECT:~3!"
+        echo [deploy] auto-detected !PORT!
+    ) else (
+        set "PREFIX4=!DETECT:~0,4!"
+        if "!PREFIX4!"=="ERR#" (
+            echo [deploy] error: could not auto-detect port ^(!DETECT:~4!^). 1>&2
+        ) else (
+            echo [deploy] error: could not auto-detect port ^(no output from pio device list^). 1>&2
+        )
+        echo [deploy] pass a port explicitly, e.g. `%SCRIPT% %BOARD% COM5`. 1>&2
+        exit /b 1
+    )
+)
+
 set "ENV=reterminal_%BOARD%"
 echo [deploy] app=%CD%  env=%ENV%  port=%PORT%
 pio run -e %ENV% -t upload -t monitor --upload-port %PORT% --monitor-port %PORT%
@@ -43,11 +64,16 @@ exit /b %errorlevel%
 echo Usage: %SCRIPT% ^<board^> [port]
 echo.
 echo   board    e1001 ^| e1002 ^| e1003 ^| e1004  (required)
-echo   port     serial port for upload + monitor (default: COM3)
+echo   port     serial port for upload + monitor (default: auto-detect)
 echo.
 echo Examples:
-echo   ..\%SCRIPT% e1003              build + upload + monitor on COM3
+echo   ..\%SCRIPT% e1003              build + upload + monitor, auto-detect port
 echo   ..\%SCRIPT% e1001 COM5         build + upload + monitor on COM5
+echo.
+echo Auto-detect uses `pio device list --json-output` and picks the port when
+echo exactly one USB serial device is present. If zero or more than one
+echo candidate is found and no port was passed, the script errors out rather
+echo than guess.
 echo.
 echo Run from inside weather-viewer\, xkcd-viewer\ or photo-viewer\.
 exit /b 1
