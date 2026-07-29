@@ -30,9 +30,27 @@ const SpriteRef& pickSprite(const IconTriple& triple, int requested) {
   return triple.small;
 }
 
+// Sample a bit from the 1 bpp source (MSB-first, row-padded to bytes).
+// Out-of-bounds returns false so the halo pass doesn't have to
+// special-case the sprite edges.
+inline bool sampleBit(const uint8_t* bits, int stride, int x, int y,
+                      int w, int h) {
+  if (x < 0 || y < 0 || x >= w || y >= h) return false;
+  const uint8_t byte = pgm_read_byte(bits + y * stride + (x >> 3));
+  return (byte & (0x80 >> (x & 7))) != 0;
+}
+
 // Draw the packed sprite centered at (cx, cy) with nearest-neighbour
 // scaling to `targetSize`. Set bits paint `color`; cleared bits are
 // left untouched so the icon composites over the existing background.
+//
+// On E1001 large icons (hero, targetSize >= 100) we additionally paint
+// a 1-pixel dark-grey halo around every stroke: sampled cleared pixels
+// whose 4-neighbours include a set pixel get TFT_GRAY_1. This widens
+// the effective anti-aliased band from ~1 to ~2 px so the eye can
+// actually see the AA on the UC8179 Gray4 panel where isolated single
+// grey pixels are invisible next to solid ink. Small icons and other
+// panels take the plain 1 bpp path -- no behaviour change there.
 void blit(TFT_eSPI& epaper, int cx, int cy, int targetSize,
           const SpriteRef& sprite, uint32_t color) {
   if (targetSize <= 0 || sprite.w == 0 || sprite.h == 0) return;
@@ -41,6 +59,9 @@ void blit(TFT_eSPI& epaper, int cx, int cy, int targetSize,
   const int stride = (sw + 7) / 8;
   const int x0 = cx - targetSize / 2;
   const int y0 = cy - targetSize / 2;
+#if RETERMINAL_MODEL == 1001
+  const bool useHalo = (targetSize >= 100);
+#endif
   for (int dy = 0; dy < targetSize; ++dy) {
     // Integer nearest-neighbour: sy = dy * sh / targetSize.
     const int sy = static_cast<int>(
@@ -53,6 +74,18 @@ void blit(TFT_eSPI& epaper, int cx, int cy, int targetSize,
       if (byte & (0x80 >> (sx & 7))) {
         epaper.drawPixel(x0 + dx, y0 + dy, color);
       }
+#if RETERMINAL_MODEL == 1001
+      else if (useHalo) {
+        // 4-neighbour dilation. Any cleared pixel that touches a set
+        // pixel gets a dark-grey halo.
+        if (sampleBit(sprite.bits, stride, sx - 1, sy, sw, sh) ||
+            sampleBit(sprite.bits, stride, sx + 1, sy, sw, sh) ||
+            sampleBit(sprite.bits, stride, sx, sy - 1, sw, sh) ||
+            sampleBit(sprite.bits, stride, sx, sy + 1, sw, sh)) {
+          epaper.drawPixel(x0 + dx, y0 + dy, TFT_GRAY_1);
+        }
+      }
+#endif
     }
   }
 }
