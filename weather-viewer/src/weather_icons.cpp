@@ -27,24 +27,30 @@ namespace {
 // (Gray16) so lightest edges blended toward white. That looked
 // staircased in practice because those shades are almost
 // indistinguishable from the panel background at single-pixel edge
-// widths. This palette is one shade darker throughout: level 1 gets a
-// visibly grey shade, levels 2 and 3 collapse to solid black so the
-// stroke interior stays crisp.
+// widths.
+//
+// The second iteration used a single grey shade for value 1 and dropped
+// values 2/3 to solid black. That produced only ~170 grey pixels on the
+// 216 px hero (0.36% of area) while ~3300 pixels were solid black --
+// visually indistinguishable from the pure 1-bit render. This palette
+// promotes value 2 to the same visibly-grey shade as value 1, tripling
+// the AA pixel count so edges actually read as anti-aliased.
 #if RETERMINAL_MODEL == 1001
-// Gray4: only three ink shades. Spend the mid tone (GRAY_1) on the
-// lightest sprite level; darker sprite levels are solid black.
+// Gray4: only three ink shades. Both AA levels use the dark-grey shade
+// (same tone the footer text uses, which is definitely visible on the
+// panel); only fully opaque sprite pixels stay solid black.
 constexpr uint32_t kInkPalette[3] = {
-    TFT_GRAY_1,  // value 1: dark grey (edge AA)
-    TFT_GRAY_0,  // value 2: solid black
-    TFT_GRAY_0,  // value 3: solid black
+    TFT_GRAY_1,  // value 1: dark grey (edge AA, light band)
+    TFT_GRAY_1,  // value 2: dark grey (edge AA, mid band)
+    TFT_GRAY_0,  // value 3: solid black (stroke interior)
 };
 #elif RETERMINAL_MODEL == 1003
-// Gray16: three genuine dark shades let the edge fade in gradually
-// without disappearing into the background.
+// Gray16: enough shades to give a genuine gradient. Broaden the edge
+// bands too so more sprite pixels contribute to the AA look.
 constexpr uint32_t kInkPalette[3] = {
-    TFT_GRAY_6,  // value 1: mid-dark grey
-    TFT_GRAY_2,  // value 2: near-black
-    TFT_GRAY_0,  // value 3: solid black
+    TFT_GRAY_4,  // value 1: mid grey (light edge band)
+    TFT_GRAY_1,  // value 2: near-black (mid edge band)
+    TFT_GRAY_0,  // value 3: solid black (stroke interior)
 };
 #else
 // 1002 / 1004 build with kBpp == 1 and never index this table; keep a
