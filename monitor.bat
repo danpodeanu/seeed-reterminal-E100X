@@ -44,7 +44,7 @@ if "%PORT%"=="" (
     )
 )
 
-echo [monitor] port=%PORT%  baud=%BAUD%  (Ctrl-] to quit)
+echo [monitor] port=%PORT%  baud=%BAUD%  (Ctrl-C to quit)
 pio device monitor --port %PORT% --baud %BAUD%
 exit /b %errorlevel%
 
@@ -62,5 +62,5 @@ echo.
 echo Auto-detect uses `pio device list --json-output` and picks the port when
 echo exactly one USB serial device is present. If zero or more than one candidate
 echo is found and no port was passed, the script errors out rather than guess.
-echo Ctrl-] exits the monitor.
+echo Ctrl-C exits the monitor.
 exit /b 0

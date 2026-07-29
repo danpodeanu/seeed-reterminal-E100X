@@ -21,7 +21,7 @@ Examples:
 Auto-detect uses \`pio device list --json-output\` and picks the port when
 exactly one USB serial device is present. If zero or more than one candidate
 is found and no port was passed, the script errors out rather than guess.
-Ctrl-] exits the monitor.
+Ctrl-C exits the monitor.
 EOF
 }
 
@@ -79,5 +79,5 @@ else:
     fi
 fi
 
-echo "[monitor] port=${port}  baud=${baud}  (Ctrl-] to quit)"
+echo "[monitor] port=${port}  baud=${baud}  (Ctrl-C to quit)"
 exec pio device monitor --port "${port}" --baud "${baud}"
