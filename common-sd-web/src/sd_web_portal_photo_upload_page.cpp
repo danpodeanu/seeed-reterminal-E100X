@@ -124,7 +124,7 @@ footer a { color: var(--muted); }
   <div class="card">
     <p class="hint" style="margin:0">Uploaded photos appear on the panel on the next refresh.
       Use the panel's arrow buttons to leave this page.</p>
-    <p class="hint" style="margin:6px 0 0 0"><a href="/">Back to file browser</a></p>
+    <p class="hint" style="margin:6px 0 0 0"><a href="/browse?path=%2F">Back to file browser</a></p>
   </div>
 </main>
 <footer>reTerminal photo portal</footer>

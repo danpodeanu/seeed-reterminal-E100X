@@ -330,6 +330,18 @@ String flashHtml() {
 // ----- request handlers -----
 
 void handleRoot() {
+  // When the embedding app has enabled the photo uploader, "/" is the
+  // uploader landing page - the file browser is still available at
+  // /browse for power users. This ensures a user who types the AP IP
+  // directly (bypassing the QR that already points at /upload-photo)
+  // still lands on the wife-friendly uploader instead of the raw file
+  // browser, whose native input POSTs the raw JPEG and skips the
+  // in-browser dither+BMP encode.
+  if (g_config.urlQrPath && *g_config.urlQrPath) {
+    g_server->sendHeader("Location", g_config.urlQrPath);
+    g_server->send(302, "text/plain", "");
+    return;
+  }
   // Redirect to /browse?path=/
   g_server->sendHeader("Location", "/browse?path=%2F");
   g_server->send(302, "text/plain", "");
