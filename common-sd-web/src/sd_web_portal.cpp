@@ -172,6 +172,12 @@ String formatTime(time_t t) {
   // the tool doesn't run NTP so this is the FAT-encoded local time from
   // whichever host wrote the file.
   gmtime_r(&t, &tmv);
+  // FAT epoch is 1980-01-01. If the system clock wasn't set when the
+  // file was written the timestamp defaults to that value (or the
+  // first minute of it), which is worse than useless. Show a dash so
+  // the user can tell "unknown" from "actually written just after
+  // midnight on 1st Jan 1980".
+  if (tmv.tm_year + 1900 <= 1980) return String("-");
   char buf[24];
   snprintf(buf, sizeof(buf), "%04d-%02d-%02d %02d:%02d",
            tmv.tm_year + 1900, tmv.tm_mon + 1, tmv.tm_mday, tmv.tm_hour,
@@ -203,36 +209,39 @@ void sendPageHeader(const String& title, const String& breadcrumbHtml) {
       "</title>"
       "<style>"
       "*,*::before,*::after{box-sizing:border-box}"
-      "body{font-family:system-ui,-apple-system,sans-serif;margin:0;padding:0;background:#f4f4f4;color:#222;font-size:16px;line-height:1.4;-webkit-text-size-adjust:100%}"
-      "header{background:#111;color:#fff;padding:1rem;position:sticky;top:0;z-index:10}"
-      "header h1{margin:0;font-size:1.2rem}"
-      "header .crumb{font-size:.95rem;color:#ccc;margin-top:.5rem;word-break:break-all;line-height:1.5}"
-      "header .crumb a{color:#8cf;text-decoration:none;padding:.15rem .1rem}"
+      "body{font-family:system-ui,-apple-system,sans-serif;margin:0;padding:0;background:#eef1f5;color:#1f2933;font-size:16px;line-height:1.4;-webkit-text-size-adjust:100%}"
+      "header{background:linear-gradient(180deg,#12233a 0%,#0e1a2b 100%);color:#fff;padding:1rem 1.25rem;position:sticky;top:0;z-index:10;border-bottom:1px solid #0a1220;box-shadow:0 2px 6px rgba(0,0,0,.18)}"
+      "header h1{margin:0;font-size:1.2rem;letter-spacing:.01em}"
+      "header .crumb{font-size:.95rem;color:#c7d3e2;margin-top:.5rem;word-break:break-all;line-height:1.5}"
+      "header .crumb a{color:#8cc4ff;text-decoration:none;padding:.15rem .1rem}"
+      "header .crumb a:hover{text-decoration:underline}"
       "main{padding:1rem;max-width:900px;margin:auto}"
-      "section{background:#fff;border-radius:8px;padding:1rem;margin-bottom:1rem;box-shadow:0 1px 3px rgba(0,0,0,.08)}"
-      "section h2{margin:.2rem 0 .75rem 0;font-size:1.05rem;color:#555}"
+      "section{background:#fff;border:1px solid #d5dbe4;border-radius:10px;padding:1rem 1.15rem;margin-bottom:1rem;box-shadow:0 1px 2px rgba(15,25,40,.05)}"
+      "section h2{margin:0 0 .85rem 0;padding-bottom:.55rem;border-bottom:1px solid #eef1f5;font-size:1.05rem;color:#334155;font-weight:600;letter-spacing:.01em}"
       "table{width:100%;border-collapse:collapse;font-size:1rem}"
-      "th,td{text-align:left;padding:.6rem .35rem;border-bottom:1px solid #eee;vertical-align:middle}"
-      "th{color:#666;font-weight:600;font-size:.9rem;text-transform:uppercase;letter-spacing:.02em}"
-      "td.size,td.mtime,th.size,th.mtime{white-space:nowrap;color:#666;font-variant-numeric:tabular-nums}"
+      "th,td{text-align:left;padding:.65rem .4rem;border-bottom:1px solid #eef1f5;vertical-align:middle}"
+      "tbody tr:last-child td{border-bottom:0}"
+      "tbody tr:hover{background:#f7f9fc}"
+      "th{color:#64748b;font-weight:600;font-size:.8rem;text-transform:uppercase;letter-spacing:.06em;border-bottom:2px solid #e2e8ef}"
+      "td.size,td.mtime,th.size,th.mtime{white-space:nowrap;color:#64748b;font-variant-numeric:tabular-nums}"
       "td.actions{text-align:right;white-space:nowrap}"
-      "a.name{color:#036;text-decoration:none;font-weight:500;display:inline-block;padding:.2rem 0;word-break:break-all}"
+      "a.name{color:#1e40af;text-decoration:none;font-weight:500;display:inline-block;padding:.2rem 0;word-break:break-all}"
       "a.name:hover{text-decoration:underline}"
       ".dir a.name::before{content:\"\\1F4C1 \";}"
       ".file a.name::before{content:\"\\1F4C4 \";}"
-      "button,.btn{background:#036;color:#fff;border:0;padding:.6rem 1rem;border-radius:6px;cursor:pointer;font-size:1rem;font-family:inherit;text-decoration:none;display:inline-block;min-height:44px;line-height:1.2}"
-      "button:hover,.btn:hover{background:#048}"
-      "button.danger{background:#a22}"
-      "button.danger:hover{background:#c33}"
+      "button,.btn{background:#1e40af;color:#fff;border:1px solid #1e3a8a;padding:.6rem 1rem;border-radius:6px;cursor:pointer;font-size:1rem;font-family:inherit;text-decoration:none;display:inline-block;min-height:44px;line-height:1.2;transition:background .12s}"
+      "button:hover,.btn:hover{background:#1d4ed8}"
+      "button.danger{background:#b91c1c;border-color:#991b1b}"
+      "button.danger:hover{background:#c92626}"
       "form.inline{display:inline}"
       "form.row{display:flex;gap:.6rem;margin-top:.5rem;flex-wrap:wrap;align-items:center}"
-      "form.row input[type=text],form.row input[type=file]{flex:1 1 200px;min-width:0;width:100%;padding:.6rem;border:1px solid #ccc;border-radius:6px;font-size:1rem;font-family:inherit;background:#fff;height:2.75rem;line-height:1.2}"
-      "form.row input[type=text]:focus,form.row input[type=file]:focus{outline:none;border-color:#036;box-shadow:0 0 0 3px rgba(0,102,153,.2)}"
+      "form.row input[type=text],form.row input[type=file]{flex:1 1 200px;min-width:0;width:100%;padding:.6rem .7rem;border:1px solid #cbd5e1;border-radius:6px;font-size:1rem;font-family:inherit;background:#fff;height:2.75rem;line-height:1.2;color:#1f2933}"
+      "form.row input[type=text]:focus,form.row input[type=file]:focus{outline:none;border-color:#1e40af;box-shadow:0 0 0 3px rgba(30,64,175,.15)}"
       "form.row button{flex:0 0 auto}"
-      ".empty{color:#888;font-style:italic;padding:.75rem 0}"
-      ".note{color:#666;font-size:.9rem;margin-top:.6rem;line-height:1.5}"
-      ".flash{background:#efe;border:1px solid #cec;color:#252;padding:.75rem;border-radius:6px;margin-bottom:1rem;font-size:1rem}"
-      ".flash.err{background:#fee;border-color:#ecc;color:#722}"
+      ".empty{color:#64748b;font-style:italic;padding:.75rem 0}"
+      ".note{color:#64748b;font-size:.9rem;margin-top:.6rem;line-height:1.5}"
+      ".flash{background:#e6f4ea;border:1px solid #b7dfc5;color:#1b5e20;padding:.75rem 1rem;border-radius:8px;margin-bottom:1rem;font-size:1rem}"
+      ".flash.err{background:#fdecea;border-color:#f5c6c1;color:#7a1c14}"
       "@media (max-width:600px){"
       "main{padding:.75rem}"
       "section{padding:.85rem;border-radius:6px}"

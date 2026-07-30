@@ -96,6 +96,11 @@ struct RenderInfo {
   String macAddress;
   String wifiPayload;
   String urlPayload;
+  // Optional third QR (e.g. "Help" -> GitHub README URL). Rendered
+  // smaller than the two main QRs. When helpPayload is empty the
+  // renderer omits this block entirely.
+  String helpPayload;
+  String helpCaption;       // e.g. "Help"
   Fonts fonts;
 };
 
@@ -220,6 +225,22 @@ inline void renderPortalScreen(EPaper& epaper, int panelW, int panelH,
               "1. Scan to join Wi-Fi", info.ssid);
     drawBlock(urlX, urlTop, urlSide, info.urlPayload,
               "2. Scan to open portal", info.url);
+
+    // Small third QR (Help) centred under the URL block. Uses roughly
+    // half the module size so it comes out visually secondary.
+    if (info.helpPayload.length() > 0) {
+      const int helpModule = moduleSize > 3 ? moduleSize / 2 : 2;
+      const int helpSide = qrSidePixels(info.helpPayload, helpModule);
+      const int helpX = (panelW - helpSide) / 2;
+      const int helpTop = urlTop + urlBlockH + panelH / 60;
+      epaper.setFreeFont(info.fonts.captionFont);
+      epaper.setTextDatum(TC_DATUM);
+      epaper.drawString(info.helpCaption.length() ? info.helpCaption.c_str()
+                                                  : "Help",
+                        helpX + helpSide / 2, helpTop, 1);
+      drawQr(epaper, info.helpPayload, helpX,
+             helpTop + captionH + panelH / 200, helpModule, black, white);
+    }
   } else {
     const int gap = (panelW - wifiSide - urlSide) / 3;
     const int wifiX = gap;
@@ -232,6 +253,23 @@ inline void renderPortalScreen(EPaper& epaper, int panelW, int panelH,
               "1. Scan to join Wi-Fi", info.ssid);
     drawBlock(urlX, blockTop, urlSide, info.urlPayload,
               "2. Scan to open portal", info.url);
+
+    // Small third QR (Help) tucked in the bottom-right corner of the
+    // landscape layout. Only rendered when the caller supplied a
+    // payload.
+    if (info.helpPayload.length() > 0) {
+      const int helpModule = moduleSize > 3 ? moduleSize / 2 : 2;
+      const int helpSide = qrSidePixels(info.helpPayload, helpModule);
+      const int helpX = panelW - helpSide - panelW / 30;
+      const int helpTop = qrRegionBottom - helpSide - captionH - panelH / 60;
+      epaper.setFreeFont(info.fonts.captionFont);
+      epaper.setTextDatum(TC_DATUM);
+      epaper.drawString(info.helpCaption.length() ? info.helpCaption.c_str()
+                                                  : "Help",
+                        helpX + helpSide / 2, helpTop, 1);
+      drawQr(epaper, info.helpPayload, helpX,
+             helpTop + captionH + panelH / 200, helpModule, black, white);
+    }
   }
 
   // Restore default text state so anything printed later renders sanely.

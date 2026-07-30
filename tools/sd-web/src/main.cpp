@@ -21,9 +21,11 @@
 
 #include "app_logger.h"
 #include "board_pins.h"
+#include "config.h"
 #include "driver.h"
 #include "epaper_setup.h"
 #include "hardware.h"
+#include "rtc_sync.h"
 #include "sd_card.h"
 #include "sd_web_portal.h"
 #include "sd_web_portal_ui.h"
@@ -145,6 +147,8 @@ void renderPortalScreen() {
   info.macAddress = wifi_sta::stationMacAddress();
   info.wifiPayload = wifiPayload;
   info.urlPayload = url;
+  info.helpPayload = config::HELP_URL;
+  info.helpCaption = config::HELP_CAPTION;
   info.fonts.titleFont = PORTAL_FONT_TITLE;
   info.fonts.subtitleFont = PORTAL_FONT_SUBTITLE;
   info.fonts.captionFont = PORTAL_FONT_CAPTION;
@@ -164,6 +168,16 @@ void setup() {
   LOG.printf("[sd-web] booting on %s\n", PANEL_LABEL);
 
   hardware::beep();
+
+  // Restore wall clock from the on-board PCF8563 before we touch the
+  // SD card. The FAT filesystem timestamps writes with the current
+  // system time; without this call every uploaded file would be
+  // stamped 1980-01-01 (the FAT epoch). If the RTC was never set - or
+  // reports voltage-low - restoreSystemClock() returns false and we
+  // just log that mtimes will be missing.
+  if (!rtc_sync::restoreSystemClock()) {
+    LOG.println("[sd-web] RTC not available - new files will show '-' mtime");
+  }
 
   epaper.begin();
   epaper_setup::finalize(epaper.getSPIinstance());
