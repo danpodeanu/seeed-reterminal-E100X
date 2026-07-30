@@ -620,16 +620,16 @@ void powerDownAndSleep(uint64_t sleepSeconds = config::SLEEP_SECONDS) {
   esp_deep_sleep_start();
 }
 
-// Poll GPIO 4 and GPIO 5. Returns true as soon as either arrow button
+// Poll GPIO 3 and GPIO 4. Returns true as soon as either arrow button
 // registers a solid press (LOW for at least ~60 ms). Used by the SD
-// portal loop to detect the "exit portal" gesture. GPIO 3 (green) is
+// portal loop to detect the "exit portal" gesture. GPIO 5 (green) is
 // ignored here so the user can still cycle the panel/portal without
 // leaving the mode.
 bool arrowPressedNow() {
-  if (digitalRead(PIN_KEY1) == LOW || digitalRead(PIN_KEY2) == LOW) {
+  if (digitalRead(PIN_KEY0) == LOW || digitalRead(PIN_KEY1) == LOW) {
     // Debounce: require the press to still be held after a short delay.
     delay(30);
-    if (digitalRead(PIN_KEY1) == LOW || digitalRead(PIN_KEY2) == LOW) {
+    if (digitalRead(PIN_KEY0) == LOW || digitalRead(PIN_KEY1) == LOW) {
       return true;
     }
   }
@@ -762,8 +762,8 @@ void renderPortalOnPanel(const String& ssid, const IPAddress& ip,
              sd_web_portal::currentIp().toString().c_str(),
              sd_web_portal::currentPort());
 
+  pinMode(PIN_KEY0, INPUT_PULLUP);
   pinMode(PIN_KEY1, INPUT_PULLUP);
-  pinMode(PIN_KEY2, INPUT_PULLUP);
 
   while (true) {
     sd_web_portal::loop();
@@ -779,8 +779,8 @@ void renderPortalOnPanel(const String& ssid, const IPAddress& ip,
       // Wait for the arrow to be released so we don't immediately
       // re-toggle after the ESP.restart() boot.
       const uint32_t startWait = millis();
-      while ((digitalRead(PIN_KEY1) == LOW ||
-              digitalRead(PIN_KEY2) == LOW) &&
+      while ((digitalRead(PIN_KEY0) == LOW ||
+              digitalRead(PIN_KEY1) == LOW) &&
              millis() - startWait < 2000) {
         delay(10);
       }
