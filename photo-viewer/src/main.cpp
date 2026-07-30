@@ -821,10 +821,9 @@ void setup() {
   if (buttonWake) hardware::beep();
 
   // Button gestures on button wake:
-  //   - Green tap (KEY0)        -> advance to the next photo.
-  //   - Green hold (KEY0 >=2 s) -> enter the SD upload portal.
-  //   - Arrow-left  (KEY1)      -> previous photo.
-  //   - Arrow-right (KEY2)      -> next photo.
+  //   - Green (KEY0)       -> enter the SD upload portal.
+  //   - Arrow-left  (KEY1) -> previous photo.
+  //   - Arrow-right (KEY2) -> next photo.
   //   - Any button while already in portal -> exit portal and refresh.
   // Cold boots start in photo mode unless the SD has no photos, in which
   // case we jump straight into the portal so the user can upload
@@ -850,23 +849,9 @@ void setup() {
       sdPortalMode = false;
       photoRefreshOnly = true;
     } else if (key0Wake) {
-      // Green: sample the pin for up to kHoldMs to distinguish a tap
-      // (advance) from a long press (enter portal). KEY0 is pulled up
-      // when idle and reads LOW while held.
-      constexpr uint32_t kHoldMs = 2000;
-      const uint32_t start = millis();
-      while (digitalRead(PIN_KEY0) == LOW &&
-             (millis() - start) < kHoldMs) {
-        delay(10);
-      }
-      if (digitalRead(PIN_KEY0) == LOW) {
-        // Still held past the threshold -> upload portal.
-        hardware::beep();  // second beep = "portal armed"
-        LOG.println("[boot] green held; entering upload portal");
-        sdPortalMode = true;
-      }
-      // Released before threshold: fall through to the normal photo
-      // path, which treats a green wake as "advance".
+      // Green: enter the upload portal.
+      LOG.println("[boot] green pressed; entering upload portal");
+      sdPortalMode = true;
     }
     // Arrow wakes fall through unmodified; app_logic::photoDirection()
     // maps key1Wake -> previous and everything else -> next.
