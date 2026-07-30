@@ -627,7 +627,7 @@ void renderPortalOnPanel(const String& ssid, const IPAddress& ip,
   info.modelLabel = MODEL_NAME;
   info.tagline = "Photo mode: press arrow to exit";
   info.ssid = ssid;
-  info.url = sd_web_portal::urlQrPayload(ip, port);
+  info.url = sd_web_portal::urlQrPayload(ip, port, "/upload-photo");
   info.macAddress = wifi_sta::stationMacAddress();
   info.wifiPayload = sd_web_portal::wifiQrPayload(ssid, nullptr);
   info.urlPayload = info.url;
@@ -684,6 +684,23 @@ void renderPortalOnPanel(const String& ssid, const IPAddress& ip,
   cfg.apNetmask = IPAddress(255, 255, 255, 0);
   cfg.httpPort = config::PORTAL_HTTP_PORT;
   cfg.maxConnections = config::PORTAL_MAX_CONNECTIONS;
+
+  // Enable the browser-side photo uploader: the portal serves a
+  // /panel.json describing this board's native resolution + palette,
+  // and a /upload-photo page whose JS dithers + encodes a 4-bit BMP
+  // matching the exact layout renderPreparedBmp() consumes.
+  cfg.panelWidth = config::PANEL_WIDTH;
+  cfg.panelHeight = config::PANEL_HEIGHT;
+#if RETERMINAL_MODEL == 1001
+  cfg.panelPalette = "gray4";
+#elif RETERMINAL_MODEL == 1003
+  cfg.panelPalette = "gray16";
+#else
+  cfg.panelPalette = "e6";
+#endif
+  cfg.panelModel = MODEL_NAME;
+  cfg.photosDir = config::PHOTO_DIR;
+  cfg.urlQrPath = "/upload-photo";
 
   if (!sd_web_portal::begin(cfg)) {
     renderStatus("Wi-Fi start failed",
