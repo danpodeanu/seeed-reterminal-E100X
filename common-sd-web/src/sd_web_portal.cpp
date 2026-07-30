@@ -1,6 +1,7 @@
 #include "sd_web_portal.h"
 
 #include <Arduino.h>
+#include <DNSServer.h>
 #include <FS.h>
 #include <SD.h>
 #include <WebServer.h>
@@ -29,6 +30,7 @@ namespace {
 // active portal per process; that matches the intended use (a single
 // tool app, or a single opt-in maintenance mode in a viewer app).
 WebServer* g_server = nullptr;
+DNSServer* g_dns = nullptr;
 
 Config g_config;
 String g_ssid;
@@ -663,8 +665,43 @@ void handleUploadDone() {
                    g_uploadOk ? "up_ok" : "up_err");
 }
 
+// Apple's "Success" body. If the phone's Captive Network Assistant
+// gets exactly this from http://captive.apple.com/hotspot-detect.html
+// (or one of the sibling probe URLs), it decides the network has
+// internet and joins silently without popping the captive portal
+// sheet. See support.apple.com/en-us/102554.
+const char kAppleSuccess[] PROGMEM =
+    "<HTML><HEAD><TITLE>Success</TITLE></HEAD>"
+    "<BODY>Success</BODY></HTML>";
+
+void handleAppleProbe() {
+  g_server->send(200, "text/html", FPSTR(kAppleSuccess));
+}
+
+// Everything else - including any URL the user types into Safari
+// while joined to our AP - gets redirected back to the portal root.
+// Combined with the DNS hijack below, this means typing "google.com"
+// (or any hostname) opens the SD card browser.
 void handleNotFound() {
-  g_server->send(404, "text/plain", "not found");
+  // Skip the redirect for Apple's probes; they're already handled by
+  // explicit routes, but a very old iOS might use an unknown path
+  // under captive.apple.com. Returning "Success" for those keeps CNA
+  // dismissed.
+  const String& host = g_server->hostHeader();
+  if (host.indexOf("apple.com") >= 0 ||
+      host.indexOf("apple.")   == 0) {
+    g_server->send(200, "text/html", FPSTR(kAppleSuccess));
+    return;
+  }
+  String target = "http://";
+  target += g_config.apIp.toString();
+  if (g_config.httpPort != 80) {
+    target += ':';
+    target += String(g_config.httpPort);
+  }
+  target += '/';
+  g_server->sendHeader("Location", target, true);
+  g_server->send(302, "text/plain", "");
 }
 
 }  // namespace
@@ -751,8 +788,37 @@ bool begin(const Config& cfg) {
   // Upload uses two callbacks: the final response, and the streaming
   // handler that receives the multipart chunks.
   g_server->on("/upload", HTTP_POST, handleUploadDone, handleUploadStream);
+
+  // Captive-portal probes. Apple's probes get the exact "Success"
+  // body so the Captive Network Assistant dismisses itself. Android
+  // and Windows probes get their expected 204/NCSI responses so
+  // those OSes also join silently.
+  g_server->on("/hotspot-detect.html",        handleAppleProbe);
+  g_server->on("/library/test/success.html",  handleAppleProbe);
+  g_server->on("/generate_204", []() { g_server->send(204); });
+  g_server->on("/gen_204",      []() { g_server->send(204); });
+  g_server->on("/ncsi.txt", []() {
+    g_server->send(200, "text/plain", "Microsoft NCSI");
+  });
+  g_server->on("/connecttest.txt", []() {
+    g_server->send(200, "text/plain", "Microsoft Connect Test");
+  });
+
   g_server->onNotFound(handleNotFound);
   g_server->begin();
+
+  // DNS hijack: answer every A query with our own IP. Combined with
+  // the catch-all handler, typing any hostname in the browser opens
+  // the portal, and Apple's probe URLs also resolve to us.
+  if (g_dns) { g_dns->stop(); delete g_dns; g_dns = nullptr; }
+  g_dns = new DNSServer();
+  g_dns->setErrorReplyCode(DNSReplyCode::NoError);
+  if (!g_dns->start(53, "*", cfg.apIp)) {
+    LOG.println("[sd-web] DNS server failed to start (portal still works via IP)");
+    delete g_dns;
+    g_dns = nullptr;
+  }
+
   g_running = true;
   LOG.printf("[sd-web] http://%s:%u/\n",
              cfg.apIp.toString().c_str(), cfg.httpPort);
@@ -761,6 +827,7 @@ bool begin(const Config& cfg) {
 
 void loop() {
   if (g_running && g_server) g_server->handleClient();
+  if (g_running && g_dns) g_dns->processNextRequest();
 }
 
 const String& currentSsid() { return g_ssid; }
@@ -768,6 +835,11 @@ IPAddress currentIp() { return g_running ? g_config.apIp : IPAddress(); }
 uint16_t currentPort() { return g_config.httpPort; }
 
 void end() {
+  if (g_dns) {
+    g_dns->stop();
+    delete g_dns;
+    g_dns = nullptr;
+  }
   if (g_server) {
     g_server->stop();
     delete g_server;
