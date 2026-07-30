@@ -49,6 +49,27 @@ struct Config {
   // clients on softAP; four is plenty for a maintenance portal and
   // keeps the DHCP pool small enough to be predictable.
   uint8_t maxConnections = 4;
+
+  // --- Optional photo-upload extension ---------------------------------
+  // Set these to enable the browser-side photo-upload page at
+  // `/upload-photo`. Leave defaults to keep the portal a plain file
+  // browser (which is what the standalone tools/sd-web ships as).
+  //
+  // The browser resizes and dithers the uploaded image to a 4-bit BMP
+  // matching the panel's native palette, then POSTs it to /upload with
+  // `parent=<photosDir>` so it lands next to any other photos.
+  //
+  // Palette names: "gray4" (E1001), "gray16" (E1003), "e6" (E1002/E1004).
+  int panelWidth = 0;
+  int panelHeight = 0;
+  const char* panelPalette = nullptr;
+  const char* panelModel = nullptr;    // e.g. "E1001" - shown in the UI
+  const char* photosDir = nullptr;     // e.g. "/photos"
+
+  // Path the on-panel URL QR code should point to. Empty/nullptr means
+  // "root" (file browser). Set to "/upload-photo" for viewer apps that
+  // want the QR to land directly on the photo-upload page.
+  const char* urlQrPath = nullptr;
 };
 
 // Build the SSID that begin() would use for the given config, without
@@ -62,8 +83,11 @@ String buildSsid(const Config& cfg = Config{});
 // `password` is non-empty, emits T:WPA;P:<password>;; instead.
 String wifiQrPayload(const String& ssid, const char* password = nullptr);
 
-// Format the browser QR payload for the given AP IP + port.
-String urlQrPayload(const IPAddress& ip, uint16_t port = 80);
+// Format the browser QR payload for the given AP IP + port. When `path`
+// is non-null and non-empty (e.g. "/upload-photo"), it is appended to
+// the URL - handy for viewers that want the QR to open a specific page.
+String urlQrPayload(const IPAddress& ip, uint16_t port = 80,
+                    const char* path = nullptr);
 
 // Start the AP + HTTP server. Returns true on success. Idempotent
 // against duplicate calls (a second call re-applies config).

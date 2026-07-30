@@ -24,6 +24,11 @@
 
 namespace sd_web_portal {
 
+// Defined in sd_web_portal_photo_upload_page.cpp. Declared at namespace
+// scope (not inside the anonymous namespace below) so the linker
+// resolves it against the same external symbol the definition emits.
+extern const char kPhotoUploadPage[] PROGMEM;
+
 namespace {
 
 // One WebServer instance per portal. The library only supports one
@@ -688,10 +693,39 @@ void handleAppleProbe() {
   g_server->send(200, "text/html", FPSTR(kAppleSuccess));
 }
 
+// Panel + photos-dir metadata for the browser-side photo uploader.
+// The JS on /upload-photo fetches this to pick the right palette, size,
+// and upload target. Kept minimal - no framework, no parsing surface.
+void handlePanelInfo() {
+  String json = "{\"width\":";
+  json += g_config.panelWidth;
+  json += ",\"height\":";
+  json += g_config.panelHeight;
+  json += ",\"palette\":\"";
+  json += g_config.panelPalette ? g_config.panelPalette : "";
+  json += "\",\"model\":\"";
+  json += g_config.panelModel ? g_config.panelModel : "";
+  json += "\",\"photosDir\":\"";
+  json += g_config.photosDir ? g_config.photosDir : "";
+  json += "\"}";
+  g_server->sendHeader("Cache-Control", "no-store");
+  g_server->send(200, "application/json", json);
+}
+
+// The photo-uploader HTML+JS bundle is defined in
+// sd_web_portal_photo_upload_page.cpp; declared at namespace scope
+// above so both TUs link to the same external symbol.
+
+void handlePhotoUploadPage() {
+  g_server->sendHeader("Cache-Control", "no-store");
+  g_server->send_P(200, "text/html; charset=utf-8", kPhotoUploadPage);
+}
+
 // Everything else - including any URL the user types into Safari
-// while joined to our AP - gets redirected back to the portal root.
+// while joined to our AP - gets redirected back to the portal root
+// (or to `urlQrPath` when the embedding app configured one).
 // Combined with the DNS hijack below, this means typing "google.com"
-// (or any hostname) opens the SD card browser.
+// (or any hostname) opens the portal.
 void handleNotFound() {
   // Skip the redirect for Apple's probes; they're already handled by
   // explicit routes, but a very old iOS might use an unknown path
@@ -709,7 +743,12 @@ void handleNotFound() {
     target += ':';
     target += String(g_config.httpPort);
   }
-  target += '/';
+  if (g_config.urlQrPath && g_config.urlQrPath[0]) {
+    if (g_config.urlQrPath[0] != '/') target += '/';
+    target += g_config.urlQrPath;
+  } else {
+    target += '/';
+  }
   g_server->sendHeader("Location", target, true);
   g_server->send(302, "text/plain", "");
 }
@@ -752,14 +791,19 @@ String wifiQrPayload(const String& ssid, const char* password) {
   return payload;
 }
 
-String urlQrPayload(const IPAddress& ip, uint16_t port) {
+String urlQrPayload(const IPAddress& ip, uint16_t port, const char* path) {
   String url = "http://";
   url += ip.toString();
   if (port != 80) {
     url += ':';
     url += String(port);
   }
-  url += '/';
+  if (path && path[0]) {
+    if (path[0] != '/') url += '/';
+    url += path;
+  } else {
+    url += '/';
+  }
   return url;
 }
 
@@ -780,7 +824,7 @@ bool begin(const Config& cfg) {
     LOG.println("[sd-web] softAP failed");
     return false;
   }
-  g_url = urlQrPayload(cfg.apIp, cfg.httpPort);
+  g_url = urlQrPayload(cfg.apIp, cfg.httpPort, cfg.urlQrPath);
   LOG.printf("[sd-web] AP up: ssid=\"%s\" ip=%s\n", g_ssid.c_str(),
              cfg.apIp.toString().c_str());
 
@@ -798,6 +842,23 @@ bool begin(const Config& cfg) {
   // Upload uses two callbacks: the final response, and the streaming
   // handler that receives the multipart chunks.
   g_server->on("/upload", HTTP_POST, handleUploadDone, handleUploadStream);
+
+  // Optional photo-upload extension. When the embedding app supplies
+  // panel dimensions + palette, expose:
+  //   GET /panel.json     - panel + photos-dir metadata for the JS.
+  //   GET /upload-photo   - the browser-side dither/upload page.
+  // The JS on /upload-photo POSTs the resulting BMP to /upload with
+  // `parent=<photosDir>`, reusing the standard streaming upload path.
+  if (cfg.panelWidth > 0 && cfg.panelHeight > 0 && cfg.panelPalette &&
+      cfg.photosDir && cfg.photosDir[0]) {
+    // Ensure the photos directory exists so the first upload succeeds
+    // without the user having to create it in the file browser.
+    if (!SD.exists(cfg.photosDir)) {
+      SD.mkdir(cfg.photosDir);
+    }
+    g_server->on("/panel.json", handlePanelInfo);
+    g_server->on("/upload-photo", handlePhotoUploadPage);
+  }
 
   // Captive-portal probes. Apple's probes get the exact "Success"
   // body so the Captive Network Assistant dismisses itself. Android
