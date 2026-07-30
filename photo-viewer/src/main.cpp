@@ -279,8 +279,16 @@ void renderStatus(const String& message, const String& detail = "",
 
 bool supportedPhotoName(String name) {
   name.toLowerCase();
-  return name.endsWith(".bmp") || name.endsWith(".png") ||
-         name.endsWith(".jpg") || name.endsWith(".jpeg");
+  return name.endsWith(".bmp");
+  // JPEG/PNG fallback disabled: the browser uploader at /upload-photo
+  // now produces the exact 4-bit BMP renderPreparedBmp() expects, and
+  // the generic image loader tries to allocate width*height*3 bytes up
+  // front, which OOMs on modern iPhone photos (12 MP -> 36 MB). Leaving
+  // this here (commented) as the on-device decoder still works for the
+  // rare small hand-authored file if we ever need it back.
+  //
+  //     return name.endsWith(".bmp") || name.endsWith(".png") ||
+  //            name.endsWith(".jpg") || name.endsWith(".jpeg");
 }
 
 String baseName(String path) {
@@ -522,7 +530,10 @@ bool renderPhoto(const String& path) {
   String lower = path;
   lower.toLowerCase();
   if (lower.endsWith(".bmp") && renderPreparedBmp(path)) return true;
-  return renderGenericPhoto(path);
+  // Generic JPEG/PNG fallback disabled - see supportedPhotoName().
+  // The browser uploader is now the single ingestion path.
+  // return renderGenericPhoto(path);
+  return false;
 }
 
 // NTP sync helpers now live in common/include/ntp_sync.h. The wrapper below

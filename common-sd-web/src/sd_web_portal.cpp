@@ -373,6 +373,15 @@ void handleBrowse() {
 
   sendPageHeader(String("SD: ") + path, breadcrumb(path));
 
+  // Cross-link back to the photo uploader when it's enabled, so the
+  // /browse power-user surface can hop over to the wife-friendly path.
+  if (g_config.urlQrPath && *g_config.urlQrPath) {
+    String hop = F("<p style=\"margin:0 0 12px 0\"><a href=\"");
+    hop += htmlEscape(String(g_config.urlQrPath));
+    hop += F("\">&larr; Back to photo uploader</a></p>");
+    sendPageChunk(hop);
+  }
+
   String prelude = flashHtml();
   prelude += F("<section><h2>Contents</h2>");
   sendPageChunk(prelude);
