@@ -119,6 +119,12 @@ RTC_DATA_ATTR bool photoRefreshOnly = false;
 // this, each wake re-shuffles and the "next photo" ordinal can land on
 // the same file the previous wake already showed.
 RTC_DATA_ATTR uint32_t photoShuffleSeed = 0;
+// Index of the photo currently sitting on the e-paper panel. Used to
+// short-circuit timer wakes when advancing would land on the same file
+// (e.g. only one photo on the card): the panel already shows the right
+// image, so we skip the 20 s refresh and just go back to sleep.
+// -1 means "no known photo on the panel yet".
+RTC_DATA_ATTR int32_t lastRenderedIndex = -1;
 
 uint16_t readLe16(const uint8_t* bytes) {
   return static_cast<uint16_t>(bytes[0]) |
@@ -843,6 +849,7 @@ void setup() {
   if (coldBoot) {
     sdPortalMode = false;
     photoRefreshOnly = false;
+    lastRenderedIndex = -1;
     // Reset the shuffle seed so a fresh power-on picks a new random
     // photo order. Deep-sleep wakes reuse the last seed to keep
     // "advance by one" stable across wakes.
@@ -1044,23 +1051,42 @@ void setup() {
     if (currentPhotoIndex < 0) currentPhotoIndex = 0;
     else currentPhotoIndex += direction;
 
-    for (uint8_t attempt = 0;
-         attempt < config::MAX_PHOTO_ATTEMPTS && attempt < photoCount;
-         ++attempt) {
-      const int32_t normalized =
-          app_logic::normalizePhotoIndex(currentPhotoIndex, photoCount);
-      currentPhotoIndex = normalized;
-      String path;
-      if (photoPathAt(static_cast<uint32_t>(normalized), path)) {
-        LOG.printf("[photo] attempt %u: %ld/%lu %s\n",
-                   attempt + 1, static_cast<long>(normalized + 1),
-                   static_cast<unsigned long>(photoCount), path.c_str());
-        if (renderPhoto(path)) {
-          displayed = true;
-          break;
+    // Peek at where we'd land after normalisation. If a timer wake would
+    // put the same photo back on the panel (typically because there's
+    // only one file in /photos), skip the render entirely - the panel
+    // already shows this image and a fresh 20 s refresh would just
+    // burn a pigment cycle.
+    const int32_t peekedIndex =
+        app_logic::normalizePhotoIndex(currentPhotoIndex, photoCount);
+    const bool timerWake = !coldBoot && !buttonWake;
+    if (timerWake && lastRenderedIndex >= 0 &&
+        peekedIndex == lastRenderedIndex) {
+      currentPhotoIndex = peekedIndex;
+      LOG.printf("[photo] timer wake: %ld/%lu already on panel, "
+                 "skipping refresh\n",
+                 static_cast<long>(peekedIndex + 1),
+                 static_cast<unsigned long>(photoCount));
+      displayed = true;  // suppress the "Photo unavailable" fallback
+    } else {
+      for (uint8_t attempt = 0;
+           attempt < config::MAX_PHOTO_ATTEMPTS && attempt < photoCount;
+           ++attempt) {
+        const int32_t normalized =
+            app_logic::normalizePhotoIndex(currentPhotoIndex, photoCount);
+        currentPhotoIndex = normalized;
+        String path;
+        if (photoPathAt(static_cast<uint32_t>(normalized), path)) {
+          LOG.printf("[photo] attempt %u: %ld/%lu %s\n",
+                     attempt + 1, static_cast<long>(normalized + 1),
+                     static_cast<unsigned long>(photoCount), path.c_str());
+          if (renderPhoto(path)) {
+            lastRenderedIndex = normalized;
+            displayed = true;
+            break;
+          }
         }
+        currentPhotoIndex += direction;
       }
-      currentPhotoIndex += direction;
     }
   }
 
