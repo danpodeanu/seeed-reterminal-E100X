@@ -25,10 +25,13 @@
 #include "driver.h"
 #include "epaper_setup.h"
 #include "hardware.h"
+#include "local_time.h"
+#include "ntp_sync.h"
 #include "rtc_sync.h"
 #include "sd_card.h"
 #include "sd_web_portal.h"
 #include "sd_web_portal_ui.h"
+#include "secrets.h"
 #include "wifi_sta.h"
 
 #ifndef EPAPER_ENABLE
@@ -169,14 +172,45 @@ void setup() {
 
   hardware::beep();
 
-  // Restore wall clock from the on-board PCF8563 before we touch the
-  // SD card. The FAT filesystem timestamps writes with the current
-  // system time; without this call every uploaded file would be
-  // stamped 1980-01-01 (the FAT epoch). If the RTC was never set - or
-  // reports voltage-low - restoreSystemClock() returns false and we
-  // just log that mtimes will be missing.
-  if (!rtc_sync::restoreSystemClock()) {
-    LOG.println("[sd-web] RTC not available - new files will show '-' mtime");
+  local_time::configureTimezone(config::TIMEZONE);
+
+  // Bring the wall clock up to date before we mount the SD card so
+  // that anything uploaded via the portal gets a real modification
+  // timestamp instead of the FAT-1980 epoch. Three-stage strategy,
+  // matching the viewer apps:
+  //   1. Restore from the battery-backed PCF8563.
+  //   2. If Wi-Fi STA credentials are configured, connect once and
+  //      synchronise from NTP; on success, the PCF8563 is refreshed
+  //      too (ntp::synchronizeAndPersist takes care of it).
+  //   3. On NTP failure the PCF8563 value from step 1 stands.
+  // We always tear down STA before starting the AP so softAP gets a
+  // clean radio.
+  const bool rtcRestored = rtc_sync::restoreSystemClock();
+  if (!rtcRestored) {
+    LOG.println("[time] PCF8563 unavailable at boot");
+  }
+  const bool haveWifiCreds = WIFI_SSID[0] != '\0';
+  if (haveWifiCreds) {
+    LOG.printf("[time] attempting NTP sync via %s\n", WIFI_SSID);
+    if (wifi_sta::connectStation(WIFI_SSID, WIFI_PASSWORD,
+                                 config::WIFI_TIMEOUT_MS)) {
+      time_t syncedAt = 0;
+      const bool ntpOk = ntp::synchronizeAndPersist(
+          config::TIMEZONE, config::NTP_SERVER_PRIMARY,
+          config::NTP_SERVER_SECONDARY, config::NTP_DHCP_TIMEOUT_MS,
+          config::NTP_SYNC_TIMEOUT_MS, &syncedAt);
+      if (ntpOk) {
+        LOG.printf("[time] NTP synced; PCF8563 refreshed at %ld\n",
+                   static_cast<long>(syncedAt));
+      } else {
+        LOG.println("[time] NTP failed; keeping PCF8563 value");
+      }
+    } else {
+      LOG.println("[time] Wi-Fi STA connect failed; skipping NTP");
+    }
+    wifi_sta::disable();
+  } else {
+    LOG.println("[time] no Wi-Fi credentials; using PCF8563 only");
   }
 
   epaper.begin();

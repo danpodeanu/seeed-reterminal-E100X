@@ -60,5 +60,15 @@ jobs:
       - name: Install PlatformIO
         run: python -m pip install --upgrade platformio intelhex
 
+      - name: Create placeholder credentials
+        # sd-web needs a secrets.h at build time (Wi-Fi STA credentials
+        # for the optional NTP sync at boot). Copy the example file so
+        # CI can compile it. Other tools (panel-test, i2c-scan) skip
+        # this step gracefully - no secrets.h.example -> no-op.
+        run: |
+          if [ -f include/secrets.h.example ] && [ ! -f include/secrets.h ]; then
+            cp include/secrets.h.example include/secrets.h
+          fi
+
       - name: Build
         run: pio run -e "${{ matrix.environment }}"

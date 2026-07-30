@@ -28,6 +28,8 @@
 #include "wifi_sta.h"
 #include "climate_sensor.h"
 #include "sd_card.h"
+#include "sd_web_portal.h"
+#include "sd_web_portal_ui.h"
 #include "log_sd_sink.h"
 #include "text_render.h"
 #include "photo_manifest.h"
@@ -100,6 +102,16 @@ sensors::Readings sensorReadings;
 
 RTC_DATA_ATTR time_t lastNtpSyncEpoch = 0;
 RTC_DATA_ATTR int32_t currentPhotoIndex = -1;
+// SD-portal mode flag. Persists across deep sleep and ESP.restart() so
+// the device remembers whether the user pressed an arrow to switch
+// modes. Cleared to false on a hard power cycle (RTC RAM is only
+// preserved while VDD stays up), which is the correct default: after a
+// power-off the user expects photo mode again.
+RTC_DATA_ATTR bool sdPortalMode = false;
+// Set to true when we're leaving SD-portal mode via ESP.restart() so
+// the fresh setup() call knows to re-render the current photo rather
+// than advance to the next one.
+RTC_DATA_ATTR bool photoRefreshOnly = false;
 
 uint16_t readLe16(const uint8_t* bytes) {
   return static_cast<uint16_t>(bytes[0]) |
@@ -568,6 +580,160 @@ void powerDownAndSleep(uint64_t sleepSeconds = config::SLEEP_SECONDS) {
   esp_deep_sleep_start();
 }
 
+// Poll GPIO 4 and GPIO 5. Returns true as soon as either arrow button
+// registers a solid press (LOW for at least ~60 ms). Used by the SD
+// portal loop to detect the "exit portal" gesture. GPIO 3 (green) is
+// ignored here so the user can still cycle the panel/portal without
+// leaving the mode.
+bool arrowPressedNow() {
+  if (digitalRead(PIN_KEY1) == LOW || digitalRead(PIN_KEY2) == LOW) {
+    // Debounce: require the press to still be held after a short delay.
+    delay(30);
+    if (digitalRead(PIN_KEY1) == LOW || digitalRead(PIN_KEY2) == LOW) {
+      return true;
+    }
+  }
+  return false;
+}
+
+// Render the SD-portal welcome screen using whichever panel fonts fit.
+// Chooses point sizes that match photo-viewer's renderStatus() so the
+// two look visually related.
+void renderPortalOnPanel(const String& ssid, const IPAddress& ip,
+                        uint16_t port) {
+#if RETERMINAL_MODEL == 1001
+  const GFXfont* titleFont = &FreeSansBold18pt7b;
+  const GFXfont* subtitleFont = &FreeSans12pt7b;
+  const GFXfont* captionFont = &FreeSansBold12pt7b;
+  const GFXfont* detailFont = &FreeSans9pt7b;
+#elif RETERMINAL_MODEL == 1002
+  const GFXfont* titleFont = &FreeSansBold18pt7b;
+  const GFXfont* subtitleFont = &FreeSans12pt7b;
+  const GFXfont* captionFont = &FreeSansBold12pt7b;
+  const GFXfont* detailFont = &FreeSans9pt7b;
+#elif RETERMINAL_MODEL == 1003
+  const GFXfont* titleFont = &FreeSansBold24pt7b;
+  const GFXfont* subtitleFont = &FreeSans18pt7b;
+  const GFXfont* captionFont = &FreeSansBold18pt7b;
+  const GFXfont* detailFont = &FreeSans12pt7b;
+#elif RETERMINAL_MODEL == 1004
+  const GFXfont* titleFont = &FreeSansBold24pt7b;
+  const GFXfont* subtitleFont = &FreeSans18pt7b;
+  const GFXfont* captionFont = &FreeSansBold18pt7b;
+  const GFXfont* detailFont = &FreeSans12pt7b;
+#endif
+
+  sd_web_portal::ui::RenderInfo info;
+  info.modelLabel = MODEL_NAME;
+  info.tagline = "Photo mode: press arrow to exit";
+  info.ssid = ssid;
+  info.url = sd_web_portal::urlQrPayload(ip, port);
+  info.macAddress = wifi_sta::stationMacAddress();
+  info.wifiPayload = sd_web_portal::wifiQrPayload(ssid, nullptr);
+  info.urlPayload = info.url;
+  info.helpPayload = config::PORTAL_HELP_URL;
+  info.helpCaption = config::PORTAL_HELP_CAPTION;
+  info.fonts.titleFont = titleFont;
+  info.fonts.subtitleFont = subtitleFont;
+  info.fonts.captionFont = captionFont;
+  info.fonts.detailFont = detailFont;
+
+  sd_web_portal::ui::renderPortalScreen<EPaper>(
+      epaper, config::PANEL_WIDTH, config::PANEL_HEIGHT, PANEL_BLACK,
+      PANEL_WHITE, info);
+  epaper.update();
+}
+
+// SD-portal mode entry point. Called from setup() when sdPortalMode is
+// true. Brings up the soft-AP + HTTP portal, draws the welcome QR
+// screen, and services HTTP requests forever. Exits when the user
+// presses either arrow button, at which point we schedule a return to
+// photo mode and reboot so setup() gets a fresh environment (WebServer
+// + softAP tear-down inside a single boot is fiddly).
+[[noreturn]] void runSdWebPortal() {
+  LOG.println("[portal] entering SD Wi-Fi portal mode");
+
+  epaper.begin();
+#if RETERMINAL_MODEL == 1001
+  epaper.initGrayMode(GRAY_LEVEL4);
+#elif RETERMINAL_MODEL == 1003
+  epaper.initGrayMode(GRAY_LEVEL16);
+#endif
+
+  sdReady = sd_card::mount(epaper.getSPIinstance(), config::PHOTO_DIR);
+  if (!sdReady) {
+    // No card - show the same message the photo path uses so behaviour
+    // is consistent, then wait for the user to press an arrow to bail
+    // out. We don't tear down and reboot here because a card might get
+    // inserted while we're waiting.
+    renderStatus("No SD card", "Insert a FAT32 card and press an arrow");
+    while (!arrowPressedNow()) delay(50);
+    sdPortalMode = false;
+    photoRefreshOnly = true;
+    LOG.println("[portal] no-card exit; restarting into photo mode");
+    LOG.flush();
+    delay(200);
+    ESP.restart();
+  }
+
+  sd_web_portal::Config cfg;
+  cfg.apSsidPrefix = config::PORTAL_SSID_PREFIX;
+  cfg.apPassword = config::PORTAL_PASSWORD;
+  cfg.apIp = IPAddress(192, 168, 1, 1);
+  cfg.apGateway = IPAddress(192, 168, 1, 1);
+  cfg.apNetmask = IPAddress(255, 255, 255, 0);
+  cfg.httpPort = config::PORTAL_HTTP_PORT;
+  cfg.maxConnections = config::PORTAL_MAX_CONNECTIONS;
+
+  if (!sd_web_portal::begin(cfg)) {
+    renderStatus("Wi-Fi start failed",
+                 "Press an arrow to return to photo mode");
+    while (!arrowPressedNow()) delay(50);
+    sdPortalMode = false;
+    photoRefreshOnly = true;
+    LOG.println("[portal] AP start failed; restarting into photo mode");
+    LOG.flush();
+    delay(200);
+    ESP.restart();
+  }
+
+  renderPortalOnPanel(sd_web_portal::currentSsid(),
+                      sd_web_portal::currentIp(),
+                      sd_web_portal::currentPort());
+  hardware::beep();
+  LOG.printf("[portal] SSID=\"%s\" URL=http://%s:%u/\n",
+             sd_web_portal::currentSsid().c_str(),
+             sd_web_portal::currentIp().toString().c_str(),
+             sd_web_portal::currentPort());
+
+  pinMode(PIN_KEY1, INPUT_PULLUP);
+  pinMode(PIN_KEY2, INPUT_PULLUP);
+
+  while (true) {
+    sd_web_portal::loop();
+    if (arrowPressedNow()) {
+      LOG.println("[portal] arrow pressed; exiting portal mode");
+      sd_web_portal::end();
+      appLog.detachSdSink();
+      if (sdReady) SD.end();
+      sdPortalMode = false;
+      photoRefreshOnly = true;
+      LOG.flush();
+      // Wait for the arrow to be released so we don't immediately
+      // re-toggle after the ESP.restart() boot.
+      const uint32_t startWait = millis();
+      while ((digitalRead(PIN_KEY1) == LOW ||
+              digitalRead(PIN_KEY2) == LOW) &&
+             millis() - startWait < 2000) {
+        delay(10);
+      }
+      delay(200);
+      ESP.restart();
+    }
+    delay(2);
+  }
+}
+
 }  // namespace
 
 void setup() {
@@ -591,6 +757,24 @@ void setup() {
   const bool key0Wake = (wakePins & (1ULL << PIN_KEY0)) != 0;
   const bool key1Wake = (wakePins & (1ULL << PIN_KEY1)) != 0;
   const bool key2Wake = (wakePins & (1ULL << PIN_KEY2)) != 0;
+
+  // Arrow buttons toggle SD-Wi-Fi-portal mode. In photo mode, either
+  // arrow flips us into portal mode; in portal mode the exit path
+  // clears the flag and reboots (see runSdWebPortal()). A green-button
+  // wake in either mode never changes the mode - it just refreshes
+  // the current view. Cold boots always start in photo mode.
+  if (coldBoot) {
+    sdPortalMode = false;
+    photoRefreshOnly = false;
+  } else if (buttonWake && (key1Wake || key2Wake)) {
+    sdPortalMode = !sdPortalMode;
+  }
+
+  if (sdPortalMode) {
+    runSdWebPortal();
+    return;  // unreachable - runSdWebPortal is [[noreturn]]
+  }
+
   if (app_logic::startupBeepRequired(coldBoot, buttonWake)) hardware::beep();
 
   LOG.println();
@@ -743,7 +927,20 @@ void setup() {
 
   bool displayed = false;
   if (sdReady && photoCount > 0) {
-    const int direction = app_logic::photoDirection(key1Wake);
+    // Direction rules:
+    //   - photoRefreshOnly (set on portal-mode exit) redraws current photo.
+    //   - key0Wake (green button) without arrows redraws current photo.
+    //   - key1Wake (left arrow) steps back one photo.
+    //   - Anything else (timer wake, key2 right arrow, cold boot) advances.
+    int direction;
+    if (photoRefreshOnly) {
+      direction = 0;
+      photoRefreshOnly = false;
+    } else if (buttonWake && key0Wake && !key1Wake && !key2Wake) {
+      direction = 0;
+    } else {
+      direction = app_logic::photoDirection(key1Wake);
+    }
     if (currentPhotoIndex < 0) currentPhotoIndex = 0;
     else currentPhotoIndex += direction;
 

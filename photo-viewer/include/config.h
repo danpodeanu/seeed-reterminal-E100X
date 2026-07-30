@@ -59,6 +59,21 @@ constexpr char NTP_SERVER_SECONDARY[] = "time.cloudflare.com";
 // troubleshooting a specific misbehaviour.
 constexpr bool LOG_TO_SD = false;
 
+// --- SD Wi-Fi portal --------------------------------------------------------
+// When either arrow button is pressed the viewer flips into an SD-card
+// Wi-Fi portal mode: it stops advancing photos, brings up an open Wi-Fi
+// AP with these settings, and serves a browser-based file manager for
+// the /photos directory on the SD card (see tools/sd-web). Pressing
+// either arrow again restarts the device back into photo mode.
+constexpr char PORTAL_SSID_PREFIX[] = "ReTerminal ";
+constexpr char* PORTAL_PASSWORD = nullptr;   // nullptr = open network
+constexpr uint16_t PORTAL_HTTP_PORT = 80;
+constexpr uint8_t PORTAL_MAX_CONNECTIONS = 4;
+// URL that the small third QR code links to (README on GitHub).
+constexpr char PORTAL_HELP_URL[] =
+    "https://github.com/danpodeanu/seeed-reterminal-E100X/tree/main/tools/sd-web";
+constexpr char PORTAL_HELP_CAPTION[] = "Help";
+
 }  // namespace config
 
 // System-level constants (hardware model, timeouts, sensor tuning,
