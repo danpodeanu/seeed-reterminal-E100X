@@ -1,0 +1,64 @@
+name: Tools build
+
+# Smoke-builds every app under tools/ so header-only breakages (like
+# unqualified fs::File in shared common/ headers) are caught in CI.
+# One board per tool is enough for a compile check - the tools all
+# share the same code across boards, and the viewer workflows already
+# fan out across all four panels.
+
+on:
+  push:
+    paths:
+      - "tools/**"
+      - "common/**"
+      - "common-sd-web/**"
+      - ".github/workflows/tools-build.yml"
+  pull_request:
+    paths:
+      - "tools/**"
+      - "common/**"
+      - "common-sd-web/**"
+      - ".github/workflows/tools-build.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: ${{ matrix.tool }} (${{ matrix.environment }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - tool: panel-test
+            environment: reterminal_e1001
+          - tool: i2c-scan
+            environment: reterminal_e1001
+          - tool: sd-web
+            environment: reterminal_e1001
+
+    defaults:
+      run:
+        working-directory: tools/${{ matrix.tool }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install PlatformIO
+        run: python -m pip install --upgrade platformio intelhex
+
+      - name: Build
+        run: pio run -e "${{ matrix.environment }}"

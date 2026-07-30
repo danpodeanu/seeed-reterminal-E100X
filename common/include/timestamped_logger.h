@@ -36,14 +36,14 @@ class TimestampedLogger {
   // Take ownership of an already-opened SD file. Any previously
   // attached sink is closed first. Pass an invalid/closed File to
   // detach (equivalent to detachSdSink()).
-  void attachSdSink(File file) {
+  void attachSdSink(fs::File file) {
     if (sdFile_) sdFile_.close();
     sdFile_ = std::move(file);
   }
 
   void detachSdSink() {
     if (sdFile_) sdFile_.close();
-    sdFile_ = File();
+    sdFile_ = fs::File();
   }
 
   size_t println() {
@@ -98,7 +98,7 @@ class TimestampedLogger {
 
  private:
   HardwareSerial& serial_;
-  File sdFile_;
+  fs::File sdFile_;
 
   void writePrefix() {
     struct timeval currentTime = {};
