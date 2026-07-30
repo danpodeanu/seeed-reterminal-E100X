@@ -929,15 +929,12 @@ void setup() {
   if (sdReady && photoCount > 0) {
     // Direction rules:
     //   - photoRefreshOnly (set on portal-mode exit) redraws current photo.
-    //   - key0Wake (green button) without arrows redraws current photo.
     //   - key1Wake (left arrow) steps back one photo.
-    //   - Anything else (timer wake, key2 right arrow, cold boot) advances.
+    //   - Anything else (green button, right arrow, timer, cold boot) advances.
     int direction;
     if (photoRefreshOnly) {
       direction = 0;
       photoRefreshOnly = false;
-    } else if (buttonWake && key0Wake && !key1Wake && !key2Wake) {
-      direction = 0;
     } else {
       direction = app_logic::photoDirection(key1Wake);
     }
