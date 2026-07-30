@@ -671,7 +671,8 @@ void renderPortalOnPanel(const String& ssid, const IPAddress& ip,
 
   sd_web_portal::ui::RenderInfo info;
   info.modelLabel = MODEL_NAME;
-  info.tagline = "Photo mode: press arrow to exit";
+  info.title = "Upload Photo";
+  info.tagline = "Press arrow to exit";
   info.ssid = ssid;
   info.url = sd_web_portal::urlQrPayload(ip, port, "/upload-photo");
   info.macAddress = wifi_sta::stationMacAddress();

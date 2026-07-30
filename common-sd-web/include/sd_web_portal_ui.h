@@ -90,6 +90,7 @@ struct Fonts {
 
 struct RenderInfo {
   const char* modelLabel;
+  const char* title = nullptr;  // overrides "SD Card Portal" header when set
   const char* tagline;      // 2-3 word description printed under the title
   String ssid;
   String url;
@@ -130,7 +131,8 @@ inline void renderPortalScreen(EPaper& epaper, int panelW, int panelH,
   epaper.setFreeFont(info.fonts.titleFont);
   const int titleFontH = epaper.fontHeight(1);
   const int titleY = panelH / 30;
-  epaper.drawString("SD Card Portal", panelW / 2, titleY, 1);
+  epaper.drawString(info.title && info.title[0] ? info.title : "SD Card Portal",
+                    panelW / 2, titleY, 1);
 
   epaper.setFreeFont(info.fonts.subtitleFont);
   const int subtitleFontH = epaper.fontHeight(1);
