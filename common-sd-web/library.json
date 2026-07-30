@@ -1,0 +1,9 @@
+{
+  "name": "reterminal_sd_web",
+  "version": "0.1.0",
+  "description": "Wi-Fi AP + captive web portal that exposes the reTerminal's SD card for browse / upload / delete / mkdir. Embeddable in any reTerminal E100X app.",
+  "build": {
+    "srcDir": "src",
+    "libArchive": false
+  }
+}
