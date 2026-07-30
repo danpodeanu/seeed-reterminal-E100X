@@ -113,7 +113,7 @@ footer a { color: var(--muted); }
 
   <div class="card">
     <h2>Pick a photo</h2>
-    <p class="hint">JPG or PNG. iPhone photos: Safari uploads the JPEG version automatically.</p>
+    <p class="hint">JPG or PNG.</p>
     <label class="file" id="pickerLabel">
       <span id="pickerText">Tap to choose photo</span>
       <input type="file" id="picker" accept="image/jpeg,image/png">

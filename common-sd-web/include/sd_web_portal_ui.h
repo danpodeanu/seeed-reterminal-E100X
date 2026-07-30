@@ -159,12 +159,27 @@ inline void renderPortalScreen(EPaper& epaper, int panelW, int panelH,
   const int qrRegionBottom = panelH - footerReserve;
 
   int moduleSize;
+  int helpModule = 0;
+  int helpSide = 0;
+  int helpBlockH = 0;  // captionH + helpSide + gap; 0 when no help QR.
+  if (info.helpPayload.length() > 0) {
+    // Pick a fixed help module size based on panel width so the corner
+    // QR is roughly the same visual weight on every board. Bounds keep
+    // it scannable without dominating the layout.
+    helpModule = panelW / 160;
+    if (helpModule < 2) helpModule = 2;
+    if (helpModule > 4) helpModule = 4;
+    helpSide = qrSidePixels(info.helpPayload, helpModule);
+    helpBlockH = captionH + helpSide + panelH / 60;
+  }
   if (portrait) {
     // Two stacked blocks: each block = caption + qr + detail + gap.
     // The QR square is the biggest component; give it the remaining
-    // vertical space after captions/details.
+    // vertical space after captions/details AND the help block reserve
+    // so the corner QR always fits on the panel.
     const int blockNonQr = captionH + detailFontH + panelH / 60;
-    const int perBlockH = (qrRegionBottom - qrRegionTop) / 2;
+    const int mainRegion = qrRegionBottom - qrRegionTop - helpBlockH;
+    const int perBlockH = mainRegion / 2;
     const int qrTargetH = perBlockH - blockNonQr;
     const int qrTargetW = panelW - panelW / 6;
     const int qrTarget = qrTargetH < qrTargetW ? qrTargetH : qrTargetW;
@@ -215,7 +230,8 @@ inline void renderPortalScreen(EPaper& epaper, int panelW, int panelH,
     const int wifiBlockH = captionH + wifiSide + detailFontH + panelH / 60;
     const int urlBlockH = captionH + urlSide + detailFontH + panelH / 60;
     const int totalH = wifiBlockH + urlBlockH;
-    const int available = qrRegionBottom - qrRegionTop;
+    const int mainRegionBottom = qrRegionBottom - helpBlockH;
+    const int available = mainRegionBottom - qrRegionTop;
     const int extra = available > totalH ? (available - totalH) : 0;
     const int wifiTop = qrRegionTop + extra / 4;
     const int urlTop = wifiTop + wifiBlockH + extra / 2;
@@ -226,13 +242,12 @@ inline void renderPortalScreen(EPaper& epaper, int panelW, int panelH,
     drawBlock(urlX, urlTop, urlSide, info.urlPayload,
               "2. Scan to open portal", info.url);
 
-    // Small third QR (Help) centred under the URL block. Uses roughly
-    // half the module size so it comes out visually secondary.
+    // Third QR (Help) pinned to the bottom-right corner. Size is fixed
+    // above based on panel width and its vertical footprint was already
+    // reserved from the main region, so it's guaranteed visible.
     if (info.helpPayload.length() > 0) {
-      const int helpModule = moduleSize > 3 ? moduleSize / 2 : 2;
-      const int helpSide = qrSidePixels(info.helpPayload, helpModule);
-      const int helpX = (panelW - helpSide) / 2;
-      const int helpTop = urlTop + urlBlockH + panelH / 60;
+      const int helpX = panelW - helpSide - panelW / 30;
+      const int helpTop = qrRegionBottom - helpSide - captionH - panelH / 200;
       epaper.setFreeFont(info.fonts.captionFont);
       epaper.setTextDatum(TC_DATUM);
       epaper.drawString(info.helpCaption.length() ? info.helpCaption.c_str()
@@ -258,8 +273,6 @@ inline void renderPortalScreen(EPaper& epaper, int panelW, int panelH,
     // landscape layout. Only rendered when the caller supplied a
     // payload.
     if (info.helpPayload.length() > 0) {
-      const int helpModule = moduleSize > 3 ? moduleSize / 2 : 2;
-      const int helpSide = qrSidePixels(info.helpPayload, helpModule);
       const int helpX = panelW - helpSide - panelW / 30;
       const int helpTop = qrRegionBottom - helpSide - captionH - panelH / 60;
       epaper.setFreeFont(info.fonts.captionFont);
