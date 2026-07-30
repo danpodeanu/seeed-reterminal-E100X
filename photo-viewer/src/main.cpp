@@ -700,7 +700,6 @@ void renderPortalOnPanel(const String& ssid, const IPAddress& ip,
   renderPortalOnPanel(sd_web_portal::currentSsid(),
                       sd_web_portal::currentIp(),
                       sd_web_portal::currentPort());
-  hardware::beep();
   LOG.printf("[portal] SSID=\"%s\" URL=http://%s:%u/\n",
              sd_web_portal::currentSsid().c_str(),
              sd_web_portal::currentIp().toString().c_str(),
@@ -713,6 +712,7 @@ void renderPortalOnPanel(const String& ssid, const IPAddress& ip,
     sd_web_portal::loop();
     if (arrowPressedNow()) {
       LOG.println("[portal] arrow pressed; exiting portal mode");
+      hardware::beep();
       sd_web_portal::end();
       appLog.detachSdSink();
       if (sdReady) SD.end();
@@ -758,6 +758,11 @@ void setup() {
   const bool key1Wake = (wakePins & (1ULL << PIN_KEY1)) != 0;
   const bool key2Wake = (wakePins & (1ULL << PIN_KEY2)) != 0;
 
+  // Beep immediately on any physical button wake so the user gets
+  // instant feedback, even if we're about to spend several seconds
+  // spinning up Wi-Fi for portal mode.
+  if (buttonWake) hardware::beep();
+
   // Arrow buttons toggle SD-Wi-Fi-portal mode. In photo mode, either
   // arrow flips us into portal mode; in portal mode the exit path
   // clears the flag and reboots (see runSdWebPortal()). A green-button
@@ -775,7 +780,11 @@ void setup() {
     return;  // unreachable - runSdWebPortal is [[noreturn]]
   }
 
-  if (app_logic::startupBeepRequired(coldBoot, buttonWake)) hardware::beep();
+  // startupBeepRequired only fires on cold boots now that buttonWake
+  // has already beeped above.
+  if (!buttonWake && app_logic::startupBeepRequired(coldBoot, buttonWake)) {
+    hardware::beep();
+  }
 
   LOG.println();
   LOG.println("============================================");
