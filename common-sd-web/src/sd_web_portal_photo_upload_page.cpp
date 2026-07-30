@@ -106,6 +106,11 @@ footer a { color: var(--muted); }
   <div class="sub" id="panelLabel">Loading panel...</div>
 </header>
 <main>
+  <div class="card" id="uploadedBanner" hidden>
+    <h2 style="color:#059669;margin:0 0 6px 0;">Uploaded</h2>
+    <p class="hint" style="margin:0">Next panel refresh will show this photo. Pick another photo below to upload more.</p>
+  </div>
+
   <div class="card">
     <h2>Pick a photo</h2>
     <p class="hint">Anything your phone can share: JPG, HEIC (Safari converts), PNG.</p>
@@ -611,9 +616,29 @@ async function runPipeline() {
   $("upload").disabled = false;
 }
 
+function resetForNextUpload() {
+  // Return to the "pick a photo" state so a second upload is one tap
+  // away. Keep the success banner visible so the user has confirmation.
+  if (state.bitmap) { state.bitmap.close(); state.bitmap = null; }
+  state.crop = null;
+  state.sourceRgba = null;
+  state.currentIndices = null;
+  state.currentPalette = null;
+  state.file = null;
+  state.fileBase = "photo";
+  $("picker").value = "";
+  $("pickerLabel").classList.remove("have");
+  $("pickerText").textContent = "Tap to choose photo";
+  $("cropCard").hidden = true;
+  $("previewCard").hidden = true;
+  $("upload").disabled = true;
+  setStatus("");
+}
+
 async function onPick(e) {
   const file = e.target.files && e.target.files[0];
   if (!file) return;
+  $("uploadedBanner").hidden = true;
   state.file = file;
   state.fileBase = stemFor(file.name);
   $("pickerLabel").classList.add("have");
@@ -659,7 +684,9 @@ async function onUpload() {
       body: fd,
     });
     if (!res.ok) throw new Error("HTTP " + res.status);
-    setStatus("Uploaded. Next panel refresh will show this photo.", "ok");
+    $("uploadedBanner").hidden = false;
+    resetForNextUpload();
+    window.scrollTo({ top: 0, behavior: "smooth" });
   } catch (err) {
     setStatus("Upload failed: " + err.message, "err");
     $("upload").disabled = false;
