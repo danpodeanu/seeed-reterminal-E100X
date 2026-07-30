@@ -41,6 +41,7 @@
 #include "image_loader.h"
 #include "pcf8563_utc.h"
 #include "screenshot_bmp.h"
+#include "panel_watchdog.h"
 #include "timestamped_logger.h"
 
 // HTTPS, HTTPClient and the SD filesystem have a fairly deep combined call
@@ -565,7 +566,7 @@ void updatePanel() {
              static_cast<unsigned long>(psram / 1024));
   const uint32_t start = millis();
   LOG.println("[render] epaper.update() start");
-  epaper.update();
+  panel_watchdog::guard([]() { epaper.update(); });
   LOG.printf("[render] epaper.update() returned after %lu ms\n",
              static_cast<unsigned long>(millis() - start));
 }

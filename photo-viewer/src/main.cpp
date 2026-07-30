@@ -24,6 +24,7 @@
 #include "hardware.h"
 #include "local_time.h"
 #include "wake_report.h"
+#include "panel_watchdog.h"
 #include "rtc_sync.h"
 #include "wifi_sta.h"
 #include "climate_sensor.h"
@@ -257,7 +258,7 @@ void drawStatusBadges() {
 }
 
 void updatePanel() {
-  epaper.update();
+  panel_watchdog::guard([]() { epaper.update(); });
 }
 
 void renderStatus(const String& message, const String& detail = "",
@@ -688,7 +689,7 @@ void renderPortalOnPanel(const String& ssid, const IPAddress& ip,
   sd_web_portal::ui::renderPortalScreen<EPaper>(
       epaper, config::PANEL_WIDTH, config::PANEL_HEIGHT, PANEL_BLACK,
       PANEL_WHITE, info);
-  epaper.update();
+  panel_watchdog::guard([]() { epaper.update(); });
 }
 
 // SD-portal mode entry point. Called from setup() when sdPortalMode is

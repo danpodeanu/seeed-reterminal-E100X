@@ -38,6 +38,7 @@
 #include "sensors.h"
 #include "pcf8563_utc.h"
 #include "screenshot_bmp.h"
+#include "panel_watchdog.h"
 #include "timestamped_logger.h"
 #include "theme.h"
 #include "weather_data.h"
@@ -95,7 +96,7 @@ void updatePanel() {
                                   config::PANEL_HEIGHT);
     screenshotRequested = false;
   }
-  epaper.update();
+  panel_watchdog::guard([]() { epaper.update(); });
 }
 
 // batteryPercentForVoltage() and the 16-sample averaging block used to be
