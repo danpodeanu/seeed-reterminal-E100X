@@ -20,6 +20,7 @@
 #if RETERMINAL_MODEL == 1003
 #include <Arduino.h>
 #include <esp_task_wdt.h>
+#include "app_logger.h"
 
 namespace panel_watchdog {
 
@@ -43,9 +44,9 @@ inline void guard(Refresh&& refresh, uint32_t timeoutSeconds = 120) {
     esp_task_wdt_init(&cfg);
   }
   const bool subscribed = esp_task_wdt_add(nullptr) == ESP_OK;
-  Serial.printf("[wdt] panel refresh guarded, panic reset in %us%s\n",
-                (unsigned)timeoutSeconds,
-                subscribed ? "" : " (subscribe failed)");
+  LOG.printf("[wdt] panel refresh guarded, panic reset in %us%s\n",
+             (unsigned)timeoutSeconds,
+             subscribed ? "" : " (subscribe failed)");
   refresh();
   if (subscribed) esp_task_wdt_delete(nullptr);
   // Deliberately leave TWDT running - reverting to the Arduino default
