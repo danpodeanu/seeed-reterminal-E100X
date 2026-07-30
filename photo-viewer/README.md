@@ -169,8 +169,9 @@ knobs (hardware timing, sensor debounce, dither internals) live in
 
 All three front buttons are deep-sleep wake sources:
 
-- GPIO4 selects the previous photo.
-- GPIO3 and GPIO5 select the next photo.
+- GPIO4 (left arrow) selects the previous photo.
+- GPIO3 (right arrow) selects the next photo.
+- GPIO5 (green) enters the SD Wi-Fi upload portal.
 
 On E1001–E1003 the green/right button is GPIO3. E1004 uses the three physical
 front buttons; no touch input is required.

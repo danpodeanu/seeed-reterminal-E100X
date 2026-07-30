@@ -821,9 +821,9 @@ void setup() {
   if (buttonWake) hardware::beep();
 
   // Button gestures on button wake:
-  //   - Green (KEY0)       -> enter the SD upload portal.
+  //   - Green (KEY2)       -> enter the SD upload portal.
   //   - Arrow-left  (KEY1) -> previous photo.
-  //   - Arrow-right (KEY2) -> next photo.
+  //   - Arrow-right (KEY0) -> next photo.
   //   - Any button while already in portal -> exit portal and refresh.
   // Cold boots start in photo mode unless the SD has no photos, in which
   // case we jump straight into the portal so the user can upload
@@ -848,7 +848,7 @@ void setup() {
       // the flag and force a same-photo redraw so nothing looks stale.
       sdPortalMode = false;
       photoRefreshOnly = true;
-    } else if (key0Wake) {
+    } else if (key2Wake) {
       // Green: enter the upload portal.
       LOG.println("[boot] green pressed; entering upload portal");
       sdPortalMode = true;
