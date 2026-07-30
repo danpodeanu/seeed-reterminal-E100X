@@ -80,6 +80,18 @@ canvas {
   background: #ffffff; border: 1px solid var(--line); border-radius: 6px;
   image-rendering: pixelated;
 }
+.stage {
+  position: relative; margin: 0 auto; touch-action: none;
+  max-width: 100%; user-select: none; -webkit-user-select: none;
+}
+.stage canvas.crop {
+  image-rendering: auto; cursor: grab;
+}
+.stage canvas.crop.dragging { cursor: grabbing; }
+.pan-hint {
+  text-align: center; color: var(--muted); font-size: 0.85rem;
+  margin: 8px 0 0 0;
+}
 .status { min-height: 1.5em; font-size: 0.9rem; color: var(--muted); }
 .status.err { color: #dc2626; }
 .status.ok { color: #059669; }
@@ -103,6 +115,15 @@ footer a { color: var(--muted); }
     </label>
   </div>
 
+  <div class="card" id="cropCard" hidden>
+    <h2>Crop &amp; pan</h2>
+    <p class="hint">Drag the photo inside the frame to choose what the panel shows.</p>
+    <div class="stage" id="cropStage">
+      <canvas class="crop" id="crop"></canvas>
+    </div>
+    <p class="pan-hint" id="cropHint">Drag to pan</p>
+  </div>
+
   <div class="card" id="previewCard" hidden>
     <h2>Preview</h2>
     <p class="hint">This is what the panel will show.</p>
@@ -110,6 +131,12 @@ footer a { color: var(--muted); }
       <label>Dither
         <select id="dither">
           <option value="fs" selected>Floyd-Steinberg (photos)</option>
+          <option value="atkinson">Atkinson (soft, e-paper favourite)</option>
+          <option value="jjn">Jarvis-Judice-Ninke (rich detail)</option>
+          <option value="stucki">Stucki (sharper JJN)</option>
+          <option value="sierra">Sierra Lite (fast)</option>
+          <option value="bayer8">Ordered 8x8 (crosshatch)</option>
+          <option value="bayer4">Ordered 4x4 (coarser)</option>
           <option value="none">None (posterise)</option>
         </select>
       </label>
@@ -153,9 +180,14 @@ const PALETTES = {
 
 const state = {
   panel: null,       // { width, height, palette, model, photosDir }
-  sourceRgba: null,  // Uint8ClampedArray, resized to panel size, RGBA
+  bitmap: null,      // ImageBitmap, EXIF-oriented source
+  crop: null,        // { sx, sy, sw, sh } in source pixels (panel aspect)
+  displayScale: 1,   // source-px per display-canvas-px
+  sourceRgba: null,  // ImageData at panel size, RGBA (cropped)
   file: null,
   fileBase: "photo",
+  currentIndices: null,
+  currentPalette: null,
 };
 
 const $ = (id) => document.getElementById(id);
@@ -181,40 +213,193 @@ function setStatus(text, kind) {
   el.className = "status" + (kind ? " " + kind : "");
 }
 
-function coverCrop(srcW, srcH, dstW, dstH) {
+// Cover-fit: the largest panel-aspect rectangle that fits inside the
+// source. Returns {sw, sh} plus the maximum sx/sy the caller can pan to.
+function coverRect(srcW, srcH, dstW, dstH) {
   const srcAsp = srcW / srcH, dstAsp = dstW / dstH;
-  let sw, sh, sx, sy;
-  if (srcAsp > dstAsp) {
-    sh = srcH; sw = Math.round(sh * dstAsp);
-    sx = Math.round((srcW - sw) / 2); sy = 0;
-  } else {
-    sw = srcW; sh = Math.round(sw / dstAsp);
-    sx = 0; sy = Math.round((srcH - sh) / 2);
-  }
-  return { sx, sy, sw, sh };
+  let sw, sh;
+  if (srcAsp > dstAsp) { sh = srcH; sw = Math.round(sh * dstAsp); }
+  else                 { sw = srcW; sh = Math.round(sw / dstAsp); }
+  return { sw, sh, maxSx: srcW - sw, maxSy: srcH - sh };
 }
 
-async function decodeAndRescale(file) {
-  const bmp = await createImageBitmap(file, { imageOrientation: "from-image" });
+function clampCrop() {
+  const c = state.crop;
+  if (!c) return;
+  c.sx = Math.max(0, Math.min(c.sx, state.bitmap.width - c.sw));
+  c.sy = Math.max(0, Math.min(c.sy, state.bitmap.height - c.sh));
+}
+
+// Redraws the crop stage: the source scaled to fit the display box, with
+// a dim overlay outside the panel-aspect crop rectangle.
+function drawCropStage() {
+  const cv = $("crop");
+  const bm = state.bitmap;
+  if (!bm) return;
+  // Fit the source into a display box sized to the card width, capped
+  // vertically so the panel-portrait side does not blow up.
+  const stage = $("cropStage");
+  const boxW = Math.max(240, Math.min(stage.clientWidth || 640, 640));
+  const boxH = 360;
+  const scale = Math.min(boxW / bm.width, boxH / bm.height);
+  const dispW = Math.max(1, Math.round(bm.width * scale));
+  const dispH = Math.max(1, Math.round(bm.height * scale));
+  cv.width = dispW; cv.height = dispH;
+  cv.style.width = dispW + "px"; cv.style.height = dispH + "px";
+  state.displayScale = 1 / scale;
+
+  const ctx = cv.getContext("2d");
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "medium";
+  ctx.clearRect(0, 0, dispW, dispH);
+  ctx.drawImage(bm, 0, 0, dispW, dispH);
+
+  clampCrop();
+  const c = state.crop;
+  const rx = c.sx * scale, ry = c.sy * scale;
+  const rw = c.sw * scale, rh = c.sh * scale;
+  // Dim outside the rect.
+  ctx.fillStyle = "rgba(0,0,0,0.45)";
+  ctx.fillRect(0, 0, dispW, ry);
+  ctx.fillRect(0, ry + rh, dispW, dispH - (ry + rh));
+  ctx.fillRect(0, ry, rx, rh);
+  ctx.fillRect(rx + rw, ry, dispW - (rx + rw), rh);
+  // Rect border.
+  ctx.lineWidth = 2;
+  ctx.strokeStyle = "#ffffff";
+  ctx.strokeRect(rx + 1, ry + 1, rw - 2, rh - 2);
+  ctx.strokeStyle = "#111827";
+  ctx.strokeRect(rx, ry, rw, rh);
+
+  const hint = $("cropHint");
+  const rectC = coverRect(bm.width, bm.height, state.panel.width, state.panel.height);
+  if (rectC.maxSx === 0 && rectC.maxSy === 0)
+    hint.textContent = "Photo already matches the panel aspect ratio.";
+  else if (rectC.maxSx === 0)
+    hint.textContent = "Drag up or down to choose the vertical crop.";
+  else if (rectC.maxSy === 0)
+    hint.textContent = "Drag left or right to choose the horizontal crop.";
+  else
+    hint.textContent = "Drag to pan.";
+}
+
+function bindCropDrag() {
+  const cv = $("crop");
+  let dragging = false, startX = 0, startY = 0, startSx = 0, startSy = 0;
+  cv.addEventListener("pointerdown", (e) => {
+    if (!state.bitmap) return;
+    dragging = true;
+    cv.classList.add("dragging");
+    cv.setPointerCapture(e.pointerId);
+    startX = e.clientX; startY = e.clientY;
+    startSx = state.crop.sx; startSy = state.crop.sy;
+  });
+  cv.addEventListener("pointermove", (e) => {
+    if (!dragging) return;
+    const dx = (e.clientX - startX) * state.displayScale;
+    const dy = (e.clientY - startY) * state.displayScale;
+    state.crop.sx = startSx - dx;
+    state.crop.sy = startSy - dy;
+    drawCropStage();
+  });
+  const finish = (e) => {
+    if (!dragging) return;
+    dragging = false;
+    cv.classList.remove("dragging");
+    try { cv.releasePointerCapture(e.pointerId); } catch (_) {}
+    runPipeline();
+  };
+  cv.addEventListener("pointerup", finish);
+  cv.addEventListener("pointercancel", finish);
+}
+
+// Take the current crop from state.bitmap into a panel-sized ImageData.
+function rescaleFromCrop() {
   const { width: pw, height: ph } = state.panel;
-  const { sx, sy, sw, sh } = coverCrop(bmp.width, bmp.height, pw, ph);
+  const c = state.crop;
   const cv = document.createElement("canvas");
   cv.width = pw; cv.height = ph;
   const ctx = cv.getContext("2d", { willReadFrequently: true });
   ctx.imageSmoothingEnabled = true;
   ctx.imageSmoothingQuality = "high";
-  ctx.drawImage(bmp, sx, sy, sw, sh, 0, 0, pw, ph);
-  bmp.close();
+  ctx.drawImage(state.bitmap, c.sx, c.sy, c.sw, c.sh, 0, 0, pw, ph);
   return ctx.getImageData(0, 0, pw, ph);
 }
 
-// Floyd-Steinberg into a palette. `imageData` is RGBA at panel size.
-// Returns Uint8Array of palette indices (one per pixel), plus a
-// dithered RGBA buffer for preview.
-function dither(imageData, palette, method) {
+// Error-diffusion kernels. Each entry is [dx, dy, weight]. Weights are
+// pre-normalised (each row sums to 1 after dividing by the divisor). We
+// only emit forward-only entries because the raster order is L->R,T->B.
+const KERNELS = {
+  fs: {  // Floyd-Steinberg, 1957
+    div: 16,
+    taps: [[ 1, 0, 7], [-1, 1, 3], [ 0, 1, 5], [ 1, 1, 1]],
+  },
+  atkinson: {  // Bill Atkinson, 1984. Only 6/8 of the error is diffused;
+               // slightly desaturates but stays crisp on e-paper.
+    div: 8,
+    taps: [[ 1, 0, 1], [ 2, 0, 1],
+           [-1, 1, 1], [ 0, 1, 1], [ 1, 1, 1],
+           [ 0, 2, 1]],
+  },
+  jjn: {  // Jarvis, Judice, Ninke, 1976. Large kernel, smooth photos.
+    div: 48,
+    taps: [[ 1, 0, 7], [ 2, 0, 5],
+           [-2, 1, 3], [-1, 1, 5], [ 0, 1, 7], [ 1, 1, 5], [ 2, 1, 3],
+           [-2, 2, 1], [-1, 2, 3], [ 0, 2, 5], [ 1, 2, 3], [ 2, 2, 1]],
+  },
+  stucki: {  // Peter Stucki, 1981. Sharper JJN.
+    div: 42,
+    taps: [[ 1, 0, 8], [ 2, 0, 4],
+           [-2, 1, 2], [-1, 1, 4], [ 0, 1, 8], [ 1, 1, 4], [ 2, 1, 2],
+           [-2, 2, 1], [-1, 2, 2], [ 0, 2, 4], [ 1, 2, 2], [ 2, 2, 1]],
+  },
+  sierra: {  // Sierra Lite - cheap two-row kernel.
+    div: 4,
+    taps: [[ 1, 0, 2], [-1, 1, 1], [ 0, 1, 1]],
+  },
+};
+
+// Bayer matrices (0..N^2-1). Threshold t is (m + 0.5) / N^2 - 0.5, added
+// to the pixel value scaled by a bias so it nudges the nearest-color pick.
+const BAYER = {
+  bayer4: {
+    n: 4,
+    m: [
+       0,  8,  2, 10,
+      12,  4, 14,  6,
+       3, 11,  1,  9,
+      15,  7, 13,  5,
+    ],
+  },
+  bayer8: {
+    n: 8,
+    m: [
+       0, 32,  8, 40,  2, 34, 10, 42,
+      48, 16, 56, 24, 50, 18, 58, 26,
+      12, 44,  4, 36, 14, 46,  6, 38,
+      60, 28, 52, 20, 62, 30, 54, 22,
+       3, 35, 11, 43,  1, 33,  9, 41,
+      51, 19, 59, 27, 49, 17, 57, 25,
+      15, 47,  7, 39, 13, 45,  5, 37,
+      63, 31, 55, 23, 61, 29, 53, 21,
+    ],
+  },
+};
+
+function nearestPaletteIndex(r, g, b, pr, pg, pb) {
+  let best = 0, bestD = Infinity;
+  for (let p = 0; p < pr.length; p++) {
+    const dr = r - pr[p], dg = g - pg[p], db = b - pb[p];
+    const d = dr * dr + dg * dg + db * db;
+    if (d < bestD) { bestD = d; best = p; }
+  }
+  return best;
+}
+
+function ditherErrorDiffusion(imageData, palette, kernel) {
   const w = imageData.width, h = imageData.height;
-  const src = imageData.data;                    // RGBA
-  const work = new Float32Array(w * h * 3);      // RGB working buffer
+  const src = imageData.data;
+  const work = new Float32Array(w * h * 3);
   for (let i = 0, j = 0; i < src.length; i += 4, j += 3) {
     work[j] = src[i]; work[j + 1] = src[i + 1]; work[j + 2] = src[i + 2];
   }
@@ -226,51 +411,95 @@ function dither(imageData, palette, method) {
   for (let p = 0; p < palette.length; p++) {
     pr[p] = palette[p][0]; pg[p] = palette[p][1]; pb[p] = palette[p][2];
   }
-  const fs = (method === "fs");
+  const div = kernel.div, taps = kernel.taps;
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
       const i = (y * w + x) * 3;
       const r = work[i], g = work[i + 1], b = work[i + 2];
-      let best = 0, bestD = Infinity;
-      for (let p = 0; p < palette.length; p++) {
-        const dr = r - pr[p], dg = g - pg[p], db = b - pb[p];
-        const d = dr * dr + dg * dg + db * db;
-        if (d < bestD) { bestD = d; best = p; }
-      }
+      const best = nearestPaletteIndex(r, g, b, pr, pg, pb);
       indices[y * w + x] = best;
       const cr = pr[best], cg = pg[best], cb = pb[best];
       const oi = (y * w + x) * 4;
       preview[oi] = cr; preview[oi + 1] = cg; preview[oi + 2] = cb; preview[oi + 3] = 255;
-      if (fs) {
-        const er = r - cr, eg = g - cg, eb = b - cb;
-        if (x + 1 < w) {
-          const j = i + 3;
-          work[j]     += er * (7 / 16);
-          work[j + 1] += eg * (7 / 16);
-          work[j + 2] += eb * (7 / 16);
-        }
-        if (y + 1 < h) {
-          if (x > 0) {
-            const j = i + (w - 1) * 3;
-            work[j]     += er * (3 / 16);
-            work[j + 1] += eg * (3 / 16);
-            work[j + 2] += eb * (3 / 16);
-          }
-          const j2 = i + w * 3;
-          work[j2]     += er * (5 / 16);
-          work[j2 + 1] += eg * (5 / 16);
-          work[j2 + 2] += eb * (5 / 16);
-          if (x + 1 < w) {
-            const j3 = i + (w + 1) * 3;
-            work[j3]     += er * (1 / 16);
-            work[j3 + 1] += eg * (1 / 16);
-            work[j3 + 2] += eb * (1 / 16);
-          }
-        }
+      const er = r - cr, eg = g - cg, eb = b - cb;
+      for (let t = 0; t < taps.length; t++) {
+        const dx = taps[t][0], dy = taps[t][1], wt = taps[t][2] / div;
+        const nx = x + dx, ny = y + dy;
+        if (nx < 0 || nx >= w || ny >= h) continue;
+        const j = (ny * w + nx) * 3;
+        work[j]     += er * wt;
+        work[j + 1] += eg * wt;
+        work[j + 2] += eb * wt;
       }
     }
   }
   return { indices, preview };
+}
+
+function ditherOrdered(imageData, palette, bayer) {
+  const w = imageData.width, h = imageData.height;
+  const src = imageData.data;
+  const indices = new Uint8Array(w * h);
+  const preview = new Uint8ClampedArray(w * h * 4);
+  const pr = new Float32Array(palette.length);
+  const pg = new Float32Array(palette.length);
+  const pb = new Float32Array(palette.length);
+  for (let p = 0; p < palette.length; p++) {
+    pr[p] = palette[p][0]; pg[p] = palette[p][1]; pb[p] = palette[p][2];
+  }
+  // Amplitude: the bias we add per pixel. For an N-level gray ramp,
+  // one step is 255/(N-1); scale slightly under one step so the pattern
+  // shows without clipping.
+  const step = 255 / Math.max(1, palette.length - 1);
+  const amp = step * 0.9;
+  const n = bayer.n, mat = bayer.m, denom = n * n;
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const si = (y * w + x) * 4;
+      const bias = ((mat[(y % n) * n + (x % n)] + 0.5) / denom - 0.5) * amp;
+      const r = src[si] + bias;
+      const g = src[si + 1] + bias;
+      const b = src[si + 2] + bias;
+      const best = nearestPaletteIndex(r, g, b, pr, pg, pb);
+      indices[y * w + x] = best;
+      preview[si]     = pr[best];
+      preview[si + 1] = pg[best];
+      preview[si + 2] = pb[best];
+      preview[si + 3] = 255;
+    }
+  }
+  return { indices, preview };
+}
+
+function ditherNone(imageData, palette) {
+  const w = imageData.width, h = imageData.height;
+  const src = imageData.data;
+  const indices = new Uint8Array(w * h);
+  const preview = new Uint8ClampedArray(w * h * 4);
+  const pr = new Float32Array(palette.length);
+  const pg = new Float32Array(palette.length);
+  const pb = new Float32Array(palette.length);
+  for (let p = 0; p < palette.length; p++) {
+    pr[p] = palette[p][0]; pg[p] = palette[p][1]; pb[p] = palette[p][2];
+  }
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const si = (y * w + x) * 4;
+      const best = nearestPaletteIndex(src[si], src[si + 1], src[si + 2], pr, pg, pb);
+      indices[y * w + x] = best;
+      preview[si]     = pr[best];
+      preview[si + 1] = pg[best];
+      preview[si + 2] = pb[best];
+      preview[si + 3] = 255;
+    }
+  }
+  return { indices, preview };
+}
+
+function dither(imageData, palette, method) {
+  if (KERNELS[method]) return ditherErrorDiffusion(imageData, palette, KERNELS[method]);
+  if (BAYER[method])   return ditherOrdered(imageData, palette, BAYER[method]);
+  return ditherNone(imageData, palette);
 }
 
 // 4-bit BMP writer. Layout matches photo-viewer's fast path:
@@ -335,9 +564,9 @@ async function runPipeline() {
   const method = $("dither").value;
   const palette = PALETTES[state.panel.palette] || PALETTES.gray4;
   setStatus("Preparing preview...");
-  // Give the browser a paint tick so the status shows.
   await new Promise(r => setTimeout(r, 20));
   const t0 = performance.now();
+  state.sourceRgba = rescaleFromCrop();
   const { indices, preview } = dither(state.sourceRgba, palette, method);
   const t1 = performance.now();
   const cv = $("preview");
@@ -361,11 +590,24 @@ async function onPick(e) {
   $("upload").disabled = true;
   setStatus("Decoding...");
   try {
-    state.sourceRgba = await decodeAndRescale(file);
+    if (state.bitmap) { state.bitmap.close(); state.bitmap = null; }
+    state.bitmap = await createImageBitmap(file,
+      { imageOrientation: "from-image" });
   } catch (err) {
     setStatus("Could not decode this file: " + err.message, "err");
     return;
   }
+  // Initial crop is a centred cover-fit rectangle at panel aspect.
+  const { width: pw, height: ph } = state.panel;
+  const r = coverRect(state.bitmap.width, state.bitmap.height, pw, ph);
+  state.crop = {
+    sx: Math.round(r.maxSx / 2),
+    sy: Math.round(r.maxSy / 2),
+    sw: r.sw,
+    sh: r.sh,
+  };
+  $("cropCard").hidden = false;
+  drawCropStage();
   await runPipeline();
 }
 
@@ -394,10 +636,12 @@ async function onUpload() {
 
 $("picker").addEventListener("change", onPick);
 $("dither").addEventListener("change", () => {
-  if (state.sourceRgba) runPipeline();
+  if (state.bitmap) runPipeline();
 });
 $("upload").addEventListener("click", onUpload);
+window.addEventListener("resize", () => { if (state.bitmap) drawCropStage(); });
 
+bindCropDrag();
 fetchPanel();
 </script>
 </body>
