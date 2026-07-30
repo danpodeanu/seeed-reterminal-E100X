@@ -45,24 +45,51 @@ constexpr int PANEL_HEIGHT = 480;
 constexpr uint32_t PANEL_BLACK = TFT_GRAY_0;
 constexpr uint32_t PANEL_WHITE = TFT_GRAY_3;
 constexpr const char* PANEL_LABEL = "reTerminal E1001";
+#define PORTAL_FONT_TITLE     &FreeSansBold18pt7b
+#define PORTAL_FONT_SUBTITLE  &FreeSans12pt7b
+#define PORTAL_FONT_CAPTION   &FreeSansBold12pt7b
+#define PORTAL_FONT_DETAIL    &FreeSans9pt7b
+#define PORTAL_FONT_ERR_TITLE &FreeSansBold24pt7b
+#define PORTAL_FONT_ERR_BODY  &FreeSans12pt7b
 #elif RETERMINAL_MODEL == 1002
 constexpr int PANEL_WIDTH = 800;
 constexpr int PANEL_HEIGHT = 480;
 constexpr uint32_t PANEL_BLACK = TFT_BLACK;
 constexpr uint32_t PANEL_WHITE = TFT_WHITE;
 constexpr const char* PANEL_LABEL = "reTerminal E1002";
+#define PORTAL_FONT_TITLE     &FreeSansBold18pt7b
+#define PORTAL_FONT_SUBTITLE  &FreeSans12pt7b
+#define PORTAL_FONT_CAPTION   &FreeSansBold12pt7b
+#define PORTAL_FONT_DETAIL    &FreeSans9pt7b
+#define PORTAL_FONT_ERR_TITLE &FreeSansBold24pt7b
+#define PORTAL_FONT_ERR_BODY  &FreeSans12pt7b
 #elif RETERMINAL_MODEL == 1003
 constexpr int PANEL_WIDTH = 1872;
 constexpr int PANEL_HEIGHT = 1404;
 constexpr uint32_t PANEL_BLACK = TFT_GRAY_0;
 constexpr uint32_t PANEL_WHITE = TFT_GRAY_15;
 constexpr const char* PANEL_LABEL = "reTerminal E1003";
+#define PORTAL_FONT_TITLE     &FreeSansBold24pt7b
+#define PORTAL_FONT_SUBTITLE  &FreeSans18pt7b
+#define PORTAL_FONT_CAPTION   &FreeSansBold18pt7b
+#define PORTAL_FONT_DETAIL    &FreeSans12pt7b
+#define PORTAL_FONT_ERR_TITLE &FreeSansBold24pt7b
+#define PORTAL_FONT_ERR_BODY  &FreeSans18pt7b
 #elif RETERMINAL_MODEL == 1004
 constexpr int PANEL_WIDTH = 1200;
 constexpr int PANEL_HEIGHT = 1600;
 constexpr uint32_t PANEL_BLACK = TFT_BLACK;
 constexpr uint32_t PANEL_WHITE = TFT_WHITE;
 constexpr const char* PANEL_LABEL = "reTerminal E1004";
+// E1004 is a 1200x1600 portrait panel viewed from ~arm's length, so we
+// use the largest available FreeSans faces for the title/captions and
+// a solid 12pt for the URL/SSID lines.
+#define PORTAL_FONT_TITLE     &FreeSansBold24pt7b
+#define PORTAL_FONT_SUBTITLE  &FreeSans18pt7b
+#define PORTAL_FONT_CAPTION   &FreeSansBold18pt7b
+#define PORTAL_FONT_DETAIL    &FreeSans12pt7b
+#define PORTAL_FONT_ERR_TITLE &FreeSansBold24pt7b
+#define PORTAL_FONT_ERR_BODY  &FreeSans18pt7b
 #else
 #error "RETERMINAL_MODEL must be 1001, 1002, 1003, or 1004"
 #endif
@@ -85,9 +112,8 @@ void renderNoSdCardAndStop() {
   epaper.fillSprite(PANEL_WHITE);
   sd_web_portal::ui::renderErrorScreen<EPaper>(
       epaper, PANEL_WIDTH, PANEL_HEIGHT, PANEL_BLACK, PANEL_WHITE,
-      "No SD card",
-      "Insert a FAT32 / exFAT card and press reset",
-      PANEL_LABEL);
+      PORTAL_FONT_ERR_TITLE, PORTAL_FONT_ERR_BODY, "No SD card",
+      "Insert a FAT32 / exFAT card and press reset", PANEL_LABEL);
   epaper.update();
   LOG.println("[sd-web] no SD card detected; halting");
   LOG.flush();
@@ -113,11 +139,16 @@ void renderPortalScreen() {
 
   sd_web_portal::ui::RenderInfo info;
   info.modelLabel = PANEL_LABEL;
+  info.tagline = "Files over Wi-Fi";
   info.ssid = ssid;
   info.url = url;
   info.macAddress = wifi_sta::stationMacAddress();
   info.wifiPayload = wifiPayload;
   info.urlPayload = url;
+  info.fonts.titleFont = PORTAL_FONT_TITLE;
+  info.fonts.subtitleFont = PORTAL_FONT_SUBTITLE;
+  info.fonts.captionFont = PORTAL_FONT_CAPTION;
+  info.fonts.detailFont = PORTAL_FONT_DETAIL;
 
   sd_web_portal::ui::renderPortalScreen<EPaper>(
       epaper, PANEL_WIDTH, PANEL_HEIGHT, PANEL_BLACK, PANEL_WHITE, info);
@@ -173,6 +204,7 @@ void setup() {
     epaper.fillSprite(PANEL_WHITE);
     sd_web_portal::ui::renderErrorScreen<EPaper>(
         epaper, PANEL_WIDTH, PANEL_HEIGHT, PANEL_BLACK, PANEL_WHITE,
+        PORTAL_FONT_ERR_TITLE, PORTAL_FONT_ERR_BODY,
         "Wi-Fi start failed",
         "Reset the device and try again",
         PANEL_LABEL);

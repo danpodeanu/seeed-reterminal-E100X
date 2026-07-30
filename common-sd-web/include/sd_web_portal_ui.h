@@ -3,6 +3,13 @@
 #include <Arduino.h>
 #include <qrcode.h>
 
+// The `GFXfont` type used by Adafruit_GFX / TFT_eSPI is a typedef around
+// an anonymous struct, so it can't be forward-declared with
+// `struct GFXfont;`. Callers of this header must have included
+// TFT_eSPI.h (or another header that pulls in gfxfont.h) before this
+// one; both viewer apps in the tree already do so via `<TFT_eSPI.h>`
+// in their main.cpp.
+
 // On-panel rendering helpers for the SD web portal. Kept as a
 // template header so the sd_web_portal library never has to link
 // against Seeed_GFX / TFT_eSPI - the caller passes in whichever EPaper
@@ -25,18 +32,12 @@ namespace ui {
 template <typename EPaper>
 inline void drawQr(EPaper& epaper, const String& payload, int x, int y,
                    int moduleSize, uint32_t black, uint32_t white) {
-  // Pick the smallest version that fits with ECC_MEDIUM. Version 3 is
-  // 29x29 modules and holds ~47 alphanumeric chars; version 5 (37x37)
-  // holds ~84. Bigger versions need more RAM for the internal buffer,
-  // hence not just always picking 10.
   uint8_t version = 3;
   if (payload.length() > 40) version = 5;
   if (payload.length() > 75) version = 8;
   if (payload.length() > 130) version = 12;
 
   const uint16_t bufSize = qrcode_getBufferSize(version);
-  // Stack buffer up to a reasonable ceiling; anything larger than
-  // version 12 (~300 bytes) is unlikely for this portal.
   uint8_t buffer[512];
   if (bufSize > sizeof(buffer)) return;
 
@@ -49,10 +50,7 @@ inline void drawQr(EPaper& epaper, const String& payload, int x, int y,
   const int quiet = 4;
   const int totalSide = (side + 2 * quiet) * moduleSize;
 
-  // Paint the entire QR bounding box (quiet zone included) white.
   epaper.fillRect(x, y, totalSide, totalSide, white);
-
-  // Draw dark modules.
   for (int row = 0; row < side; ++row) {
     for (int col = 0; col < side; ++col) {
       if (qrcode_getModule(&qr, col, row)) {
@@ -71,24 +69,47 @@ inline int qrSidePixels(const String& payload, int moduleSize) {
   if (payload.length() > 40) version = 5;
   if (payload.length() > 75) version = 8;
   if (payload.length() > 130) version = 12;
-  // Version N -> 4*N + 17 modules per side.
   const int side = 4 * version + 17;
   return (side + 8) * moduleSize;
 }
 
-struct RenderInfo {
-  const char* modelLabel;   // e.g. "reTerminal E1001"
-  String ssid;              // "ReTerminal ABCDEF"
-  String url;               // "http://192.168.1.1/"
-  String macAddress;        // "AA:BB:CC:DD:EE:FF" (station MAC)
-  String wifiPayload;       // "WIFI:S:...;T:nopass;;"
-  String urlPayload;        // same as `url`
+// Font pointers supplied by the caller. All four must be non-null; the
+// renderer sets them via epaper.setFreeFont() and draws at TFT_eSPI
+// virtual font id 1 (the "current free font" slot).
+//
+//   titleFont     - big header ("SD Card Portal")
+//   subtitleFont  - short tagline immediately below the title
+//   captionFont   - "1. Scan to join Wi-Fi" / "2. Scan to open portal"
+//   detailFont    - SSID / URL / MAC lines
+struct Fonts {
+  const GFXfont* titleFont;
+  const GFXfont* subtitleFont;
+  const GFXfont* captionFont;
+  const GFXfont* detailFont;
 };
 
-// Full-screen "welcome" layout: title top, two QR codes side by side
-// (landscape) or stacked (portrait), captions, then the AP details at
-// the bottom. Fonts and colours are picked to look reasonable on every
-// reTerminal E-series panel.
+struct RenderInfo {
+  const char* modelLabel;
+  const char* tagline;      // 2-3 word description printed under the title
+  String ssid;
+  String url;
+  String macAddress;
+  String wifiPayload;
+  String urlPayload;
+  Fonts fonts;
+};
+
+// Full-screen welcome layout. From top to bottom:
+//   * Title band                                      (info.fonts.titleFont)
+//   * Tagline (e.g. "Files over Wi-Fi")               (info.fonts.subtitleFont)
+//   * Device MAC line                                 (info.fonts.detailFont)
+//   * Two QR codes side by side (landscape) or stacked (portrait):
+//       - "1. Scan to join Wi-Fi" caption ABOVE       (info.fonts.captionFont)
+//       - Wi-Fi QR
+//       - SSID text BELOW                             (info.fonts.detailFont)
+//       - "2. Scan to open portal" caption ABOVE
+//       - URL QR
+//       - URL text BELOW
 template <typename EPaper>
 inline void renderPortalScreen(EPaper& epaper, int panelW, int panelH,
                                uint32_t black, uint32_t white,
@@ -96,90 +117,125 @@ inline void renderPortalScreen(EPaper& epaper, int panelW, int panelH,
   epaper.fillSprite(white);
   epaper.setTextColor(black, white, true);
 
-  // Pick a QR module size that fills roughly one-third of the smaller
-  // panel dimension - large enough for a phone camera to lock onto
-  // from arm's length, small enough to leave room for the caption.
-  // Both QR codes use the same module size so the two blocks match.
   const bool portrait = panelH > panelW;
-  const int targetSide = portrait ? panelW / 2 : (panelH - panelH / 5) - panelH / 8;
-  const int wifiSideModules = 4 * (info.wifiPayload.length() > 40 ? 5 : 3) + 17 + 8;
-  const int urlSideModules  = 4 * (info.urlPayload.length()  > 40 ? 5 : 3) + 17 + 8;
-  const int maxModules = wifiSideModules > urlSideModules ? wifiSideModules : urlSideModules;
-  int moduleSize = targetSide / maxModules;
-  if (moduleSize < 2) moduleSize = 2;
 
-  const int wifiSide = qrSidePixels(info.wifiPayload, moduleSize);
-  const int urlSide  = qrSidePixels(info.urlPayload,  moduleSize);
-
-  // Fonts (fall back to built-in for tiny panels).
-  const int titleFontId = panelW >= 1200 ? 6 : 4;
-  const int labelFontId = panelW >= 1200 ? 4 : 2;
-  const int bodyFontId  = panelW >= 1200 ? 4 : 2;
-
-  // Title band.
+  // ---- Header block: title + tagline + MAC. ----
   epaper.setTextDatum(TC_DATUM);
-  epaper.setFreeFont(nullptr);
-  epaper.setTextFont(titleFontId);
-  const int titleY = panelH / 20;
-  epaper.drawString("SD Card Wi-Fi Portal", panelW / 2, titleY, titleFontId);
 
-  epaper.setTextFont(labelFontId);
-  epaper.drawString(String("on ") + info.modelLabel, panelW / 2,
-                    titleY + epaper.fontHeight(titleFontId), labelFontId);
+  epaper.setFreeFont(info.fonts.titleFont);
+  const int titleFontH = epaper.fontHeight(1);
+  const int titleY = panelH / 30;
+  epaper.drawString("SD Card Portal", panelW / 2, titleY, 1);
 
-  // Layout: two QR codes.
-  int qrTop;
-  int wifiX, urlX, wifiCaptionY, urlCaptionY;
+  epaper.setFreeFont(info.fonts.subtitleFont);
+  const int subtitleFontH = epaper.fontHeight(1);
+  int y = titleY + titleFontH + panelH / 90;
+  if (info.tagline && info.tagline[0]) {
+    epaper.drawString(info.tagline, panelW / 2, y, 1);
+    y += subtitleFontH;
+  }
+
+  epaper.setFreeFont(info.fonts.detailFont);
+  const int detailFontH = epaper.fontHeight(1);
+  y += panelH / 120;
+  epaper.drawString(String("Device MAC ") + info.macAddress, panelW / 2, y, 1);
+  y += detailFontH;
+
+  // ---- QR sizing. ----
+  // Reserve room for two captions + two QR + two SSID/URL lines. In
+  // landscape the two blocks sit side by side, so we only need the
+  // vertical space of one block; in portrait we need both stacked.
+  epaper.setFreeFont(info.fonts.captionFont);
+  const int captionH = epaper.fontHeight(1);
+
+  const int headerBottom = y + panelH / 60;
+  const int footerReserve = panelH / 40;
+  const int qrRegionTop = headerBottom;
+  const int qrRegionBottom = panelH - footerReserve;
+
+  int moduleSize;
   if (portrait) {
-    qrTop = titleY + epaper.fontHeight(titleFontId) +
-            epaper.fontHeight(labelFontId) + panelH / 30;
-    wifiX = (panelW - wifiSide) / 2;
-    urlX  = (panelW - urlSide)  / 2;
-    // Stack: Wi-Fi on top, URL below.
-    wifiCaptionY = qrTop + wifiSide + panelH / 90;
-    urlCaptionY  = wifiCaptionY + epaper.fontHeight(labelFontId) * 3 + urlSide + panelH / 90;
+    // Two stacked blocks: each block = caption + qr + detail + gap.
+    // The QR square is the biggest component; give it the remaining
+    // vertical space after captions/details.
+    const int blockNonQr = captionH + detailFontH + panelH / 60;
+    const int perBlockH = (qrRegionBottom - qrRegionTop) / 2;
+    const int qrTargetH = perBlockH - blockNonQr;
+    const int qrTargetW = panelW - panelW / 6;
+    const int qrTarget = qrTargetH < qrTargetW ? qrTargetH : qrTargetW;
+    const int wifiModulesSide =
+        4 * (info.wifiPayload.length() > 40 ? 5 : 3) + 17 + 8;
+    const int urlModulesSide =
+        4 * (info.urlPayload.length() > 40 ? 5 : 3) + 17 + 8;
+    const int maxModules =
+        wifiModulesSide > urlModulesSide ? wifiModulesSide : urlModulesSide;
+    moduleSize = qrTarget / maxModules;
   } else {
-    qrTop = titleY + epaper.fontHeight(titleFontId) +
-            epaper.fontHeight(labelFontId) + panelH / 20;
-    // Two blocks: [left third | wifi | middle third | url | right third]
-    const int totalWidth = wifiSide + urlSide;
-    const int gap = (panelW - totalWidth) / 3;
-    wifiX = gap;
-    urlX  = wifiX + wifiSide + gap;
-    wifiCaptionY = qrTop + wifiSide + panelH / 40;
-    urlCaptionY  = wifiCaptionY;
+    // Landscape: side-by-side blocks. QR height limited by region height
+    // minus caption+detail; QR width limited by half panel width minus
+    // side gaps.
+    const int qrTargetH = (qrRegionBottom - qrRegionTop) - captionH -
+                          detailFontH - panelH / 60;
+    const int qrTargetW = (panelW - panelW / 4) / 2;
+    const int qrTarget = qrTargetH < qrTargetW ? qrTargetH : qrTargetW;
+    const int wifiModulesSide =
+        4 * (info.wifiPayload.length() > 40 ? 5 : 3) + 17 + 8;
+    const int urlModulesSide =
+        4 * (info.urlPayload.length() > 40 ? 5 : 3) + 17 + 8;
+    const int maxModules =
+        wifiModulesSide > urlModulesSide ? wifiModulesSide : urlModulesSide;
+    moduleSize = qrTarget / maxModules;
   }
+  if (moduleSize < 2) moduleSize = 2;
+  const int wifiSide = qrSidePixels(info.wifiPayload, moduleSize);
+  const int urlSide = qrSidePixels(info.urlPayload, moduleSize);
 
-  // Draw the two QR codes.
-  drawQr(epaper, info.wifiPayload, wifiX, qrTop, moduleSize, black, white);
-  int urlTopY = qrTop;
+  // ---- QR layout. ----
+  auto drawBlock = [&](int blockX, int blockTop, int qrSide,
+                       const String& payload, const char* caption,
+                       const String& detailLine) {
+    // Caption above.
+    epaper.setFreeFont(info.fonts.captionFont);
+    epaper.setTextDatum(TC_DATUM);
+    epaper.drawString(caption, blockX + qrSide / 2, blockTop, 1);
+    const int qrTop = blockTop + captionH + panelH / 200;
+    drawQr(epaper, payload, blockX, qrTop, moduleSize, black, white);
+    // Detail below.
+    epaper.setFreeFont(info.fonts.detailFont);
+    epaper.drawString(detailLine, blockX + qrSide / 2,
+                      qrTop + qrSide + panelH / 200, 1);
+  };
+
   if (portrait) {
-    urlTopY = wifiCaptionY + epaper.fontHeight(labelFontId) * 2 + panelH / 40;
+    const int wifiBlockH = captionH + wifiSide + detailFontH + panelH / 60;
+    const int urlBlockH = captionH + urlSide + detailFontH + panelH / 60;
+    const int totalH = wifiBlockH + urlBlockH;
+    const int available = qrRegionBottom - qrRegionTop;
+    const int extra = available > totalH ? (available - totalH) : 0;
+    const int wifiTop = qrRegionTop + extra / 4;
+    const int urlTop = wifiTop + wifiBlockH + extra / 2;
+    const int wifiX = (panelW - wifiSide) / 2;
+    const int urlX = (panelW - urlSide) / 2;
+    drawBlock(wifiX, wifiTop, wifiSide, info.wifiPayload,
+              "1. Scan to join Wi-Fi", info.ssid);
+    drawBlock(urlX, urlTop, urlSide, info.urlPayload,
+              "2. Scan to open portal", info.url);
+  } else {
+    const int gap = (panelW - wifiSide - urlSide) / 3;
+    const int wifiX = gap;
+    const int urlX = wifiX + wifiSide + gap;
+    const int blockH = captionH + wifiSide + detailFontH + panelH / 60;
+    const int available = qrRegionBottom - qrRegionTop;
+    const int blockTop =
+        qrRegionTop + (available > blockH ? (available - blockH) / 2 : 0);
+    drawBlock(wifiX, blockTop, wifiSide, info.wifiPayload,
+              "1. Scan to join Wi-Fi", info.ssid);
+    drawBlock(urlX, blockTop, urlSide, info.urlPayload,
+              "2. Scan to open portal", info.url);
   }
-  drawQr(epaper, info.urlPayload, urlX, urlTopY, moduleSize, black, white);
 
-  // Captions.
-  epaper.setTextFont(labelFontId);
-  epaper.setTextDatum(TC_DATUM);
-  epaper.drawString("1. Scan to join Wi-Fi", wifiX + wifiSide / 2,
-                    wifiCaptionY, labelFontId);
-  epaper.drawString(info.ssid, wifiX + wifiSide / 2,
-                    wifiCaptionY + epaper.fontHeight(labelFontId),
-                    labelFontId);
-
-  const int urlCapY = portrait
-                          ? urlTopY + urlSide + panelH / 90
-                          : urlCaptionY;
-  epaper.drawString("2. Scan to open portal", urlX + urlSide / 2,
-                    urlCapY, labelFontId);
-  epaper.drawString(info.url, urlX + urlSide / 2,
-                    urlCapY + epaper.fontHeight(labelFontId), labelFontId);
-
-  // Footer with MAC + instructions.
-  epaper.setTextFont(bodyFontId);
-  epaper.setTextDatum(BC_DATUM);
-  epaper.drawString(String("Device MAC ") + info.macAddress,
-                    panelW / 2, panelH - panelH / 50, bodyFontId);
+  // Restore default text state so anything printed later renders sanely.
+  epaper.setFreeFont(nullptr);
   epaper.setTextDatum(TL_DATUM);
 }
 
@@ -189,28 +245,29 @@ inline void renderPortalScreen(EPaper& epaper, int panelW, int panelH,
 template <typename EPaper>
 inline void renderErrorScreen(EPaper& epaper, int panelW, int panelH,
                               uint32_t black, uint32_t white,
-                              const char* title, const char* line1,
+                              const GFXfont* titleFont,
+                              const GFXfont* bodyFont, const char* title,
+                              const char* line1,
                               const char* line2 = nullptr) {
   epaper.fillSprite(white);
   epaper.setTextColor(black, white, true);
-  epaper.setFreeFont(nullptr);
-  const int titleFontId = panelW >= 1200 ? 8 : 6;
-  const int bodyFontId = panelW >= 1200 ? 6 : 4;
-  epaper.setTextFont(titleFontId);
+  epaper.setFreeFont(titleFont);
   epaper.setTextDatum(MC_DATUM);
-  const int centerY = panelH / 2 - epaper.fontHeight(titleFontId);
-  epaper.drawString(title, panelW / 2, centerY, titleFontId);
+  const int titleH = epaper.fontHeight(1);
+  const int centerY = panelH / 2 - titleH;
+  epaper.drawString(title, panelW / 2, centerY, 1);
 
-  epaper.setTextFont(bodyFontId);
-  const int gap = epaper.fontHeight(bodyFontId);
-  int y = centerY + epaper.fontHeight(titleFontId);
+  epaper.setFreeFont(bodyFont);
+  const int bodyH = epaper.fontHeight(1);
+  int y = centerY + titleH;
   if (line1 && line1[0]) {
-    epaper.drawString(line1, panelW / 2, y, bodyFontId);
-    y += gap;
+    epaper.drawString(line1, panelW / 2, y, 1);
+    y += bodyH;
   }
   if (line2 && line2[0]) {
-    epaper.drawString(line2, panelW / 2, y, bodyFontId);
+    epaper.drawString(line2, panelW / 2, y, 1);
   }
+  epaper.setFreeFont(nullptr);
   epaper.setTextDatum(TL_DATUM);
 }
 

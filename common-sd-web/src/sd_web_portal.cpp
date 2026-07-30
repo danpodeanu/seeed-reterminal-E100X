@@ -180,6 +180,15 @@ String formatTime(time_t t) {
 // ----- HTML rendering -----
 
 void sendPageHeader(const String& title, const String& breadcrumbHtml) {
+  // Use chunked transfer encoding: setContentLength(CONTENT_LENGTH_UNKNOWN)
+  // + send(code, type, "") tells WebServer to omit Content-Length and
+  // use "Transfer-Encoding: chunked" instead. If we send() with a
+  // non-empty body, Content-Length is set to that body's length and the
+  // browser stops reading after it - dropping every subsequent
+  // sendContent() chunk on the floor.
+  g_server->setContentLength(CONTENT_LENGTH_UNKNOWN);
+  g_server->send(200, "text/html; charset=utf-8", "");
+
   String html;
   html.reserve(2048);
   html += F(
@@ -227,7 +236,7 @@ void sendPageHeader(const String& title, const String& breadcrumbHtml) {
       "<div class=\"crumb\">");
   html += breadcrumbHtml;
   html += F("</div></header><main>");
-  g_server->send(200, "text/html; charset=utf-8", html);
+  g_server->sendContent(html);
 }
 
 void sendPageChunk(const String& chunk) {
