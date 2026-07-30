@@ -791,13 +791,15 @@ void setup() {
   // spinning up Wi-Fi for portal mode.
   if (buttonWake) hardware::beep();
 
-  // Arrow buttons toggle SD-Wi-Fi-portal mode. In photo mode, either
-  // arrow flips us into portal mode; in portal mode the exit path
-  // clears the flag and reboots (see runSdWebPortal()). A green-button
-  // wake in either mode never changes the mode - it just refreshes
-  // the current view. Cold boots start in photo mode unless the SD has
-  // no photos, in which case we jump straight into the portal so the
-  // user can upload something without hunting for the arrow buttons.
+  // Button gestures on button wake:
+  //   - Green tap (KEY0)        -> advance to the next photo.
+  //   - Green hold (KEY0 >=2 s) -> enter the SD upload portal.
+  //   - Arrow-left  (KEY1)      -> previous photo.
+  //   - Arrow-right (KEY2)      -> next photo.
+  //   - Any button while already in portal -> exit portal and refresh.
+  // Cold boots start in photo mode unless the SD has no photos, in which
+  // case we jump straight into the portal so the user can upload
+  // something without hunting for the right gesture.
   if (coldBoot) {
     sdPortalMode = false;
     photoRefreshOnly = false;
@@ -808,8 +810,33 @@ void setup() {
                  config::PHOTO_DIR);
       sdPortalMode = true;
     }
-  } else if (buttonWake && (key1Wake || key2Wake)) {
-    sdPortalMode = !sdPortalMode;
+  } else if (buttonWake) {
+    if (sdPortalMode) {
+      // Any wake while portal-mode is armed means "leave portal": clear
+      // the flag and force a same-photo redraw so nothing looks stale.
+      sdPortalMode = false;
+      photoRefreshOnly = true;
+    } else if (key0Wake) {
+      // Green: sample the pin for up to kHoldMs to distinguish a tap
+      // (advance) from a long press (enter portal). KEY0 is pulled up
+      // when idle and reads LOW while held.
+      constexpr uint32_t kHoldMs = 2000;
+      const uint32_t start = millis();
+      while (digitalRead(PIN_KEY0) == LOW &&
+             (millis() - start) < kHoldMs) {
+        delay(10);
+      }
+      if (digitalRead(PIN_KEY0) == LOW) {
+        // Still held past the threshold -> upload portal.
+        hardware::beep();  // second beep = "portal armed"
+        LOG.println("[boot] green held; entering upload portal");
+        sdPortalMode = true;
+      }
+      // Released before threshold: fall through to the normal photo
+      // path, which treats a green wake as "advance".
+    }
+    // Arrow wakes fall through unmodified; app_logic::photoDirection()
+    // maps key1Wake -> previous and everything else -> next.
   }
 
   if (sdPortalMode) {
