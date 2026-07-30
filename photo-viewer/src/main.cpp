@@ -112,6 +112,13 @@ RTC_DATA_ATTR bool sdPortalMode = false;
 // the fresh setup() call knows to re-render the current photo rather
 // than advance to the next one.
 RTC_DATA_ATTR bool photoRefreshOnly = false;
+// Seed for the deterministic shuffle used by countPhotos(). Zero means
+// "not seeded yet"; setup() clears it on cold boot. Every wake in the
+// same session reuses the seed so /photos is shuffled into the same
+// order, which keeps currentPhotoIndex stable across wakes - without
+// this, each wake re-shuffles and the "next photo" ordinal can land on
+// the same file the previous wake already showed.
+RTC_DATA_ATTR uint32_t photoShuffleSeed = 0;
 
 uint16_t readLe16(const uint8_t* bytes) {
   return static_cast<uint16_t>(bytes[0]) |
@@ -312,6 +319,15 @@ uint32_t countPhotos() {
       if (!path.startsWith("/")) {
         path = String(config::PHOTO_DIR) + "/" + path;
       }
+      // Skip macOS/FAT sidecars like "._IMG_1234.bmp" - the finder
+      // writes those to removable media and they'd otherwise inflate
+      // the ordinal count with zero-visible photos.
+      const String bn = baseName(path);
+      if (bn.startsWith("._")) {
+        entry.close();
+        entry = directory.openNextFile();
+        continue;
+      }
       photoList.emplace_back(std::move(path));
     }
     entry.close();
@@ -319,11 +335,24 @@ uint32_t countPhotos() {
   }
   directory.close();
   if (config::PHOTO_ORDER_RANDOM) {
-    // Shuffle at boot so rotation feels random rather than following FAT32
-    // directory order. esp_random() draws from the hardware RNG.
+    // Seeded xorshift32 shuffle. The seed lives in RTC memory and stays
+    // fixed across button/timer wakes within a power session, so
+    // "advance by 1" always lands on the next photo the user last saw.
+    // photoShuffleSeed is reset on cold boot so each fresh power-on
+    // still gets a new random order. esp_random() provides bootstrap
+    // entropy.
+    if (photoShuffleSeed == 0) {
+      photoShuffleSeed = esp_random();
+      if (photoShuffleSeed == 0) photoShuffleSeed = 1;  // never 0
+    }
+    uint32_t s = photoShuffleSeed;
     app_logic::shuffleInPlace(
-        photoList, [](size_t upperExclusive) -> size_t {
-          return static_cast<size_t>(esp_random()) % upperExclusive;
+        photoList, [&s](size_t upperExclusive) -> size_t {
+          // xorshift32 - cheap, good enough for shuffling a directory.
+          s ^= s << 13;
+          s ^= s >> 17;
+          s ^= s << 5;
+          return static_cast<size_t>(s) % upperExclusive;
         });
   } else {
     // Alphabetical sort makes ordinal-based rotation deterministic across
@@ -803,6 +832,10 @@ void setup() {
   if (coldBoot) {
     sdPortalMode = false;
     photoRefreshOnly = false;
+    // Reset the shuffle seed so a fresh power-on picks a new random
+    // photo order. Deep-sleep wakes reuse the last seed to keep
+    // "advance by one" stable across wakes.
+    photoShuffleSeed = 0;
     sdReady = sd_card::mount(epaper.getSPIinstance(), config::PHOTO_DIR);
     const uint32_t initialPhotoCount = countPhotos();
     if (initialPhotoCount == 0) {
