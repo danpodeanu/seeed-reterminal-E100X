@@ -142,6 +142,17 @@ footer a { color: var(--muted); }
       </label>
       <span class="status" id="status"></span>
     </div>
+    <div class="row" style="gap: 10px; margin-bottom: 10px;">
+      <label style="flex: 1; display: flex; align-items: center; gap: 8px;">
+        <span>Brightness</span>
+        <input type="range" id="gamma" min="0.5" max="2.0" step="0.05"
+               value="1.0" style="flex: 1;">
+        <span id="gammaValue" style="min-width: 3ch; text-align: right;
+              font-variant-numeric: tabular-nums;">1.00</span>
+        <button type="button" id="gammaReset" style="padding: 4px 10px;
+                font-size: 0.85rem;">Reset</button>
+      </label>
+    </div>
     <canvas id="preview"></canvas>
     <div class="row" style="justify-content: flex-end; margin-top: 12px;">
       <button id="upload" class="primary" disabled>Upload to panel</button>
@@ -324,6 +335,25 @@ function rescaleFromCrop() {
   ctx.imageSmoothingQuality = "high";
   ctx.drawImage(state.bitmap, c.sx, c.sy, c.sw, c.sh, 0, 0, pw, ph);
   return ctx.getImageData(0, 0, pw, ph);
+}
+
+// Gamma-correct RGB in place. gamma > 1 lifts mid-tones (brighter);
+// gamma < 1 crushes them (darker). Uses a 256-entry lookup table so the
+// per-pixel cost is a table read, not a pow() call. Skipped when gamma
+// is close to 1 to keep the identity case free.
+function applyGamma(imageData, gamma) {
+  if (Math.abs(gamma - 1) < 0.005) return;
+  const inv = 1 / gamma;
+  const lut = new Uint8ClampedArray(256);
+  for (let i = 0; i < 256; i++) {
+    lut[i] = Math.round(255 * Math.pow(i / 255, inv));
+  }
+  const d = imageData.data;
+  for (let i = 0; i < d.length; i += 4) {
+    d[i]     = lut[d[i]];
+    d[i + 1] = lut[d[i + 1]];
+    d[i + 2] = lut[d[i + 2]];
+  }
 }
 
 // Error-diffusion kernels. Each entry is [dx, dy, weight]. Weights are
@@ -562,11 +592,13 @@ function stemFor(name) {
 
 async function runPipeline() {
   const method = $("dither").value;
+  const gamma = parseFloat($("gamma").value) || 1.0;
   const palette = PALETTES[state.panel.palette] || PALETTES.gray4;
   setStatus("Preparing preview...");
   await new Promise(r => setTimeout(r, 20));
   const t0 = performance.now();
   state.sourceRgba = rescaleFromCrop();
+  applyGamma(state.sourceRgba, gamma);
   const { indices, preview } = dither(state.sourceRgba, palette, method);
   const t1 = performance.now();
   const cv = $("preview");
@@ -636,6 +668,23 @@ async function onUpload() {
 
 $("picker").addEventListener("change", onPick);
 $("dither").addEventListener("change", () => {
+  if (state.bitmap) runPipeline();
+});
+let gammaTimer = null;
+function updateGammaLabel() {
+  $("gammaValue").textContent = parseFloat($("gamma").value).toFixed(2);
+}
+$("gamma").addEventListener("input", () => {
+  updateGammaLabel();
+  if (!state.bitmap) return;
+  // Debounce so dragging the slider doesn't queue up a full-panel
+  // dither on every step; 150 ms feels responsive without thrashing.
+  clearTimeout(gammaTimer);
+  gammaTimer = setTimeout(runPipeline, 150);
+});
+$("gammaReset").addEventListener("click", () => {
+  $("gamma").value = "1.0";
+  updateGammaLabel();
   if (state.bitmap) runPipeline();
 });
 $("upload").addEventListener("click", onUpload);
