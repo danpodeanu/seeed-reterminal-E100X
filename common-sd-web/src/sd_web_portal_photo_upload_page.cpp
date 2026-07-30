@@ -113,10 +113,10 @@ footer a { color: var(--muted); }
 
   <div class="card">
     <h2>Pick a photo</h2>
-    <p class="hint">Anything your phone can share: JPG, HEIC (Safari converts), PNG.</p>
+    <p class="hint">JPG or PNG. iPhone photos: Safari uploads the JPEG version automatically.</p>
     <label class="file" id="pickerLabel">
       <span id="pickerText">Tap to choose photo</span>
-      <input type="file" id="picker" accept="image/*">
+      <input type="file" id="picker" accept="image/jpeg,image/png">
     </label>
   </div>
 
