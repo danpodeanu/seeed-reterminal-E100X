@@ -784,10 +784,19 @@ void setup() {
   // arrow flips us into portal mode; in portal mode the exit path
   // clears the flag and reboots (see runSdWebPortal()). A green-button
   // wake in either mode never changes the mode - it just refreshes
-  // the current view. Cold boots always start in photo mode.
+  // the current view. Cold boots start in photo mode unless the SD has
+  // no photos, in which case we jump straight into the portal so the
+  // user can upload something without hunting for the arrow buttons.
   if (coldBoot) {
     sdPortalMode = false;
     photoRefreshOnly = false;
+    sdReady = sd_card::mount(epaper.getSPIinstance(), config::PHOTO_DIR);
+    const uint32_t initialPhotoCount = countPhotos();
+    if (initialPhotoCount == 0) {
+      LOG.printf("[boot] no photos in %s - entering upload portal\n",
+                 config::PHOTO_DIR);
+      sdPortalMode = true;
+    }
   } else if (buttonWake && (key1Wake || key2Wake)) {
     sdPortalMode = !sdPortalMode;
   }
