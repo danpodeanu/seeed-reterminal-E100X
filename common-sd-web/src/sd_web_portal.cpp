@@ -41,6 +41,7 @@ Config g_config;
 String g_ssid;
 String g_url;
 bool g_running = false;
+bool g_exitRequested = false;
 
 // Upload state. Managed inside the /upload handler; kept as file-scope
 // so start/write/end callbacks (which are separate invocations of the
@@ -742,6 +743,15 @@ void handlePhotoUploadPage() {
   g_server->send_P(200, "text/html; charset=utf-8", kPhotoUploadPage);
 }
 
+// POSTed by the "Switch display to photo view" button in the upload page.
+// Sets the exit flag; firmware polls exitRequested() from its portal loop
+// and triggers the same reboot path the physical arrows use.
+void handleExitPortal() {
+  g_exitRequested = true;
+  g_server->sendHeader("Cache-Control", "no-store");
+  g_server->send(200, "application/json", "{\"ok\":true}");
+}
+
 // Everything else - including any URL the user types into Safari
 // while joined to our AP - gets redirected back to the portal root
 // (or to `urlQrPath` when the embedding app configured one).
@@ -830,6 +840,7 @@ String urlQrPayload(const IPAddress& ip, uint16_t port, const char* path) {
 
 bool begin(const Config& cfg) {
   g_config = cfg;
+  g_exitRequested = false;
 
   // Bring the radio into AP mode with the requested static IP.
   WiFi.persistent(false);
@@ -879,6 +890,7 @@ bool begin(const Config& cfg) {
     }
     g_server->on("/panel.json", handlePanelInfo);
     g_server->on("/upload-photo", handlePhotoUploadPage);
+    g_server->on("/exit-portal", HTTP_POST, handleExitPortal);
   }
 
   // Captive-portal probes. Apple's probes get the exact "Success"
@@ -925,6 +937,7 @@ void loop() {
 const String& currentSsid() { return g_ssid; }
 IPAddress currentIp() { return g_running ? g_config.apIp : IPAddress(); }
 uint16_t currentPort() { return g_config.httpPort; }
+bool exitRequested() { return g_exitRequested; }
 
 void end() {
   if (g_dns) {

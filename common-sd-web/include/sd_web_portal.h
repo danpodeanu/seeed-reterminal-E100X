@@ -102,6 +102,11 @@ const String& currentSsid();
 IPAddress currentIp();
 uint16_t currentPort();
 
+// Set to true once a browser POSTs /exit-portal (photo uploader "Switch
+// display to photo view" button). Firmware polls this from its portal
+// loop to trigger the same exit path as the physical arrow buttons.
+bool exitRequested();
+
 // Stop the HTTP server and shut down the AP. Not normally needed - the
 // portal is a one-shot power-cycle tool - but useful for embedding apps
 // that want to run the portal on demand.

@@ -165,6 +165,14 @@ footer a { color: var(--muted); }
   </div>
 
   <div class="card">
+    <h2>Done uploading?</h2>
+    <p class="hint" style="margin:0 0 10px 0">Switch the panel back to showing photos. You can also press the left or right arrow on the device.</p>
+    <div class="row" style="justify-content: flex-end;">
+      <button type="button" id="exitPortal" class="primary">Switch display to photo view</button>
+    </div>
+  </div>
+
+  <div class="card">
     <p class="hint" style="margin:0">Uploaded photos appear on the panel on the next refresh.
       Use the panel's arrow buttons to leave this page.</p>
     <p class="hint" style="margin:6px 0 0 0"><a href="/browse?path=%2F">Back to file browser</a></p>
@@ -715,6 +723,18 @@ $("gammaReset").addEventListener("click", () => {
   if (state.bitmap) runPipeline();
 });
 $("upload").addEventListener("click", onUpload);
+$("exitPortal").addEventListener("click", async () => {
+  const btn = $("exitPortal");
+  btn.disabled = true;
+  btn.textContent = "Switching...";
+  try {
+    await fetch("/exit-portal", { method: "POST" });
+  } catch (e) {
+    // The AP goes down as the device reboots, so the fetch usually
+    // rejects. That's fine - the request was sent.
+  }
+  btn.textContent = "Panel is switching. You can close this tab.";
+});
 window.addEventListener("resize", () => { if (state.bitmap) drawCropStage(); });
 
 bindCropDrag();

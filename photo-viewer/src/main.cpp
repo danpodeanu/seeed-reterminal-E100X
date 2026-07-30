@@ -767,9 +767,21 @@ void renderPortalOnPanel(const String& ssid, const IPAddress& ip,
 
   while (true) {
     sd_web_portal::loop();
-    if (arrowPressedNow()) {
-      LOG.println("[portal] arrow pressed; exiting portal mode");
+    const bool webExit = sd_web_portal::exitRequested();
+    if (webExit || arrowPressedNow()) {
+      LOG.println(webExit
+                      ? "[portal] web exit requested; leaving portal mode"
+                      : "[portal] arrow pressed; exiting portal mode");
       hardware::beep();
+      // Give the HTTP server a moment to flush the response to the
+      // browser before we tear the AP down.
+      if (webExit) {
+        const uint32_t drainStart = millis();
+        while (millis() - drainStart < 400) {
+          sd_web_portal::loop();
+          delay(10);
+        }
+      }
       sd_web_portal::end();
       appLog.detachSdSink();
       if (sdReady) SD.end();
