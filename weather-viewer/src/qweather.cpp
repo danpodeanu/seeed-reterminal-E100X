@@ -16,13 +16,14 @@
 #include "app_logic.h"
 #include "config.h"
 #include "secrets.h"
+#include "weather_config_runtime.h"
 #include "weather_data.h"
 #include "weather_provider.h"
 
-// Provide safe defaults for QWeather secrets so the firmware still compiles
-// when the user's secrets.h omits them (they are only needed when
-// config::WEATHER_PROVIDER is set to QWeather). Missing credentials are
-// caught at runtime with a descriptive log line.
+// The QWeather secrets baked into secrets.h are the boot-time fallback
+// path -- weather_config::runtime::qweatherHost() etc. return them when
+// NVS has no override. Provide the same #ifndef safety net for any
+// secrets.h that omits a field so the firmware still compiles.
 #ifndef QWEATHER_API_HOST
 #define QWEATHER_API_HOST "devapi.qweather.com"
 #endif
@@ -42,19 +43,19 @@ namespace {
 
 String endpointUrl(const char* path) {
   String url = "https://";
-  url += QWEATHER_API_HOST;
+  url += weather_config::runtime::qweatherHost();
   url += path;
   // QWeather accepts either a LocationID or "longitude,latitude"
   // (longitude first, comma-separated, at most two decimals). Reuse the
-  // single config::LATITUDE / LONGITUDE that Open-Meteo also uses so both
+  // single runtime latitude / longitude that Open-Meteo also uses so both
   // providers refer to one canonical location.
   url += "?location=";
-  url += String(config::LONGITUDE, 2);
+  url += String(weather_config::runtime::longitude(), 2);
   url += ",";
-  url += String(config::LATITUDE, 2);
+  url += String(weather_config::runtime::latitude(), 2);
   url += "&unit=m";
   url += "&lang=";
-  url += config::QWEATHER_LANG;
+  url += weather_config::runtime::qweatherLang();
   return url;
 }
 
@@ -159,9 +160,9 @@ int parseInt(const char* text, int fallback) {
 // QWEATHER_PRIVATE_KEY_HEX from the compilation environment.
 bool buildJwt(String& jwt, String& failureReason) {
   jwt = "";
-  const char* kid = QWEATHER_CREDENTIAL_ID;
-  const char* sub = QWEATHER_PROJECT_ID;
-  const char* privateKeyHex = QWEATHER_PRIVATE_KEY_HEX;
+  const char* kid = weather_config::runtime::qweatherCredentialId();
+  const char* sub = weather_config::runtime::qweatherProjectId();
+  const char* privateKeyHex = weather_config::runtime::qweatherPrivateKeyHex();
   if (kid[0] == '\0' || sub[0] == '\0' || privateKeyHex[0] == '\0') {
     failureReason = "QWeather credentials are not configured";
     LOG.println(
@@ -179,7 +180,7 @@ bool buildJwt(String& jwt, String& failureReason) {
   if (cleanedLen == static_cast<size_t>(-1)) {
     failureReason = "QWeather private key contains non-hex characters";
     LOG.println(
-        "[weather] QWEATHER_PRIVATE_KEY_HEX contains characters that are "
+        "[weather] QWeather private key contains characters that are "
         "not hex digits, whitespace, or ':'");
     return false;
   }
@@ -188,7 +189,7 @@ bool buildJwt(String& jwt, String& failureReason) {
   if (decoded != sizeof(privateKey)) {
     failureReason = "QWeather private key is not 32 bytes of hex";
     LOG.printf(
-        "[weather] QWEATHER_PRIVATE_KEY_HEX is not 64 hex chars "
+        "[weather] QWeather private key is not 64 hex chars "
         "(cleaned length=%u)\n", static_cast<unsigned>(cleanedLen));
     return false;
   }
@@ -539,7 +540,7 @@ bool fetchQWeather(WeatherData& weather, String& responseBody,
   // still returns HTTP 200 with an empty `warning` array). We stitch a
   // placeholder envelope so the parser can rely on `warning_env` being present.
   String warningBody;
-  if (config::QWEATHER_ALERTS_ENABLED) {
+  if (weather_config::runtime::qweatherAlertsEnabled()) {
     String warningFailureReason;
     if (!fetchEndpoint(endpointUrl("/v7/warning/now"), bearerToken, warningBody,
                        warningFailureReason, bypassHttpCache)) {

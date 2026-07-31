@@ -44,26 +44,42 @@ export.
 
 ## Configure
 
-User-editable behavior lives in `include/config.h`. Implementation-level
-knobs (panel geometry, timing budgets, cache paths, retry windows) are
-in `include/system_config.h` and are included from the bottom of
-`config.h`; you should not usually need to touch them.
+There are two ways to configure the viewer:
 
-Create the ignored credentials file:
+1. **On-device portal (recommended).** On first boot, or whenever you hold
+   the green button for less than 5 s at boot, the device raises a WPA2
+   access point named `ReTerminal xxxxxx` with a per-device password
+   (generated once and persisted in NVS) and hosts a small captive portal.
+   The e-paper panel renders two QR codes on entry: one that autofills the
+   Wi-Fi credentials on a phone, another that opens `http://192.168.1.1/`.
+   Every setting that used to live in `include/config.h` and every secret
+   from `include/secrets.h` (Wi-Fi + full QWeather credentials) is
+   editable from the browser. Values persist in NVS and survive reflashing.
+   The reset pane wipes the Wi-Fi and app NVS namespaces so the device
+   reverts to the compile-time defaults.
 
-```bash
-cp include/secrets.h.example include/secrets.h
-```
+2. **Compile-time defaults.** The values in `include/secrets.h` and
+   `include/config.h` still act as fallbacks when NVS has no value stored.
+   User-editable behavior lives in `include/config.h`; implementation-level
+   knobs (panel geometry, timing budgets, cache paths, retry windows) are
+   in `include/system_config.h`. To seed the credentials header:
 
-Edit `include/secrets.h` and set `WIFI_SSID` and `WIFI_PASSWORD`.
+   ```bash
+   cp include/secrets.h.example include/secrets.h
+   ```
 
-The example forecast location is London. Edit these values in
+   Edit `include/secrets.h` and set `WIFI_SSID` / `WIFI_PASSWORD` (and the
+   QWeather fields if you're using that provider). The placeholder values
+   `YOUR_WIFI_NAME` / `YOUR_QWEATHER_PROJECT_ID` etc. are treated as
+   "unconfigured", so leaving them in place launches the portal instead.
+
+The example forecast location is Suzhou. Edit these values in
 `include/config.h`:
 
 ```cpp
-constexpr char LOCATION_NAME[] = "London";
-constexpr double LATITUDE = 51.5074;
-constexpr double LONGITUDE = -0.1278;
+constexpr char LOCATION_NAME[] = "Suzhou";
+constexpr double LATITUDE = 31.29834;
+constexpr double LONGITUDE = 120.58319;
 ```
 
 The same latitude / longitude are used regardless of which weather

@@ -44,6 +44,12 @@
 #include "weather_data.h"
 #include "weather_provider.h"
 #include "canonical_weather.h"
+#include "config_portal.h"
+#include "config_portal_ui.h"
+#include "wifi_schema.h"
+#include "weather_config_schema.h"
+#include "weather_config_runtime.h"
+#include "weather_wifi_credentials.h"
 #include "weather_icons.h"
 #include "weather_quotes.h"
 
@@ -309,7 +315,7 @@ void drawBadges(uint32_t background = PANEL_WHITE,
   epaper.setTextDatum(MR_DATUM);
   const int percentRightX = x - config::ui(9);
   epaper.drawString(percent, percentRightX, statusCenterY, 1);
-  if (config::DEBUG_SHOW_STATUS_BADGES && weatherUpdateTime != nullptr &&
+  if (weather_config::runtime::debugShowStatusBadges() && weatherUpdateTime != nullptr &&
       !weatherUpdateTime->isEmpty()) {
     const int separator = weatherUpdateTime->indexOf('T');
     if (separator >= 10 &&
@@ -337,7 +343,8 @@ void drawBadges(uint32_t background = PANEL_WHITE,
 }
 
 void renderStatus(const String& message, const String& detail = "",
-                  const String& lineAbove = "") {
+                  const String& lineAbove = "",
+                  const String& helpBelow = "") {
   epaper.fillSprite(PANEL_WHITE);
   epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, true);
   epaper.setTextDatum(MC_DATUM);
@@ -360,6 +367,13 @@ void renderStatus(const String& message, const String& detail = "",
         config::PANEL_WIDTH / 2,
         config::PANEL_HEIGHT / 2 + config::ui(25), 1);
   }
+  if (!helpBelow.isEmpty()) {
+    selectSmallFont();
+    epaper.drawString(
+        text_render::ellipsize(epaper, helpBelow, config::PANEL_WIDTH - config::ui(60)),
+        config::PANEL_WIDTH / 2,
+        config::PANEL_HEIGHT / 2 + config::ui(55), 1);
+  }
   epaper.setTextSize(1);
   epaper.setFreeFont(nullptr);
   epaper.setTextFont(2);
@@ -369,7 +383,7 @@ void renderStatus(const String& message, const String& detail = "",
 
 // NTP sync helpers now live in common/include/ntp_sync.h. The wrapper below
 bool parseWeather(const String& body, WeatherData& weather) {
-  if (config::WEATHER_PROVIDER == config::WeatherProvider::QWeather) {
+  if (weather_config::runtime::weatherProvider() == config::WeatherProvider::QWeather) {
     return weather_provider::parseQWeather(body, weather);
   }
   return weather_provider::parseOpenMeteo(body, weather);
@@ -377,7 +391,7 @@ bool parseWeather(const String& body, WeatherData& weather) {
 
 bool fetchWeather(WeatherData& weather, String& responseBody,
                   String& failureReason, bool bypassHttpCache = false) {
-  if (config::WEATHER_PROVIDER == config::WeatherProvider::QWeather) {
+  if (weather_config::runtime::weatherProvider() == config::WeatherProvider::QWeather) {
     return weather_provider::fetchQWeather(weather, responseBody,
                                            failureReason, bypassHttpCache);
   }
@@ -681,7 +695,7 @@ void drawForecastCard(const DailyForecast& day, uint8_t index,
       weather_format::temperature(day.minimumC) + "  /  " +
       weather_format::temperature(day.maximumC);
   epaper.drawString(range, centerX, top + config::ui(107), 1);
-  if (!config::CLUTTER_FREE_MODE) {
+  if (!weather_config::runtime::clutterFreeMode()) {
     epaper.setTextColor(PANEL_MUTED, PANEL_WHITE, true);
     String extra;
     if (day.precipitationProbability >= 0) {
@@ -814,7 +828,7 @@ void drawPortraitForecastRow(const DailyForecast& day, uint8_t index,
       text_render::ellipsize(epaper, app_logic::conditionName(day.weatherCode),
                 config::PANEL_WIDTH * 36 / 100),
       textX, centerY + config::ui(4), 1);
-  if (!config::CLUTTER_FREE_MODE) {
+  if (!weather_config::runtime::clutterFreeMode()) {
     String extra;
     if (day.precipitationProbability >= 0) {
       extra = "Rain " + weather_format::integer(day.precipitationProbability) +
@@ -910,7 +924,7 @@ void renderFooter(const WeatherData& weather) {
   // Right: location name. Measure similarly to know where the middle
   // band starts.
   const String locationText =
-      text_render::displayText(String(config::LOCATION_NAME));
+      text_render::displayText(String(weather_config::runtime::locationName()));
   const int rightPad = config::ui(12);
   const int locationLeft = config::PANEL_WIDTH - rightPad
                            - epaper.textWidth(locationText);
@@ -1076,38 +1090,186 @@ void setup() {
   const bool leftWokeDevice =
       (wakePins & (1ULL << PIN_BUTTON_LEFT)) != 0;
 
-  local_time::configureTimezone(config::TIMEZONE);
-  quiet_hours::configure({config::QUIET_HOURS_ENABLED,
-                          config::QUIET_START_HOUR,
-                          config::QUIET_START_MINUTE,
-                          config::QUIET_END_HOUR,
-                          config::QUIET_END_MINUTE});
+  local_time::configureTimezone(weather_config::runtime::timezone());
+  quiet_hours::configure({weather_config::runtime::quietHoursEnabled(),
+                          weather_config::runtime::quietStartHour(),
+                          weather_config::runtime::quietStartMinute(),
+                          weather_config::runtime::quietEndHour(),
+                          weather_config::runtime::quietEndMinute()});
   LOG.begin(115200, SERIAL_8N1, PIN_LOG_RX, PIN_LOG_TX);
-  if (app_logic::startupBeepRequired(coldBoot, buttonWake)) {
-    // Acknowledge cold boots and button wakes immediately. Holding the green
-    // button through this beep and the interval below requests a screenshot.
-    hardware::beep();
-  }
 
-  bool greenHeldLongEnough = false;
-  if (greenWokeDevice) {
-    const uint32_t holdStarted = millis();
-    uint32_t releaseStarted = 0;
-    while (millis() - holdStarted < config::SCREENSHOT_LONG_PRESS_MS) {
-      if (!digitalRead(PIN_BUTTON_GREEN)) {
-        releaseStarted = 0;
-      } else if (releaseStarted == 0) {
-        releaseStarted = millis();
-      } else if (millis() - releaseStarted >=
-                 config::BUTTON_RELEASE_DEBOUNCE_MS) {
+  // Load NVS-backed settings so every weather_config::runtime accessor
+  // returns a consistent value for the rest of this boot. Do this after
+  // LOG.begin so any storage messages land on the serial console.
+  weather_config::runtime::load();
+  weather_wifi::load();
+  // Re-apply timezone / quiet hours now that NVS values are cached (the
+  // initial configure calls above ran off the constexpr defaults).
+  local_time::configureTimezone(weather_config::runtime::timezone());
+  quiet_hours::configure({weather_config::runtime::quietHoursEnabled(),
+                          weather_config::runtime::quietStartHour(),
+                          weather_config::runtime::quietStartMinute(),
+                          weather_config::runtime::quietEndHour(),
+                          weather_config::runtime::quietEndMinute()});
+
+  // Unified green-button boot gesture. Applies on both cold boot and
+  // deep-sleep green wakes. A first beep marks the start of the portal
+  // window; a second beep 5 s later marks the switch to screenshot:
+  //   * Released before second beep (<=5 s) -> enter config portal.
+  //   * Released after second beep          -> capture a screenshot.
+  //   * Not pressed                         -> normal boot.
+  // On cold boot we also trigger the portal automatically when no
+  // Wi-Fi credentials are available (NVS + secrets.h both empty).
+  enum class GreenGesture { None, PortalRequest, ScreenshotRequest };
+  GreenGesture gesture = GreenGesture::None;
+  const bool greenPressedAtBoot =
+      (coldBoot && !digitalRead(PIN_BUTTON_GREEN)) || greenWokeDevice;
+  if (greenPressedAtBoot) {
+    hardware::beep();  // first beep: portal window is open.
+    const uint32_t gestureStartMs = millis();
+    constexpr uint32_t kPortalDecisionMs = 5000;
+    bool releasedBeforeDecision = false;
+    uint32_t releasedAtMs = 0;
+    while (millis() - gestureStartMs < kPortalDecisionMs) {
+      if (digitalRead(PIN_BUTTON_GREEN)) {
+        releasedBeforeDecision = true;
+        releasedAtMs = millis() - gestureStartMs;
         break;
       }
       delay(5);
     }
-    greenHeldLongEnough =
-        millis() - holdStarted >= config::SCREENSHOT_LONG_PRESS_MS;
+    if (releasedBeforeDecision) {
+      LOG.printf("[gesture] green released after %u ms -> portal\n",
+                 static_cast<unsigned>(releasedAtMs));
+      gesture = GreenGesture::PortalRequest;
+    } else {
+      LOG.printf("[gesture] green still held at %u ms -> screenshot\n",
+                 static_cast<unsigned>(kPortalDecisionMs));
+      hardware::beep();  // second beep: past portal window, screenshot armed.
+      gesture = GreenGesture::ScreenshotRequest;
+      uint32_t releaseStarted = 0;
+      const uint32_t releaseWaitDeadlineMs =
+          gestureStartMs + config::SCREENSHOT_LONG_PRESS_MS + 3000;
+      while (millis() < releaseWaitDeadlineMs) {
+        if (!digitalRead(PIN_BUTTON_GREEN)) {
+          releaseStarted = 0;
+        } else if (releaseStarted == 0) {
+          releaseStarted = millis();
+        } else if (millis() - releaseStarted >=
+                   config::BUTTON_RELEASE_DEBOUNCE_MS) {
+          break;
+        }
+        delay(5);
+      }
+    }
   }
-  screenshotRequested = greenHeldLongEnough;
+  const bool wifiUnconfigured = coldBoot && !weather_wifi::haveCredentials();
+  const bool portalRequested =
+      gesture == GreenGesture::PortalRequest || wifiUnconfigured;
+  screenshotRequested = gesture == GreenGesture::ScreenshotRequest;
+
+  if (portalRequested) {
+    LOG.printf("[portal] entering config portal (no_wifi=%d gesture=%s)\n",
+               wifiUnconfigured,
+               gesture == GreenGesture::PortalRequest ? "green-tap" : "auto");
+    // Bring the panel up FIRST so the QR splash renders before we start
+    // the Wi-Fi AP + web server.
+    LOG.println("[portal] panel: begin");
+    epaper.begin();
+#if RETERMINAL_MODEL == 1001
+    epaper.initGrayMode(GRAY_LEVEL4);
+    const GFXfont* titleFont    = &FreeSansBold18pt7b;
+    const GFXfont* subtitleFont = &FreeSans12pt7b;
+    const GFXfont* captionFont  = &FreeSansBold12pt7b;
+    const GFXfont* detailFont   = &FreeSans9pt7b;
+#elif RETERMINAL_MODEL == 1003
+    epaper.initGrayMode(GRAY_LEVEL16);
+    const GFXfont* titleFont    = &FreeSansBold24pt7b;
+    const GFXfont* subtitleFont = &FreeSans18pt7b;
+    const GFXfont* captionFont  = &FreeSansBold18pt7b;
+    const GFXfont* detailFont   = &FreeSans12pt7b;
+#else
+    const GFXfont* titleFont    = &FreeSansBold18pt7b;
+    const GFXfont* subtitleFont = &FreeSans12pt7b;
+    const GFXfont* captionFont  = &FreeSansBold12pt7b;
+    const GFXfont* detailFont   = &FreeSans9pt7b;
+#endif
+    LOG.println("[portal] panel: grayMode initialised");
+
+    config_portal::Config portalCfg;
+    portalCfg.wifiSchema = &config_portal::kWifiSchema;
+    portalCfg.appSchema = &weather_config::kSchema;
+    portalCfg.appName = "weather viewer";
+    portalCfg.useAutoApPassword = true;
+    portalCfg.wifiFallback = [](const char* key) -> String {
+      if (strcmp(key, "ssid") == 0) return String(weather_wifi::ssid());
+      if (strcmp(key, "password") == 0) return String(weather_wifi::password());
+      return String();
+    };
+    if (config_portal::begin(portalCfg)) {
+      config_portal::ui::RenderInfo info;
+      info.modelLabel = MODEL_NAME;
+      info.title = "Configure";
+      info.tagline = "Join the AP to set Wi-Fi + settings";
+      info.ssid = config_portal::currentSsid();
+      info.wifiPassword = config_portal::currentApPassword();
+      info.url = String("http://") + config_portal::currentIp().toString();
+      info.macAddress = wifi_sta::stationMacAddress();
+      info.wifiPayload = config_portal::wifiQrPayload(
+          info.ssid,
+          info.wifiPassword.length() ? info.wifiPassword.c_str() : nullptr);
+      info.urlPayload = config_portal::urlQrPayload(
+          config_portal::currentIp(), config_portal::currentPort(), "/wifi");
+      info.fonts.titleFont = titleFont;
+      info.fonts.subtitleFont = subtitleFont;
+      info.fonts.captionFont = captionFont;
+      info.fonts.detailFont = detailFont;
+      LOG.println("[portal] rendering QR splash");
+      const uint32_t drawStart = millis();
+      config_portal::ui::renderPortalScreen<EPaper>(
+          epaper, config::PANEL_WIDTH, config::PANEL_HEIGHT, PANEL_BLACK,
+          PANEL_WHITE, info);
+      LOG.printf("[portal] splash drawn in %u ms; committing to panel\n",
+                 static_cast<unsigned>(millis() - drawStart));
+      const uint32_t updateStart = millis();
+      panel_watchdog::guard([]() { epaper.update(); });
+      LOG.printf("[portal] panel refresh complete in %u ms\n",
+                 static_cast<unsigned>(millis() - updateStart));
+
+      uint32_t lastHeartbeatMs = millis();
+      while (!config_portal::rebootRequested()) {
+        config_portal::loop();
+        const uint32_t nowMs = millis();
+        if (nowMs - lastHeartbeatMs >= 15000) {
+          const String& pass = config_portal::currentApPassword();
+          if (pass.length()) {
+            LOG.printf("[portal] waiting for client on http://%s "
+                       "(SSID \"%s\" pass \"%s\")\n",
+                       config_portal::currentIp().toString().c_str(),
+                       config_portal::currentSsid().c_str(),
+                       pass.c_str());
+          } else {
+            LOG.printf("[portal] waiting for client on http://%s (SSID \"%s\")\n",
+                       config_portal::currentIp().toString().c_str(),
+                       config_portal::currentSsid().c_str());
+          }
+          lastHeartbeatMs = nowMs;
+        }
+        delay(5);
+      }
+      config_portal::end();
+    }
+    LOG.println("[portal] rebooting to apply configuration");
+    delay(200);
+    ESP.restart();
+  }
+
+  if (app_logic::startupBeepRequired(coldBoot, buttonWake)) {
+    // Acknowledge cold boots and button wakes immediately. The unified
+    // green-button gesture handler above has already decided whether
+    // this boot is a portal request or a screenshot request.
+    hardware::beep();
+  }
 
   LOG.println();
   LOG.println("============================================");
@@ -1119,14 +1281,12 @@ void setup() {
              wakeCause, static_cast<unsigned long long>(wakePins),
              static_cast<unsigned long>(ESP.getPsramSize() / 1024),
              greenWokeDevice
-                 ? (greenHeldLongEnough ? "long-press" : "short-press")
+                 ? (screenshotRequested ? "long-press" : "short-press")
                  : "idle",
              rightWokeDevice ? "wake" : "idle",
              leftWokeDevice ? "wake" : "idle");
   if (screenshotRequested) {
     LOG.println("[screenshot] green-button long press requested export");
-    delay(80);
-    hardware::beep();
   }
 
   const time_t startupTime = time(nullptr);
@@ -1168,7 +1328,7 @@ void setup() {
   }
   epaper.begin();
   sdReady = sd_card::mount(epaper.getSPIinstance(), config::CACHE_DIR);
-  if (sdReady && config::LOG_TO_SD) {
+  if (sdReady && weather_config::runtime::logToSd()) {
     log_sd_sink::install(appLog);
   }
   if (screenshotRequested && !sdReady) {
@@ -1198,8 +1358,9 @@ void setup() {
 #if RETERMINAL_MODEL == 1001
   if (showConnectionStatus) {
     LOG.println("[display] showing Wi-Fi connection status");
-    renderStatus("Connecting to " + String(WIFI_SSID), connectionDetail,
-                 stationMac);
+    renderStatus("Connecting to " + String(weather_wifi::ssid()), connectionDetail,
+                 stationMac,
+                 "Hold green button for 2 s at boot to reconfigure Wi-Fi");
   }
   epaper.initGrayMode(GRAY_LEVEL4);
 #elif RETERMINAL_MODEL == 1003
@@ -1210,16 +1371,17 @@ void setup() {
 #if RETERMINAL_MODEL != 1001
   if (showConnectionStatus) {
     LOG.println("[display] showing Wi-Fi connection status");
-    renderStatus("Connecting to " + String(WIFI_SSID), connectionDetail,
-                 stationMac);
+    renderStatus("Connecting to " + String(weather_wifi::ssid()), connectionDetail,
+                 stationMac,
+                 "Hold green button for 2 s at boot to reconfigure Wi-Fi");
   }
 #endif
 
   const bool networkRequired = buttonWake || ntpDue || !cacheLoaded;
   const bool networkAvailable =
-      networkRequired && wifi_sta::connectStation(WIFI_SSID, WIFI_PASSWORD, config::WIFI_TIMEOUT_MS, &liveFailureReason);
+      networkRequired && wifi_sta::connectStation(weather_wifi::ssid(), weather_wifi::password(), config::WIFI_TIMEOUT_MS, &liveFailureReason);
   const bool ntpSynchronized =
-      networkAvailable && ntpDue && ntp::synchronizeAndPersist(config::TIMEZONE, config::NTP_SERVER_PRIMARY, config::NTP_SERVER_SECONDARY, config::NTP_DHCP_TIMEOUT_MS, config::NTP_SYNC_TIMEOUT_MS, &lastNtpSyncEpoch);
+      networkAvailable && ntpDue && ntp::synchronizeAndPersist(weather_config::runtime::timezone(), weather_config::runtime::ntpPrimary(), weather_config::runtime::ntpSecondary(), config::NTP_DHCP_TIMEOUT_MS, config::NTP_SYNC_TIMEOUT_MS, &lastNtpSyncEpoch);
   bool rtcRestored = false;
   if (ntpDue && !ntpSynchronized && !coldBoot) {
     LOG.println("[ntp] using PCF8563 fallback after synchronization failure");
@@ -1228,17 +1390,17 @@ void setup() {
   if (coldBoot && ntpDue && !ntpSynchronized) {
     LOG.println("[display] cold boot NTP unavailable; warning user about clock");
     const String warning =
-        config::WEATHER_PROVIDER == config::WeatherProvider::QWeather
+        weather_config::runtime::weatherProvider() == config::WeatherProvider::QWeather
             ? "Clock not synced - times inaccurate, QWeather may fail"
             : "Clock not synced - displayed times may be inaccurate";
-    renderStatus("Connecting to " + String(WIFI_SSID), warning, stationMac);
+    renderStatus("Connecting to " + String(weather_wifi::ssid()), warning, stationMac);
   }
-  local_time::configureTimezone(config::TIMEZONE);
-  quiet_hours::configure({config::QUIET_HOURS_ENABLED,
-                          config::QUIET_START_HOUR,
-                          config::QUIET_START_MINUTE,
-                          config::QUIET_END_HOUR,
-                          config::QUIET_END_MINUTE});
+  local_time::configureTimezone(weather_config::runtime::timezone());
+  quiet_hours::configure({weather_config::runtime::quietHoursEnabled(),
+                          weather_config::runtime::quietStartHour(),
+                          weather_config::runtime::quietStartMinute(),
+                          weather_config::runtime::quietEndHour(),
+                          weather_config::runtime::quietEndMinute()});
   if (!wakeEventLogged) {
     wake_report::logWakeEvent(wakeCause, wakePins, true);
   }
@@ -1291,10 +1453,10 @@ void setup() {
     cacheLoaded = loadCachedWeather(weather, cacheFailureReason);
   }
   const bool haveWeather = liveUpdated || cacheLoaded;
-  uint64_t nextSleepSeconds = config::SLEEP_SECONDS;
+  uint64_t nextSleepSeconds = weather_config::runtime::sleepSeconds();
   if (local_time::localClock(localTime)) {
     if (quiet_hours::active(localTime) ||
-        quiet_hours::nextWakeFallsInside(localTime, config::SLEEP_SECONDS)) {
+        quiet_hours::nextWakeFallsInside(localTime, weather_config::runtime::sleepSeconds())) {
       quietSleepNotice = true;
       nextSleepSeconds = quiet_hours::secondsUntilEnd(localTime);
       LOG.printf("[quiet] this is the final refresh; sleeping until %s\n",

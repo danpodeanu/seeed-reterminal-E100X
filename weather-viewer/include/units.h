@@ -11,24 +11,25 @@
 #include <Arduino.h>
 
 #include "config.h"
+#include "weather_config_runtime.h"
 
 namespace units {
 
 inline float temperatureDisplay(float celsius) {
-  if (config::TEMPERATURE_UNIT == config::TemperatureUnit::Fahrenheit) {
+  if (weather_config::runtime::temperatureUnit() == config::TemperatureUnit::Fahrenheit) {
     return celsius * 9.0f / 5.0f + 32.0f;
   }
   return celsius;
 }
 
 inline const char* temperatureLabel() {
-  return config::TEMPERATURE_UNIT == config::TemperatureUnit::Fahrenheit
+  return weather_config::runtime::temperatureUnit() == config::TemperatureUnit::Fahrenheit
              ? "F"
              : "C";
 }
 
 inline float windSpeedDisplay(float kmh) {
-  if (config::WIND_SPEED_UNIT == config::WindSpeedUnit::MilesPerHour) {
+  if (weather_config::runtime::windSpeedUnit() == config::WindSpeedUnit::MilesPerHour) {
     // 1 km/h == 0.621371 mph.
     return kmh * 0.621371f;
   }
@@ -36,7 +37,7 @@ inline float windSpeedDisplay(float kmh) {
 }
 
 inline const char* windSpeedLabel() {
-  return config::WIND_SPEED_UNIT == config::WindSpeedUnit::MilesPerHour
+  return weather_config::runtime::windSpeedUnit() == config::WindSpeedUnit::MilesPerHour
              ? "mph"
              : "km/h";
 }

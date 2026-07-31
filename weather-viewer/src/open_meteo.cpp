@@ -9,6 +9,7 @@
 #include "app_logger.h"
 #include "app_logic.h"
 #include "config.h"
+#include "weather_config_runtime.h"
 #include "weather_data.h"
 #include "weather_provider.h"
 
@@ -19,9 +20,9 @@ namespace {
 String forecastUrl() {
   String url =
       "https://api.open-meteo.com/v1/forecast?latitude=";
-  url += String(config::LATITUDE, 4);
+  url += String(weather_config::runtime::latitude(), 4);
   url += "&longitude=";
-  url += String(config::LONGITUDE, 4);
+  url += String(weather_config::runtime::longitude(), 4);
   url +=
       "&current=temperature_2m,relative_humidity_2m,apparent_temperature,"
       "is_day,weather_code,wind_speed_10m"
@@ -55,9 +56,9 @@ void fetchNwsAlerts(WeatherData& weather) {
   http.setReuse(false);
   http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
   String url = "https://api.weather.gov/alerts/active?point=";
-  url += String(config::LATITUDE, 4);
+  url += String(weather_config::runtime::latitude(), 4);
   url += ",";
-  url += String(config::LONGITUDE, 4);
+  url += String(weather_config::runtime::longitude(), 4);
   if (!http.begin(client, url)) {
     LOG.println("[weather] NWS alerts: could not start HTTPS request");
     return;
@@ -322,7 +323,7 @@ bool fetchOpenMeteo(WeatherData& weather, String& responseBody,
   // parseOpenMeteo does not touch the alert fields (Open-Meteo itself has
   // no alerts endpoint). Populate them from the US NWS when enabled and
   // the point is inside NWS coverage; failures are non-fatal.
-  if (config::NWS_ALERTS_ENABLED) {
+  if (weather_config::runtime::nwsAlertsEnabled()) {
     fetchNwsAlerts(weather);
   }
   return true;
