@@ -293,16 +293,15 @@ void renderStatus(const String& message, const String& detail = "",
 
 bool supportedPhotoName(String name) {
   name.toLowerCase();
-  return name.endsWith(".bmp");
-  // JPEG/PNG fallback disabled: the browser uploader at /upload-photo
-  // now produces the exact 4-bit BMP renderPreparedBmp() expects, and
-  // the generic image loader tries to allocate width*height*3 bytes up
-  // front, which OOMs on modern iPhone photos (12 MP -> 36 MB). Leaving
-  // this here (commented) as the on-device decoder still works for the
-  // rare small hand-authored file if we ever need it back.
-  //
-  //     return name.endsWith(".bmp") || name.endsWith(".png") ||
-  //            name.endsWith(".jpg") || name.endsWith(".jpeg");
+  // BMP takes the fast prepared-4-bit path in renderPreparedBmp(). PNG is
+  // decoded via the pngle streaming decoder in renderGenericPhoto() -- it
+  // still allocates a width*height*3 RGB buffer in PSRAM, so extremely
+  // large PNGs (e.g. an 8000x6000 photo saved as PNG) will fail gracefully
+  // with an "[png] OOM" log line instead of crashing. Typical /photos PNGs
+  // sized for the panel (a few hundred pixels a side) fit comfortably.
+  // JPEG is intentionally still gated behind the browser uploader because
+  // 12 MP iPhone photos routinely OOM the same buffer at ~36 MB.
+  return name.endsWith(".bmp") || name.endsWith(".png");
 }
 
 String baseName(String path) {
@@ -566,9 +565,12 @@ bool renderPhoto(const String& path) {
   String lower = path;
   lower.toLowerCase();
   if (lower.endsWith(".bmp") && renderPreparedBmp(path)) return true;
-  // Generic JPEG/PNG fallback disabled - see supportedPhotoName().
-  // The browser uploader is now the single ingestion path.
-  // return renderGenericPhoto(path);
+  // PNGs (and any non-BMP file supportedPhotoName() lets through) fall
+  // through to the pngle-backed streaming decoder. renderGenericPhoto()
+  // returns false with a "[photo] decode failed" line on OOM, so a huge
+  // PNG will just skip to the next candidate instead of taking the app
+  // down.
+  if (lower.endsWith(".png")) return renderGenericPhoto(path);
   return false;
 }
 

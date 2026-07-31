@@ -22,8 +22,10 @@ constexpr char TIMEZONE[] = "CST-8";
 
 // --- Photo library ----------------------------------------------------------
 // Directory on the SD card that the viewer scans for photos. All supported
-// files (prepared 4-bit BMP + fallback JPEG/PNG/BMP) directly under this
-// directory are candidates for display.
+// files (prepared 4-bit BMP + ordinary PNG) directly under this directory
+// are candidates for display. JPEG is intentionally not scanned here; use
+// the browser uploader at /upload-photo for JPEG so it transcodes into the
+// prepared 4-bit BMP layout without blowing the on-device RGB buffer.
 constexpr char PHOTO_DIR[] = "/photos";
 
 // Photo rotation order. When true, the enumeration is shuffled at each boot

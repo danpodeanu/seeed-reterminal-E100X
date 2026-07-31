@@ -99,8 +99,14 @@ other warm areas. It is enabled by default;
 color mixing matters more.
 
 Prepared files are exact-size, 4-bit BMPs. The firmware also has a convenience
-fallback for ordinary JPEG, PNG, and BMP files, but on-device resizing is
-lower quality and memory-intensive—especially on the E1003 and E1004.
+fallback for ordinary PNG and BMP files dropped straight into `/photos`, so
+you can copy a browser-sized PNG onto the SD card without running
+`prepare_photos.py` first. Ordinary JPEG is intentionally not scanned from
+`/photos` — 12 MP phone photos routinely OOM the RGB decode buffer. Use the
+browser uploader at `/upload-photo` for JPEG (it transcodes to the prepared
+BMP layout), and keep drop-in PNGs sensibly sized (a few hundred pixels a
+side). On-device resizing is lower quality and memory-intensive—especially
+on the E1003 and E1004.
 
 ## Configure and build
 
