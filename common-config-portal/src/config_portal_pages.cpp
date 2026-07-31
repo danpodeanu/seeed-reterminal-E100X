@@ -226,6 +226,7 @@ String renderResetPage(const Config& cfg, bool hasSettings) {
             "</label></p>"
             "<button class=\"secondary\" type=\"button\" id=\"resetBtn\" disabled "
             "style=\"background:#b91c1c\">Restore defaults and reboot</button>"
+            "<button class=\"secondary\" type=\"button\" id=\"rebootBtn\">Reboot to viewer</button>"
             "<span id=\"msg\" class=\"msg\"></span></section><script>"
             "let btn=document.getElementById('resetBtn');"
             "document.getElementById('confirmChk').onchange=e=>{btn.disabled=!e.target.checked;};"
@@ -235,6 +236,7 @@ String renderResetPage(const Config& cfg, bool hasSettings) {
             "if(!r.ok||!j.ok)throw new Error(j.error||'reset failed');"
             "m.className='ok';m.textContent='Done. Rebooting\u2026';"
             "}catch(x){m.className='err';m.textContent=x.message;btn.disabled=false;}};"
+            "document.getElementById('rebootBtn').onclick=async()=>{let m=document.getElementById('msg');m.className='';m.textContent='Rebooting\u2026';try{await fetch('/reboot',{method:'POST'});}catch(e){}};"
             "</script></main></body></html>");
   return html;
 }
