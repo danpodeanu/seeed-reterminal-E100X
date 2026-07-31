@@ -3,7 +3,3 @@
 compile_commands.json
 .cache/
 .clangd/
-
-# Deployment secrets. Copy secrets.h.example -> secrets.h and edit locally;
-# never commit the filled-in copy.
-include/secrets.h

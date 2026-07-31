@@ -4,9 +4,6 @@ compile_commands.json
 .cache/
 .clangd/
 
-# Local credentials (commit include/secrets.h.example instead)
-include/secrets.h
-
 # Local Python environments
 .venv/
 venv/
