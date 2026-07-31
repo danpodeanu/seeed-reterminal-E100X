@@ -217,8 +217,7 @@ String renderResetPage(const Config& cfg, bool hasSettings) {
     html += F("<li>Clears the app settings NVS namespace (sleep interval, "
               "quiet hours, NTP, display, debug flags).</li>");
   }
-  html += F("<li>Leaves the SoftAP password and cached comic index alone; "
-            "erase the whole flash if you want a true factory reset.</li>"
+  html += F("<li>Leaves the SoftAP password and cached comic index alone.</li>"
             "<li>This cannot be undone from the portal.</li>"
             "</ul>"
             "<p><label style=\"font-weight:650\">"
