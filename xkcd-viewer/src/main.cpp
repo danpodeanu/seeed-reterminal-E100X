@@ -1317,32 +1317,37 @@ void setup() {
     LOG.printf("[portal] entering config portal (no_wifi=%d gesture=%s)\n",
                wifiUnconfigured,
                gesture == GreenGesture::PortalRequest ? "green-tap" : "auto");
+    // Bring the panel up FIRST so the QR splash renders before we start
+    // the Wi-Fi AP + web server. If the panel refresh ever hangs, the
+    // AP won't be advertising anyway, so this gives a clearer failure
+    // mode than "AP up, panel blank".
+    LOG.println("[portal] panel: begin");
+    epaper.begin();
+#if RETERMINAL_MODEL == 1001
+    epaper.initGrayMode(GRAY_LEVEL4);
+    const GFXfont* titleFont    = &FreeSansBold18pt7b;
+    const GFXfont* subtitleFont = &FreeSans12pt7b;
+    const GFXfont* captionFont  = &FreeSansBold12pt7b;
+    const GFXfont* detailFont   = &FreeSans9pt7b;
+#elif RETERMINAL_MODEL == 1003
+    epaper.initGrayMode(GRAY_LEVEL16);
+    const GFXfont* titleFont    = &FreeSansBold24pt7b;
+    const GFXfont* subtitleFont = &FreeSans18pt7b;
+    const GFXfont* captionFont  = &FreeSansBold18pt7b;
+    const GFXfont* detailFont   = &FreeSans12pt7b;
+#else
+    const GFXfont* titleFont    = &FreeSansBold18pt7b;
+    const GFXfont* subtitleFont = &FreeSans12pt7b;
+    const GFXfont* captionFont  = &FreeSansBold12pt7b;
+    const GFXfont* detailFont   = &FreeSans9pt7b;
+#endif
+    LOG.println("[portal] panel: grayMode initialised");
+
     config_portal::Config portalCfg;
     portalCfg.wifiSchema = &config_portal::kWifiSchema;
     portalCfg.appSchema = &xkcd_config::kSchema;
     portalCfg.appName = "xkcd viewer";
     if (config_portal::begin(portalCfg)) {
-      // Bring the panel up and render a QR splash so the user can join
-      // the AP and open the portal without needing a serial console.
-      epaper.begin();
-#if RETERMINAL_MODEL == 1001
-      epaper.initGrayMode(GRAY_LEVEL4);
-      const GFXfont* titleFont    = &FreeSansBold18pt7b;
-      const GFXfont* subtitleFont = &FreeSans12pt7b;
-      const GFXfont* captionFont  = &FreeSansBold12pt7b;
-      const GFXfont* detailFont   = &FreeSans9pt7b;
-#elif RETERMINAL_MODEL == 1003
-      epaper.initGrayMode(GRAY_LEVEL16);
-      const GFXfont* titleFont    = &FreeSansBold24pt7b;
-      const GFXfont* subtitleFont = &FreeSans18pt7b;
-      const GFXfont* captionFont  = &FreeSansBold18pt7b;
-      const GFXfont* detailFont   = &FreeSans12pt7b;
-#else
-      const GFXfont* titleFont    = &FreeSansBold18pt7b;
-      const GFXfont* subtitleFont = &FreeSans12pt7b;
-      const GFXfont* captionFont  = &FreeSansBold12pt7b;
-      const GFXfont* detailFont   = &FreeSans9pt7b;
-#endif
       config_portal::ui::RenderInfo info;
       info.modelLabel = MODEL_NAME;
       info.title = "Configure";
@@ -1357,10 +1362,17 @@ void setup() {
       info.fonts.subtitleFont = subtitleFont;
       info.fonts.captionFont = captionFont;
       info.fonts.detailFont = detailFont;
+      LOG.println("[portal] rendering QR splash");
+      const uint32_t drawStart = millis();
       config_portal::ui::renderPortalScreen<EPaper>(
           epaper, config::PANEL_WIDTH, config::PANEL_HEIGHT, PANEL_BLACK,
           PANEL_WHITE, info);
+      LOG.printf("[portal] splash drawn in %u ms; committing to panel\n",
+                 static_cast<unsigned>(millis() - drawStart));
+      const uint32_t updateStart = millis();
       panel_watchdog::guard([]() { epaper.update(); });
+      LOG.printf("[portal] panel refresh complete in %u ms\n",
+                 static_cast<unsigned>(millis() - updateStart));
 
       uint32_t lastHeartbeatMs = millis();
       while (!config_portal::rebootRequested()) {
