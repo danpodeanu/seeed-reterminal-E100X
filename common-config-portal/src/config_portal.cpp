@@ -30,8 +30,8 @@ uint32_t g_scanMs = 0;
 String g_scanJson = "[]";
 
 String macToHexSuffix(const uint8_t mac[6]) {
-  char buf[13];
-  snprintf(buf, sizeof(buf), "%02X%02X%02X", mac[0], mac[1], mac[2]);
+  char buf[5];
+  snprintf(buf, sizeof(buf), "%02X%02X", mac[0], mac[1]);
   return String(buf);
 }
 
@@ -139,7 +139,10 @@ void handleNotFound() {
 
 String buildSsid(const Config& cfg) {
   uint8_t mac[6] = {};
-  esp_read_mac(mac, ESP_MAC_WIFI_SOFTAP);
+  // Use the station MAC so the SSID matches the label the user sees on
+  // the device / in logs (esp_read_mac derives the SoftAP MAC by
+  // OR'ing the locally-administered bit, which shifts the first byte).
+  esp_read_mac(mac, ESP_MAC_WIFI_STA);
   String s = cfg.apSsidPrefix ? String(cfg.apSsidPrefix) : String();
   s += macToHexSuffix(mac);
   return s;
