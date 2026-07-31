@@ -58,18 +58,30 @@ Always build the environment matching the physical device.
 
 ## Configure
 
-Create the local credentials header:
+There are two ways to configure the viewer:
 
-```bash
-cp include/secrets.h.example include/secrets.h
-```
+1. **On-device portal (recommended).** On first boot, or whenever you hold the
+   green button during the first ~1.5 s of boot, the device raises an open Wi-Fi
+   access point named `ReTerminal xxxxxx` and hosts a small captive portal. Join
+   the AP from any phone; a `http://192.168.1.1/wifi` page lets you scan for
+   networks, save credentials, and edit every setting that used to live in
+   `config.h` (refresh cadence, quiet hours, timezone, NTP servers, minimum
+   display scale, debug badges, log-to-SD). Values persist in NVS and survive
+   reflashing.
 
-Edit `include/secrets.h` and set `WIFI_SSID` and `WIFI_PASSWORD`. The real file
-is excluded by `.gitignore`; only the placeholder example belongs in version
-control.
+2. **Compile-time defaults.** The values in `include/secrets.h` and
+   `include/config.h` still act as fallbacks when NVS has no value stored. To
+   use them, copy the example header:
 
-The clock synchronizes on cold boot and then at most once every six hours. Time settings
-are in `include/config.h`:
+   ```bash
+   cp include/secrets.h.example include/secrets.h
+   ```
+
+   Edit `include/secrets.h` and set `WIFI_SSID` and `WIFI_PASSWORD`. The real
+   file is excluded by `.gitignore`; only the placeholder example belongs in
+   version control.
+
+Time settings and NTP behaviour default to the constants in `include/config.h`:
 
 ```cpp
 constexpr char TIMEZONE[] = "GMT0BST,M3.5.0/1,M10.5.0";

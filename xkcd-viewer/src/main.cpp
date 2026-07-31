@@ -43,6 +43,11 @@
 #include "screenshot_bmp.h"
 #include "panel_watchdog.h"
 #include "timestamped_logger.h"
+#include "config_portal.h"
+#include "wifi_schema.h"
+#include "xkcd_config_runtime.h"
+#include "xkcd_config_schema.h"
+#include "xkcd_wifi_credentials.h"
 
 // HTTPS, HTTPClient and the SD filesystem have a fairly deep combined call
 // chain. E1003 exposed the default 8 KiB Arduino loop stack limit when the SD
@@ -414,7 +419,7 @@ void selectStatusMessageDetailFont() { applyGfxFont(FOOTER_FALLBACK_FONT); }
 String formatComicDate(const Comic& comic) {
   if (comic.year <= 0 || comic.month <= 0 || comic.day <= 0) return String();
   char buf[16];
-  switch (config::DATE_LOCALE) {
+  switch (xkcd_config::runtime::dateLocale()) {
     case config::DateLocale::MDY:
       snprintf(buf, sizeof(buf), "%02d-%02d-%04d", comic.month, comic.day,
                comic.year);
@@ -471,7 +476,7 @@ void drawBadges(uint32_t background = PANEL_WHITE,
   // right-hand cluster as a single "status" block.
   int nextRightX =
       percentRightX - epaper.textWidth(percent, 1) - config::ui(10);
-  if (config::DEBUG_SHOW_STATUS_BADGES && lastRefreshTime != nullptr &&
+  if (xkcd_config::runtime::debugShowStatusBadges() && lastRefreshTime != nullptr &&
       !lastRefreshTime->isEmpty()) {
     const int separator = lastRefreshTime->indexOf('T');
     if (separator >= 10 &&
@@ -496,7 +501,7 @@ void drawBadges(uint32_t background = PANEL_WHITE,
     }
   }
 
-  if (config::DEBUG_SHOW_STATUS_BADGES && cacheStatsAvailable) {
+  if (xkcd_config::runtime::debugShowStatusBadges() && cacheStatsAvailable) {
     const int statsRightX = nextRightX;
     selectCacheStatsFont();
     epaper.setTextColor(PANEL_CACHE_STATS_COLOR, background,
@@ -877,9 +882,9 @@ ImageLayout calculateLayout(const Comic& comic, int sourceWidth, int sourceHeigh
 }
 
 bool layoutIsSuitable(const ImageLayout& layout, int comicNumber) {
-  if (layout.scale < config::MIN_DISPLAY_SCALE) {
+  if (layout.scale < xkcd_config::runtime::minDisplayScale()) {
     LOG.printf("[comic] #%d skipped: it needs reduction below %.0f%%\n",
-               comicNumber, config::MIN_DISPLAY_SCALE * 100.0f);
+               comicNumber, xkcd_config::runtime::minDisplayScale() * 100.0f);
     return false;
   }
   if (layout.width < config::MIN_RENDERED_WIDTH) {
@@ -962,15 +967,16 @@ bool loadUsableComic(int number, bool networkAvailable, Comic& comic,
 
 bool acquireComic(bool networkAvailable, Comic& comic, RgbImage& image,
                   ImageLayout& layout) {
-  if (config::DEBUG_FORCE_COMIC > 0) {
+  const int32_t forcedComic = xkcd_config::runtime::debugForceComic();
+  if (forcedComic > 0) {
     LOG.printf("[debug] DEBUG_FORCE_COMIC=%d, bypassing selection\n",
-               config::DEBUG_FORCE_COMIC);
-    if (loadUsableComic(config::DEBUG_FORCE_COMIC, networkAvailable, comic,
+               forcedComic);
+    if (loadUsableComic(forcedComic, networkAvailable, comic,
                         image, layout)) {
       return true;
     }
     LOG.printf("[debug] forced comic #%d could not be loaded; falling back\n",
-               config::DEBUG_FORCE_COMIC);
+               forcedComic);
     image_free(&image);
   }
 
@@ -1157,7 +1163,7 @@ bool renderComic(const Comic& comic, RgbImage& image, ImageLayout layout) {
 }
 
 // NTP sync helpers now live in common/include/ntp_sync.h. The wrapper below
-void powerDownAndSleep(uint64_t sleepSeconds = config::SLEEP_SECONDS) {
+void powerDownAndSleep(uint64_t sleepSeconds = xkcd_config::runtime::sleepSeconds()) {
   wifi_sta::disable();
   // Close the log file before SD.end() so its FAT/directory update
   // hits disk cleanly. Safe to call unconditionally -- no-ops when no
@@ -1243,13 +1249,57 @@ void setup() {
   const bool buttonWake = wakeCause == ESP_SLEEP_WAKEUP_EXT1;
   const bool timerWake = wakeCause == ESP_SLEEP_WAKEUP_TIMER;
 
-  local_time::configureTimezone(config::TIMEZONE);
-  quiet_hours::configure({config::QUIET_HOURS_ENABLED,
-                          config::QUIET_START_HOUR,
-                          config::QUIET_START_MINUTE,
-                          config::QUIET_END_HOUR,
-                          config::QUIET_END_MINUTE});
   LOG.begin(115200, SERIAL_8N1, PIN_LOG_RX, PIN_LOG_TX);
+
+  // Load NVS-backed settings so every config::runtime accessor returns a
+  // consistent value for the rest of this boot.
+  xkcd_config::runtime::load();
+  xkcd_wifi::load();
+
+  // Configuration-portal trigger. Only checked on cold boot to avoid
+  // interfering with timer wakes and button-driven navigation:
+  //   * Wi-Fi NVS empty (first boot after flashing, or after "Clear") -- OR
+  //   * Green button held during the first ~1500 ms of boot.
+  // The portal owns the device until it reboots via ESP.restart(); when
+  // this call returns we simply continue booting normally.
+  if (coldBoot) {
+    const bool wifiUnconfigured = xkcd_wifi::nvsEmpty();
+    const uint32_t triggerWindowMs = 1500;
+    const uint32_t triggerStart = millis();
+    bool greenHeldForPortal = false;
+    while (millis() - triggerStart < triggerWindowMs) {
+      if (!digitalRead(PIN_BUTTON_GREEN)) {
+        greenHeldForPortal = true;
+        break;
+      }
+      delay(10);
+    }
+    if (wifiUnconfigured || greenHeldForPortal) {
+      LOG.printf("[portal] entering config portal (wifi_empty=%d green=%d)\n",
+                 wifiUnconfigured, greenHeldForPortal);
+      config_portal::Config portalCfg;
+      portalCfg.wifiSchema = &config_portal::kWifiSchema;
+      portalCfg.appSchema = &xkcd_config::kSchema;
+      portalCfg.appName = "xkcd viewer";
+      if (config_portal::begin(portalCfg)) {
+        while (!config_portal::rebootRequested()) {
+          config_portal::loop();
+          delay(5);
+        }
+        config_portal::end();
+      }
+      LOG.println("[portal] rebooting to apply configuration");
+      delay(200);
+      ESP.restart();
+    }
+  }
+
+  local_time::configureTimezone(xkcd_config::runtime::timezone());
+  quiet_hours::configure({xkcd_config::runtime::quietHoursEnabled(),
+                          xkcd_config::runtime::quietStartHour(),
+                          xkcd_config::runtime::quietStartMinute(),
+                          xkcd_config::runtime::quietEndHour(),
+                          xkcd_config::runtime::quietEndMinute()});
   if (app_logic::startupBeepRequired(coldBoot, buttonWake)) {
     // Acknowledge cold boots and button wakes immediately. Holding the green
     // button through this beep and the interval below requests a screenshot.
@@ -1342,7 +1392,7 @@ void setup() {
 
   epaper.begin();
   sdReady = sd_card::mount(epaper.getSPIinstance(), config::CACHE_DIR);
-  if (sdReady && config::LOG_TO_SD) {
+  if (sdReady && xkcd_config::runtime::logToSd()) {
     log_sd_sink::install(appLog);
   }
   if (screenshotRequested && !sdReady) {
@@ -1402,7 +1452,7 @@ void setup() {
   // epaper_setup.h). Kept here just so the first frame isn't blank.
   if (showConnectionStatus) {
     LOG.println("[display] showing Wi-Fi connection status");
-    renderStatus("Connecting to " + String(WIFI_SSID), connectionDetail,
+    renderStatus("Connecting to " + String(xkcd_wifi::ssid()), connectionDetail,
                  stationMac);
   }
   epaper.initGrayMode(GRAY_LEVEL4);
@@ -1414,29 +1464,29 @@ void setup() {
 #if RETERMINAL_MODEL != 1001
   if (showConnectionStatus) {
     LOG.println("[display] showing Wi-Fi connection status");
-    renderStatus("Connecting to " + String(WIFI_SSID), connectionDetail,
+    renderStatus("Connecting to " + String(xkcd_wifi::ssid()), connectionDetail,
                  stationMac);
   }
 #endif
 
   bool networkAvailable = false;
   if (networkPlanned) {
-    networkAvailable = wifi_sta::connectStation(WIFI_SSID, WIFI_PASSWORD, config::WIFI_TIMEOUT_MS, nullptr, networkOperationShouldStop);
+    networkAvailable = wifi_sta::connectStation(xkcd_wifi::ssid(), xkcd_wifi::password(), config::WIFI_TIMEOUT_MS, nullptr, networkOperationShouldStop);
   } else {
     LOG.println("[wifi] skipped; using the local XKCD cache");
   }
   const bool ntpSynchronized =
-      networkAvailable && ntpDue && ntp::synchronizeAndPersist(config::TIMEZONE, config::NTP_SERVER_PRIMARY, config::NTP_SERVER_SECONDARY, config::NTP_DHCP_TIMEOUT_MS, config::NTP_SYNC_TIMEOUT_MS, &lastNtpSyncEpoch);
+      networkAvailable && ntpDue && ntp::synchronizeAndPersist(xkcd_config::runtime::timezone(), xkcd_config::runtime::ntpPrimary(), xkcd_config::runtime::ntpSecondary(), config::NTP_DHCP_TIMEOUT_MS, config::NTP_SYNC_TIMEOUT_MS, &lastNtpSyncEpoch);
   if (ntpDue && !ntpSynchronized && !coldBoot) {
     LOG.println("[ntp] using PCF8563 fallback after synchronization failure");
     rtc_sync::restoreSystemClock();
   }
-  local_time::configureTimezone(config::TIMEZONE);
-  quiet_hours::configure({config::QUIET_HOURS_ENABLED,
-                          config::QUIET_START_HOUR,
-                          config::QUIET_START_MINUTE,
-                          config::QUIET_END_HOUR,
-                          config::QUIET_END_MINUTE});
+  local_time::configureTimezone(xkcd_config::runtime::timezone());
+  quiet_hours::configure({xkcd_config::runtime::quietHoursEnabled(),
+                          xkcd_config::runtime::quietStartHour(),
+                          xkcd_config::runtime::quietStartMinute(),
+                          xkcd_config::runtime::quietEndHour(),
+                          xkcd_config::runtime::quietEndMinute()});
   if (!wakeEventLogged) {
     wake_report::logWakeEvent(wakeCause, wakePins, true);
   }
@@ -1502,9 +1552,9 @@ void setup() {
   // download flips `acquired`.
   if (app_logic::liveRecoveryAllowed(sdReady, acquired, networkAvailable)) {
     LOG.println("[cache] no usable local comic; trying one live refresh");
-    networkAvailable = wifi_sta::connectStation(WIFI_SSID, WIFI_PASSWORD, config::WIFI_TIMEOUT_MS, nullptr, networkOperationShouldStop);
+    networkAvailable = wifi_sta::connectStation(xkcd_wifi::ssid(), xkcd_wifi::password(), config::WIFI_TIMEOUT_MS, nullptr, networkOperationShouldStop);
     if (networkAvailable) {
-      if (local_time::refreshDue(coldBoot, lastNtpSyncEpoch, config::NTP_REFRESH_SECONDS)) ntp::synchronizeAndPersist(config::TIMEZONE, config::NTP_SERVER_PRIMARY, config::NTP_SERVER_SECONDARY, config::NTP_DHCP_TIMEOUT_MS, config::NTP_SYNC_TIMEOUT_MS, &lastNtpSyncEpoch);
+      if (local_time::refreshDue(coldBoot, lastNtpSyncEpoch, config::NTP_REFRESH_SECONDS)) ntp::synchronizeAndPersist(xkcd_config::runtime::timezone(), xkcd_config::runtime::ntpPrimary(), xkcd_config::runtime::ntpSecondary(), config::NTP_DHCP_TIMEOUT_MS, config::NTP_SYNC_TIMEOUT_MS, &lastNtpSyncEpoch);
       acquired = acquireComic(true, comic, image, layout);
     }
   }
@@ -1513,10 +1563,10 @@ void setup() {
   // dithering and the comparatively slow e-paper update.
   wifi_sta::disable();
 
-  uint64_t nextSleepSeconds = config::SLEEP_SECONDS;
+  uint64_t nextSleepSeconds = xkcd_config::runtime::sleepSeconds();
   if (local_time::localClock(localTime)) {
     if (quiet_hours::active(localTime) ||
-        quiet_hours::nextWakeFallsInside(localTime, config::SLEEP_SECONDS)) {
+        quiet_hours::nextWakeFallsInside(localTime, xkcd_config::runtime::sleepSeconds())) {
       quietSleepNotice = true;
       nextSleepSeconds = quiet_hours::secondsUntilEnd(localTime);
       LOG.printf("[quiet] this is the final refresh; sleeping until %s\n",
@@ -1543,7 +1593,7 @@ void setup() {
     armMaintenanceButtonCancellation();
     networkOperationDeadlineMs =
         millis() + config::ARCHIVE_MAINTENANCE_DEADLINE_MS;
-    if (wifi_sta::connectStation(WIFI_SSID, WIFI_PASSWORD, config::WIFI_TIMEOUT_MS, nullptr, networkOperationShouldStop)) {
+    if (wifi_sta::connectStation(xkcd_wifi::ssid(), xkcd_wifi::password(), config::WIFI_TIMEOUT_MS, nullptr, networkOperationShouldStop)) {
       refreshArchiveCache();
       if (local_time::clockIsValid()) lastArchiveRefreshEpoch = time(nullptr);
     } else if (maintenanceCancellationRequested()) {
