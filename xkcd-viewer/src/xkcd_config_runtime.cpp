@@ -40,11 +40,14 @@ bool  g_loaded = false;
 
 void load() {
   using config_portal::storage::PrefsStorage;
+  // Each schema helper (getInt/getString/getBool/getFloat) opens its
+  // own NVS session and closes it. If we held the namespace open here
+  // ourselves those inner ``begin()`` calls would fail (Arduino's
+  // Preferences::begin returns false when the handle is already open),
+  // and every field would silently fall back to its schema default -
+  // which is why the whole Settings page used to look like nothing had
+  // been saved even after the portal wrote the values to NVS.
   PrefsStorage prefs;
-  if (!prefs.begin(kNamespace, /*readOnly=*/true)) {
-    g_loaded = true;
-    return;
-  }
 
   g_cache.sleepSeconds =
       static_cast<uint64_t>(config_portal::storage::getInt(prefs, kSchema, kKeySleepSeconds));
@@ -79,7 +82,6 @@ void load() {
   g_cache.logToSd =
       config_portal::storage::getBool(prefs, kSchema, kKeyLogToSd);
 
-  prefs.end();
   g_loaded = true;
 }
 
