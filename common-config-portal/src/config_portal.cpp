@@ -4,6 +4,7 @@
 #include <Arduino.h>
 #include <ArduinoJson.h>
 #include <DNSServer.h>
+#include <Preferences.h>
 #include <WebServer.h>
 #include <WiFi.h>
 #include <esp_mac.h>
@@ -191,6 +192,40 @@ void handlePanel() {
   sendJson(200, out);
 }
 
+// Wipe a Preferences namespace. Returns true if we successfully opened
+// it and issued a clear (or if it was already empty / non-existent -
+// the goal is "no user config remains", not "namespace existed").
+bool clearNamespace(const char* ns) {
+  if (!ns || !ns[0]) return false;
+  Preferences p;
+  if (!p.begin(ns, /*readOnly=*/false)) {
+    LOG.printf("[cfg-portal] reset: namespace \"%s\" absent, nothing to clear\n", ns);
+    return true;
+  }
+  const bool ok = p.clear();
+  p.end();
+  LOG.printf("[cfg-portal] reset: cleared NVS namespace \"%s\" (%s)\n",
+             ns, ok ? "ok" : "clear failed");
+  return ok;
+}
+
+void handleReset() {
+  LOG.println("[cfg-portal] reset requested via /reset.json");
+  bool ok = true;
+  if (g_config.wifiSchema && g_config.wifiSchema->nvsNamespace) {
+    ok &= clearNamespace(g_config.wifiSchema->nvsNamespace);
+  }
+  if (g_config.appSchema && g_config.appSchema->nvsNamespace) {
+    ok &= clearNamespace(g_config.appSchema->nvsNamespace);
+  }
+  if (!ok) {
+    sendJson(500, json::errorJson("one or more namespaces failed to clear"));
+    return;
+  }
+  g_rebootRequested = true;
+  sendJson(200, "{\"ok\":true,\"reboot\":true}");
+}
+
 void handleNotFound() {
   g_server->send(404, "text/html; charset=utf-8",
                  "<!doctype html><title>Not found</title><p>Not found</p>");
@@ -313,6 +348,8 @@ bool begin(const Config& cfg) {
   g_server->on("/settings.json", HTTP_GET, []() { if (!g_config.appSchema) handleNotFound(); else handleValues(*g_config.appSchema, g_appStorage); });
   g_server->on("/settings.json", HTTP_POST, []() { if (!g_config.appSchema) handleNotFound(); else handleSave(*g_config.appSchema, g_appStorage, false); });
   g_server->on("/reboot", HTTP_POST, []() { g_rebootRequested = true; sendJson(200, "{\"ok\":true}"); });
+  g_server->on("/reset", []() { sendHtml(200, renderResetPage(g_config, g_config.appSchema != nullptr)); });
+  g_server->on("/reset.json", HTTP_POST, handleReset);
   g_server->on("/panel.json", handlePanel);
   g_server->on("/generate_204", redirectWifi);
   g_server->on("/hotspot-detect.html", redirectWifi);

@@ -62,6 +62,9 @@ void appendChrome(String& html, const Config& cfg, const char* title,
     if (String(active) == "settings") html += F(" class=\"active\"");
     html += F(" href=\"/settings\">Settings</a>");
   }
+  html += F("<a");
+  if (String(active) == "reset") html += F(" class=\"active\"");
+  html += F(" href=\"/reset\">Reset</a>");
   html += F("</nav><h1>");
   html += htmlEscape(cfg.appName ? cfg.appName : "reTerminal");
   html += F("</h1><p>");
@@ -197,6 +200,43 @@ String renderSettingsPage(const Config& cfg, const Schema& appSchema, const Sche
   html += F("<button type=\"submit\">Save settings</button><button class=\"secondary\" type=\"button\" id=\"rebootBtn\">Reboot to viewer</button><span id=\"msg\" class=\"msg\"></span></form><script>");
   html += FPSTR(kSharedScript);
   html += F("loadValues('/settings.json');document.getElementById('settingsForm').onsubmit=async e=>{e.preventDefault();let m=document.getElementById('msg');try{await postForm('/settings.json');m.className='ok';m.textContent='Saved.'}catch(x){m.className='err';m.textContent=x.message}};document.getElementById('rebootBtn').onclick=async()=>{await fetch('/reboot',{method:'POST'});document.getElementById('msg').textContent='Rebooting…';setTimeout(()=>location.reload(),2000)};</script></main></body></html>");
+  return html;
+}
+
+String renderResetPage(const Config& cfg, bool hasSettings) {
+  String html;
+  html.reserve(5000);
+  appendChrome(html, cfg, "Restore defaults", hasSettings, "reset");
+  html += F("<section class=\"card\"><h2>Restore defaults</h2>"
+            "<p>Wipe all saved Wi-Fi credentials and app settings, then reboot. "
+            "The device will come back with its compile-time defaults from "
+            "<code>secrets.h</code> and <code>config.h</code>.</p>"
+            "<ul class=\"help\">"
+            "<li>Clears the <b>wifi</b> NVS namespace (SSID + password).</li>");
+  if (hasSettings) {
+    html += F("<li>Clears the app settings NVS namespace (sleep interval, "
+              "quiet hours, NTP, display, debug flags).</li>");
+  }
+  html += F("<li>Leaves the SoftAP password and cached comic index alone; "
+            "erase the whole flash if you want a true factory reset.</li>"
+            "<li>This cannot be undone from the portal.</li>"
+            "</ul>"
+            "<p><label style=\"font-weight:650\">"
+            "<input type=\"checkbox\" id=\"confirmChk\" style=\"width:auto;margin-right:.5rem\">"
+            "I understand this will erase my saved configuration."
+            "</label></p>"
+            "<button class=\"secondary\" type=\"button\" id=\"resetBtn\" disabled "
+            "style=\"background:#b91c1c\">Restore defaults and reboot</button>"
+            "<span id=\"msg\" class=\"msg\"></span></section><script>"
+            "let btn=document.getElementById('resetBtn');"
+            "document.getElementById('confirmChk').onchange=e=>{btn.disabled=!e.target.checked;};"
+            "btn.onclick=async()=>{let m=document.getElementById('msg');m.className='';"
+            "m.textContent='Wiping saved config\u2026';btn.disabled=true;"
+            "try{let r=await fetch('/reset.json',{method:'POST'});let j=await r.json();"
+            "if(!r.ok||!j.ok)throw new Error(j.error||'reset failed');"
+            "m.className='ok';m.textContent='Done. Rebooting\u2026';"
+            "}catch(x){m.className='err';m.textContent=x.message;btn.disabled=false;}};"
+            "</script></main></body></html>");
   return html;
 }
 

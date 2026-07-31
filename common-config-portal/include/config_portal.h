@@ -58,6 +58,7 @@ void end();
 
 String renderWifiPage(const Config& cfg, const Schema& wifi, const Schema* appSchema);
 String renderSettingsPage(const Config& cfg, const Schema& appSchema, const Schema& wifi);
+String renderResetPage(const Config& cfg, bool hasSettings);
 
 }  // namespace config_portal
 #endif
