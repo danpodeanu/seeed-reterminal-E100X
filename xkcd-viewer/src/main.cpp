@@ -1258,13 +1258,11 @@ void setup() {
   xkcd_wifi::load();
 
   // Unified green-button boot gesture. Applies on both cold boot and
-  // deep-sleep green wakes. An initial short beep is emitted immediately
-  // as an auditory "release me" cue:
-  //   * Released within 3 s      -> enter config portal.
-  //   * Still held at 3 s        -> second beep marks the transition,
-  //                                  then once released a screenshot is
-  //                                  captured.
-  //   * Not pressed              -> normal boot.
+  // deep-sleep green wakes. A first beep marks the start of the portal
+  // window; a second beep 1.5 s later marks the switch to screenshot:
+  //   * Released before second beep (<=1.5 s) -> enter config portal.
+  //   * Released after second beep            -> capture a screenshot.
+  //   * Not pressed                           -> normal boot.
   // On cold boot we also trigger the portal automatically when no
   // Wi-Fi credentials are available (NVS + secrets.h both empty).
   enum class GreenGesture { None, PortalRequest, ScreenshotRequest };
@@ -1272,9 +1270,9 @@ void setup() {
   const bool greenPressedAtBoot =
       (coldBoot && !digitalRead(PIN_BUTTON_GREEN)) || greenWokeDevice;
   if (greenPressedAtBoot) {
-    hardware::beep();  // "I'm awake -- release now for portal, keep holding for screenshot."
+    hardware::beep();  // first beep: portal window is open.
     const uint32_t gestureStartMs = millis();
-    constexpr uint32_t kPortalDecisionMs = 3000;
+    constexpr uint32_t kPortalDecisionMs = 1500;
     bool releasedBeforeDecision = false;
     uint32_t releasedAtMs = 0;
     while (millis() - gestureStartMs < kPortalDecisionMs) {
@@ -1292,7 +1290,7 @@ void setup() {
     } else {
       LOG.printf("[gesture] green still held at %u ms -> screenshot\n",
                  static_cast<unsigned>(kPortalDecisionMs));
-      hardware::beep();
+      hardware::beep();  // second beep: past portal window, screenshot armed.
       gesture = GreenGesture::ScreenshotRequest;
       uint32_t releaseStarted = 0;
       const uint32_t releaseWaitDeadlineMs =
