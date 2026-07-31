@@ -14,42 +14,58 @@ Hosted at:
 
 - Presents two dropdowns: board (E1001 / E1002 / E1003 / E1004) and
   application (XKCD Viewer / Weather Viewer / Photo Viewer).
-- Looks up the repository's latest GitHub Release through the public API.
-- Finds the merged firmware asset that matches the selection
-  (`firmware-<app>-<board>.bin`) and hands its download URL to the
-  ESP Web Tools install button.
-- The install button connects to the reTerminal over USB serial, writes the
-  merged image at flash offset 0, and reboots.
+- Looks up the repository's latest GitHub Release through the public API
+  so the version tag can be displayed in the status line.
+- Points the ESP Web Tools install button at
+  `./firmware/latest/firmware-<app>-<board>.bin`, which is bundled with
+  this Pages deployment (see below).
+- The install button connects to the reTerminal over USB serial, writes
+  the merged image at flash offset 0, and reboots.
 
 ## Files
 
 | File | Purpose |
 | --- | --- |
 | `index.html` | Page shell, board/app dropdowns, `<esp-web-install-button>`. |
-| `manifest.js` | Reads the latest release from the GitHub API and builds an in-memory ESP Web Tools manifest. |
+| `manifest.js` | Reads the latest release tag from the GitHub API and builds an in-memory ESP Web Tools manifest that points at same-origin firmware URLs. |
 
 The ESP Web Tools bundle is loaded from the `unpkg` CDN so nothing needs to
 be built or versioned locally.
 
+## Why same-origin firmware
+
+GitHub Release downloads redirect from `github.com` to a signed URL on
+`release-assets.githubusercontent.com`, which is served from Azure Blob
+Storage without `Access-Control-Allow-Origin`. A cross-origin browser
+`fetch()` from the flasher page therefore fails with "Failed to fetch"
+before the install can start. The Pages workflow works around this by
+copying the release binaries into `/firmware/latest/` at deploy time so
+the flasher and the binaries share an origin.
+
 ## How releases feed the flasher
 
-The `.github/workflows/release.yml` workflow runs on tag pushes (`v*`). For
-every application × board combination it:
+Two workflows cooperate:
 
-1. Builds the firmware with PlatformIO.
-2. Merges the bootloader, partition table, OTA selector, and application
-   into a single flash image with `esptool merge_bin`.
-3. Uploads the result as `firmware-<app>-<board>.bin` to the GitHub Release
-   attached to the tag.
+1. `.github/workflows/release.yml` runs on tag pushes (`v*`). For every
+   application × board combination it builds the firmware with
+   PlatformIO, merges the bootloader, partition table, OTA selector, and
+   application into a single image with `esptool merge_bin`, and
+   attaches the result to the GitHub Release as
+   `firmware-<app>-<board>.bin`.
+2. `.github/workflows/pages.yml` runs on `release: published`, on
+   changes under `docs/`, and on manual dispatch. It downloads every
+   `firmware-*.bin` from the latest release into `/firmware/latest/`,
+   assembles it alongside `docs/`, and deploys the combined site to
+   GitHub Pages.
 
-The web flasher discovers those assets at runtime; no static per-release
-manifest is committed.
+The flasher never needs a static per-release manifest committed to the
+repository.
 
 ## Enabling GitHub Pages
 
-In the repository settings, set Pages to serve from the `main` branch and
-the `/docs` folder. That publishes this directory to
-`https://<owner>.github.io/<repo>/`.
+In the repository settings, set Pages **Source** to **GitHub Actions**.
+The `pages.yml` workflow will then have permission to deploy and will
+publish to `https://<owner>.github.io/<repo>/` after each run.
 
 ## Browser support
 

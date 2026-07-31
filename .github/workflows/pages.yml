@@ -1,0 +1,72 @@
+name: Publish Pages site
+
+# Deploys docs/ to GitHub Pages, bundling the latest published
+# firmware release assets at /firmware/latest/. Serving the bins from
+# the same origin as the web flasher avoids the cross-origin fetch
+# problem: GitHub's redirect chain for release-asset downloads ends at
+# a signed Azure Blob URL that does not emit CORS headers, so the
+# browser's fetch fails with "Failed to fetch".
+#
+# Trigger:
+# - push to main under docs/ or this workflow
+# - a new release is published (fires after release.yml uploads assets)
+# - manual dispatch
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - ".github/workflows/pages.yml"
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Assemble Pages site
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          mkdir -p site/firmware/latest
+          cp -R docs/. site/
+          # Download every firmware-*.bin from the newest release. If no
+          # release exists yet, leave the directory empty; the flasher
+          # will report that no binaries are available.
+          if gh release view --repo "${{ github.repository }}" >/dev/null 2>&1; then
+            gh release download \
+              --repo "${{ github.repository }}" \
+              --pattern 'firmware-*.bin' \
+              --dir site/firmware/latest
+            ls -la site/firmware/latest
+          else
+            echo "No published release yet; skipping firmware download."
+          fi
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - name: Deploy to Pages
+        id: deploy
+        uses: actions/deploy-pages@v4
