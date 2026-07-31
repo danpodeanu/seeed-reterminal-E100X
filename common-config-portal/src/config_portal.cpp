@@ -30,8 +30,11 @@ uint32_t g_scanMs = 0;
 String g_scanJson = "[]";
 
 String macToHexSuffix(const uint8_t mac[6]) {
+  // Use the last 2 bytes so the SSID varies per device -- the first 3
+  // bytes are the vendor OUI (identical across all ESP32-S3 boards
+  // from the same silicon batch).
   char buf[5];
-  snprintf(buf, sizeof(buf), "%02X%02X", mac[0], mac[1]);
+  snprintf(buf, sizeof(buf), "%02X%02X", mac[4], mac[5]);
   return String(buf);
 }
 
