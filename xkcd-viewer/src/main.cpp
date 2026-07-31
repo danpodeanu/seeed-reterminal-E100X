@@ -1257,91 +1257,125 @@ void setup() {
   xkcd_config::runtime::load();
   xkcd_wifi::load();
 
-  // Configuration-portal trigger. Only checked on cold boot to avoid
-  // interfering with timer wakes and button-driven navigation:
-  //   * No Wi-Fi credentials available anywhere (NVS empty AND secrets.h
-  //     blank / not configured) -- OR
-  //   * Green button held during the first ~1500 ms of boot.
-  // The portal owns the device until it reboots via ESP.restart(); when
-  // this call returns we simply continue booting normally.
-  if (coldBoot) {
-    const bool wifiUnconfigured = !xkcd_wifi::haveCredentials();
-    const uint32_t triggerWindowMs = 1500;
-    const uint32_t triggerStart = millis();
-    bool greenHeldForPortal = false;
-    while (millis() - triggerStart < triggerWindowMs) {
-      if (!digitalRead(PIN_BUTTON_GREEN)) {
-        greenHeldForPortal = true;
+  // Unified green-button boot gesture. Applies on both cold boot and
+  // deep-sleep green wakes:
+  //   * Released within 1500 ms  -> enter config portal.
+  //   * Still held at 1500 ms    -> beep to mark the transition, then
+  //                                  once released, take a screenshot.
+  //   * Not pressed              -> normal boot.
+  // On cold boot we also trigger the portal automatically when no
+  // Wi-Fi credentials are available (NVS + secrets.h both empty).
+  enum class GreenGesture { None, PortalRequest, ScreenshotRequest };
+  GreenGesture gesture = GreenGesture::None;
+  const bool greenPressedAtBoot =
+      (coldBoot && !digitalRead(PIN_BUTTON_GREEN)) || greenWokeDevice;
+  if (greenPressedAtBoot) {
+    const uint32_t gestureStartMs = millis();
+    constexpr uint32_t kPortalDecisionMs = 1500;
+    bool releasedBeforeDecision = false;
+    while (millis() - gestureStartMs < kPortalDecisionMs) {
+      if (digitalRead(PIN_BUTTON_GREEN)) {
+        releasedBeforeDecision = true;
         break;
       }
-      delay(10);
+      delay(5);
     }
-    if (wifiUnconfigured || greenHeldForPortal) {
-      LOG.printf("[portal] entering config portal (no_wifi=%d green=%d)\n",
-                 wifiUnconfigured, greenHeldForPortal);
-      config_portal::Config portalCfg;
-      portalCfg.wifiSchema = &config_portal::kWifiSchema;
-      portalCfg.appSchema = &xkcd_config::kSchema;
-      portalCfg.appName = "xkcd viewer";
-      if (config_portal::begin(portalCfg)) {
-        // Bring the panel up and render a QR splash so the user can join
-        // the AP and open the portal without needing a serial console.
-        epaper.begin();
-#if RETERMINAL_MODEL == 1001
-        epaper.initGrayMode(GRAY_LEVEL4);
-        const GFXfont* titleFont    = &FreeSansBold18pt7b;
-        const GFXfont* subtitleFont = &FreeSans12pt7b;
-        const GFXfont* captionFont  = &FreeSansBold12pt7b;
-        const GFXfont* detailFont   = &FreeSans9pt7b;
-#elif RETERMINAL_MODEL == 1003
-        epaper.initGrayMode(GRAY_LEVEL16);
-        const GFXfont* titleFont    = &FreeSansBold24pt7b;
-        const GFXfont* subtitleFont = &FreeSans18pt7b;
-        const GFXfont* captionFont  = &FreeSansBold18pt7b;
-        const GFXfont* detailFont   = &FreeSans12pt7b;
-#else
-        const GFXfont* titleFont    = &FreeSansBold18pt7b;
-        const GFXfont* subtitleFont = &FreeSans12pt7b;
-        const GFXfont* captionFont  = &FreeSansBold12pt7b;
-        const GFXfont* detailFont   = &FreeSans9pt7b;
-#endif
-        config_portal::ui::RenderInfo info;
-        info.modelLabel = MODEL_NAME;
-        info.title = "Configure";
-        info.tagline = "Join the AP to set Wi-Fi + settings";
-        info.ssid = config_portal::currentSsid();
-        info.url = String("http://") + config_portal::currentIp().toString();
-        info.macAddress = wifi_sta::stationMacAddress();
-        info.wifiPayload = config_portal::wifiQrPayload(info.ssid, nullptr);
-        info.urlPayload = config_portal::urlQrPayload(
-            config_portal::currentIp(), config_portal::currentPort(), "/wifi");
-        info.fonts.titleFont = titleFont;
-        info.fonts.subtitleFont = subtitleFont;
-        info.fonts.captionFont = captionFont;
-        info.fonts.detailFont = detailFont;
-        config_portal::ui::renderPortalScreen<EPaper>(
-            epaper, config::PANEL_WIDTH, config::PANEL_HEIGHT, PANEL_BLACK,
-            PANEL_WHITE, info);
-        panel_watchdog::guard([]() { epaper.update(); });
-
-        uint32_t lastHeartbeatMs = millis();
-        while (!config_portal::rebootRequested()) {
-          config_portal::loop();
-          const uint32_t nowMs = millis();
-          if (nowMs - lastHeartbeatMs >= 15000) {
-            LOG.printf("[portal] waiting for client on http://%s (SSID \"%s\")\n",
-                       config_portal::currentIp().toString().c_str(),
-                       config_portal::currentSsid().c_str());
-            lastHeartbeatMs = nowMs;
-          }
-          delay(5);
+    if (releasedBeforeDecision) {
+      gesture = GreenGesture::PortalRequest;
+    } else {
+      // 1.5 s elapsed with green still held -> commit to screenshot mode
+      // and audibly acknowledge the split. Then wait for the operator to
+      // let go (with debounce) so the rest of the flow sees a clean idle
+      // pin state.
+      hardware::beep();
+      gesture = GreenGesture::ScreenshotRequest;
+      uint32_t releaseStarted = 0;
+      const uint32_t releaseWaitDeadlineMs =
+          gestureStartMs + config::SCREENSHOT_LONG_PRESS_MS + 2000;
+      while (millis() < releaseWaitDeadlineMs) {
+        if (!digitalRead(PIN_BUTTON_GREEN)) {
+          releaseStarted = 0;
+        } else if (releaseStarted == 0) {
+          releaseStarted = millis();
+        } else if (millis() - releaseStarted >=
+                   config::BUTTON_RELEASE_DEBOUNCE_MS) {
+          break;
         }
-        config_portal::end();
+        delay(5);
       }
-      LOG.println("[portal] rebooting to apply configuration");
-      delay(200);
-      ESP.restart();
     }
+  }
+  const bool wifiUnconfigured = coldBoot && !xkcd_wifi::haveCredentials();
+  const bool portalRequested =
+      gesture == GreenGesture::PortalRequest || wifiUnconfigured;
+  screenshotRequested = gesture == GreenGesture::ScreenshotRequest;
+
+  if (portalRequested) {
+    LOG.printf("[portal] entering config portal (no_wifi=%d gesture=%s)\n",
+               wifiUnconfigured,
+               gesture == GreenGesture::PortalRequest ? "green-tap" : "auto");
+    config_portal::Config portalCfg;
+    portalCfg.wifiSchema = &config_portal::kWifiSchema;
+    portalCfg.appSchema = &xkcd_config::kSchema;
+    portalCfg.appName = "xkcd viewer";
+    if (config_portal::begin(portalCfg)) {
+      // Bring the panel up and render a QR splash so the user can join
+      // the AP and open the portal without needing a serial console.
+      epaper.begin();
+#if RETERMINAL_MODEL == 1001
+      epaper.initGrayMode(GRAY_LEVEL4);
+      const GFXfont* titleFont    = &FreeSansBold18pt7b;
+      const GFXfont* subtitleFont = &FreeSans12pt7b;
+      const GFXfont* captionFont  = &FreeSansBold12pt7b;
+      const GFXfont* detailFont   = &FreeSans9pt7b;
+#elif RETERMINAL_MODEL == 1003
+      epaper.initGrayMode(GRAY_LEVEL16);
+      const GFXfont* titleFont    = &FreeSansBold24pt7b;
+      const GFXfont* subtitleFont = &FreeSans18pt7b;
+      const GFXfont* captionFont  = &FreeSansBold18pt7b;
+      const GFXfont* detailFont   = &FreeSans12pt7b;
+#else
+      const GFXfont* titleFont    = &FreeSansBold18pt7b;
+      const GFXfont* subtitleFont = &FreeSans12pt7b;
+      const GFXfont* captionFont  = &FreeSansBold12pt7b;
+      const GFXfont* detailFont   = &FreeSans9pt7b;
+#endif
+      config_portal::ui::RenderInfo info;
+      info.modelLabel = MODEL_NAME;
+      info.title = "Configure";
+      info.tagline = "Join the AP to set Wi-Fi + settings";
+      info.ssid = config_portal::currentSsid();
+      info.url = String("http://") + config_portal::currentIp().toString();
+      info.macAddress = wifi_sta::stationMacAddress();
+      info.wifiPayload = config_portal::wifiQrPayload(info.ssid, nullptr);
+      info.urlPayload = config_portal::urlQrPayload(
+          config_portal::currentIp(), config_portal::currentPort(), "/wifi");
+      info.fonts.titleFont = titleFont;
+      info.fonts.subtitleFont = subtitleFont;
+      info.fonts.captionFont = captionFont;
+      info.fonts.detailFont = detailFont;
+      config_portal::ui::renderPortalScreen<EPaper>(
+          epaper, config::PANEL_WIDTH, config::PANEL_HEIGHT, PANEL_BLACK,
+          PANEL_WHITE, info);
+      panel_watchdog::guard([]() { epaper.update(); });
+
+      uint32_t lastHeartbeatMs = millis();
+      while (!config_portal::rebootRequested()) {
+        config_portal::loop();
+        const uint32_t nowMs = millis();
+        if (nowMs - lastHeartbeatMs >= 15000) {
+          LOG.printf("[portal] waiting for client on http://%s (SSID \"%s\")\n",
+                     config_portal::currentIp().toString().c_str(),
+                     config_portal::currentSsid().c_str());
+          lastHeartbeatMs = nowMs;
+        }
+        delay(5);
+      }
+      config_portal::end();
+    }
+    LOG.println("[portal] rebooting to apply configuration");
+    delay(200);
+    ESP.restart();
   }
 
   local_time::configureTimezone(xkcd_config::runtime::timezone());
@@ -1351,30 +1385,12 @@ void setup() {
                           xkcd_config::runtime::quietEndHour(),
                           xkcd_config::runtime::quietEndMinute()});
   if (app_logic::startupBeepRequired(coldBoot, buttonWake)) {
-    // Acknowledge cold boots and button wakes immediately. Holding the green
-    // button through this beep and the interval below requests a screenshot.
+    // Acknowledge cold boots and button wakes immediately. The unified
+    // green-button gesture handler above has already decided whether
+    // this boot is a portal request or a screenshot request.
     hardware::beep();
   }
 
-  bool greenHeldLongEnough = false;
-  if (greenWokeDevice) {
-    const uint32_t holdStarted = millis();
-    uint32_t releaseStarted = 0;
-    while (millis() - holdStarted < config::SCREENSHOT_LONG_PRESS_MS) {
-      if (!digitalRead(PIN_BUTTON_GREEN)) {
-        releaseStarted = 0;
-      } else if (releaseStarted == 0) {
-        releaseStarted = millis();
-      } else if (millis() - releaseStarted >=
-                 config::BUTTON_RELEASE_DEBOUNCE_MS) {
-        break;
-      }
-      delay(5);
-    }
-    greenHeldLongEnough =
-        millis() - holdStarted >= config::SCREENSHOT_LONG_PRESS_MS;
-  }
-  screenshotRequested = greenHeldLongEnough;
   LOG.println();
   LOG.println("============================================");
   LOG.printf(" reTerminal %s standalone XKCD / %s\n", MODEL_NAME, COLOR_MODE_NAME);
@@ -1385,14 +1401,12 @@ void setup() {
              wakeCause, static_cast<unsigned long long>(wakePins),
              static_cast<unsigned long>(ESP.getPsramSize() / 1024),
              greenWokeDevice
-                 ? (greenHeldLongEnough ? "long-press" : "short-press")
+                 ? (screenshotRequested ? "long-press" : "short-press")
                  : "idle",
              rightWokeDevice ? "wake" : "idle",
              leftWokeDevice ? "wake" : "idle");
   if (screenshotRequested) {
     LOG.println("[screenshot] green-button long press requested export");
-    delay(80);
-    hardware::beep();
   }
 
   const time_t startupTime = time(nullptr);
