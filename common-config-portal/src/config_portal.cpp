@@ -307,7 +307,7 @@ bool begin(const Config& cfg) {
   g_server->on("/", redirectWifi);
   g_server->on("/wifi", []() { sendHtml(200, renderWifiPage(g_config, *g_config.wifiSchema, g_config.appSchema)); });
   g_server->on("/wifi.json", HTTP_GET, handleWifiValues);
-  g_server->on("/wifi.json", HTTP_POST, []() { handleSave(*g_config.wifiSchema, g_wifiStorage, true); });
+  g_server->on("/wifi.json", HTTP_POST, []() { handleSave(*g_config.wifiSchema, g_wifiStorage, false); });
   g_server->on("/scan.json", handleScan);
   g_server->on("/settings", []() { if (!g_config.appSchema) handleNotFound(); else sendHtml(200, renderSettingsPage(g_config, *g_config.appSchema, *g_config.wifiSchema)); });
   g_server->on("/settings.json", HTTP_GET, []() { if (!g_config.appSchema) handleNotFound(); else handleValues(*g_config.appSchema, g_appStorage); });

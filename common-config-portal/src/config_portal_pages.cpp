@@ -153,7 +153,7 @@ String renderWifiPage(const Config& cfg, const Schema& wifi, const Schema* appSc
       }
     }
   }
-  html += F("<button type=\"submit\">Save Wi-Fi</button><span id=\"msg\" class=\"msg\"></span></form></section><script>");
+  html += F("<button type=\"submit\">Save Wi-Fi</button><button class=\"secondary\" type=\"button\" id=\"rebootBtn\">Reboot to viewer</button><span id=\"msg\" class=\"msg\"></span></form></section><script>");
   html += FPSTR(kSharedScript);
   html += F(
       "loadValues('/wifi.json');"
@@ -175,7 +175,8 @@ String renderWifiPage(const Config& cfg, const Schema& wifi, const Schema* appSc
       "async function doScan(){let m=document.getElementById('msg');m.className='';m.textContent='Scanning\u2026';try{let j=await (await fetch('/scan.json',{cache:'no-store'})).json();renderScan(j);m.textContent=j.length?(j.length+' networks found'):'No networks found';}catch(e){m.textContent=e.message;m.className='err'}}"
       "document.getElementById('scanBtn').onclick=doScan;"
       "doScan();"
-      "document.getElementById('wifiForm').onsubmit=async e=>{e.preventDefault();let m=document.getElementById('msg');try{await postForm('/wifi.json');m.className='ok';m.textContent='Saved. Rebooting\u2026';setTimeout(()=>location.reload(),2000)}catch(x){m.className='err';m.textContent=x.message}};"
+      "document.getElementById('wifiForm').onsubmit=async e=>{e.preventDefault();let m=document.getElementById('msg');try{await postForm('/wifi.json');m.className='ok';m.textContent='Saved.';}catch(x){m.className='err';m.textContent=x.message}};"
+      "document.getElementById('rebootBtn').onclick=async()=>{let m=document.getElementById('msg');m.className='';m.textContent='Rebooting\u2026';try{await fetch('/reboot',{method:'POST'});}catch(e){}};"
       "</script></main></body></html>");
   return html;
 }
