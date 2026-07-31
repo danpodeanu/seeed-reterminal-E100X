@@ -1,0 +1,9 @@
+{
+  "name": "reterminal_config_portal",
+  "version": "0.1.0",
+  "description": "Reusable Wi-Fi + secrets + settings configuration portal for reTerminal E100X viewer apps. AP + captive web portal with schema-driven form generation and NVS persistence.",
+  "build": {
+    "srcDir": "src",
+    "libArchive": false
+  }
+}
