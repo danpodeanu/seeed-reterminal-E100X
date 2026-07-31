@@ -1347,6 +1347,11 @@ void setup() {
     portalCfg.wifiSchema = &config_portal::kWifiSchema;
     portalCfg.appSchema = &xkcd_config::kSchema;
     portalCfg.appName = "xkcd viewer";
+    // Persistent per-device SoftAP password: generated on first boot,
+    // stored in NVS, reused thereafter. Encrypts the portal as WPA2-PSK
+    // without any compile-time shared secret. The password is embedded
+    // in the QR splash so phones autofill it.
+    portalCfg.useAutoApPassword = true;
     // Feed the current-resolved credentials back into the portal so the
     // Wi-Fi form shows what the device would connect to on the next
     // boot. The portal will redact the password with the __saved__
@@ -1362,9 +1367,12 @@ void setup() {
       info.title = "Configure";
       info.tagline = "Join the AP to set Wi-Fi + settings";
       info.ssid = config_portal::currentSsid();
+      info.wifiPassword = config_portal::currentApPassword();
       info.url = String("http://") + config_portal::currentIp().toString();
       info.macAddress = wifi_sta::stationMacAddress();
-      info.wifiPayload = config_portal::wifiQrPayload(info.ssid, nullptr);
+      info.wifiPayload = config_portal::wifiQrPayload(
+          info.ssid,
+          info.wifiPassword.length() ? info.wifiPassword.c_str() : nullptr);
       info.urlPayload = config_portal::urlQrPayload(
           config_portal::currentIp(), config_portal::currentPort(), "/wifi");
       info.fonts.titleFont = titleFont;
@@ -1388,9 +1396,18 @@ void setup() {
         config_portal::loop();
         const uint32_t nowMs = millis();
         if (nowMs - lastHeartbeatMs >= 15000) {
-          LOG.printf("[portal] waiting for client on http://%s (SSID \"%s\")\n",
-                     config_portal::currentIp().toString().c_str(),
-                     config_portal::currentSsid().c_str());
+          const String& pass = config_portal::currentApPassword();
+          if (pass.length()) {
+            LOG.printf("[portal] waiting for client on http://%s "
+                       "(SSID \"%s\" pass \"%s\")\n",
+                       config_portal::currentIp().toString().c_str(),
+                       config_portal::currentSsid().c_str(),
+                       pass.c_str());
+          } else {
+            LOG.printf("[portal] waiting for client on http://%s (SSID \"%s\")\n",
+                       config_portal::currentIp().toString().c_str(),
+                       config_portal::currentSsid().c_str());
+          }
           lastHeartbeatMs = nowMs;
         }
         delay(5);

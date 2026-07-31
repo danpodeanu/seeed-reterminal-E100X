@@ -15,6 +15,11 @@ void test_parse_submission_ignores_unknown_keys();
 void test_parse_submission_handles_malformed_json();
 void test_wifi_schema_fields_and_defaults();
 void test_wifi_password_redacts_when_stored();
+void test_easy_password_alphabet_excludes_confusables();
+void test_random_easy_password_returns_requested_length();
+void test_random_easy_password_uses_only_alphabet_chars();
+void test_random_easy_password_is_deterministic_with_fixed_rng();
+void test_random_easy_password_rejects_bad_input();
 
 void setUp() {}
 void tearDown() {}
@@ -36,5 +41,10 @@ int main(int, char**) {
   RUN_TEST(test_parse_submission_handles_malformed_json);
   RUN_TEST(test_wifi_schema_fields_and_defaults);
   RUN_TEST(test_wifi_password_redacts_when_stored);
+  RUN_TEST(test_easy_password_alphabet_excludes_confusables);
+  RUN_TEST(test_random_easy_password_returns_requested_length);
+  RUN_TEST(test_random_easy_password_uses_only_alphabet_chars);
+  RUN_TEST(test_random_easy_password_is_deterministic_with_fixed_rng);
+  RUN_TEST(test_random_easy_password_rejects_bad_input);
   return UNITY_END();
 }

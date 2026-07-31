@@ -13,6 +13,7 @@
 #include "app_logger.h"
 #include "config_json.h"
 #include "config_storage.h"
+#include "portal_ap_password.h"
 #include "wifi_schema.h"
 
 namespace config_portal {
@@ -22,6 +23,7 @@ WebServer* g_server = nullptr;
 DNSServer* g_dns = nullptr;
 Config g_config;
 String g_ssid;
+String g_apPassword;  // empty when the AP is open
 bool g_running = false;
 bool g_rebootRequested = false;
 storage::PrefsStorage g_wifiStorage;
@@ -255,14 +257,25 @@ bool begin(const Config& cfg) {
     return false;
   }
   g_ssid = buildSsid(cfg);
-  const char* pass = (cfg.apPassword && cfg.apPassword[0]) ? cfg.apPassword : nullptr;
+  g_apPassword = String();
+  if (cfg.apPassword && cfg.apPassword[0]) {
+    g_apPassword = cfg.apPassword;
+  } else if (cfg.useAutoApPassword) {
+    g_apPassword = ensureApPassword(8);
+  }
+  const char* pass = g_apPassword.length() ? g_apPassword.c_str() : nullptr;
   if (!WiFi.softAP(g_ssid.c_str(), pass, 1, 0, cfg.maxConnections)) {
     LOG.println("[cfg-portal] softAP failed");
     return false;
   }
-  LOG.printf("[cfg-portal] AP up: ssid=\"%s\" ip=%s%s\n",
-             g_ssid.c_str(), cfg.apIp.toString().c_str(),
-             pass ? " (WPA2)" : " (open)");
+  if (pass) {
+    LOG.printf("[cfg-portal] AP up: ssid=\"%s\" pass=\"%s\" ip=%s (WPA2-PSK)\n",
+               g_ssid.c_str(), g_apPassword.c_str(),
+               cfg.apIp.toString().c_str());
+  } else {
+    LOG.printf("[cfg-portal] AP up: ssid=\"%s\" ip=%s (open)\n",
+               g_ssid.c_str(), cfg.apIp.toString().c_str());
+  }
 
   // Log AP client connect / disconnect / IP assignment so an operator
   // can see which device is talking to the portal.
@@ -327,6 +340,7 @@ void loop() {
 }
 
 const String& currentSsid() { return g_ssid; }
+const String& currentApPassword() { return g_apPassword; }
 IPAddress currentIp() { return g_running ? g_config.apIp : IPAddress(); }
 uint16_t currentPort() { return g_config.httpPort; }
 bool rebootRequested() { return g_rebootRequested; }

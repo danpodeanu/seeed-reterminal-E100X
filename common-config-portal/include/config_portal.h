@@ -14,6 +14,11 @@ namespace config_portal {
 struct Config {
   const char* apSsidPrefix = "ReTerminal ";
   const char* apPassword = nullptr;
+  // When true and apPassword is null/empty, the portal generates an
+  // 8-character password on first boot, persists it in NVS, and reuses
+  // it thereafter. Retrievable via currentApPassword() so the caller
+  // can embed it in the on-screen splash + QR payload.
+  bool useAutoApPassword = false;
   IPAddress apIp{192, 168, 1, 1};
   IPAddress apGateway{192, 168, 1, 1};
   IPAddress apNetmask{255, 255, 255, 0};
@@ -45,6 +50,7 @@ bool begin(const Config& cfg);
 void loop();
 
 const String& currentSsid();
+const String& currentApPassword();  // empty when the AP is open
 IPAddress currentIp();
 uint16_t currentPort();
 bool rebootRequested();
