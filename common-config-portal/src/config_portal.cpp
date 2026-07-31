@@ -49,19 +49,70 @@ String jsonEscape(const String& in) {
   return out;
 }
 
+// Compact per-request access log inspired by nginx: client IP, HTTP
+// method, request URI, and status code go to the serial log so an
+// operator can see when the browser is talking to the portal.
+void logAccess(int statusCode) {
+  if (!g_server) return;
+  const char* method;
+  switch (g_server->method()) {
+    case HTTP_GET:     method = "GET"; break;
+    case HTTP_POST:    method = "POST"; break;
+    case HTTP_PUT:     method = "PUT"; break;
+    case HTTP_DELETE:  method = "DELETE"; break;
+    case HTTP_OPTIONS: method = "OPTIONS"; break;
+    case HTTP_HEAD:    method = "HEAD"; break;
+    default:           method = "?"; break;
+  }
+  LOG.printf("[cfg-portal] %s - %s %s %d\n",
+             g_server->client().remoteIP().toString().c_str(),
+             method, g_server->uri().c_str(), statusCode);
+}
+
 void redirectWifi() {
   g_server->sendHeader("Location", "/wifi");
   g_server->send(302, "text/plain", "");
+  logAccess(302);
 }
 
 void sendJson(int code, const String& body) {
   g_server->sendHeader("Cache-Control", "no-store");
   g_server->send(code, "application/json", body);
+  logAccess(code);
+}
+
+void sendHtml(int code, const String& body) {
+  g_server->send(code, "text/html; charset=utf-8", body);
+  logAccess(code);
 }
 
 void handleValues(const Schema& schema, storage::Storage& store) {
   std::vector<std::pair<String, String>> values;
   storage::loadForGet(store, schema, values);
+  sendJson(200, json::valuesToJson(values));
+}
+
+// Wi-Fi-specific values handler that layers the app-provided compile-
+// time fallback (e.g. secrets.h) over an empty NVS so the form still
+// shows the credentials the device is currently using. Secrets are
+// redacted with the __saved__ sentinel so we never leak the real
+// password over HTTP.
+void handleWifiValues() {
+  std::vector<std::pair<String, String>> values;
+  storage::loadForGet(g_wifiStorage, *g_config.wifiSchema, values);
+  if (g_config.wifiFallback) {
+    for (auto& kv : values) {
+      // If loadForGet already returned the __saved__ sentinel we leave
+      // it alone (a real secret is stored in NVS).
+      if (kv.second.length() > 0 && kv.second != "__saved__") continue;
+      String fb = g_config.wifiFallback(kv.first.c_str());
+      if (!fb.length()) continue;
+      const Field* f = findField(*g_config.wifiSchema, kv.first.c_str());
+      const bool secret = f && (f->type == FieldType::Secret ||
+                                f->type == FieldType::Password);
+      kv.second = secret ? String("__saved__") : fb;
+    }
+  }
   sendJson(200, json::valuesToJson(values));
 }
 
@@ -90,30 +141,35 @@ void handleScan() {
     sendJson(200, g_scanJson);
     return;
   }
-  int n = WiFi.scanComplete();
-  if (n == WIFI_SCAN_RUNNING) {
-    sendJson(200, g_scanJson.length() ? g_scanJson : "[]");
-    return;
-  }
-  if (n < 0) {
-    WiFi.scanNetworks(true, true);
-    sendJson(200, g_scanJson.length() ? g_scanJson : "[]");
-    return;
-  }
+  // Cancel any half-finished async scan from a previous request, then
+  // run a blocking scan so the browser gets real results in a single
+  // round trip (the previous async design returned "[]" on the first
+  // click and the frontend never re-polled, so the dropdown stayed
+  // empty). A blocking scan takes ~2-3 s which is fine for a captive
+  // portal UI.
+  const int prior = WiFi.scanComplete();
+  if (prior >= 0) WiFi.scanDelete();
+  LOG.println("[cfg-portal] scanning for Wi-Fi networks...");
+  const uint32_t scanStart = millis();
+  const int n = WiFi.scanNetworks(/*async=*/false, /*show_hidden=*/true);
+  LOG.printf("[cfg-portal] scan complete: %d networks in %u ms\n",
+             n, static_cast<unsigned>(millis() - scanStart));
   String out = "[";
   bool first = true;
-  for (int i = 0; i < n; ++i) {
-    String ssid = WiFi.SSID(i);
-    if (!ssid.length()) continue;
-    if (!first) out += ',';
-    first = false;
-    out += "{\"ssid\":\"";
-    out += jsonEscape(ssid);
-    out += "\",\"rssi\":";
-    out += WiFi.RSSI(i);
-    out += ",\"secure\":";
-    out += WiFi.encryptionType(i) == WIFI_AUTH_OPEN ? "false" : "true";
-    out += "}";
+  if (n > 0) {
+    for (int i = 0; i < n; ++i) {
+      String ssid = WiFi.SSID(i);
+      if (!ssid.length()) continue;
+      if (!first) out += ',';
+      first = false;
+      out += "{\"ssid\":\"";
+      out += jsonEscape(ssid);
+      out += "\",\"rssi\":";
+      out += WiFi.RSSI(i);
+      out += ",\"secure\":";
+      out += WiFi.encryptionType(i) == WIFI_AUTH_OPEN ? "false" : "true";
+      out += "}";
+    }
   }
   out += "]";
   WiFi.scanDelete();
@@ -136,6 +192,7 @@ void handlePanel() {
 void handleNotFound() {
   g_server->send(404, "text/html; charset=utf-8",
                  "<!doctype html><title>Not found</title><p>Not found</p>");
+  logAccess(404);
 }
 
 }  // namespace
@@ -203,16 +260,43 @@ bool begin(const Config& cfg) {
     LOG.println("[cfg-portal] softAP failed");
     return false;
   }
-  LOG.printf("[cfg-portal] AP up: ssid=\"%s\" ip=%s\n", g_ssid.c_str(), cfg.apIp.toString().c_str());
+  LOG.printf("[cfg-portal] AP up: ssid=\"%s\" ip=%s%s\n",
+             g_ssid.c_str(), cfg.apIp.toString().c_str(),
+             pass ? " (WPA2)" : " (open)");
+
+  // Log AP client connect / disconnect / IP assignment so an operator
+  // can see which device is talking to the portal.
+  WiFi.onEvent([](WiFiEvent_t /*event*/, WiFiEventInfo_t info) {
+    const auto& sta = info.wifi_ap_staconnected;
+    LOG.printf("[cfg-portal] AP client connected: "
+               "%02X:%02X:%02X:%02X:%02X:%02X aid=%u\n",
+               sta.mac[0], sta.mac[1], sta.mac[2],
+               sta.mac[3], sta.mac[4], sta.mac[5], sta.aid);
+  }, ARDUINO_EVENT_WIFI_AP_STACONNECTED);
+  WiFi.onEvent([](WiFiEvent_t /*event*/, WiFiEventInfo_t info) {
+    const auto& sta = info.wifi_ap_stadisconnected;
+    LOG.printf("[cfg-portal] AP client disconnected: "
+               "%02X:%02X:%02X:%02X:%02X:%02X aid=%u\n",
+               sta.mac[0], sta.mac[1], sta.mac[2],
+               sta.mac[3], sta.mac[4], sta.mac[5], sta.aid);
+  }, ARDUINO_EVENT_WIFI_AP_STADISCONNECTED);
+  WiFi.onEvent([](WiFiEvent_t /*event*/, WiFiEventInfo_t info) {
+    const uint32_t ip = info.wifi_ap_staipassigned.ip.addr;
+    LOG.printf("[cfg-portal] AP client got IP: %u.%u.%u.%u\n",
+               (unsigned)((ip >> 0)  & 0xFF),
+               (unsigned)((ip >> 8)  & 0xFF),
+               (unsigned)((ip >> 16) & 0xFF),
+               (unsigned)((ip >> 24) & 0xFF));
+  }, ARDUINO_EVENT_WIFI_AP_STAIPASSIGNED);
 
   if (g_server) { g_server->stop(); delete g_server; }
   g_server = new WebServer(cfg.httpPort);
   g_server->on("/", redirectWifi);
-  g_server->on("/wifi", []() { g_server->send(200, "text/html; charset=utf-8", renderWifiPage(g_config, *g_config.wifiSchema, g_config.appSchema)); });
-  g_server->on("/wifi.json", HTTP_GET, []() { handleValues(*g_config.wifiSchema, g_wifiStorage); });
+  g_server->on("/wifi", []() { sendHtml(200, renderWifiPage(g_config, *g_config.wifiSchema, g_config.appSchema)); });
+  g_server->on("/wifi.json", HTTP_GET, handleWifiValues);
   g_server->on("/wifi.json", HTTP_POST, []() { handleSave(*g_config.wifiSchema, g_wifiStorage, true); });
   g_server->on("/scan.json", handleScan);
-  g_server->on("/settings", []() { if (!g_config.appSchema) handleNotFound(); else g_server->send(200, "text/html; charset=utf-8", renderSettingsPage(g_config, *g_config.appSchema, *g_config.wifiSchema)); });
+  g_server->on("/settings", []() { if (!g_config.appSchema) handleNotFound(); else sendHtml(200, renderSettingsPage(g_config, *g_config.appSchema, *g_config.wifiSchema)); });
   g_server->on("/settings.json", HTTP_GET, []() { if (!g_config.appSchema) handleNotFound(); else handleValues(*g_config.appSchema, g_appStorage); });
   g_server->on("/settings.json", HTTP_POST, []() { if (!g_config.appSchema) handleNotFound(); else handleSave(*g_config.appSchema, g_appStorage, false); });
   g_server->on("/reboot", HTTP_POST, []() { g_rebootRequested = true; sendJson(200, "{\"ok\":true}"); });

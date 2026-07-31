@@ -1347,6 +1347,15 @@ void setup() {
     portalCfg.wifiSchema = &config_portal::kWifiSchema;
     portalCfg.appSchema = &xkcd_config::kSchema;
     portalCfg.appName = "xkcd viewer";
+    // Feed the current-resolved credentials back into the portal so the
+    // Wi-Fi form shows what the device would connect to on the next
+    // boot. The portal will redact the password with the __saved__
+    // sentinel before serving it over HTTP.
+    portalCfg.wifiFallback = [](const char* key) -> String {
+      if (strcmp(key, "ssid") == 0) return String(xkcd_wifi::ssid());
+      if (strcmp(key, "password") == 0) return String(xkcd_wifi::password());
+      return String();
+    };
     if (config_portal::begin(portalCfg)) {
       config_portal::ui::RenderInfo info;
       info.modelLabel = MODEL_NAME;

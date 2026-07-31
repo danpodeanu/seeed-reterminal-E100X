@@ -25,6 +25,16 @@ struct Config {
   const char* appName = "reTerminal";
   const char* helpUrl = "https://github.com/danpodeanu/seeed-reterminal-E100X#configuration";
   const char* firmwareVersion = nullptr;
+
+  // Optional compile-time-defaults provider consulted when NVS has no
+  // value for a Wi-Fi field yet. Lets apps like xkcd-viewer pre-populate
+  // the form with the credentials baked into secrets.h so the user sees
+  // what's currently in use instead of a blank field. Return an empty
+  // String when there's no fallback for the requested key. Only used
+  // for /wifi.json GET; secrets are still redacted with the __saved__
+  // sentinel before being sent to the browser.
+  using WifiFallbackFn = String (*)(const char* key);
+  WifiFallbackFn wifiFallback = nullptr;
 };
 
 String buildSsid(const Config& cfg = Config{});
