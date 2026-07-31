@@ -48,7 +48,12 @@ void appendChrome(String& html, const Config& cfg, const char* title,
             "input[type=text],input[type=password],input[type=number],select{width:100%;padding:.65rem;border:1px solid #b8c0cc;border-radius:7px;background:#fff;color:#111827}"
             "button{background:#1d4ed8;color:#fff;border:0;border-radius:7px;padding:.7rem 1rem;min-height:44px;cursor:pointer;margin:.4rem .4rem .4rem 0}"
             "button.secondary{background:#475569}.help{font-size:.9rem;color:#64748b}.msg{min-height:1.5rem}.err{color:#b91c1c}.ok{color:#166534}"
-            "@media(prefers-color-scheme:dark){body{background:#0f172a;color:#e5e7eb}header{background:#020617}.card,fieldset{background:#111827;border-color:#334155}input[type=text],input[type=password],input[type=number],select{background:#0f172a;color:#e5e7eb;border-color:#475569}.help{color:#94a3b8}}"
+            ".ssid-list{list-style:none;margin:.5rem 0 0;padding:0;border:1px solid #d7dce5;border-radius:7px;overflow:hidden;max-height:14rem;overflow-y:auto}"
+            ".ssid-list li{display:flex;justify-content:space-between;align-items:center;gap:.5rem;padding:.55rem .75rem;border-bottom:1px solid #eef1f5;cursor:pointer}"
+            ".ssid-list li:last-child{border-bottom:0}.ssid-list li:hover,.ssid-list li:focus{background:#eef2ff;outline:none}"
+            ".ssid-list .ssid-name{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}"
+            ".ssid-list .ssid-meta{font-size:.85rem;color:#64748b;flex-shrink:0}"
+            "@media(prefers-color-scheme:dark){body{background:#0f172a;color:#e5e7eb}header{background:#020617}.card,fieldset{background:#111827;border-color:#334155}input[type=text],input[type=password],input[type=number],select{background:#0f172a;color:#e5e7eb;border-color:#475569}.help{color:#94a3b8}.ssid-list{border-color:#334155}.ssid-list li{border-bottom-color:#1f2937}.ssid-list li:hover,.ssid-list li:focus{background:#1e293b}.ssid-list .ssid-meta{color:#94a3b8}}"
             "</style></head><body><header><nav><a");
   if (String(active) == "wifi") html += F(" class=\"active\"");
   html += F(" href=\"/wifi\">Wi-Fi</a>");
@@ -142,7 +147,7 @@ String renderWifiPage(const Config& cfg, const Schema& wifi, const Schema* appSc
     for (size_t fi = 0; fi < wifi.sections[si].fieldCount; ++fi) {
       const Field& f = wifi.sections[si].fields[fi];
       if (String(f.key) == "ssid") {
-        html += F("<div class=\"field\" data-type=\"string\"><label for=\"ssid\">SSID</label><div style=\"display:flex;gap:.5rem\"><input type=\"text\" list=\"ssidList\" id=\"ssid\" name=\"ssid\"><datalist id=\"ssidList\"></datalist><button type=\"button\" class=\"secondary\" id=\"scanBtn\">Scan</button></div></div>");
+        html += F("<div class=\"field\" data-type=\"string\"><label for=\"ssid\">SSID</label><div style=\"display:flex;gap:.5rem\"><input type=\"text\" id=\"ssid\" name=\"ssid\"><button type=\"button\" class=\"secondary\" id=\"scanBtn\">Scan</button></div><ul id=\"ssidList\" class=\"ssid-list\" hidden></ul></div>");
       } else {
         appendFieldInput(html, f);
       }
@@ -150,7 +155,28 @@ String renderWifiPage(const Config& cfg, const Schema& wifi, const Schema* appSc
   }
   html += F("<button type=\"submit\">Save Wi-Fi</button><span id=\"msg\" class=\"msg\"></span></form></section><script>");
   html += FPSTR(kSharedScript);
-  html += F("loadValues('/wifi.json');document.getElementById('scanBtn').onclick=async()=>{let m=document.getElementById('msg');m.textContent='Scanning…';try{let j=await (await fetch('/scan.json',{cache:'no-store'})).json();let dl=document.getElementById('ssidList');dl.innerHTML='';j.forEach(n=>{let o=document.createElement('option');o.value=n.ssid;o.label=n.ssid+' ('+n.rssi+' dBm)'+(n.secure?' 🔒':'');dl.appendChild(o)});m.textContent='';}catch(e){m.textContent=e.message;m.className='err'}};document.getElementById('wifiForm').onsubmit=async e=>{e.preventDefault();let m=document.getElementById('msg');try{await postForm('/wifi.json');m.className='ok';m.textContent='Saved. Rebooting…';setTimeout(()=>location.reload(),2000)}catch(x){m.className='err';m.textContent=x.message}};</script></main></body></html>");
+  html += F(
+      "loadValues('/wifi.json');"
+      "function rssiBars(r){if(r>=-55)return '\u2588\u2588\u2588\u2588';if(r>=-65)return '\u2588\u2588\u2588_';if(r>=-75)return '\u2588\u2588__';if(r>=-85)return '\u2588___';return '____';}"
+      "function renderScan(nets){"
+      "let ul=document.getElementById('ssidList');ul.innerHTML='';"
+      "let seen=new Set();"
+      "nets.slice().sort((a,b)=>b.rssi-a.rssi).forEach(n=>{"
+      "if(!n.ssid||seen.has(n.ssid))return;seen.add(n.ssid);"
+      "let li=document.createElement('li');li.tabIndex=0;li.setAttribute('role','button');"
+      "let name=document.createElement('span');name.className='ssid-name';name.textContent=(n.secure?'\u2022 ':'  ')+n.ssid;"
+      "let meta=document.createElement('span');meta.className='ssid-meta';meta.textContent=rssiBars(n.rssi)+' '+n.rssi+' dBm';"
+      "li.append(name,meta);"
+      "let pick=()=>{let s=document.getElementById('ssid');s.value=n.ssid;s.focus();let p=document.querySelector('[name=\"password\"]');if(p)p.focus();};"
+      "li.onclick=pick;li.onkeydown=e=>{if(e.key==='Enter'||e.key===' '){e.preventDefault();pick();}};"
+      "ul.appendChild(li);});"
+      "ul.hidden=ul.children.length===0;"
+      "}"
+      "async function doScan(){let m=document.getElementById('msg');m.className='';m.textContent='Scanning\u2026';try{let j=await (await fetch('/scan.json',{cache:'no-store'})).json();renderScan(j);m.textContent=j.length?(j.length+' networks found'):'No networks found';}catch(e){m.textContent=e.message;m.className='err'}}"
+      "document.getElementById('scanBtn').onclick=doScan;"
+      "doScan();"
+      "document.getElementById('wifiForm').onsubmit=async e=>{e.preventDefault();let m=document.getElementById('msg');try{await postForm('/wifi.json');m.className='ok';m.textContent='Saved. Rebooting\u2026';setTimeout(()=>location.reload(),2000)}catch(x){m.className='err';m.textContent=x.message}};"
+      "</script></main></body></html>");
   return html;
 }
 
