@@ -1259,10 +1259,10 @@ void setup() {
 
   // Unified green-button boot gesture. Applies on both cold boot and
   // deep-sleep green wakes. A first beep marks the start of the portal
-  // window; a second beep 1.5 s later marks the switch to screenshot:
-  //   * Released before second beep (<=1.5 s) -> enter config portal.
-  //   * Released after second beep            -> capture a screenshot.
-  //   * Not pressed                           -> normal boot.
+  // window; a second beep 5 s later marks the switch to screenshot:
+  //   * Released before second beep (<=5 s) -> enter config portal.
+  //   * Released after second beep          -> capture a screenshot.
+  //   * Not pressed                         -> normal boot.
   // On cold boot we also trigger the portal automatically when no
   // Wi-Fi credentials are available (NVS + secrets.h both empty).
   enum class GreenGesture { None, PortalRequest, ScreenshotRequest };
@@ -1272,7 +1272,7 @@ void setup() {
   if (greenPressedAtBoot) {
     hardware::beep();  // first beep: portal window is open.
     const uint32_t gestureStartMs = millis();
-    constexpr uint32_t kPortalDecisionMs = 1500;
+    constexpr uint32_t kPortalDecisionMs = 5000;
     bool releasedBeforeDecision = false;
     uint32_t releasedAtMs = 0;
     while (millis() - gestureStartMs < kPortalDecisionMs) {
