@@ -1258,10 +1258,12 @@ void setup() {
   xkcd_wifi::load();
 
   // Unified green-button boot gesture. Applies on both cold boot and
-  // deep-sleep green wakes:
-  //   * Released within 1500 ms  -> enter config portal.
-  //   * Still held at 1500 ms    -> beep to mark the transition, then
-  //                                  once released, take a screenshot.
+  // deep-sleep green wakes. An initial short beep is emitted immediately
+  // as an auditory "release me" cue:
+  //   * Released within 3 s      -> enter config portal.
+  //   * Still held at 3 s        -> second beep marks the transition,
+  //                                  then once released a screenshot is
+  //                                  captured.
   //   * Not pressed              -> normal boot.
   // On cold boot we also trigger the portal automatically when no
   // Wi-Fi credentials are available (NVS + secrets.h both empty).
@@ -1270,28 +1272,31 @@ void setup() {
   const bool greenPressedAtBoot =
       (coldBoot && !digitalRead(PIN_BUTTON_GREEN)) || greenWokeDevice;
   if (greenPressedAtBoot) {
+    hardware::beep();  // "I'm awake -- release now for portal, keep holding for screenshot."
     const uint32_t gestureStartMs = millis();
-    constexpr uint32_t kPortalDecisionMs = 1500;
+    constexpr uint32_t kPortalDecisionMs = 3000;
     bool releasedBeforeDecision = false;
+    uint32_t releasedAtMs = 0;
     while (millis() - gestureStartMs < kPortalDecisionMs) {
       if (digitalRead(PIN_BUTTON_GREEN)) {
         releasedBeforeDecision = true;
+        releasedAtMs = millis() - gestureStartMs;
         break;
       }
       delay(5);
     }
     if (releasedBeforeDecision) {
+      LOG.printf("[gesture] green released after %u ms -> portal\n",
+                 static_cast<unsigned>(releasedAtMs));
       gesture = GreenGesture::PortalRequest;
     } else {
-      // 1.5 s elapsed with green still held -> commit to screenshot mode
-      // and audibly acknowledge the split. Then wait for the operator to
-      // let go (with debounce) so the rest of the flow sees a clean idle
-      // pin state.
+      LOG.printf("[gesture] green still held at %u ms -> screenshot\n",
+                 static_cast<unsigned>(kPortalDecisionMs));
       hardware::beep();
       gesture = GreenGesture::ScreenshotRequest;
       uint32_t releaseStarted = 0;
       const uint32_t releaseWaitDeadlineMs =
-          gestureStartMs + config::SCREENSHOT_LONG_PRESS_MS + 2000;
+          gestureStartMs + config::SCREENSHOT_LONG_PRESS_MS + 3000;
       while (millis() < releaseWaitDeadlineMs) {
         if (!digitalRead(PIN_BUTTON_GREEN)) {
           releaseStarted = 0;
