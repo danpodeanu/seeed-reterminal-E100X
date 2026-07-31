@@ -1,0 +1,236 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>reTerminal E100X web flasher</title>
+    <link rel="icon" href="data:," />
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #ffffff;
+        --fg: #101418;
+        --muted: #5a6470;
+        --border: #d0d7de;
+        --accent: #0969da;
+        --accent-fg: #ffffff;
+        --card: #f6f8fa;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #0d1117;
+          --fg: #e6edf3;
+          --muted: #8b949e;
+          --border: #30363d;
+          --accent: #2f81f7;
+          --accent-fg: #ffffff;
+          --card: #161b22;
+        }
+      }
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          Helvetica, Arial, sans-serif;
+        background: var(--bg);
+        color: var(--fg);
+        margin: 0;
+        padding: 2rem 1rem;
+      }
+      main {
+        max-width: 44rem;
+        margin: 0 auto;
+      }
+      h1 {
+        margin-top: 0;
+        font-size: 1.75rem;
+      }
+      h2 {
+        margin-top: 2rem;
+        font-size: 1.15rem;
+      }
+      p,
+      li {
+        line-height: 1.55;
+      }
+      code {
+        background: var(--card);
+        padding: 0.05rem 0.3rem;
+        border-radius: 3px;
+        font-size: 0.9em;
+      }
+      .card {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 1.25rem;
+        margin: 1rem 0;
+      }
+      .row {
+        display: grid;
+        gap: 0.75rem;
+        grid-template-columns: 1fr 1fr;
+      }
+      @media (max-width: 32rem) {
+        .row {
+          grid-template-columns: 1fr;
+        }
+      }
+      label {
+        display: flex;
+        flex-direction: column;
+        font-size: 0.9rem;
+        gap: 0.25rem;
+        color: var(--muted);
+      }
+      select {
+        font: inherit;
+        padding: 0.55rem 0.75rem;
+        background: var(--bg);
+        color: var(--fg);
+        border: 1px solid var(--border);
+        border-radius: 6px;
+      }
+      .install-row {
+        margin-top: 1.25rem;
+        display: flex;
+        align-items: center;
+        gap: 1rem;
+        flex-wrap: wrap;
+      }
+      esp-web-install-button {
+        --esp-tools-button-color: var(--accent-fg);
+        --esp-tools-button-background-color: var(--accent);
+      }
+      .status {
+        color: var(--muted);
+        font-size: 0.9rem;
+      }
+      .status.error {
+        color: #d1242f;
+      }
+      .warn {
+        border-left: 4px solid #d29922;
+        padding: 0.5rem 0.85rem;
+        background: var(--card);
+        border-radius: 0 6px 6px 0;
+        margin: 1rem 0;
+      }
+      a {
+        color: var(--accent);
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>reTerminal E100X web flasher</h1>
+      <p>
+        Flash the latest published firmware to a Seeed Studio reTerminal
+        E1001&nbsp;/&nbsp;E1002&nbsp;/&nbsp;E1003&nbsp;/&nbsp;E1004 directly
+        from the browser over USB. No installer, no
+        <code>esptool.py</code>.
+      </p>
+
+      <div class="warn">
+        <strong>Browser support.</strong> This page uses the Web Serial API,
+        which is available in Chrome, Edge, Opera, and other Chromium-based
+        browsers on desktop. Firefox and Safari are not supported.
+      </div>
+
+      <div class="card">
+        <div class="row">
+          <label>
+            Board
+            <select id="board">
+              <option value="reterminal_e1001">reTerminal E1001</option>
+              <option value="reterminal_e1002">reTerminal E1002</option>
+              <option value="reterminal_e1003" selected>
+                reTerminal E1003
+              </option>
+              <option value="reterminal_e1004">reTerminal E1004</option>
+            </select>
+          </label>
+          <label>
+            Application
+            <select id="app">
+              <option value="xkcd-viewer">XKCD Viewer</option>
+              <option value="weather-viewer">Weather Viewer</option>
+              <option value="photo-viewer" selected>Photo Viewer</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="install-row">
+          <esp-web-install-button id="installer" manifest="" hidden>
+            <button slot="activate">Connect and install</button>
+            <span slot="unsupported">
+              Web Serial isn't available in this browser. Try Chrome or Edge.
+            </span>
+            <span slot="not-allowed">
+              This page must be served over HTTPS.
+            </span>
+          </esp-web-install-button>
+          <span id="status" class="status">Loading latest release&hellip;</span>
+        </div>
+      </div>
+
+      <h2>How it works</h2>
+      <ol>
+        <li>Choose a board and an application above.</li>
+        <li>
+          Click <em>Connect and install</em>. The browser will ask which USB
+          serial port to use — pick the reTerminal.
+        </li>
+        <li>
+          The flasher writes the merged image to flash offset&nbsp;0 and
+          reboots. The device continues into the app on its own.
+        </li>
+      </ol>
+
+      <h2>First-time setup</h2>
+      <ul>
+        <li>
+          Connect the reTerminal to your computer with a USB-C data cable.
+        </li>
+        <li>
+          On Windows you may need the CH340 or CP210x USB serial driver the
+          first time. macOS and Linux ship with both.
+        </li>
+        <li>
+          If the browser can't see any serial port, close other tools that
+          might be holding it (PlatformIO monitor, Arduino IDE, screen).
+        </li>
+        <li>
+          If the device won't accept the flash, hold the boot button while
+          plugging the cable in, then release. Most factory-fresh boards do
+          not need this.
+        </li>
+      </ul>
+
+      <h2>What gets flashed</h2>
+      <p>
+        Each build is a single merged image containing the bootloader, the
+        partition table, the OTA selector, and the application. It is
+        produced by CI from the tagged source in
+        <a href="https://github.com/danpodeanu/seeed-reterminal-E100X"
+          >danpodeanu/seeed-reterminal-E100X</a
+        >
+        and attached to the matching GitHub Release. No pre-shared
+        credentials are baked in; configure Wi-Fi and any API keys per the
+        application's README before or after flashing.
+      </p>
+
+      <p class="status">
+        Firmware source and release notes:
+        <a
+          href="https://github.com/danpodeanu/seeed-reterminal-E100X/releases/latest"
+          >github.com/danpodeanu/seeed-reterminal-E100X/releases/latest</a
+        >
+      </p>
+    </main>
+
+    <script type="module" src="./manifest.js"></script>
+    <script
+      type="module"
+      src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"
+    ></script>
+  </body>
+</html>

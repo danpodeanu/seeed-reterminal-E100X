@@ -1,0 +1,113 @@
+name: Release firmware
+
+# Builds every app x board combination, merges each into a single
+# flashable binary, and attaches the results to the GitHub Release.
+# The web flasher in docs/ reads the release assets by name.
+#
+# Trigger: pushing a semver tag such as `v1.2.3`. Manual runs are
+# supported via `workflow_dispatch`; they build against the default
+# branch and attach the assets to a draft release named "manual-<sha>".
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: ${{ matrix.app }} / ${{ matrix.board }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [xkcd-viewer, weather-viewer, photo-viewer]
+        board:
+          - reterminal_e1001
+          - reterminal_e1002
+          - reterminal_e1003
+          - reterminal_e1004
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install PlatformIO
+        run: python -m pip install --upgrade platformio esptool intelhex resvg_py Pillow
+
+      - name: Create placeholder credentials
+        working-directory: ${{ matrix.app }}
+        run: cp include/secrets.h.example include/secrets.h
+
+      - name: Build firmware
+        working-directory: ${{ matrix.app }}
+        run: pio run -e "${{ matrix.board }}"
+
+      - name: Merge flash image
+        working-directory: ${{ matrix.app }}
+        run: |
+          BUILD_DIR=".pio/build/${{ matrix.board }}"
+          BOOT_APP0="$(find ~/.platformio/packages/framework-arduinoespressif32 -name boot_app0.bin | head -n1)"
+          if [ -z "$BOOT_APP0" ]; then
+            echo "boot_app0.bin not found" >&2
+            exit 1
+          fi
+          OUT="firmware-${{ matrix.app }}-${{ matrix.board }}.bin"
+          # Offsets match the arduino-esp32 partition table used by the
+          # Seeed reTerminal E100X boards. The merged image is flashed
+          # at 0x0 and includes bootloader, partitions, OTA selector,
+          # and application.
+          python -m esptool --chip esp32s3 merge_bin \
+            --output "$OUT" \
+            --flash_mode dio --flash_freq 80m --flash_size 8MB \
+            0x0000   "$BUILD_DIR/bootloader.bin" \
+            0x8000   "$BUILD_DIR/partitions.bin" \
+            0xe000   "$BOOT_APP0" \
+            0x10000  "$BUILD_DIR/firmware.bin"
+          ls -la "$OUT"
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-${{ matrix.app }}-${{ matrix.board }}
+          path: ${{ matrix.app }}/firmware-${{ matrix.app }}-${{ matrix.board }}.bin
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    name: Publish release assets
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    steps:
+      - name: Download all firmware artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Flatten artifacts
+        run: |
+          mkdir -p release
+          find artifacts -type f -name '*.bin' -exec cp {} release/ \;
+          ls -la release/
+
+      - name: Upload to release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release/*.bin
+          fail_on_unmatched_files: true

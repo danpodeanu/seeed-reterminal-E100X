@@ -176,6 +176,37 @@ All three front buttons are deep-sleep wake sources:
 On E1001–E1003 the green/right button is GPIO3. E1004 uses the three physical
 front buttons; no touch input is required.
 
+## Wi-Fi upload portal
+
+The green button also serves as a one-shot Wi-Fi upload path, so a new photo
+can be prepared and stored on the SD card without removing it from the frame:
+
+1. Press green. The panel switches to the portal welcome screen, which shows
+   three QR codes: the Wi-Fi network to join, the portal URL, and a direct
+   link to the online help page. The tagline reads *Press arrow to exit*.
+2. The device brings up an open WPA-none access point named
+   `ReTerminal <last four MAC digits>` and a captive-portal web server on
+   `http://192.168.4.1`. The SSID and URL are also printed on the panel.
+3. Connect a phone, tablet, or laptop to the AP and open the portal URL
+   (the captive-portal dialog usually opens on its own). The upload page
+   accepts JPG and PNG only. iOS Safari transparently converts HEIC files to
+   JPEG during selection, so photos taken on an iPhone work directly.
+4. The page previews the image, applies the same crop-to-cover, gamma, and
+   dithering pipeline used by `prepare_photos.py`, and streams the resulting
+   4-bit BMP straight to `/photos/` on the SD card. A success banner
+   ("Uploaded. Next panel refresh will show this photo.") persists so the
+   next upload can be prepared without page reload.
+5. Pressing either arrow button exits the portal, tears down the AP, and
+   returns to the normal photo view. A *Switch display to photo view*
+   button on the upload page does the same over the network so the exit can
+   be triggered from the phone after the upload completes.
+
+The portal only starts on the green button; the device never brings up an AP
+during ordinary photo changes or timer wakes. The AP is deliberately open —
+its scope is one file transfer to `/photos/` on the local SD card, no
+credentials are ever transmitted, and Wi-Fi is torn down before the device
+returns to deep sleep in either exit path.
+
 ## SD-card errors
 
 Without a mounted card, or when `/photos` is empty, the frame displays a clear

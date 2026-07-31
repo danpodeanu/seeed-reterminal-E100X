@@ -5,6 +5,7 @@
 [![Photo Viewer build](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/photo-viewer-build.yml/badge.svg?branch=main&event=push)](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/photo-viewer-build.yml)
 [![Repository checks](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/repository-checks.yml/badge.svg?branch=main&event=push)](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/repository-checks.yml)
 [![CodeQL](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/codeql.yml/badge.svg?branch=main&event=push)](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/codeql.yml)
+[![Release firmware](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/release.yml/badge.svg)](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/release.yml)
 
 A collection of applications for the
 [Seeed Studio reTerminal E Series](https://wiki.seeedstudio.com/reterminal_e10xx_main_page/)
@@ -55,6 +56,7 @@ different framework or architecture where that better suits their use case.
 .
 ├── .github/workflows/    # Repository-level build checks
 ├── common/               # Shared driver, board pin, and helper code (e-paper setup, SD, RTC, sensors)
+├── docs/                 # Web flasher (GitHub Pages)
 ├── xkcd-viewer/          # Standalone XKCD display firmware
 ├── weather-viewer/       # Standalone weather display firmware
 ├── photo-viewer/         # SD-card photo-frame firmware and preparation tool
@@ -83,6 +85,11 @@ uploading firmware.
 Choose an application from the table above and follow the instructions in its
 README. Do not assume that firmware built for one E100X model is suitable for
 another; select the exact device target during compilation.
+
+For pre-built firmware, the
+[web flasher](https://danpodeanu.github.io/seeed-reterminal-E100X/) writes
+the latest GitHub Release for any application × board combination directly
+from Chrome or Edge over USB. See [`docs/`](docs/) for how it is wired up.
 
 ## Testing
 
