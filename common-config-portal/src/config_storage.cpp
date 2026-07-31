@@ -58,17 +58,20 @@ bool PrefsStorage::clear() { return prefs_.clear(); }
 void loadForGet(Storage& s, const Schema& schema,
                 std::vector<std::pair<String, String>>& out) {
   out.clear();
-  if (!s.begin(schema.nvsNamespace, true)) return;
+  const bool nvsOpen = s.begin(schema.nvsNamespace, true);
   for (size_t si = 0; si < schema.sectionCount; ++si) {
     const Section& section = schema.sections[si];
     for (size_t fi = 0; fi < section.fieldCount; ++fi) {
       const Field& f = section.fields[fi];
-      String value = readField(s, f);
+      // If NVS is unavailable (e.g. the namespace hasn't been created
+      // yet on a fresh device), fall back to the schema defaults so the
+      // browser can still pre-populate the form.
+      String value = nvsOpen ? readField(s, f) : String(defVal(f));
       if (isSecret(f) && value.length() > 0) value = kSecretSentinel;
       out.push_back(std::make_pair(String(f.key), value));
     }
   }
-  s.end();
+  if (nvsOpen) s.end();
 }
 
 bool save(Storage& s, const Schema& schema,
