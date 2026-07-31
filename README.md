@@ -16,6 +16,12 @@ for information that changes occasionally. Each application lives in its own
 folder with its own setup instructions, dependencies, and supported-device
 details.
 
+> ### 🔌 [Flash your reTerminal from the browser](https://danpodeanu.github.io/seeed-reterminal-E100X/)
+>
+> No installer, no `esptool.py`. Pick the board and application, plug in
+> the USB-C cable, and Chrome or Edge writes the latest release straight
+> to the device over Web Serial.
+
 ## Applications
 
 | Application | Description | Status |
