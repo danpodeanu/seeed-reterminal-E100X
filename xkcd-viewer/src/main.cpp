@@ -44,6 +44,7 @@
 #include "panel_watchdog.h"
 #include "timestamped_logger.h"
 #include "config_portal.h"
+#include "config_portal_ui.h"
 #include "wifi_schema.h"
 #include "xkcd_config_runtime.h"
 #include "xkcd_config_schema.h"
@@ -1258,12 +1259,13 @@ void setup() {
 
   // Configuration-portal trigger. Only checked on cold boot to avoid
   // interfering with timer wakes and button-driven navigation:
-  //   * Wi-Fi NVS empty (first boot after flashing, or after "Clear") -- OR
+  //   * No Wi-Fi credentials available anywhere (NVS empty AND secrets.h
+  //     blank / not configured) -- OR
   //   * Green button held during the first ~1500 ms of boot.
   // The portal owns the device until it reboots via ESP.restart(); when
   // this call returns we simply continue booting normally.
   if (coldBoot) {
-    const bool wifiUnconfigured = xkcd_wifi::nvsEmpty();
+    const bool wifiUnconfigured = !xkcd_wifi::haveCredentials();
     const uint32_t triggerWindowMs = 1500;
     const uint32_t triggerStart = millis();
     bool greenHeldForPortal = false;
@@ -1275,15 +1277,63 @@ void setup() {
       delay(10);
     }
     if (wifiUnconfigured || greenHeldForPortal) {
-      LOG.printf("[portal] entering config portal (wifi_empty=%d green=%d)\n",
+      LOG.printf("[portal] entering config portal (no_wifi=%d green=%d)\n",
                  wifiUnconfigured, greenHeldForPortal);
       config_portal::Config portalCfg;
       portalCfg.wifiSchema = &config_portal::kWifiSchema;
       portalCfg.appSchema = &xkcd_config::kSchema;
       portalCfg.appName = "xkcd viewer";
       if (config_portal::begin(portalCfg)) {
+        // Bring the panel up and render a QR splash so the user can join
+        // the AP and open the portal without needing a serial console.
+        epaper.begin();
+#if RETERMINAL_MODEL == 1001
+        epaper.initGrayMode(GRAY_LEVEL4);
+        const GFXfont* titleFont    = &FreeSansBold18pt7b;
+        const GFXfont* subtitleFont = &FreeSans12pt7b;
+        const GFXfont* captionFont  = &FreeSansBold12pt7b;
+        const GFXfont* detailFont   = &FreeSans9pt7b;
+#elif RETERMINAL_MODEL == 1003
+        epaper.initGrayMode(GRAY_LEVEL16);
+        const GFXfont* titleFont    = &FreeSansBold24pt7b;
+        const GFXfont* subtitleFont = &FreeSans18pt7b;
+        const GFXfont* captionFont  = &FreeSansBold18pt7b;
+        const GFXfont* detailFont   = &FreeSans12pt7b;
+#else
+        const GFXfont* titleFont    = &FreeSansBold18pt7b;
+        const GFXfont* subtitleFont = &FreeSans12pt7b;
+        const GFXfont* captionFont  = &FreeSansBold12pt7b;
+        const GFXfont* detailFont   = &FreeSans9pt7b;
+#endif
+        config_portal::ui::RenderInfo info;
+        info.modelLabel = MODEL_NAME;
+        info.title = "Configure";
+        info.tagline = "Join the AP to set Wi-Fi + settings";
+        info.ssid = config_portal::currentSsid();
+        info.url = String("http://") + config_portal::currentIp().toString();
+        info.macAddress = wifi_sta::stationMacAddress();
+        info.wifiPayload = config_portal::wifiQrPayload(info.ssid, nullptr);
+        info.urlPayload = config_portal::urlQrPayload(
+            config_portal::currentIp(), config_portal::currentPort(), "/wifi");
+        info.fonts.titleFont = titleFont;
+        info.fonts.subtitleFont = subtitleFont;
+        info.fonts.captionFont = captionFont;
+        info.fonts.detailFont = detailFont;
+        config_portal::ui::renderPortalScreen<EPaper>(
+            epaper, config::PANEL_WIDTH, config::PANEL_HEIGHT, PANEL_BLACK,
+            PANEL_WHITE, info);
+        panel_watchdog::guard([]() { epaper.update(); });
+
+        uint32_t lastHeartbeatMs = millis();
         while (!config_portal::rebootRequested()) {
           config_portal::loop();
+          const uint32_t nowMs = millis();
+          if (nowMs - lastHeartbeatMs >= 15000) {
+            LOG.printf("[portal] waiting for client on http://%s (SSID \"%s\")\n",
+                       config_portal::currentIp().toString().c_str(),
+                       config_portal::currentSsid().c_str());
+            lastHeartbeatMs = nowMs;
+          }
           delay(5);
         }
         config_portal::end();
