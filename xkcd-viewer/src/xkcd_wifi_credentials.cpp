@@ -43,10 +43,22 @@ void load() {
   // NVS empty (or unavailable) -- fall back to secrets.h defaults.
   g_ssid = WIFI_SSID;
   g_password = WIFI_PASSWORD;
+  // secrets.h.example ships with "YOUR_WIFI_NAME" / "YOUR_WIFI_PASSWORD"
+  // sentinels. Treat them as "unconfigured" so callers see empty
+  // strings: the boot flow launches the config portal (see
+  // haveCredentials() below) and the /wifi form pre-fills to blank
+  // instead of asking the user to delete the placeholder text.
+  if (isPlaceholder(g_ssid)) {
+    g_ssid = "";
+    g_password = "";
+  }
   g_loaded = true;
 }
 
 bool haveCredentials() {
+  // g_ssid is already scrubbed of the placeholder in load(); the extra
+  // isPlaceholder check here is defensive belt-and-braces in case
+  // something ever assigns g_ssid directly.
   return g_loaded && g_ssid.length() > 0 && !isPlaceholder(g_ssid);
 }
 bool nvsEmpty()        { return g_nvsEmpty; }
