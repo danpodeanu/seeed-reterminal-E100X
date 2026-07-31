@@ -45,7 +45,7 @@ jobs:
           set -euo pipefail
           forbidden="$(
             git ls-files |
-              grep -E '(^|/)secrets\.h$|(^|/)\.pio/|(^|/)firmware\.(bin|elf|map)$' ||
+              grep -E '(^|/)\.pio/|(^|/)firmware\.(bin|elf|map)$' ||
               true
           )"
           if [[ -n "$forbidden" ]]; then
@@ -53,3 +53,31 @@ jobs:
             echo "$forbidden"
             exit 1
           fi
+
+      - name: Ensure secrets.h files match their .example templates
+        shell: bash
+        # secrets.h is intentionally tracked now (see commit 041a416) so
+        # a fresh clone builds without a manual copy step. This check is
+        # the CI-side twin of .githooks/pre-commit: it refuses any
+        # secrets.h that has diverged from its sibling .example -- i.e.
+        # a real credential leaked in. To reshape the template legitimately,
+        # update BOTH files in the same commit.
+        run: |
+          set -euo pipefail
+          fail=0
+          while IFS= read -r f; do
+            [ -z "$f" ] && continue
+            example="${f}.example"
+            if [ ! -f "$example" ]; then
+              echo "warning: no $example next to $f; skipping" >&2
+              continue
+            fi
+            if ! diff -q "$f" "$example" >/dev/null 2>&1; then
+              fail=1
+              echo "error: $f differs from $example"
+              echo "  Real credentials likely leaked into the tracked copy."
+              echo "  Reset with: cp $example $f"
+              diff -u "$example" "$f" | head -40 || true
+            fi
+          done < <(git ls-files | grep -E '(^|/)include/secrets\.h$' || true)
+          exit $fail
