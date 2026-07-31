@@ -1,0 +1,38 @@
+#!/bin/sh
+# Refuse to commit an include/secrets.h that differs from its sibling
+# include/secrets.h.example. This catches the common leak: filling in
+# real Wi-Fi / QWeather credentials on a checkout that now tracks
+# secrets.h (see commit 041a416).
+#
+# Bypass with `git commit --no-verify` if you *intentionally* changed
+# the template shape -- and then remember to update the .example too.
+
+set -e
+
+staged=$(git diff --cached --name-only --diff-filter=ACM \
+  | grep -E '(^|/)include/secrets\.h$' || true)
+[ -z "$staged" ] && exit 0
+
+fail=0
+for f in $staged; do
+  example="${f}.example"
+  if [ ! -f "$example" ]; then
+    printf 'pre-commit: no %s next to %s; skipping template check\n' \
+      "$example" "$f" >&2
+    continue
+  fi
+  # Compare the staged blob (":$f") against the working-tree .example.
+  if ! git show ":$f" | diff -q - "$example" >/dev/null 2>&1; then
+    fail=1
+    printf '\npre-commit: %s differs from %s\n' "$f" "$example" >&2
+    printf '  Real credentials likely leaked into the staged copy.\n' >&2
+    printf '  Restore the placeholder with:\n' >&2
+    printf '    cp %s %s\n' "$example" "$f" >&2
+    printf '    git add %s\n' "$f" >&2
+    printf '  If you *did* mean to change the template shape, also\n' >&2
+    printf '  update %s and rerun the commit.\n' "$example" >&2
+    printf '  Emergency bypass: git commit --no-verify\n' >&2
+  fi
+done
+
+exit $fail
