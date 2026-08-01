@@ -21,40 +21,87 @@ namespace {
 // every SPI SD op as retryable so a single glitch doesn't propagate
 // into "missing font", "cache write dropped", etc.
 //
-// Retries use exponential backoff: 25, 50, 100, 200, 400 ms between
-// attempts (~775 ms cumulative budget across 5 tries). That's enough
-// to ride through the worst observed post-Wi-Fi-teardown SD stalls
-// without noticeably delaying the boot on a healthy card, which
-// succeeds on the first attempt in a handful of milliseconds.
+// Two-stage recovery:
+//   - Stage 1: 5 fast retries with exponential backoff (25/50/100/200 ms
+//     between attempts, ~375 ms of sleeps). Handles brief SPI stalls
+//     without touching the SD driver state.
+//   - Stage 2: if all fast retries fail, do a full SD.end() +
+//     SD.begin() bus reset and try one more time. Recovers from the
+//     "driver got wedged after a big HTTPS+gzip transfer" case where
+//     every SD.open() itself blocks for ~1 s before returning false -
+//     no amount of additional retries helps there, only a bus reset.
+// A healthy card still succeeds on the first attempt, so the boot
+// cost is unchanged; the extra logic only pays when it actually
+// prevents a lost cache write or a missing font.
 constexpr int kSdOpRetries = 5;
 constexpr uint32_t kSdOpInitialDelayMs = 25;
+
+// Bus state captured during mount() so we can transparently remount
+// during the fallback recovery step. Set once at mount, never
+// modified afterwards; nullptr means mount() has not run.
+SPIClass* g_spi = nullptr;
+int g_csPin = -1;
+
+// Rate-limit remount attempts to at most once per burst window so
+// repeated failing ops don't each pay the SD.begin() cost.
+uint32_t g_lastRemountMs = 0;
+constexpr uint32_t kRemountCooldownMs = 500;
 
 // Sleep between attempt `attempt` (0-based) and the next one. Doubles
 // each step so the tail attempts absorb longer SPI stalls without
 // paying that cost when the first retry is enough.
 void backoffSleep(int attempt) {
-  uint32_t delayMs = kSdOpInitialDelayMs << attempt;  // 25, 50, 100, 200, 400
+  uint32_t delayMs = kSdOpInitialDelayMs << attempt;  // 25, 50, 100, 200
   delay(delayMs);
 }
 
-// Try opening `path` in `mode` up to kSdOpRetries times. Returns the
-// first non-falsy File; the caller inherits ownership (call close()).
+// Reset the SD driver in place. Called after a burst of failed ops,
+// to recover the "driver wedged" case where SD.open()/rename()/remove()
+// all keep blocking for ~1 s before returning false. SD.end() +
+// SD.begin() flushes the driver's internal state and re-negotiates
+// the card. Returns true if the remount succeeded.
+bool attemptRemount() {
+  if (!g_spi || g_csPin < 0) return false;
+  const uint32_t now = millis();
+  if (g_lastRemountMs != 0 &&
+      (now - g_lastRemountMs) < kRemountCooldownMs) {
+    // Another op in the same burst already remounted us; don't do
+    // it again in case the card genuinely is unhappy.
+    return false;
+  }
+  g_lastRemountMs = now;
+  SD.end();
+  delay(50);
+  const bool ok = SD.begin(g_csPin, *g_spi);
+  LOG.printf("[sd] bus reset after stalled op -> %s\n",
+             ok ? "remounted" : "failed");
+  return ok;
+}
+
+// Try opening `path` in `mode` up to kSdOpRetries times, then do one
+// remount + one more attempt on the failure path. Returns the first
+// non-falsy File; the caller inherits ownership (call close()).
 File retryingOpen(const String& path, const char* mode) {
   File file = SD.open(path, mode);
   for (int attempt = 0; !file && attempt < kSdOpRetries - 1; ++attempt) {
     backoffSleep(attempt);
     file = SD.open(path, mode);
   }
+  if (!file && attemptRemount()) {
+    file = SD.open(path, mode);
+  }
   return file;
 }
 
-// Try SD.rename until it succeeds or we've burned through kSdOpRetries.
+// Try SD.rename until it succeeds or we've burned through kSdOpRetries
+// plus a remount recovery attempt.
 bool retryingRename(const String& from, const String& to) {
   if (SD.rename(from, to)) return true;
   for (int attempt = 0; attempt < kSdOpRetries - 1; ++attempt) {
     backoffSleep(attempt);
     if (SD.rename(from, to)) return true;
   }
+  if (attemptRemount() && SD.rename(from, to)) return true;
   return false;
 }
 
@@ -67,6 +114,7 @@ bool retryingMkdir(const char* path) {
     backoffSleep(attempt);
     if (SD.mkdir(path)) return true;
   }
+  if (attemptRemount() && SD.mkdir(path)) return true;
   return false;
 }
 
@@ -86,6 +134,12 @@ bool retryingRemove(const String& path) {
     backoffSleep(attempt);
     if (SD.remove(path)) return true;
   }
+  if (attemptRemount()) {
+    File probe = SD.open(path, FILE_READ);
+    if (!probe) return true;
+    probe.close();
+    if (SD.remove(path)) return true;
+  }
   return false;
 }
 
@@ -98,6 +152,7 @@ bool retryingRmdir(const String& path) {
     backoffSleep(attempt);
     if (SD.rmdir(path)) return true;
   }
+  if (attemptRemount() && SD.rmdir(path)) return true;
   return false;
 }
 
@@ -166,6 +221,10 @@ bool mount(SPIClass& spi, const char* cacheDir) {
     digitalWrite(board::PIN_SD_ENABLE, LOW);
     return false;
   }
+  // Capture the bus + CS so attemptRemount() can reset the driver
+  // later without re-plumbing the SPI object through every caller.
+  g_spi = &spi;
+  g_csPin = board::PIN_SD_CS;
   if (!fileExists(cacheDir) && !retryingMkdir(cacheDir)) {
     LOG.printf("[sd] could not create %s\n", cacheDir);
     SD.end();
