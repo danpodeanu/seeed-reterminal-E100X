@@ -76,14 +76,15 @@ MODELS: List[ModelSpec] = [
     # intermediate grays for a gradient) - all four themes still small.
     ModelSpec(1002, 800, 480, False, 1, 2, 1, ALL_THEMES,
               "weather_background_data_e1002.cpp"),
-    # E1003 16-gray 1872x1404. One 2bpp half-res payload is 164 KB.
-    # Bundling all four themes would cost ~656 KB and push flash back to
-    # ~90%, so this model bundles cloudy only.
-    ModelSpec(1003, 1872, 1404, False, 2, 4, 2, CLOUDY_ONLY,
+    # E1003 16-gray 1872x1404. Quarter-res (scale=4, 468x351) 2bpp is
+    # ~41 KB per theme, so all four fit in ~164 KB - same footprint as
+    # the previous single-theme half-res payload.
+    ModelSpec(1003, 1872, 1404, False, 2, 4, 4, ALL_THEMES,
               "weather_background_data_e1003.cpp"),
-    # E1004 Spectra 6 1200x1600 portrait. 1bpp payload is 240 KB; four
-    # would cost ~960 KB and squeeze flash the same way. Cloudy only.
-    ModelSpec(1004, 1200, 1600, True, 1, 2, 1, CLOUDY_ONLY,
+    # E1004 Spectra 6 1200x1600 portrait. Half-res (scale=2, 600x800)
+    # 1bpp is ~60 KB per theme, so all four fit in ~240 KB - same
+    # footprint as the previous single-theme full-res payload.
+    ModelSpec(1004, 1200, 1600, True, 1, 2, 2, ALL_THEMES,
               "weather_background_data_e1004.cpp"),
 ]
 
