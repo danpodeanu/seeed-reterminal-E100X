@@ -1,5 +1,5 @@
-// AUTO-GENERATED - weather background for reTerminal E1003.
-// Panel 1872x1404 (landscape), payload 936x702 @ 2bpp x2 nearest-neighbor upscale (4 gray levels).
+// AUTO-GENERATED - weather background(s) for reTerminal E1003.
+// Panel 1872x1404 (landscape), 1 theme(s), each 936x702 @ 2bpp x2 nearest-neighbor upscale (4 gray levels).
 // See tools/embed_weather_background.py to regenerate.
 
 #if defined(RETERMINAL_MODEL) && RETERMINAL_MODEL == 1003
@@ -15,9 +15,10 @@ extern const uint16_t kHeight = 702;
 extern const uint8_t  kBitsPerPixel = 2;
 extern const uint8_t  kLevels = 4;
 extern const uint8_t  kScale = 2;
-extern const size_t kDataLen = 164268;
+extern const uint8_t  kThemeCount = 1;
+extern const size_t   kThemeDataLen = 164268;
 
-extern const uint8_t kData[] PROGMEM = {
+static const uint8_t kCloudy[] PROGMEM = {
   0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
   0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
   0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff, 0xff,
@@ -10286,6 +10287,8 @@ extern const uint8_t kData[] PROGMEM = {
   0xff, 0xfe, 0xff, 0xfb, 0xef, 0xff, 0xef, 0xff, 0xff, 0xff, 0xff, 0xfe, 0xfb, 0xff, 0xff, 0xbf,
   0xbe, 0xfb, 0xef, 0xbf, 0xff, 0xff, 0xef, 0xff, 0xff, 0xff, 0xfb, 0xfb,
 };
+
+extern const uint8_t* const kThemeData[4] = { kCloudy, kCloudy, kCloudy, kCloudy };
 
 }  // namespace weather_background
 

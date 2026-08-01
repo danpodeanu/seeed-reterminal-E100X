@@ -1046,7 +1046,8 @@ void renderWeather(const WeatherData& weather) {
   // user has toggled the background off in /settings, fall back to a
   // plain white sprite instead.
   if (weather_config::runtime::weatherBackgroundEnabled()) {
-    weather_background::draw(epaper);
+    weather_background::draw(
+        epaper, weather_background::themeForWmoCode(weather.weatherCode));
   } else {
     epaper.fillSprite(PANEL_WHITE);
   }

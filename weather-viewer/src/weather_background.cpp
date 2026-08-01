@@ -7,7 +7,7 @@ namespace {
 
 // Return the color the panel should use for gray level `idx` out of
 // `kLevels`. Splitting this out keeps the pixel loop palette-agnostic:
-// the blitter unpacks kData indices in the range 0..kLevels-1 and calls
+// the blitter unpacks indices in the range 0..kLevels-1 and calls
 // paletteColor() to translate to the model's native palette.
 inline uint32_t paletteColor(uint8_t idx) {
 #if RETERMINAL_MODEL == 1001
@@ -35,7 +35,32 @@ inline uint32_t paletteColor(uint8_t idx) {
 
 }  // namespace
 
-void draw(TFT_eSPI& epaper) {
+Theme themeForWmoCode(int wmoCode) {
+  // The ranges mirror weather_quotes::wmoToBucketIndex so the background
+  // never disagrees with the hero icon or the footer proverb about what
+  // "kind" of weather it is. Freezing precipitation is treated as snowy
+  // for the picture even though other subsystems may bucket it as sleet.
+  switch (wmoCode) {
+    case 0:  return Theme::SUNNY;                    // clear sky
+    case 1:                                          // mainly clear
+    case 2:                                          // partly cloudy
+    case 3:  return Theme::CLOUDY;                   // overcast
+    case 45:                                         // fog
+    case 48: return Theme::CLOUDY;                   // depositing rime fog
+    default: break;
+  }
+  if (wmoCode >= 51 && wmoCode <= 55) return Theme::RAINY;    // drizzle
+  if (wmoCode == 56 || wmoCode == 57) return Theme::SNOWY;    // freezing drizzle
+  if (wmoCode >= 61 && wmoCode <= 65) return Theme::RAINY;    // rain
+  if (wmoCode == 66 || wmoCode == 67) return Theme::SNOWY;    // freezing rain
+  if (wmoCode >= 71 && wmoCode <= 77) return Theme::SNOWY;    // snow
+  if (wmoCode >= 80 && wmoCode <= 82) return Theme::RAINY;    // rain showers
+  if (wmoCode == 85 || wmoCode == 86) return Theme::SNOWY;    // snow showers
+  if (wmoCode >= 95 && wmoCode <= 99) return Theme::RAINY;    // thunderstorm
+  return Theme::CLOUDY;                                       // unknown / -1
+}
+
+void draw(TFT_eSPI& epaper, Theme theme) {
   const uint16_t w = kWidth;
   const uint16_t h = kHeight;
   const uint8_t bpp = kBitsPerPixel;
@@ -43,7 +68,10 @@ void draw(TFT_eSPI& epaper) {
   const uint16_t pixelsPerByte = 8 / bpp;
   const uint8_t mask = (1 << bpp) - 1;
   const size_t rowBytes = (size_t)w * bpp / 8;
-  const uint8_t* row = kData;
+  // Every slot in kThemeData is populated (single-theme models redirect
+  // unsupported themes to the cloudy payload), so we can index by theme
+  // without a null check.
+  const uint8_t* row = kThemeData[static_cast<uint8_t>(theme)];
   for (uint16_t y = 0; y < h; ++y) {
     for (uint16_t x = 0; x < w; x += pixelsPerByte) {
       const uint8_t b = pgm_read_byte(row + (x * bpp / 8));

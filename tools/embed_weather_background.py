@@ -1,11 +1,17 @@
 """Regenerate weather-viewer/src/weather_background_data_e1NNN.cpp for one model.
 
-Pipeline: LANCZOS upscale, Gaussian blur to melt the source halftone into
+Pipeline per theme: LANCZOS upscale, Gaussian blur to melt the source into
 continuous tone, unsharp mask to bring back edges, contrast auto-fix,
 optional rotation, LANCZOS resize to the target panel size, fade toward
 white so overlaid text stays legible, then Floyd-Steinberg dither to the
 model's target palette. Output is packed at the model's native bit depth
 and dropped in a per-model PROGMEM cpp guarded with `#if RETERMINAL_MODEL`.
+
+Each per-model file contains one payload array per supported theme plus a
+pointer table `kThemeData[4]` indexed by the C++ `Theme` enum. On models
+that only bundle the cloudy theme (E1003, E1004) every slot in the table
+points at the sole cloudy payload, so the blitter can index by theme
+unconditionally and callers can request any theme without a null check.
 
 Regenerate a single model:
     python tools/embed_weather_background.py --model 1003
@@ -19,13 +25,18 @@ import argparse
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, List, Tuple
+from typing import Callable, Dict, List, Tuple
 
 from PIL import Image, ImageFilter, ImageOps
 
 REPO = Path(__file__).resolve().parents[1]
-DEFAULT_SRC = REPO / "weather-viewer" / "assets" / "cloudy_source.png"
+ASSETS_DIR = REPO / "weather-viewer" / "assets"
 OUT_DIR = REPO / "weather-viewer" / "src"
+
+# Theme enum ordering. Matches Theme in weather_background.h - the pointer
+# table emitted below is indexed directly by the enum value.
+ALL_THEMES: Tuple[str, ...] = ("sunny", "cloudy", "rainy", "snowy")
+CLOUDY_ONLY: Tuple[str, ...] = ("cloudy",)
 
 # Fade the ink-wash toward white so headline text stays legible. 0.55 keeps
 # ~45% of the original ink, plenty to still read as a landscape.
@@ -41,6 +52,7 @@ class ModelSpec:
     bpp: int           # bits per pixel in the packed payload
     levels: int        # number of dither levels (2, 4, ...); must match bpp mask
     scale: int         # blitter upscale factor (1 = 1:1, 2 = nearest-neighbor 2x2)
+    themes: Tuple[str, ...]  # themes bundled for this model, in any order
     out_file: str
 
     @property
@@ -57,19 +69,22 @@ class ModelSpec:
 
 
 MODELS: List[ModelSpec] = [
-    # E1001 UC8179 4-gray landscape.
-    ModelSpec(1001, 800, 480, False, 2, 4, 1, "weather_background_data_e1001.cpp"),
-    # E1002 Spectra 6 landscape. Only black and white read cleanly for a
-    # dithered gray landscape on this palette, so store 1bpp BW.
-    ModelSpec(1002, 800, 480, False, 1, 2, 1, "weather_background_data_e1002.cpp"),
-    # E1003 16-gray landscape. 1872x1404 at 2bpp would be 657 KB. Store
-    # at half resolution and let the blitter upscale 2x with nearest
-    # neighbour - the picture is a stylised ink wash so soft edges are
-    # fine, and this drops the payload to ~164 KB and keeps E1003's
-    # firmware well under the flash limit.
-    ModelSpec(1003, 1872, 1404, False, 2, 4, 2, "weather_background_data_e1003.cpp"),
-    # E1004 Spectra 6 portrait. Same BW rationale as E1002.
-    ModelSpec(1004, 1200, 1600, True, 1, 2, 1, "weather_background_data_e1004.cpp"),
+    # E1001 UC8179 4-gray landscape. All four themes fit comfortably.
+    ModelSpec(1001, 800, 480, False, 2, 4, 1, ALL_THEMES,
+              "weather_background_data_e1001.cpp"),
+    # E1002 Spectra 6 landscape. 1bpp BW (Spectra 6 has no usable
+    # intermediate grays for a gradient) - all four themes still small.
+    ModelSpec(1002, 800, 480, False, 1, 2, 1, ALL_THEMES,
+              "weather_background_data_e1002.cpp"),
+    # E1003 16-gray 1872x1404. One 2bpp half-res payload is 164 KB.
+    # Bundling all four themes would cost ~656 KB and push flash back to
+    # ~90%, so this model bundles cloudy only.
+    ModelSpec(1003, 1872, 1404, False, 2, 4, 2, CLOUDY_ONLY,
+              "weather_background_data_e1003.cpp"),
+    # E1004 Spectra 6 1200x1600 portrait. 1bpp payload is 240 KB; four
+    # would cost ~960 KB and squeeze flash the same way. Cloudy only.
+    ModelSpec(1004, 1200, 1600, True, 1, 2, 1, CLOUDY_ONLY,
+              "weather_background_data_e1004.cpp"),
 ]
 
 
@@ -122,12 +137,31 @@ def pack(indexed: Image.Image, bpp: int) -> bytes:
     return bytes(out)
 
 
-def emit_cpp(spec: ModelSpec, payload: bytes, out_path: Path) -> None:
+def emit_cpp(spec: ModelSpec, payloads: Dict[str, bytes], out_path: Path) -> None:
+    """Emit one .cpp per model containing every bundled theme + a pointer
+    table indexed by the Theme enum.
+
+    ``payloads`` maps theme name -> packed bytes for that theme. All bundled
+    themes share the same payload size (driven by the ModelSpec), so we can
+    expose a single ``kThemeDataLen`` at the top of the file.
+    """
+    themes_present = list(payloads.keys())
+    payload_len = len(next(iter(payloads.values())))
+    # Sanity: all payloads for one model are the same shape.
+    assert all(len(p) == payload_len for p in payloads.values()), \
+        "theme payloads for one model must be same length"
+
+    # Fallback for slots in kThemeData[] we don't have a dedicated payload
+    # for: prefer 'cloudy' when available (it reads as neutral), else the
+    # first bundled theme.
+    fallback_theme = "cloudy" if "cloudy" in payloads else themes_present[0]
+
     lines = [
-        f"// AUTO-GENERATED - weather background for reTerminal E{spec.model}.",
+        f"// AUTO-GENERATED - weather background(s) for reTerminal E{spec.model}.",
         f"// Panel {spec.panel_w}x{spec.panel_h}"
         f" ({'portrait' if spec.portrait else 'landscape'}),"
-        f" payload {spec.payload_w}x{spec.payload_h}"
+        f" {len(themes_present)} theme(s), each"
+        f" {spec.payload_w}x{spec.payload_h}"
         f" @ {spec.bpp}bpp x{spec.scale} nearest-neighbor upscale"
         f" ({spec.levels} gray levels).",
         "// See tools/embed_weather_background.py to regenerate.",
@@ -145,14 +179,31 @@ def emit_cpp(spec: ModelSpec, payload: bytes, out_path: Path) -> None:
         f"extern const uint8_t  kBitsPerPixel = {spec.bpp};",
         f"extern const uint8_t  kLevels = {spec.levels};",
         f"extern const uint8_t  kScale = {spec.scale};",
-        f"extern const size_t kDataLen = {len(payload)};",
+        f"extern const uint8_t  kThemeCount = {len(themes_present)};",
+        f"extern const size_t   kThemeDataLen = {payload_len};",
         "",
-        "extern const uint8_t kData[] PROGMEM = {",
     ]
-    for i in range(0, len(payload), 16):
-        chunk = payload[i:i + 16]
-        lines.append("  " + ", ".join(f"0x{b:02x}" for b in chunk) + ",")
-    lines.append("};")
+    # One PROGMEM array per bundled theme. Emitted with file-scope linkage
+    # so callers only reach the payloads via the kThemeData[] table below.
+    for theme, payload in payloads.items():
+        cap = theme.capitalize()
+        lines.append(f"static const uint8_t k{cap}[] PROGMEM = {{")
+        for i in range(0, len(payload), 16):
+            chunk = payload[i:i + 16]
+            lines.append("  " + ", ".join(f"0x{b:02x}" for b in chunk) + ",")
+        lines.append("};")
+        lines.append("")
+
+    # Pointer table indexed by the Theme enum. Themes we didn't bundle
+    # redirect to the fallback so callers never see a null slot.
+    entries = []
+    for t in ALL_THEMES:
+        name = t if t in payloads else fallback_theme
+        entries.append(f"k{name.capitalize()}")
+    lines.append(
+        f"extern const uint8_t* const kThemeData[{len(ALL_THEMES)}] = "
+        f"{{ {', '.join(entries)} }};"
+    )
     lines.append("")
     lines.append("}  // namespace weather_background")
     lines.append("")
@@ -161,23 +212,33 @@ def emit_cpp(spec: ModelSpec, payload: bytes, out_path: Path) -> None:
     out_path.write_text("\n".join(lines), encoding="utf-8", newline="\n")
 
 
-def render_for(spec: ModelSpec, src: Path) -> Path:
+def render_theme(spec: ModelSpec, theme: str, assets_dir: Path) -> bytes:
+    """Refine + dither + pack the source PNG for one theme."""
+    src = assets_dir / f"{theme}_source.png"
     img = Image.open(src).convert("L")
     if spec.portrait:
-        # The source is a landscape ink-wash. Rotate so the mountains
-        # occupy the bottom of the portrait frame before we resize.
+        # Our source PNGs are landscape 3:2 ink-wash mountain scenes.
+        # Rotate so the mountains occupy the bottom of the portrait frame
+        # before we resize to the panel dimensions.
         img = img.rotate(90, expand=True, resample=Image.BICUBIC)
     refined = refine(img, (spec.payload_w, spec.payload_h))
     indexed = dither_to_palette(refined, spec.levels)
-    packed = pack(indexed, spec.bpp)
+    return pack(indexed, spec.bpp)
+
+
+def render_for(spec: ModelSpec, assets_dir: Path) -> Path:
+    payloads: Dict[str, bytes] = {}
+    for theme in spec.themes:
+        payloads[theme] = render_theme(spec, theme, assets_dir)
     out_path = OUT_DIR / spec.out_file
-    emit_cpp(spec, packed, out_path)
+    emit_cpp(spec, payloads, out_path)
     return out_path
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--src", type=Path, default=DEFAULT_SRC)
+    parser.add_argument("--assets-dir", type=Path, default=ASSETS_DIR,
+                        help="Directory holding <theme>_source.png files.")
     parser.add_argument("--model", type=int, choices=[m.model for m in MODELS])
     parser.add_argument("--all", action="store_true",
                         help="Regenerate all four models.")
@@ -188,11 +249,12 @@ def main() -> None:
 
     specs = MODELS if args.all else [m for m in MODELS if m.model == args.model]
     for spec in specs:
-        out_path = render_for(spec, args.src)
+        out_path = render_for(spec, args.assets_dir)
         size = os.path.getsize(out_path)
         print(
             f"E{spec.model}: wrote {out_path.name} "
-            f"({size:>8d} B source, {spec.payload_bytes:>7d} B payload)"
+            f"({size:>8d} B source, {len(spec.themes)} theme(s) x "
+            f"{spec.payload_bytes:>7d} B payload)"
         )
 
 
