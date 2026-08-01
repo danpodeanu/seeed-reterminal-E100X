@@ -19,7 +19,8 @@ namespace config {
 constexpr uint64_t SLEEP_SECONDS = 15ULL * 60ULL;
 
 // POSIX TZ notation uses the opposite sign: CST-8 means UTC+8.
-constexpr char TIMEZONE[] = "CST-8";
+// London (GMT/BST) with EU-style DST rules is the default.
+constexpr char TIMEZONE[] = "GMT0BST,M3.5.0/1,M10.5.0/2";
 
 // --- Quiet hours ------------------------------------------------------------
 // Suppress automatic refreshes overnight. A cold boot or any front-button

@@ -20,8 +20,10 @@ constexpr char LOCATION_NAME[] = "London";
 constexpr double LATITUDE = 51.5074;
 constexpr double LONGITUDE = -0.1278;
 
-// POSIX TZ notation uses the opposite sign: CST-8 means UTC+8.
-constexpr char TIMEZONE[] = "CST-8";
+// POSIX TZ notation uses the opposite sign: CST-8 means UTC+8. The
+// default matches the London coordinates above (GMT/BST) with the
+// standard EU-style DST switchover baked in.
+constexpr char TIMEZONE[] = "GMT0BST,M3.5.0/1,M10.5.0/2";
 
 // --- Refresh cadence --------------------------------------------------------
 // How long the device sleeps between automatic refreshes. Shorter = fresher

@@ -23,8 +23,9 @@ constexpr char HELP_CAPTION[] = "Help";
 
 // --- Time synchronisation ---------------------------------------------------
 // POSIX TZ notation uses the opposite sign: CST-8 means UTC+8. Only
-// affects the mtime column in the file listing.
-constexpr char TIMEZONE[] = "CST-8";
+// affects the mtime column in the file listing. London (GMT/BST) with
+// EU-style DST rules is the default.
+constexpr char TIMEZONE[] = "GMT0BST,M3.5.0/1,M10.5.0/2";
 
 // NTP servers. The tool briefly joins the STA network in secrets.h at
 // boot, queries these servers, then tears down the STA session and
