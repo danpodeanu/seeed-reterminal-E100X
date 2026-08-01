@@ -13,9 +13,9 @@
 namespace config {
 
 // --- Refresh cadence --------------------------------------------------------
-// Six hours gives an ambient frame four automatic photos per day while
-// keeping expensive color e-paper refreshes and radio usage low.
-constexpr uint64_t SLEEP_SECONDS = 6ULL * 60ULL * 60ULL;
+// One hour gives an ambient frame 24 automatic photos per day. E-paper
+// refresh cost is modest on this cadence and the frame feels alive.
+constexpr uint64_t SLEEP_SECONDS = 60ULL * 60ULL;
 
 // POSIX TZ notation uses the opposite sign: CST-8 means UTC+8.
 // London (GMT/BST) with EU-style DST rules is the default.

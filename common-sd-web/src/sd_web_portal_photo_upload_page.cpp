@@ -29,7 +29,7 @@
 
 namespace sd_web_portal {
 
-extern const char kPhotoUploadPage[] PROGMEM = R"HTML(<!doctype html>
+extern const char kPhotoUploadPageHead[] PROGMEM = R"HTML(<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
@@ -101,7 +101,9 @@ footer a { color: var(--muted); }
 </style>
 </head>
 <body>
-<header>
+)HTML";
+
+extern const char kPhotoUploadPageTail[] PROGMEM = R"HTML(<header>
   <h1>Upload photo</h1>
   <div class="sub" id="panelLabel">Loading panel...</div>
 </header>

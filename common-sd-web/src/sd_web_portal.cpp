@@ -26,8 +26,12 @@ namespace sd_web_portal {
 
 // Defined in sd_web_portal_photo_upload_page.cpp. Declared at namespace
 // scope (not inside the anonymous namespace below) so the linker
-// resolves it against the same external symbol the definition emits.
-extern const char kPhotoUploadPage[] PROGMEM;
+// resolves them against the same external symbols the definition emits.
+// The upload page is split into two PROGMEM blobs so an optional
+// cross-portal nav bar (Config::navHtml) can be injected right after
+// the opening <body> tag, matching the other embedded-portal pages.
+extern const char kPhotoUploadPageHead[] PROGMEM;
+extern const char kPhotoUploadPageTail[] PROGMEM;
 
 namespace {
 
@@ -748,7 +752,28 @@ void handlePanelInfo() {
 
 void handlePhotoUploadPage() {
   g_server->sendHeader("Cache-Control", "no-store");
-  g_server->send_P(200, "text/html; charset=utf-8", kPhotoUploadPage);
+  // Chunked-send: head PROGMEM (through opening <body>), optional shared
+  // nav bar wrapped in its own <header>, tail PROGMEM (starting at the
+  // page's own <header>). Matches how sendPageHeader stitches navHtml
+  // into the SD browse pages so both look consistent.
+  g_server->setContentLength(CONTENT_LENGTH_UNKNOWN);
+  g_server->send(200, "text/html; charset=utf-8", "");
+  g_server->sendContent_P(kPhotoUploadPageHead);
+  if (g_config.navHtml != nullptr && g_config.navHtml[0] != '\0') {
+    String nav;
+    nav.reserve(strlen(g_config.navHtml) + 320);
+    nav += F("<header style=\"background:#14213d;padding:.75rem 1.25rem;"
+             "box-shadow:none;border-bottom:1px solid #0a1220\">");
+    nav += g_config.navHtml;
+    nav += F("</header>"
+             "<style>header nav{font-family:system-ui,-apple-system,sans-serif}"
+             "header nav a{color:#bfdbfe;margin-right:1rem;text-decoration:none;"
+             "font-weight:500}"
+             "header nav a.active{color:#fff;font-weight:700}</style>");
+    g_server->sendContent(nav);
+  }
+  g_server->sendContent_P(kPhotoUploadPageTail);
+  g_server->sendContent("");  // terminate chunked response
 }
 
 // POSTed by the "Switch display to photo view" button in the upload page.

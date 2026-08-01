@@ -38,7 +38,7 @@ not match.
   across physical power-off.
 - Wi-Fi is disabled immediately after time synchronization. Ordinary photo
   changes do not start the radio.
-- Automatic changes occur every six hours by default. Any hardware button
+- Automatic changes occur every hour by default. Any hardware button
   wakes the device and changes the photo.
 - Every startup logs a `[wake]` line with the local time and whether it was a
   cold boot/reset, scheduled timer, or front-button wake.
