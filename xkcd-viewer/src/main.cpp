@@ -1411,9 +1411,24 @@ void setup() {
                  static_cast<unsigned>(millis() - updateStart));
 
       uint32_t lastHeartbeatMs = millis();
+      uint32_t greenLowSinceMs = 0;
       while (!config_portal::rebootRequested()) {
         config_portal::loop();
         const uint32_t nowMs = millis();
+        // Green button in the portal = reboot the device. Convenient exit
+        // once you've saved settings on your phone, matching the "Reboot"
+        // button on /reset. Debounced at 50 ms.
+        if (!digitalRead(PIN_BUTTON_GREEN)) {
+          if (greenLowSinceMs == 0) {
+            greenLowSinceMs = nowMs;
+          } else if (nowMs - greenLowSinceMs >= 50) {
+            LOG.println("[portal] green button pressed -> reboot");
+            hardware::beep();
+            break;
+          }
+        } else {
+          greenLowSinceMs = 0;
+        }
         if (nowMs - lastHeartbeatMs >= 15000) {
           const String& pass = config_portal::currentApPassword();
           if (pass.length()) {
