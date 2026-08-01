@@ -33,6 +33,11 @@ namespace sd_web_portal {
 extern const char kPhotoUploadPageHead[] PROGMEM;
 extern const char kPhotoUploadPageTail[] PROGMEM;
 
+// Defined in epdoptimize_js.cpp (auto-generated). Same reasoning as above:
+// declared at namespace scope so the extern symbols the .cpp emits resolve.
+extern const uint8_t kEpdoptimizeJsGz[] PROGMEM;
+extern const size_t kEpdoptimizeJsGzLen;
+
 namespace {
 
 // One WebServer instance per portal. The library only supports one
@@ -991,6 +996,21 @@ void handleDeletePhoto() {
 // re-decoded on every page load; a small SVG placeholder is served in
 // that case. The 0-byte marker is cleared on next upload of the same
 // filename, so replacing a broken photo un-poisons the cache.
+// Serves the bundled paperlesspaper/epdoptimize ESM module from
+// /epdoptimize.mjs so the browser can dither with calibrated Spectra 6
+// colours without depending on a CDN. The payload is baked into flash as
+// a gzipped byte array (see tools/embed_epdoptimize.py); ~40 KB on the
+// wire, transparently decompressed by any modern browser.
+void handleEpdoptimizeJs() {
+  // The bundle is content-addressable (regenerated only when the pinned
+  // version bumps), so a long-lived cache with immutable is safe.
+  g_server->sendHeader("Cache-Control", "public, max-age=604800, immutable");
+  g_server->sendHeader("Content-Encoding", "gzip");
+  g_server->send_P(200, PSTR("text/javascript"),
+                   reinterpret_cast<const char*>(kEpdoptimizeJsGz),
+                   kEpdoptimizeJsGzLen);
+}
+
 void handleThumbnail() {
   g_server->sendHeader("Cache-Control", "public, max-age=60");
   if (!g_config.thumbnailDir || !g_config.thumbnailDir[0] ||
@@ -1247,6 +1267,7 @@ void installHandlers(WebServer& server, const Config& cfg, bool embedded) {
     server.on("/photos-list.json", handlePhotosList);
     server.on("/delete-photo", HTTP_POST, handleDeletePhoto);
     server.on("/upload-photo", handlePhotoUploadPage);
+    server.on("/epdoptimize.mjs", handleEpdoptimizeJs);
     server.on("/exit-portal", HTTP_POST, handleExitPortal);
     if (cfg.thumbnailDir && cfg.thumbnailDir[0] &&
         cfg.thumbnailGenerator != nullptr) {

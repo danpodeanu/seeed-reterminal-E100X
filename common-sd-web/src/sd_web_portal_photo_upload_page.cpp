@@ -178,6 +178,9 @@ extern const char kPhotoUploadPageTail[] PROGMEM = R"HTML(<header>
       </label>
       <span class="status" id="status"></span>
     </div>
+    <p class="hint" id="ditherHint" hidden style="margin:-4px 0 10px 0;
+       color:#059669;">Using paperlesspaper/epdoptimize with calibrated Spectra 6 palette
+       and auto-selected preset. Bundled with the firmware - no network needed.</p>
     <div class="row" style="gap: 10px; margin-bottom: 10px;">
       <label style="flex: 1; display: flex; align-items: center; gap: 8px;">
         <span>Brightness</span>
@@ -648,7 +651,21 @@ async function runPipeline() {
   const t0 = performance.now();
   state.sourceRgba = rescaleFromCrop();
   applyGamma(state.sourceRgba, gamma);
-  const { indices, preview } = dither(state.sourceRgba, palette, method);
+  let indices, preview;
+  if (method === "epdo" && state.panel.palette === "e6") {
+    const out = await runEpdoOptimize(state.sourceRgba, palette);
+    if (!out) {
+      // Library disappeared between init and use - fall back so the user
+      // still gets a preview instead of an error.
+      const fallback = dither(state.sourceRgba, palette, "fs");
+      indices = fallback.indices; preview = fallback.preview;
+    } else {
+      indices = out.indices; preview = out.preview;
+    }
+  } else {
+    const out = dither(state.sourceRgba, palette, method);
+    indices = out.indices; preview = out.preview;
+  }
   const t1 = performance.now();
   const cv = $("preview");
   cv.width = state.panel.width; cv.height = state.panel.height;
@@ -658,6 +675,106 @@ async function runPipeline() {
   state.currentPalette = palette;
   setStatus(`Ready (dither ${Math.round(t1 - t0)} ms).`, "ok");
   $("upload").disabled = false;
+}
+
+// paperlesspaper/epdoptimize integration. Loaded on demand from jsDelivr the
+// first time the user picks a Spectra 6 panel option. The library is ~140 KB
+// ESM, self-contained (rgbquant is bundled), and does its own tone mapping +
+// preset selection, so we only feed it the cropped RGBA and read the device
+// colors back out.
+//
+// The device-color output is pure primaries (#000, #FFF, #00FF00, #FF0000,
+// #FFFF00, #0000FF), which our internal e6 palette resolves to via ordinary
+// nearest-color matching. That means the same 4bpp BMP encoder + on-device
+// renderer keep working with no extra codepath.
+const EPDO_URL = "/epdoptimize.mjs";
+let epdoPromise = null;
+function loadEpdo() {
+  if (epdoPromise) return epdoPromise;
+  epdoPromise = import(EPDO_URL).catch((err) => {
+    console.warn("epdoptimize failed to load:", err);
+    return null;
+  });
+  return epdoPromise;
+}
+
+async function initEpdoIfSupported() {
+  if (!state.panel || state.panel.palette !== "e6") return;
+  const mod = await loadEpdo();
+  if (!mod) return;
+  // Insert the option at the top of the list and select it. If the user has
+  // manually picked a classic ditherer before the module resolves, keep
+  // their choice.
+  const sel = $("dither");
+  const opt = document.createElement("option");
+  opt.value = "epdo";
+  opt.textContent = "Auto (epdoptimize) - recommended";
+  sel.insertBefore(opt, sel.firstChild);
+  const userTouched = sel.dataset.userTouched === "1";
+  if (!userTouched) {
+    sel.value = "epdo";
+    $("ditherHint").hidden = false;
+  }
+  // Re-render if a photo is already loaded so the user sees the epdo output.
+  if (state.bitmap && !userTouched) runPipeline();
+}
+
+async function runEpdoOptimize(srcImageData, ourPalette) {
+  const mod = await loadEpdo();
+  if (!mod) return null;
+  const {
+    suggestCanvasProcessingOptions, ditherImage, replaceColors,
+    aitjcizeSpectra6Palette,
+  } = mod;
+  const w = srcImageData.width, h = srcImageData.height;
+  const inC = document.createElement("canvas");
+  inC.width = w; inC.height = h;
+  inC.getContext("2d").putImageData(srcImageData, 0, 0);
+  const outC = document.createElement("canvas");
+  outC.width = w; outC.height = h;
+  let suggestion;
+  try {
+    suggestion = suggestCanvasProcessingOptions(inC, aitjcizeSpectra6Palette);
+  } catch (err) {
+    console.warn("epdoptimize suggest failed:", err);
+    return null;
+  }
+  try {
+    await ditherImage(inC, outC, {
+      ...suggestion.ditherOptions,
+      palette: aitjcizeSpectra6Palette,
+    });
+  } catch (err) {
+    console.warn("epdoptimize dither failed:", err);
+    return null;
+  }
+  const devC = document.createElement("canvas");
+  devC.width = w; devC.height = h;
+  try {
+    replaceColors(outC, devC, aitjcizeSpectra6Palette);
+  } catch (err) {
+    console.warn("epdoptimize replaceColors failed:", err);
+    return null;
+  }
+  const devData = devC.getContext("2d").getImageData(0, 0, w, h).data;
+  const indices = new Uint8Array(w * h);
+  const preview = new Uint8ClampedArray(w * h * 4);
+  const pr = new Float32Array(ourPalette.length);
+  const pg = new Float32Array(ourPalette.length);
+  const pb = new Float32Array(ourPalette.length);
+  for (let p = 0; p < ourPalette.length; p++) {
+    pr[p] = ourPalette[p][0]; pg[p] = ourPalette[p][1]; pb[p] = ourPalette[p][2];
+  }
+  for (let i = 0, j = 0; j < indices.length; i += 4, j++) {
+    const idx = nearestPaletteIndex(devData[i], devData[i + 1], devData[i + 2],
+                                    pr, pg, pb);
+    indices[j] = idx;
+    preview[i]     = pr[idx];
+    preview[i + 1] = pg[idx];
+    preview[i + 2] = pb[idx];
+    preview[i + 3] = 255;
+  }
+  return { indices, preview };
 }
 
 function resetForNextUpload() {
@@ -740,6 +857,10 @@ async function onUpload() {
 
 $("picker").addEventListener("change", onPick);
 $("dither").addEventListener("change", () => {
+  // Track that the user made a manual choice so a late-resolving epdoptimize
+  // load doesn't yank their selection away.
+  $("dither").dataset.userTouched = "1";
+  $("ditherHint").hidden = $("dither").value !== "epdo";
   if (state.bitmap) runPipeline();
 });
 let gammaTimer = null;
@@ -855,7 +976,10 @@ async function onDeletePhoto(ev) {
 }
 
 bindCropDrag();
-fetchPanel().then(refreshPhotoList);
+fetchPanel().then(() => {
+  refreshPhotoList();
+  initEpdoIfSupported();
+});
 </script>
 </body>
 </html>
