@@ -119,8 +119,8 @@ const String& currentSsid();
 IPAddress currentIp();
 uint16_t currentPort();
 
-// Set to true once a browser POSTs /exit-portal (photo uploader "Switch
-// display to photo view" button). Firmware polls this from its portal
+// Set to true once a browser POSTs /exit-portal (the "Reboot to viewer"
+// button on the SD portal pages). Firmware polls this from its portal
 // loop to trigger the same exit path as the physical arrow buttons.
 bool exitRequested();
 

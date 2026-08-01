@@ -501,6 +501,28 @@ void handleBrowse() {
   actions += F("<button>Upload</button></form>");
   actions += F("<div class=\"note\">Uploads are streamed directly to the card. Existing files will be overwritten.</div>");
   actions += F("</section>");
+
+  // Reboot back into the viewer (photo-viewer / weather-viewer / etc.).
+  // Only shown when the SD portal is embedded inside an app that owns a
+  // navHtml top strip -- standalone tools/sd-web has nothing to reboot
+  // "back to", so we suppress the button there.
+  if (g_config.navHtml != nullptr && g_config.navHtml[0] != '\0') {
+    actions += F(
+        "<section><h2>Reboot to viewer</h2>"
+        "<p class=\"note\">Restart the panel back into the viewer. "
+        "You can also press the left or right arrow on the device.</p>"
+        "<button type=\"button\" id=\"rebootBtn\">Reboot to viewer</button>"
+        "<span id=\"rebootMsg\" class=\"note\" style=\"margin-left:.75rem\"></span>"
+        "<script>"
+        "document.getElementById('rebootBtn').addEventListener('click',async()=>{"
+        "let b=document.getElementById('rebootBtn');"
+        "let m=document.getElementById('rebootMsg');"
+        "b.disabled=true;m.textContent='Rebooting...';"
+        "try{await fetch('/exit-portal',{method:'POST'});}catch(e){}"
+        "m.textContent='Rebooting. You can close this tab.';"
+        "});"
+        "</script></section>");
+  }
   sendPageChunk(actions);
 
   sendPageFooter();
@@ -886,7 +908,7 @@ void handlePhotoUploadPage() {
   g_server->sendContent("");  // terminate chunked response
 }
 
-// POSTed by the "Switch display to photo view" button in the upload page.
+// POSTed by the "Reboot to viewer" button in the upload/browse pages.
 // Sets the exit flag; firmware polls exitRequested() from its portal loop
 // and triggers the same reboot path the physical arrows use.
 void handleExitPortal() {

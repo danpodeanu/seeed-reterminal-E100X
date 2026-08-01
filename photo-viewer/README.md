@@ -203,9 +203,10 @@ can be prepared and stored on the SD card without removing it from the frame:
    ("Uploaded. Next panel refresh will show this photo.") persists so the
    next upload can be prepared without page reload.
 5. Pressing either arrow button exits the portal, tears down the AP, and
-   returns to the normal photo view. A *Switch display to photo view*
-   button on the upload page does the same over the network so the exit can
-   be triggered from the phone after the upload completes.
+   returns to the normal photo view. A *Reboot to viewer* button on every
+   portal page (Wi-Fi, Settings, SD, Photos, Reset) does the same over the
+   network so the exit can be triggered from the phone after the upload
+   completes.
 
 The portal only starts on the green button; the device never brings up an AP
 during ordinary photo changes or timer wakes. The AP is deliberately open —

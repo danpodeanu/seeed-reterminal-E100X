@@ -202,10 +202,10 @@ extern const char kPhotoUploadPageTail[] PROGMEM = R"HTML(<header>
   </div>
 
   <div class="card">
-    <h2>Done uploading?</h2>
-    <p class="hint" style="margin:0 0 10px 0">Switch the panel back to showing photos. You can also press the left or right arrow on the device.</p>
+    <h2>Reboot to viewer</h2>
+    <p class="hint" style="margin:0 0 10px 0">Restart the panel back into photo-viewer mode. You can also press the left or right arrow on the device.</p>
     <div class="row" style="justify-content: flex-end;">
-      <button type="button" id="exitPortal" class="primary">Switch display to photo view</button>
+      <button type="button" id="rebootBtn" class="primary">Reboot to viewer</button>
     </div>
   </div>
 
@@ -760,17 +760,17 @@ $("gammaReset").addEventListener("click", () => {
   if (state.bitmap) runPipeline();
 });
 $("upload").addEventListener("click", onUpload);
-$("exitPortal").addEventListener("click", async () => {
-  const btn = $("exitPortal");
+$("rebootBtn").addEventListener("click", async () => {
+  const btn = $("rebootBtn");
   btn.disabled = true;
-  btn.textContent = "Switching...";
+  btn.textContent = "Rebooting...";
   try {
     await fetch("/exit-portal", { method: "POST" });
   } catch (e) {
     // The AP goes down as the device reboots, so the fetch usually
     // rejects. That's fine - the request was sent.
   }
-  btn.textContent = "Panel is switching. You can close this tab.";
+  btn.textContent = "Rebooting. You can close this tab.";
 });
 window.addEventListener("resize", () => { if (state.bitmap) drawCropStage(); });
 
