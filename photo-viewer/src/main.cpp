@@ -348,7 +348,9 @@ uint32_t countPhotos() {
   directory.close();
   // Debug override: pinned photo filename shortcuts the entire enumeration
   // to just the requested file (verified to exist and to be a supported
-  // format). Empty string disables the override.
+  // format). Empty string disables the override. countPhotos() runs more
+  // than once per boot (cold-boot "any photos?" probe + main render), so
+  // logging happens at the caller instead of here to avoid double logs.
   const char* pinned = photo_config::runtime::pinnedPhoto();
   if (pinned && pinned[0] != '\0') {
     String pinnedName(pinned);
@@ -359,11 +361,7 @@ uint32_t countPhotos() {
     }
     photoList.clear();
     if (only.length() > 0) {
-      LOG.printf("[photo] pinned to %s\n", only.c_str());
       photoList.emplace_back(std::move(only));
-    } else {
-      LOG.printf("[photo] pinned filename \"%s\" not found in %s\n",
-                 pinnedName.c_str(), config::PHOTO_DIR);
     }
     return static_cast<uint32_t>(photoList.size());
   }
@@ -1014,8 +1012,21 @@ void setup() {
     log_sd_sink::install(appLog);
   }
   const uint32_t photoCount = countPhotos();
-  LOG.printf("[photo] %lu supported files in %s\n",
-             static_cast<unsigned long>(photoCount), config::PHOTO_DIR);
+  const char* pinned = photo_config::runtime::pinnedPhoto();
+  if (pinned && pinned[0] != '\0') {
+    // Pinned-photo debug override: photoCount is either 1 (match) or 0
+    // (name doesn't exist in /photos).
+    if (photoCount == 1) {
+      LOG.printf("[photo] pinned to %s (debug override active)\n", pinned);
+    } else {
+      LOG.printf(
+          "[photo] pinned filename \"%s\" not found in %s (debug override)\n",
+          pinned, config::PHOTO_DIR);
+    }
+  } else {
+    LOG.printf("[photo] %lu supported files in %s\n",
+               static_cast<unsigned long>(photoCount), config::PHOTO_DIR);
+  }
 
   if (sdReady) {
     const String manifestPath =
