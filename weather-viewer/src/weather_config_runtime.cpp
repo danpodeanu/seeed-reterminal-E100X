@@ -58,19 +58,27 @@ struct Cache {
 Cache g_cache;
 bool  g_loaded = false;
 
+// Enum parsers -- MUST match an exact schema value, otherwise fall back
+// to the compile-time default. Previously an empty/unknown string
+// silently mapped to the "other" enum value (QWeather / Fahrenheit /
+// MilesPerHour), which meant a stray blank in NVS overrode the intended
+// firmware default rather than being ignored.
 ::config::WeatherProvider parseProvider(const String& s) {
   if (s == "OpenMeteo") return ::config::WeatherProvider::OpenMeteo;
-  return ::config::WeatherProvider::QWeather;
+  if (s == "QWeather")  return ::config::WeatherProvider::QWeather;
+  return ::config::WEATHER_PROVIDER;
 }
 
 ::config::TemperatureUnit parseTempUnit(const String& s) {
+  if (s == "Celsius")    return ::config::TemperatureUnit::Celsius;
   if (s == "Fahrenheit") return ::config::TemperatureUnit::Fahrenheit;
-  return ::config::TemperatureUnit::Celsius;
+  return ::config::TEMPERATURE_UNIT;
 }
 
 ::config::WindSpeedUnit parseWindUnit(const String& s) {
-  if (s == "MilesPerHour") return ::config::WindSpeedUnit::MilesPerHour;
-  return ::config::WindSpeedUnit::KilometresPerHour;
+  if (s == "KilometresPerHour") return ::config::WindSpeedUnit::KilometresPerHour;
+  if (s == "MilesPerHour")      return ::config::WindSpeedUnit::MilesPerHour;
+  return ::config::WIND_SPEED_UNIT;
 }
 
 // Load a string from NVS via the schema. If the loaded value is empty
