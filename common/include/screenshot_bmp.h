@@ -77,7 +77,7 @@ inline bool saveScreenshotBmp(EPaper& epaper, uint32_t width, uint32_t height,
     return false;
   }
 
-  SD.remove(temporaryPath);
+  sd_card::removeFile(temporaryPath);
   File file = sd_card::openForWrite(temporaryPath);
   if (!file) {
     LOG.println("[screenshot] could not create temporary BMP");
@@ -129,14 +129,14 @@ inline bool saveScreenshotBmp(EPaper& epaper, uint32_t width, uint32_t height,
 
   if (!ok) {
     LOG.println("[screenshot] BMP write failed");
-    SD.remove(temporaryPath);
+    sd_card::removeFile(temporaryPath);
     return false;
   }
 
-  SD.remove(screenshotPath);
+  sd_card::removeFile(screenshotPath);
   if (!sd_card::renameFile(temporaryPath, screenshotPath)) {
     LOG.println("[screenshot] could not install /screenshot.bmp");
-    SD.remove(temporaryPath);
+    sd_card::removeFile(temporaryPath);
     return false;
   }
 

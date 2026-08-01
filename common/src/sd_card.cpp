@@ -70,6 +70,37 @@ bool retryingMkdir(const char* path) {
   return false;
 }
 
+// Try SD.remove. Succeeds if the file is gone after the call; a first
+// false may just mean the file did not exist, so we probe existence
+// before scheduling another attempt to avoid burning the retry budget
+// on already-clean paths.
+bool retryingRemove(const String& path) {
+  if (SD.remove(path)) return true;
+  for (int attempt = 0; attempt < kSdOpRetries - 1; ++attempt) {
+    // Probe: if the file already vanished (or never existed), we're
+    // done. openForRead() itself retries, so this reflects the true
+    // filesystem state after the last SPI stall.
+    File probe = SD.open(path, FILE_READ);
+    if (!probe) return true;
+    probe.close();
+    backoffSleep(attempt);
+    if (SD.remove(path)) return true;
+  }
+  return false;
+}
+
+// Retrying SD.rmdir. Non-empty directories return false immediately
+// (a legitimate failure) but transient SPI stalls also produce false,
+// so we still retry a few times.
+bool retryingRmdir(const String& path) {
+  if (SD.rmdir(path)) return true;
+  for (int attempt = 0; attempt < kSdOpRetries - 1; ++attempt) {
+    backoffSleep(attempt);
+    if (SD.rmdir(path)) return true;
+  }
+  return false;
+}
+
 }  // namespace
 
 File openForRead(const String& path) {
@@ -86,6 +117,18 @@ File openForAppend(const String& path) {
 
 bool renameFile(const String& from, const String& to) {
   return retryingRename(from, to);
+}
+
+bool removeFile(const String& path) {
+  return retryingRemove(path);
+}
+
+bool makeDir(const String& path) {
+  return retryingMkdir(path.c_str());
+}
+
+bool removeDir(const String& path) {
+  return retryingRmdir(path);
 }
 
 bool mount(SPIClass& spi, const char* cacheDir) {
@@ -151,7 +194,7 @@ bool readFile(const String& path, String& out, size_t maxBytes) {
 
 bool writeFileAtomically(const String& path, const String& contents) {
   const String temporary = path + ".part";
-  SD.remove(temporary);
+  retryingRemove(temporary);
   File file = openForWrite(temporary);
   if (!file) {
     LOG.printf("[cache] could not create %s\n", temporary.c_str());
@@ -162,13 +205,13 @@ bool writeFileAtomically(const String& path, const String& contents) {
   file.close();
   if (written != contents.length()) {
     LOG.printf("[cache] short write for %s\n", path.c_str());
-    SD.remove(temporary);
+    retryingRemove(temporary);
     return false;
   }
-  SD.remove(path);
+  retryingRemove(path);
   if (!renameFile(temporary, path)) {
     LOG.printf("[cache] could not install %s\n", path.c_str());
-    SD.remove(temporary);
+    retryingRemove(temporary);
     return false;
   }
   return true;

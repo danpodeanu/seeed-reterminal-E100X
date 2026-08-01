@@ -312,7 +312,7 @@ String baseName(String path) {
 
 uint32_t countPhotos() {
   if (!sdReady) return 0;
-  File directory = SD.open(config::PHOTO_DIR);
+  File directory = sd_card::openForRead(config::PHOTO_DIR);
   if (!directory || !directory.isDirectory()) {
     if (directory) directory.close();
     return 0;

@@ -55,4 +55,21 @@ File openForWrite(const String& path);
 File openForAppend(const String& path);
 bool renameFile(const String& from, const String& to);
 
+// Retrying wrappers for the remaining raw SD ops. Callers should use
+// these instead of SD.remove()/SD.mkdir()/SD.rmdir() so that transient
+// SPI stalls do not surface as leaked temp files, missing cache
+// directories, or half-deleted trees.
+//
+// `removeFile` returns true when the path no longer exists on return
+// (successful delete or already absent) - callers cleaning up a temp
+// file typically ignore the return value, but code that must know the
+// file was actually gone can check it.
+bool removeFile(const String& path);
+// Retrying SD.mkdir wrapper. Returns true only when the directory was
+// created; callers that only need "exists on return" should probe
+// fileExists() first.
+bool makeDir(const String& path);
+// Retrying SD.rmdir wrapper. Fails if the directory is non-empty.
+bool removeDir(const String& path);
+
 }  // namespace sd_card

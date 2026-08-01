@@ -80,7 +80,7 @@ bool downloadToSd(const String& url, const String& destination,
   }
 
   const String temporary = destination + ".part";
-  SD.remove(temporary);
+  sd_card::removeFile(temporary);
   File file = sd_card::openForWrite(temporary);
   if (!file) {
     LOG.printf("[cache] could not create %s\n", temporary.c_str());
@@ -94,7 +94,7 @@ bool downloadToSd(const String& url, const String& destination,
   if (!buffer) {
     LOG.println("[http] could not allocate SD download buffer");
     file.close();
-    SD.remove(temporary);
+    sd_card::removeFile(temporary);
     http.end();
     return false;
   }
@@ -147,13 +147,13 @@ bool downloadToSd(const String& url, const String& destination,
   if (!ok || total == 0) {
     LOG.printf("[cache] write/download failed for %s after %lu bytes\n",
                destination.c_str(), static_cast<unsigned long>(total));
-    SD.remove(temporary);
+    sd_card::removeFile(temporary);
     return false;
   }
-  SD.remove(destination);
+  sd_card::removeFile(destination);
   if (!sd_card::renameFile(temporary, destination)) {
     LOG.printf("[cache] could not install %s\n", destination.c_str());
-    SD.remove(temporary);
+    sd_card::removeFile(temporary);
     return false;
   }
   LOG.printf("[cache] saved %s (%lu bytes)\n", destination.c_str(),

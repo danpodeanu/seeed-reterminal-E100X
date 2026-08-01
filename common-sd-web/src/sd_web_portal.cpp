@@ -357,7 +357,7 @@ void handleBrowse() {
     return;
   }
 
-  File dir = SD.open(path);
+  File dir = sd_card::openForRead(path);
   if (!dir) {
     g_server->sendHeader("Location", "/browse?path=%2F&m=bad");
     g_server->send(302, "text/plain", "");
@@ -506,7 +506,7 @@ void handleDownload() {
     g_server->send(400, "text/plain", "bad path");
     return;
   }
-  File file = SD.open(path);
+  File file = sd_card::openForRead(path);
   if (!file || file.isDirectory()) {
     if (file) file.close();
     g_server->send(404, "text/plain", "not found");
@@ -546,7 +546,7 @@ void handleMkdir() {
     return;
   }
   const String target = joinPath(parent, name);
-  const bool ok = SD.mkdir(target);
+  const bool ok = sd_card::makeDir(target);
   LOG.printf("[sd-web] mkdir %s -> %s\n", target.c_str(), ok ? "ok" : "fail");
   redirectToBrowse(parent, ok ? "mk_ok" : "mk_err");
 }
@@ -554,11 +554,11 @@ void handleMkdir() {
 // Recursive rmdir: attempt to remove a directory and its contents. SD
 // library's rmdir refuses non-empty dirs, so we descend ourselves.
 bool removeRecursive(const String& path) {
-  File node = SD.open(path);
+  File node = sd_card::openForRead(path);
   if (!node) return false;
   if (!node.isDirectory()) {
     node.close();
-    return SD.remove(path);
+    return sd_card::removeFile(path);
   }
   // Collect entry names first (can't reliably mutate while iterating).
   const size_t kMaxChildren = 256;
@@ -585,13 +585,13 @@ bool removeRecursive(const String& path) {
     if (isDir[i]) {
       ok = removeRecursive(childPath) && ok;
     } else {
-      ok = SD.remove(childPath) && ok;
+      ok = sd_card::removeFile(childPath) && ok;
     }
   }
   delete[] names;
   delete[] isDir;
   if (!ok) return false;
-  return SD.rmdir(path);
+  return sd_card::removeDir(path);
 }
 
 void handleDelete() {
@@ -608,7 +608,7 @@ void handleDelete() {
     redirectToBrowse(parent.length() ? parent : String("/"), "bad");
     return;
   }
-  File node = SD.open(target);
+  File node = sd_card::openForRead(target);
   if (!node) {
     redirectToBrowse(parent.length() ? parent : String("/"), "del_err");
     return;
@@ -619,7 +619,7 @@ void handleDelete() {
   if (isDir) {
     ok = removeRecursive(target);
   } else {
-    ok = SD.remove(target);
+    ok = sd_card::removeFile(target);
   }
   LOG.printf("[sd-web] delete %s (dir=%d) -> %s\n", target.c_str(),
              isDir ? 1 : 0, ok ? "ok" : "fail");
@@ -655,8 +655,8 @@ void handleUploadStream() {
       g_uploadTargetPath = joinPath(parent, name);
       // Overwrite by removing first; SD FILE_WRITE opens truncating,
       // but be explicit so a failed open doesn't leave a stale file.
-      SD.remove(g_uploadTargetPath);
-      g_uploadFile = SD.open(g_uploadTargetPath, FILE_WRITE);
+      sd_card::removeFile(g_uploadTargetPath);
+      g_uploadFile = sd_card::openForWrite(g_uploadTargetPath);
       g_uploadOk = static_cast<bool>(g_uploadFile);
       LOG.printf("[sd-web] upload start %s -> %s\n",
                  g_uploadTargetPath.c_str(), g_uploadOk ? "ok" : "open-fail");
@@ -684,7 +684,7 @@ void handleUploadStream() {
     }
     case UPLOAD_FILE_ABORTED: {
       if (g_uploadFile) g_uploadFile.close();
-      if (g_uploadTargetPath.length()) SD.remove(g_uploadTargetPath);
+      if (g_uploadTargetPath.length()) sd_card::removeFile(g_uploadTargetPath);
       g_uploadOk = false;
       LOG.printf("[sd-web] upload aborted %s\n", g_uploadTargetPath.c_str());
       break;
@@ -885,8 +885,8 @@ bool begin(const Config& cfg) {
       cfg.photosDir && cfg.photosDir[0]) {
     // Ensure the photos directory exists so the first upload succeeds
     // without the user having to create it in the file browser.
-    if (!SD.exists(cfg.photosDir)) {
-      SD.mkdir(cfg.photosDir);
+    if (!sd_card::fileExists(cfg.photosDir)) {
+      sd_card::makeDir(cfg.photosDir);
     }
     g_server->on("/panel.json", handlePanelInfo);
     g_server->on("/upload-photo", handlePhotoUploadPage);

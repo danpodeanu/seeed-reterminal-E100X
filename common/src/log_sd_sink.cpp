@@ -12,14 +12,14 @@ void install(TimestampedLogger& logger) {
   // on the ESP-IDF SD stack, so we don't check the return value -- a
   // subsequent openForAppend() will succeed either way if the
   // directory is present.
-  SD.mkdir(kLogsDir);
+  sd_card::makeDir(kLogsDir);
 
   // Rotate: unlink the previous slot (SD.rename refuses to overwrite),
   // then move the current log into it. Both steps are best-effort;
   // failure here just means the next boot starts a fresh current.log
   // alongside a stale previous.log.
   if (sd_card::fileExists(kCurrentLogPath)) {
-    SD.remove(kPreviousLogPath);
+    sd_card::removeFile(kPreviousLogPath);
     sd_card::renameFile(kCurrentLogPath, kPreviousLogPath);
   }
 

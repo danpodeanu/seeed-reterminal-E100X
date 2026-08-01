@@ -22,6 +22,8 @@ extern "C" {
 #include "pngle.h"
 }
 
+#include "sd_card.h"
+
 // Uncomment to dump every JPEG marker (APP/DHT/DQT/...) the parser walks past.
 // Off by default -- only useful when debugging a JPEG that fails to decode.
 // #define VERBOSE_JPEG_DECODE
@@ -789,7 +791,7 @@ bool load_image_from_sd(const char* path, int target_w, int target_h, RgbImage* 
   if (!path || !out) return false;
   out->pixels = nullptr; out->width = 0; out->height = 0;
 
-  File f = SD.open(path, FILE_READ);
+  File f = sd_card::openForRead(path);
   if (!f) { Serial1.printf("[img] open failed: %s\n", path); return false; }
 
   // Sniff the actual file format by reading the first 8 bytes -- many users get

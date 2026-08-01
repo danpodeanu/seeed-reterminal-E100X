@@ -242,7 +242,7 @@ bool writeJsonlComic(File& file, int number, const StoredMeta& stored) {
 
 bool persist() {
   const String temporary = String(config::CACHE_INDEX) + ".part";
-  SD.remove(temporary);
+  sd_card::removeFile(temporary);
   File file = sd_card::openForWrite(temporary);
   if (!file) return false;
 
@@ -253,19 +253,19 @@ bool persist() {
   file.flush();
   file.close();
   if (!ok) {
-    SD.remove(temporary);
+    sd_card::removeFile(temporary);
     return false;
   }
 
-  SD.remove(config::CACHE_INDEX);
+  sd_card::removeFile(config::CACHE_INDEX);
   if (!sd_card::renameFile(temporary, config::CACHE_INDEX)) {
-    SD.remove(temporary);
+    sd_card::removeFile(temporary);
     return false;
   }
   // Older on-disk formats are now fully superseded; clean them up
   // so a downgrade never sees stale data.
-  SD.remove(config::CACHE_INDEX_LEGACY_JSON);
-  SD.remove(config::CACHE_INDEX_LEGACY_TXT);
+  sd_card::removeFile(config::CACHE_INDEX_LEGACY_JSON);
+  sd_card::removeFile(config::CACHE_INDEX_LEGACY_TXT);
   return true;
 }
 
@@ -274,7 +274,7 @@ bool load() {
   clearAll();
   // v4 .json (single-doc) is superseded; drop it so it never shadows
   // the new .jsonl file if the SD card still has both.
-  SD.remove(config::CACHE_INDEX_LEGACY_JSON);
+  sd_card::removeFile(config::CACHE_INDEX_LEGACY_JSON);
   File file = sd_card::openForRead(config::CACHE_INDEX);
   if (!file) {
     LOG.println("[cache] comic manifest is missing");
