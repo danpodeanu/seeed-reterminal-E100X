@@ -84,7 +84,27 @@ bool synchronizeClock(const char* timezone, const char* primary,
   }
   char formatted[40] = {};
   strftime(formatted, sizeof(formatted), "%Y-%m-%d %H:%M:%S %Z", &localTime);
-  LOG.printf("[ntp] synchronized: %s\n", formatted);
+  // Report which server (or IP) fed us. Slot 0 holds the DHCP-supplied
+  // server when that path succeeded; when we fell through to
+  // configTzTime, slot 0 holds the primary hostname and its IP is any.
+  char sourceLabel[64] = {};
+  const char* servername = esp_sntp_getservername(0);
+  if (servername != nullptr && servername[0] != '\0') {
+    snprintf(sourceLabel, sizeof(sourceLabel), "%s", servername);
+  } else {
+    const ip_addr_t* addr = esp_sntp_getserver(0);
+    if (addr != nullptr && !ip_addr_isany(addr)) {
+      ipaddr_ntoa_r(addr, sourceLabel, sizeof(sourceLabel));
+    }
+  }
+  if (sourceLabel[0] == '\0' && primary != nullptr && primary[0] != '\0') {
+    snprintf(sourceLabel, sizeof(sourceLabel), "%s", primary);
+  }
+  if (sourceLabel[0] != '\0') {
+    LOG.printf("[ntp] synchronized (%s): %s\n", sourceLabel, formatted);
+  } else {
+    LOG.printf("[ntp] synchronized: %s\n", formatted);
+  }
   if (onSynced != nullptr) onSynced(now);
   return true;
 }
