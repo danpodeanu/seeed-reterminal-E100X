@@ -9,7 +9,10 @@ name: Publish Pages site
 #
 # Trigger:
 # - push to main under docs/ or this workflow
-# - a new release is published (fires after release.yml uploads assets)
+# - release.yml dispatches this workflow on main after publishing
+#   assets (the `release.published` event fires with a tag ref, and
+#   the github-pages environment is protected to main only, so we
+#   dispatch on main instead of listening for the release event)
 # - manual dispatch
 
 on:
@@ -18,8 +21,6 @@ on:
     paths:
       - "docs/**"
       - ".github/workflows/pages.yml"
-  release:
-    types: [published]
   workflow_dispatch:
 
 permissions:
