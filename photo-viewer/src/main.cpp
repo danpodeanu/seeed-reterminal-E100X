@@ -950,6 +950,11 @@ void renderPortalOnPanel(const String& ssid, const String& password,
   portalCfg.useAutoApPassword = true;
   portalCfg.extraTabs = kExtraTabs;
   portalCfg.extraTabCount = sizeof(kExtraTabs) / sizeof(kExtraTabs[0]);
+  // After Wi-Fi is configured, GET / lands on the photo management
+  // page instead of Settings so the portal opens straight into the
+  // most-used view. Weather/xkcd viewers leave this null and fall
+  // through to /settings.
+  portalCfg.postConfigLandingPath = "/upload-photo";
   portalCfg.wifiFallback = [](const char* key) -> String {
     if (strcmp(key, "ssid") == 0) return String(photo_wifi::ssid());
     if (strcmp(key, "password") == 0) return String(photo_wifi::password());

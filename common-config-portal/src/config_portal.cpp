@@ -72,8 +72,27 @@ void logAccess(int statusCode) {
              method, g_server->uri().c_str(), statusCode);
 }
 
-void redirectWifi() {
-  g_server->sendHeader("Location", "/wifi");
+// Root and captive-portal redirect. Sends the browser to /wifi during
+// first-time setup (no SSID stored yet) and to the app's configured
+// landing page once Wi-Fi is configured. Falls back to /settings when
+// no landing path is set and the app registered an appSchema.
+void redirectRoot() {
+  const char* dest = "/wifi";
+  bool hasWifi = false;
+  if (g_config.wifiSchema) {
+    if (g_wifiStorage.begin(g_config.wifiSchema->nvsNamespace, true)) {
+      hasWifi = g_wifiStorage.getString("ssid", "").length() > 0;
+      g_wifiStorage.end();
+    }
+  }
+  if (hasWifi) {
+    if (g_config.postConfigLandingPath && g_config.postConfigLandingPath[0]) {
+      dest = g_config.postConfigLandingPath;
+    } else if (g_config.appSchema) {
+      dest = "/settings";
+    }
+  }
+  g_server->sendHeader("Location", dest);
   g_server->send(302, "text/plain", "");
   logAccess(302);
 }
@@ -339,7 +358,7 @@ bool begin(const Config& cfg) {
 
   if (g_server) { g_server->stop(); delete g_server; }
   g_server = new WebServer(cfg.httpPort);
-  g_server->on("/", redirectWifi);
+  g_server->on("/", redirectRoot);
   g_server->on("/wifi", []() { sendHtml(200, renderWifiPage(g_config, *g_config.wifiSchema, g_config.appSchema)); });
   g_server->on("/wifi.json", HTTP_GET, handleWifiValues);
   g_server->on("/wifi.json", HTTP_POST, []() { handleSave(*g_config.wifiSchema, g_wifiStorage, false); });
@@ -351,11 +370,11 @@ bool begin(const Config& cfg) {
   g_server->on("/reset", []() { sendHtml(200, renderResetPage(g_config, g_config.appSchema != nullptr)); });
   g_server->on("/reset.json", HTTP_POST, handleReset);
   g_server->on("/panel.json", handlePanel);
-  g_server->on("/generate_204", redirectWifi);
-  g_server->on("/hotspot-detect.html", redirectWifi);
-  g_server->on("/connecttest.txt", redirectWifi);
-  g_server->on("/redirect", redirectWifi);
-  g_server->on("/ncsi.txt", redirectWifi);
+  g_server->on("/generate_204", redirectRoot);
+  g_server->on("/hotspot-detect.html", redirectRoot);
+  g_server->on("/connecttest.txt", redirectRoot);
+  g_server->on("/redirect", redirectRoot);
+  g_server->on("/ncsi.txt", redirectRoot);
   g_server->onNotFound(handleNotFound);
   g_server->begin();
 

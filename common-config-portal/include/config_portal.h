@@ -61,6 +61,14 @@ struct Config {
   // by the app itself.
   const NavTab* extraTabs = nullptr;
   size_t extraTabCount = 0;
+
+  // Where GET / (and captive-portal probe URLs) redirect once Wi-Fi is
+  // already configured. When Wi-Fi is unset the root always sends the
+  // browser to /wifi so the first-time setup flow is unambiguous. Leave
+  // null to fall back to /settings when appSchema is present, or /wifi
+  // when it isn't. Photo-viewer sets this to "/upload-photo" so the
+  // portal opens the photo management page after Wi-Fi is set.
+  const char* postConfigLandingPath = nullptr;
 };
 
 String buildSsid(const Config& cfg = Config{});
