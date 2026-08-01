@@ -81,34 +81,32 @@ using namespace ::board;
 // COLOR_SUN, PIN_BUTTON_GREEN, ...) working at every callsite below.
 using namespace theme;
 
-// On E1001 we draw the zenith ink-wash landscape as the background, so
-// having drawString paint a padded white rectangle behind each text
-// element is exactly wrong: it stamps out visible rectangles all over the
-// picture. On the other panels the sprite is a uniform PANEL_WHITE, so
-// the fill and transparent look identical - keeping the fill there means
-// TFT_eSPI's drawString still clears any leftover pixels on rerenders.
-#if RETERMINAL_MODEL == 1001
-constexpr bool kFillTextBackground = false;
-#else
-constexpr bool kFillTextBackground = true;
-#endif
-
+// The zenith ink-wash background can now be enabled on any of the four
+// panels via /settings. TFT_eSPI's drawString path for GFX free fonts
+// unconditionally paints a padded fillRect(..., textbgcolor) behind
+// every string whenever textcolor != textbgcolor - the _fillbg / bgfill
+// flag is only checked on the smooth-font path. So the only way to stop
+// body text from stamping visible rectangles onto the zenith picture is
+// to set textbgcolor == textcolor, which trips the "no fill needed"
+// branch inside drawString. When zenith is off we keep the classic
+// (fg, PANEL_WHITE, true) behaviour so redraws still erase old glyphs
+// and smooth fonts keep their anti-aliasing.
 EPaper epaper;
 
-// TFT_eSPI's drawString path for GFX free fonts unconditionally paints
-// a padded fillRect(..., textbgcolor) behind every string whenever
-// textcolor != textbgcolor - the _fillbg / bgfill flag is only checked
-// on the smooth-font path. So the only way to keep body text from
-// stamping white rectangles onto the zenith background on E1001 is to
-// set textbgcolor == textcolor, which trips the "no fill needed" branch
-// inside drawString. On the other panels we keep the classic
-// (fg, PANEL_WHITE, true) behaviour so redraws still erase old glyphs.
 inline void setBodyTextColor(uint16_t fg) {
-#if RETERMINAL_MODEL == 1001
-  epaper.setTextColor(fg, fg);
-#else
-  epaper.setTextColor(fg, PANEL_WHITE, true);
-#endif
+  if (weather_config::runtime::zenithBackgroundEnabled()) {
+    epaper.setTextColor(fg, fg);
+  } else {
+    epaper.setTextColor(fg, PANEL_WHITE, true);
+  }
+}
+
+// Header/alert strip callers know their background color (the strip
+// fillRect that precedes them), so they can keep the classic path and
+// preserve smooth-font anti-aliasing even when zenith is enabled - the
+// backdrop rect just repaints the strip's own color and stays invisible.
+inline void setStripTextColor(uint16_t fg, uint16_t stripColor) {
+  epaper.setTextColor(fg, stripColor, true);
 }
 Adafruit_SHT4x sht4;
 
@@ -332,7 +330,7 @@ void selectLargeTemperatureFont() {
 }
 
 void drawBadges(uint32_t background = PANEL_WHITE,
-                bool fillTextBackground = kFillTextBackground,
+                bool fillTextBackground = true,
                 time_t weatherUpdateTime = 0) {
   epaper.setTextColor(PANEL_BLACK, background, fillTextBackground);
   selectSmallFont();
@@ -709,8 +707,8 @@ void drawLargeTemperature(float celsius, int cx, int cy) {
 void drawHeader(const WeatherData& weather) {
   const int height = config::ui(45);
   epaper.fillRect(0, 0, config::PANEL_WIDTH, height, PANEL_WHITE);
-  drawBadges(PANEL_WHITE, kFillTextBackground, weather.updateTime);
-  setBodyTextColor(PANEL_BLACK);
+  drawBadges(PANEL_WHITE, true, weather.updateTime);
+  setStripTextColor(PANEL_BLACK, PANEL_WHITE);
   epaper.setTextDatum(MC_DATUM);
   String heading;
   const String age = weatherAgeText(weather.updateTime);
@@ -1027,7 +1025,7 @@ void drawAlertBar(const WeatherData& weather) {
   epaper.fillRect(0, top, config::PANEL_WIDTH, height, PANEL_LIGHT);
   epaper.drawFastHLine(config::ui(10), top + height,
                        config::PANEL_WIDTH - config::ui(20), PANEL_MUTED);
-  setBodyTextColor(PANEL_BLACK);
+  setStripTextColor(PANEL_BLACK, PANEL_LIGHT);
   epaper.setTextDatum(MC_DATUM);
   selectSmallFont();
   String line = "! Alert: " + weather.alertTitle;
@@ -1041,21 +1039,17 @@ void drawAlertBar(const WeatherData& weather) {
 }
 
 void renderWeather(const WeatherData& weather) {
-#if RETERMINAL_MODEL == 1001
   // Zenith test background: paint the ink-wash landscape first so the
-  // header, icons, and text render on top of it. E1001 is 800x480 4-gray,
-  // which is exactly the native format of the embedded picture, so we
-  // skip the fillSprite - the zenith blit covers every pixel. When the
-  // user has toggled the background off in /settings, fall back to a
-  // plain white sprite like the other panels.
+  // header, icons, and text render on top of it. Payloads are pre-baked
+  // per model (2bpp on the gray panels, 1bpp black-and-white on the
+  // Spectra-6 panels) so the blit covers every pixel and we skip the
+  // fillSprite step. When the user has toggled the background off in
+  // /settings, fall back to a plain white sprite instead.
   if (weather_config::runtime::zenithBackgroundEnabled()) {
     zenith_background::draw(epaper);
   } else {
     epaper.fillSprite(PANEL_WHITE);
   }
-#else
-  epaper.fillSprite(PANEL_WHITE);
-#endif
   drawHeader(weather);
   drawAlertBar(weather);
 #if RETERMINAL_MODEL == 1004

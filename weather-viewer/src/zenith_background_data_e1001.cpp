@@ -1,5 +1,9 @@
-// AUTO-GENERATED FROM sticky icon_zenith_h.bin (2bpp 800x480, 4-gray).
+// AUTO-GENERATED - zenith weather background for reTerminal E1001.
+// 800x480 (landscape) packed at 2bpp (4 gray levels).
 // See tools/embed_zenith_background.py to regenerate.
+
+#if defined(RETERMINAL_MODEL) && RETERMINAL_MODEL == 1001
+
 #include <pgmspace.h>
 #include <stdint.h>
 #include <stddef.h>
@@ -8,6 +12,8 @@ namespace zenith_background {
 
 extern const uint16_t kWidth = 800;
 extern const uint16_t kHeight = 480;
+extern const uint8_t  kBitsPerPixel = 2;
+extern const uint8_t  kLevels = 4;
 extern const size_t kDataLen = 96000;
 
 extern const uint8_t kData[] PROGMEM = {
@@ -6014,3 +6020,5 @@ extern const uint8_t kData[] PROGMEM = {
 };
 
 }  // namespace zenith_background
+
+#endif  // RETERMINAL_MODEL == 1001
