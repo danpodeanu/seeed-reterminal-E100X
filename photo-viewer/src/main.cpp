@@ -1179,7 +1179,7 @@ void setup() {
 
   if (!displayed) {
     renderStatus("Photo unavailable",
-                 sdReady ? "Run tools/prepare_photos.py and copy files to /photos"
+                 sdReady ? "Hold green button for 2 seconds to open upload portal"
                          : "Insert a FAT32 SD card");
   }
 
