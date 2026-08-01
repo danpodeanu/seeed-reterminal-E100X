@@ -53,6 +53,7 @@
 #include "weather_wifi_credentials.h"
 #include "weather_icons.h"
 #include "weather_quotes.h"
+#include "zenith_background.h"
 
 #if RETERMINAL_MODEL == 1003
 #include "fonts/Roboto_Bold90pt7b.h"
@@ -1012,7 +1013,15 @@ void drawAlertBar(const WeatherData& weather) {
 }
 
 void renderWeather(const WeatherData& weather) {
+#if RETERMINAL_MODEL == 1001
+  // Zenith test background: paint the ink-wash landscape first so the
+  // header, icons, and text render on top of it. E1001 is 800x480 4-gray,
+  // which is exactly the native format of the embedded picture, so we
+  // skip the fillSprite - the zenith blit covers every pixel.
+  zenith_background::draw(epaper);
+#else
   epaper.fillSprite(PANEL_WHITE);
+#endif
   drawHeader(weather);
   drawAlertBar(weather);
 #if RETERMINAL_MODEL == 1004
