@@ -1270,11 +1270,12 @@ void setup() {
   xkcd_wifi::load();
 
   // Unified green-button boot gesture. Applies on both cold boot and
-  // deep-sleep green wakes. A first beep marks the start of the portal
-  // window; a second beep 5 s later marks the switch to screenshot:
-  //   * Released before second beep (<=5 s) -> enter config portal.
-  //   * Released after second beep          -> capture a screenshot.
-  //   * Not pressed                         -> normal boot.
+  // deep-sleep green wakes. A first beep marks the press being registered;
+  // a second beep 5 s later marks the switch to screenshot:
+  //   * Released before 1 s          -> accidental tap, ignored.
+  //   * Released between 1 s and 5 s -> enter config portal.
+  //   * Held past 5 s                -> capture a screenshot.
+  //   * Not pressed                  -> normal boot.
   // On cold boot we also trigger the portal automatically when no
   // Wi-Fi credentials are available (NVS + secrets.h both empty).
   enum class GreenGesture { None, PortalRequest, ScreenshotRequest };
@@ -1282,8 +1283,9 @@ void setup() {
   const bool greenPressedAtBoot =
       (coldBoot && !digitalRead(PIN_BUTTON_GREEN)) || greenWokeDevice;
   if (greenPressedAtBoot) {
-    hardware::beep();  // first beep: portal window is open.
+    hardware::beep();  // first beep: gesture registered.
     const uint32_t gestureStartMs = millis();
+    constexpr uint32_t kPortalMinMs = 1000;
     constexpr uint32_t kPortalDecisionMs = 5000;
     bool releasedBeforeDecision = false;
     uint32_t releasedAtMs = 0;
@@ -1296,9 +1298,16 @@ void setup() {
       delay(5);
     }
     if (releasedBeforeDecision) {
-      LOG.printf("[gesture] green released after %u ms -> portal\n",
-                 static_cast<unsigned>(releasedAtMs));
-      gesture = GreenGesture::PortalRequest;
+      if (releasedAtMs < kPortalMinMs) {
+        LOG.printf("[gesture] green released after %u ms (< %u ms min) -> ignored\n",
+                   static_cast<unsigned>(releasedAtMs),
+                   static_cast<unsigned>(kPortalMinMs));
+        gesture = GreenGesture::None;
+      } else {
+        LOG.printf("[gesture] green released after %u ms -> portal\n",
+                   static_cast<unsigned>(releasedAtMs));
+        gesture = GreenGesture::PortalRequest;
+      }
     } else {
       LOG.printf("[gesture] green still held at %u ms -> screenshot\n",
                  static_cast<unsigned>(kPortalDecisionMs));
