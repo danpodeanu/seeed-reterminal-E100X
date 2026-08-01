@@ -20,15 +20,29 @@ namespace {
 // that is definitely present and would succeed on a re-attempt. Treat
 // every SPI SD op as retryable so a single glitch doesn't propagate
 // into "missing font", "cache write dropped", etc.
-constexpr int kSdOpRetries = 3;
-constexpr uint32_t kSdOpRetryDelayMs = 50;
+//
+// Retries use exponential backoff: 25, 50, 100, 200, 400 ms between
+// attempts (~775 ms cumulative budget across 5 tries). That's enough
+// to ride through the worst observed post-Wi-Fi-teardown SD stalls
+// without noticeably delaying the boot on a healthy card, which
+// succeeds on the first attempt in a handful of milliseconds.
+constexpr int kSdOpRetries = 5;
+constexpr uint32_t kSdOpInitialDelayMs = 25;
+
+// Sleep between attempt `attempt` (0-based) and the next one. Doubles
+// each step so the tail attempts absorb longer SPI stalls without
+// paying that cost when the first retry is enough.
+void backoffSleep(int attempt) {
+  uint32_t delayMs = kSdOpInitialDelayMs << attempt;  // 25, 50, 100, 200, 400
+  delay(delayMs);
+}
 
 // Try opening `path` in `mode` up to kSdOpRetries times. Returns the
 // first non-falsy File; the caller inherits ownership (call close()).
 File retryingOpen(const String& path, const char* mode) {
   File file = SD.open(path, mode);
-  for (int attempt = 1; !file && attempt < kSdOpRetries; ++attempt) {
-    delay(kSdOpRetryDelayMs);
+  for (int attempt = 0; !file && attempt < kSdOpRetries - 1; ++attempt) {
+    backoffSleep(attempt);
     file = SD.open(path, mode);
   }
   return file;
@@ -36,9 +50,10 @@ File retryingOpen(const String& path, const char* mode) {
 
 // Try SD.rename until it succeeds or we've burned through kSdOpRetries.
 bool retryingRename(const String& from, const String& to) {
-  for (int attempt = 0; attempt < kSdOpRetries; ++attempt) {
+  if (SD.rename(from, to)) return true;
+  for (int attempt = 0; attempt < kSdOpRetries - 1; ++attempt) {
+    backoffSleep(attempt);
     if (SD.rename(from, to)) return true;
-    delay(kSdOpRetryDelayMs);
   }
   return false;
 }
@@ -47,9 +62,10 @@ bool retryingRename(const String& from, const String& to) {
 // caller should probe fileExists() first; this only handles the "SPI
 // hiccup dropped the mkdir" case.
 bool retryingMkdir(const char* path) {
-  for (int attempt = 0; attempt < kSdOpRetries; ++attempt) {
+  if (SD.mkdir(path)) return true;
+  for (int attempt = 0; attempt < kSdOpRetries - 1; ++attempt) {
+    backoffSleep(attempt);
     if (SD.mkdir(path)) return true;
-    delay(kSdOpRetryDelayMs);
   }
   return false;
 }
