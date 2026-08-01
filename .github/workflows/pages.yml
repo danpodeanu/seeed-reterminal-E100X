@@ -52,12 +52,16 @@ jobs:
           cp -R docs/. site/
           # Download every firmware-*.bin from the newest release. If no
           # release exists yet, leave the directory empty; the flasher
-          # will report that no binaries are available.
+          # will report that no binaries are available. Don't fail the
+          # deploy when the release exists but has no matching assets
+          # (e.g. release-firmware CI hasn't finished uploading yet) —
+          # publish the docs with an empty firmware dir instead.
           if gh release view --repo "${{ github.repository }}" >/dev/null 2>&1; then
             gh release download \
               --repo "${{ github.repository }}" \
               --pattern 'firmware-*.bin' \
-              --dir site/firmware/latest
+              --dir site/firmware/latest \
+              || echo "No matching firmware-*.bin assets on latest release yet."
             ls -la site/firmware/latest
           else
             echo "No published release yet; skipping firmware download."
