@@ -1375,13 +1375,17 @@ void setup() {
   const String connectionDetail =
       cacheLoaded ? "Live update not required" : "Live update required";
   const String stationMac = wifi_sta::stationMacAddress();
+  const String locationLabel = String(weather_config::runtime::locationName());
   LOG.printf("[wifi] station MAC=%s\n", stationMac.c_str());
+  LOG.printf("[location] %s (%.4f, %.4f)\n", locationLabel.c_str(),
+             weather_config::runtime::latitude(),
+             weather_config::runtime::longitude());
 
 #if RETERMINAL_MODEL == 1001
   if (showConnectionStatus) {
     LOG.println("[display] showing Wi-Fi connection status");
     renderStatus("Connecting to " + String(weather_wifi::ssid()), connectionDetail,
-                 stationMac,
+                 locationLabel,
                  "Hold green button for 2 seconds at boot to reconfigure Wi-Fi");
   }
   epaper.initGrayMode(GRAY_LEVEL4);
@@ -1394,7 +1398,7 @@ void setup() {
   if (showConnectionStatus) {
     LOG.println("[display] showing Wi-Fi connection status");
     renderStatus("Connecting to " + String(weather_wifi::ssid()), connectionDetail,
-                 stationMac,
+                 locationLabel,
                  "Hold green button for 2 seconds at boot to reconfigure Wi-Fi");
   }
 #endif
@@ -1415,7 +1419,7 @@ void setup() {
         weather_config::runtime::weatherProvider() == config::WeatherProvider::QWeather
             ? "Clock not synced - times inaccurate, QWeather may fail"
             : "Clock not synced - displayed times may be inaccurate";
-    renderStatus("Connecting to " + String(weather_wifi::ssid()), warning, stationMac);
+    renderStatus("Connecting to " + String(weather_wifi::ssid()), warning, locationLabel);
   }
   local_time::configureTimezone(weather_config::runtime::timezone());
   quiet_hours::configure({weather_config::runtime::quietHoursEnabled(),
