@@ -15,6 +15,7 @@
 #include "app_logger.h"
 #include "app_logic.h"
 #include "config.h"
+#include "local_time.h"
 #include "secrets.h"
 #include "weather_config_runtime.h"
 #include "weather_data.h"
@@ -115,87 +116,14 @@ bool decompressGzipIfNeeded(String& body) {
   return true;
 }
 
-// Portable UTC epoch computation via Howard Hinnant's days_from_civil
-// formula (public-domain). Sidesteps the TZ-swap dance normally needed
-// for timegm() on ESP32 newlib, which lacks it. Handles any date in the
-// range time_t supports.
-static int64_t daysFromCivil(int y, int m, int d) {
-  y -= m <= 2;
-  const int era = (y >= 0 ? y : y - 399) / 400;
-  const int yoe = y - era * 400;
-  const int doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1;
-  const int doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
-  return static_cast<int64_t>(era) * 146097 + doe - 719468;
-}
-
-static time_t utcEpochSeconds(int year, int month, int day,
-                              int hour, int minute, int second) {
-  const int64_t days = daysFromCivil(year, month, day);
-  return static_cast<time_t>(days * 86400LL + hour * 3600LL +
-                             minute * 60LL + second);
-}
-
-// QWeather returns "YYYY-MM-DDTHH:MM+HH:MM" timestamps: no seconds and
-// the offset is the *observation location's* local timezone, NOT the
-// device timezone. If we simply dropped the offset we would later
-// mis-parse the string as the device's local time. For London the
-// observation reads as +01:00 (BST) while the device runs on CST-8, so
-// dropping the offset silently ages every reading by 7 hours.
-//
-// Normalize to "YYYY-MM-DDTHH:MM:SS" in the device's currently-configured
-// local timezone so parseIso8601Local() consumes it correctly and
-// slot-vs-observation string comparisons still work.
-String normalizeTimestamp(const char* raw) {
-  if (raw == nullptr) return String();
-
-  int year = 0, month = 0, day = 0, hour = 0, minute = 0, second = 0;
-  const int fields = sscanf(raw, "%d-%d-%dT%d:%d:%d",
-                            &year, &month, &day, &hour, &minute, &second);
-  if (fields < 5) return String();
-
-  // Skip past the "YYYY-MM-DD" segment to find the timezone marker.
-  size_t i = 0;
-  while (raw[i] && i < 10) ++i;                     // "YYYY-MM-DD"
-  while (raw[i] && raw[i] != '+' && raw[i] != '-' && raw[i] != 'Z') ++i;
-
-  int offsetMinutes = 0;
-  bool haveOffset = false;
-  if (raw[i] == 'Z') {
-    haveOffset = true;
-  } else if (raw[i] == '+' || raw[i] == '-') {
-    const int sign = (raw[i] == '+') ? 1 : -1;
-    int offH = 0, offM = 0;
-    if (sscanf(raw + i + 1, "%d:%d", &offH, &offM) == 2) {
-      offsetMinutes = sign * (offH * 60 + offM);
-      haveOffset = true;
-    }
-  }
-
-  if (!haveOffset) {
-    // Fall back to the historical no-offset behaviour: caller-supplied
-    // strings without a timezone are treated as already in device local
-    // time (this keeps unit tests and OpenMeteo's `current.time` field,
-    // which is already localized, working unchanged).
-    char buf[24];
-    snprintf(buf, sizeof(buf), "%04d-%02d-%02dT%02d:%02d:%02d",
-             year, month, day, hour, minute, second);
-    return String(buf);
-  }
-
-  // Observation instant in UTC = local wall clock - offset.
-  const time_t epoch =
-      utcEpochSeconds(year, month, day, hour, minute, second) -
-      static_cast<time_t>(offsetMinutes) * 60;
-  if (epoch <= 0) return String();
-
-  // Reformat as device-local wall clock.
-  struct tm localTm = {};
-  if (localtime_r(&epoch, &localTm) == nullptr) return String();
-  char buf[24];
-  snprintf(buf, sizeof(buf), "%04d-%02d-%02dT%02d:%02d:%02d",
-           localTm.tm_year + 1900, localTm.tm_mon + 1, localTm.tm_mday,
-           localTm.tm_hour, localTm.tm_min, localTm.tm_sec);
-  return String(buf);
+// QWeather timestamps arrive in "YYYY-MM-DDTHH:MM+HH:MM" form. The
+// offset is the observation location's, not the device's. Parse it as
+// UTC epoch via local_time::parseIso8601Utc. Returns 0 on failure so
+// downstream code can use `!= 0` as "have this timestamp".
+static time_t parseQweatherTimestamp(const char* raw) {
+  time_t out = 0;
+  if (raw == nullptr || raw[0] == '\0') return 0;
+  return local_time::parseIso8601Utc(raw, out) ? out : 0;
 }
 
 float parseFloat(const char* text) {
@@ -450,10 +378,10 @@ bool parseQWeather(const String& body, WeatherData& weather) {
   const int nowIcon = parseInt(now["icon"] | "", -1);
   weather.weatherCode = app_logic::qweatherIconToWmoCode(nowIcon);
   weather.isDay = !app_logic::qweatherIconIsNight(nowIcon);
-  weather.updateTime = normalizeTimestamp(now["obsTime"] | "");
+  weather.updateTime = parseQweatherTimestamp(now["obsTime"] | "");
   weather.rainTimingAvailable = false;
   weather.rainExpected = false;
-  weather.nextRainTime = "";
+  weather.nextRainTime = 0;
   weather.nextRainMm = NAN;
   weather.nextRainProbability = -1;
 
@@ -475,10 +403,11 @@ bool parseQWeather(const String& body, WeatherData& weather) {
         min(static_cast<size_t>(config::RAIN_FORECAST_HOURS), hourly.size());
     for (size_t i = 0; i < limit; ++i) {
       JsonObject slot = hourly[i];
-      const String slotTime = normalizeTimestamp(slot["fxTime"] | "");
-      if (slotTime.isEmpty() ||
-          (!weather.updateTime.isEmpty() &&
-           strcmp(slotTime.c_str(), weather.updateTime.c_str()) <= 0)) {
+      const time_t slotTime = parseQweatherTimestamp(slot["fxTime"] | "");
+      // Skip past the observation instant. Both timestamps are UTC
+      // epoch, so an integer compare is unambiguous.
+      if (slotTime == 0 ||
+          (weather.updateTime != 0 && slotTime <= weather.updateTime)) {
         continue;
       }
       const float precipitation = parseFloat(slot["precip"] | "0");
@@ -555,11 +484,17 @@ bool parseQWeather(const String& body, WeatherData& weather) {
   LOG.printf("[weather] %.1fC, feels %.1fC, %.0f%% RH, code=%d\n",
              weather.temperatureC, weather.apparentC, weather.humidityPct,
              weather.weatherCode);
-  LOG.printf("[weather] QWeather obsTime=\"%s\"\n", weather.updateTime.c_str());
+  {
+    char buf[24];
+    local_time::formatLocalIso(weather.updateTime, buf, sizeof(buf));
+    LOG.printf("[weather] QWeather obsTime=%lld (local %s)\n",
+               static_cast<long long>(weather.updateTime), buf);
+  }
   if (weather.rainExpected) {
+    char buf[24];
+    local_time::formatLocalIso(weather.nextRainTime, buf, sizeof(buf));
     LOG.printf("[weather] next rain around %s, %.1fmm, probability=%d%%\n",
-               weather.nextRainTime.c_str(), weather.nextRainMm,
-               weather.nextRainProbability);
+               buf, weather.nextRainMm, weather.nextRainProbability);
   } else if (weather.rainTimingAvailable) {
     LOG.printf("[weather] no qualifying rain in the next %u hours\n",
                config::RAIN_FORECAST_HOURS);

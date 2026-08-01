@@ -21,7 +21,7 @@
 
 namespace canonical_weather {
 
-constexpr char SCHEMA_VERSION[] = "reterminal-weather-v1";
+constexpr char SCHEMA_VERSION[] = "reterminal-weather-v2";
 
 namespace detail {
 
@@ -52,7 +52,8 @@ inline int readInt(JsonVariantConst v, int fallback = -1) {
 inline bool serialize(const WeatherData& weather, String& out) {
   JsonDocument doc;
   doc["_schema"] = SCHEMA_VERSION;
-  doc["updateTime"] = weather.updateTime;
+  // Timestamps are stored as UTC epoch seconds. See weather_data.h.
+  doc["updateTime"] = static_cast<int64_t>(weather.updateTime);
   detail::writeFloat(doc, "temperatureC", weather.temperatureC);
   detail::writeFloat(doc, "apparentC", weather.apparentC);
   detail::writeFloat(doc, "humidityPct", weather.humidityPct);
@@ -61,8 +62,8 @@ inline bool serialize(const WeatherData& weather, String& out) {
   doc["isDay"] = weather.isDay;
   doc["rainTimingAvailable"] = weather.rainTimingAvailable;
   doc["rainExpected"] = weather.rainExpected;
-  if (weather.nextRainTime.length() > 0) {
-    doc["nextRainTime"] = weather.nextRainTime;
+  if (weather.nextRainTime != 0) {
+    doc["nextRainTime"] = static_cast<int64_t>(weather.nextRainTime);
   }
   detail::writeFloat(doc, "nextRainMm", weather.nextRainMm);
   detail::writeInt(doc, "nextRainProbability", weather.nextRainProbability);
@@ -110,7 +111,7 @@ inline bool parse(const String& body, WeatherData& weather) {
   }
   weather = WeatherData{};
   weather.valid = true;
-  weather.updateTime = doc["updateTime"] | "";
+  weather.updateTime = static_cast<time_t>(doc["updateTime"] | int64_t{0});
   weather.temperatureC = detail::readFloat(doc["temperatureC"]);
   weather.apparentC = detail::readFloat(doc["apparentC"]);
   weather.humidityPct = detail::readFloat(doc["humidityPct"]);
@@ -119,7 +120,8 @@ inline bool parse(const String& body, WeatherData& weather) {
   weather.isDay = doc["isDay"] | true;
   weather.rainTimingAvailable = doc["rainTimingAvailable"] | false;
   weather.rainExpected = doc["rainExpected"] | false;
-  weather.nextRainTime = doc["nextRainTime"] | "";
+  weather.nextRainTime =
+      static_cast<time_t>(doc["nextRainTime"] | int64_t{0});
   weather.nextRainMm = detail::readFloat(doc["nextRainMm"]);
   weather.nextRainProbability =
       detail::readInt(doc["nextRainProbability"]);

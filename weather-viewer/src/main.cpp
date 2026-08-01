@@ -304,7 +304,7 @@ void selectLargeTemperatureFont() {
 
 void drawBadges(uint32_t background = PANEL_WHITE,
                 bool fillTextBackground = true,
-                const String* weatherUpdateTime = nullptr) {
+                time_t weatherUpdateTime = 0) {
   epaper.setTextColor(PANEL_BLACK, background, fillTextBackground);
   selectSmallFont();
 
@@ -331,14 +331,18 @@ void drawBadges(uint32_t background = PANEL_WHITE,
   epaper.setTextDatum(MR_DATUM);
   const int percentRightX = x - config::ui(9);
   epaper.drawString(percent, percentRightX, statusCenterY, 1);
-  if (weather_config::runtime::debugShowStatusBadges() && weatherUpdateTime != nullptr &&
-      !weatherUpdateTime->isEmpty()) {
-    const int separator = weatherUpdateTime->indexOf('T');
-    if (separator >= 10 &&
-        weatherUpdateTime->length() >= static_cast<size_t>(separator + 6)) {
-      const String updateDate = weatherUpdateTime->substring(5, 10);
-      const String updateClock =
-          weatherUpdateTime->substring(separator + 1, separator + 6);
+  if (weather_config::runtime::debugShowStatusBadges() &&
+      weatherUpdateTime != 0) {
+    // Format the UTC epoch as the device-local calendar day (MM-DD)
+    // and time (HH:MM) — matching what the header shows.
+    struct tm tm = {};
+    if (localtime_r(&weatherUpdateTime, &tm) != nullptr) {
+      char updateDate[6];
+      char updateClock[6];
+      snprintf(updateDate, sizeof(updateDate), "%02d-%02d",
+               tm.tm_mon + 1, tm.tm_mday);
+      snprintf(updateClock, sizeof(updateClock), "%02d:%02d",
+               tm.tm_hour, tm.tm_min);
       const int updateRightX =
           percentRightX - epaper.textWidth(percent, 1) - config::ui(10);
       selectUpdateTimeFont();
@@ -442,16 +446,15 @@ bool loadCachedWeather(WeatherData& weather, String& failureReason,
   }
 
   const time_t now = time(nullptr);
-  time_t forecastTime = 0;
   if (!local_time::clockIsValid()) {
     failureReason = "Cannot verify saved forecast age";
     LOG.printf("[cache] %s\n", failureReason.c_str());
     return false;
   }
-  if (!local_time::parseIso8601Local(weather.updateTime.c_str(), forecastTime)) {
+  const time_t forecastTime = weather.updateTime;
+  if (forecastTime == 0) {
     failureReason = "Saved forecast time is invalid";
-    LOG.printf("[cache] %s: %s\n", failureReason.c_str(),
-               weather.updateTime.c_str());
+    LOG.printf("[cache] %s\n", failureReason.c_str());
     return false;
   }
   if (!app_logic::cachedDataFresh(
@@ -471,8 +474,11 @@ bool loadCachedWeather(WeatherData& weather, String& failureReason,
   }
 
   weather.fromCache = true;
-  LOG.printf("[cache] using forecast updated %s\n",
-             weather.updateTime.c_str());
+  {
+    char buf[24];
+    local_time::formatLocalIso(weather.updateTime, buf, sizeof(buf));
+    LOG.printf("[cache] using forecast updated %s\n", buf);
+  }
   return true;
 }
 
@@ -485,17 +491,17 @@ String uvDescription(float uv) {
   return "Extreme";
 }
 
-String updateClock(const String& isoTime) {
-  const int separator = isoTime.indexOf('T');
-  if (separator >= 0 && isoTime.length() >= static_cast<size_t>(separator + 6))
-    return isoTime.substring(separator + 1, separator + 6);
-  return "";
+String updateClock(time_t epoch) {
+  if (epoch == 0) return "";
+  struct tm tm = {};
+  if (localtime_r(&epoch, &tm) == nullptr) return "";
+  char buf[6];
+  snprintf(buf, sizeof(buf), "%02d:%02d", tm.tm_hour, tm.tm_min);
+  return String(buf);
 }
 
-String weatherAgeText(const String& isoTime) {
-  time_t forecastTime = 0;
-  if (!local_time::clockIsValid() || !local_time::parseIso8601Local(isoTime.c_str(), forecastTime))
-    return "";
+String weatherAgeText(time_t forecastTime) {
+  if (!local_time::clockIsValid() || forecastTime == 0) return "";
 
   const int64_t roundedMinutes = app_logic::roundedAgeMinutes(
       static_cast<int64_t>(time(nullptr)),
@@ -553,17 +559,24 @@ String dayLabel(uint8_t index, const String& date) {
 }
 
 String nextRainWhen(const WeatherData& weather) {
+  if (weather.nextRainTime == 0) return "";
   const String clock = updateClock(weather.nextRainTime);
   if (clock.isEmpty()) return "";
-  if (weather.nextRainTime.length() >= 10) {
-    const String date = weather.nextRainTime.substring(0, 10);
-    if (!weather.days[0].date.isEmpty() && date == weather.days[0].date)
-      return clock;
-    if (!weather.days[1].date.isEmpty() && date == weather.days[1].date)
-      return "tomorrow " + clock;
-    return weather.nextRainTime.substring(5, 10) + " " + clock;
-  }
-  return clock;
+  // Format the observation instant as a device-local calendar date to
+  // compare against days[i].date (also device-local "YYYY-MM-DD").
+  struct tm tm = {};
+  if (localtime_r(&weather.nextRainTime, &tm) == nullptr) return clock;
+  char date[11];
+  snprintf(date, sizeof(date), "%04d-%02d-%02d",
+           tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday);
+  const String dateStr(date);
+  if (!weather.days[0].date.isEmpty() && dateStr == weather.days[0].date)
+    return clock;
+  if (!weather.days[1].date.isEmpty() && dateStr == weather.days[1].date)
+    return "tomorrow " + clock;
+  char mmdd[6];
+  snprintf(mmdd, sizeof(mmdd), "%02d-%02d", tm.tm_mon + 1, tm.tm_mday);
+  return String(mmdd) + " " + clock;
 }
 
 String rainSummary(const WeatherData& weather) {
@@ -667,7 +680,7 @@ void drawLargeTemperature(float celsius, int cx, int cy) {
 void drawHeader(const WeatherData& weather) {
   const int height = config::ui(45);
   epaper.fillRect(0, 0, config::PANEL_WIDTH, height, PANEL_WHITE);
-  drawBadges(PANEL_WHITE, true, &weather.updateTime);
+  drawBadges(PANEL_WHITE, true, weather.updateTime);
   epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, true);
   epaper.setTextDatum(MC_DATUM);
   String heading;
@@ -1013,9 +1026,12 @@ void renderWeather(const WeatherData& weather) {
   epaper.setTextFont(2);
   {
     const String ageForLog = weatherAgeText(weather.updateTime);
-    LOG.printf("[render] source=%s updateTime=\"%s\" header=\"Weather %s\"\n",
+    char updateBuf[24];
+    local_time::formatLocalIso(weather.updateTime, updateBuf,
+                               sizeof(updateBuf));
+    LOG.printf("[render] source=%s updateTime=%s header=\"Weather %s\"\n",
                weather.fromCache ? "cache" : "live",
-               weather.updateTime.c_str(),
+               updateBuf[0] ? updateBuf : "(unknown)",
                ageForLog.isEmpty() ? "(no age)" : ageForLog.c_str());
   }
   LOG.println("[render] refreshing weather panel");

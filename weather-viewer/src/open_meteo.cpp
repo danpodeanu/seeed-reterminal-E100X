@@ -9,6 +9,7 @@
 #include "app_logger.h"
 #include "app_logic.h"
 #include "config.h"
+#include "local_time.h"
 #include "weather_config_runtime.h"
 #include "weather_data.h"
 #include "weather_provider.h"
@@ -29,7 +30,13 @@ String forecastUrl() {
       "&hourly=precipitation_probability,precipitation,rain,showers"
       "&daily=weather_code,temperature_2m_max,temperature_2m_min,"
       "uv_index_max,precipitation_probability_max"
-      "&temperature_unit=celsius&wind_speed_unit=kmh&timezone=auto"
+      "&temperature_unit=celsius&wind_speed_unit=kmh"
+      // timezone=auto so Open-Meteo groups daily entries by the
+      // observation location's calendar day. timeformat=unixtime so
+      // every "time" field arrives as an integer UTC epoch, sidestepping
+      // the "did we mean the observation's local wall clock or the
+      // device's?" ambiguity we hit with QWeather.
+      "&timezone=auto&timeformat=unixtime"
       "&forecast_hours=";
   url += String(config::RAIN_FORECAST_HOURS);
   url += "&forecast_days=";
@@ -179,15 +186,35 @@ bool parseOpenMeteo(const String& body, WeatherData& weather) {
   weather.windKmh = current["wind_speed_10m"] | NAN;
   weather.weatherCode = current["weather_code"] | -1;
   weather.isDay = (current["is_day"] | 1) != 0;
-  weather.updateTime = String(current["time"] | "");
+  weather.updateTime = static_cast<time_t>(current["time"] | int64_t{0});
   weather.rainTimingAvailable = false;
   weather.rainExpected = false;
-  weather.nextRainTime = "";
+  weather.nextRainTime = 0;
   weather.nextRainMm = NAN;
   weather.nextRainProbability = -1;
 
+  // With timeformat=unixtime, daily.time[i] is the UTC epoch of the
+  // observation-local midnight for that calendar day. Shifting by
+  // utc_offset_seconds and formatting as UTC gives the observation
+  // location's calendar date, which is what the panel wants.
+  const int32_t utcOffsetSeconds =
+      document["utc_offset_seconds"] | int32_t{0};
+
   for (uint8_t i = 0; i < config::FORECAST_DAYS; ++i) {
-    weather.days[i].date = String(dates[i] | "");
+    const int64_t dailyEpoch = dates[i] | int64_t{0};
+    if (dailyEpoch == 0) {
+      weather.days[i].date = "";
+    } else {
+      const time_t shifted =
+          static_cast<time_t>(dailyEpoch + utcOffsetSeconds);
+      struct tm tm = {};
+      char buf[11] = "";  // "YYYY-MM-DD"
+      if (gmtime_r(&shifted, &tm) != nullptr) {
+        snprintf(buf, sizeof(buf), "%04d-%02d-%02d",
+                 tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday);
+      }
+      weather.days[i].date = String(buf);
+    }
     weather.days[i].weatherCode = codes[i] | -1;
     weather.days[i].maximumC = maxima[i] | NAN;
     weather.days[i].minimumC = minima[i] | NAN;
@@ -206,10 +233,10 @@ bool parseOpenMeteo(const String& body, WeatherData& weather) {
   if (!hourly.isNull() && hourlyCount > 0) {
     weather.rainTimingAvailable = true;
     for (size_t i = 0; i < hourlyCount; ++i) {
-      const String slotTime = String(hourlyTimes[i] | "");
-      if (slotTime.isEmpty() ||
-          (!weather.updateTime.isEmpty() &&
-           strcmp(slotTime.c_str(), weather.updateTime.c_str()) <= 0)) {
+      const time_t slotTime =
+          static_cast<time_t>(hourlyTimes[i] | int64_t{0});
+      if (slotTime == 0 ||
+          (weather.updateTime != 0 && slotTime <= weather.updateTime)) {
         continue;
       }
 
@@ -247,12 +274,17 @@ bool parseOpenMeteo(const String& body, WeatherData& weather) {
   LOG.printf("[weather] %.1fC, feels %.1fC, %.0f%% RH, code=%d\n",
              weather.temperatureC, weather.apparentC, weather.humidityPct,
              weather.weatherCode);
-  LOG.printf("[weather] Open-Meteo current.time=\"%s\"\n",
-             weather.updateTime.c_str());
+  {
+    char buf[24];
+    local_time::formatLocalIso(weather.updateTime, buf, sizeof(buf));
+    LOG.printf("[weather] Open-Meteo current.time=%lld (local %s)\n",
+               static_cast<long long>(weather.updateTime), buf);
+  }
   if (weather.rainExpected) {
+    char buf[24];
+    local_time::formatLocalIso(weather.nextRainTime, buf, sizeof(buf));
     LOG.printf("[weather] next rain around %s, %.1fmm, probability=%d%%\n",
-               weather.nextRainTime.c_str(), weather.nextRainMm,
-               weather.nextRainProbability);
+               buf, weather.nextRainMm, weather.nextRainProbability);
   } else if (weather.rainTimingAvailable) {
     LOG.printf("[weather] no qualifying rain in the next %u hours\n",
                config::RAIN_FORECAST_HOURS);

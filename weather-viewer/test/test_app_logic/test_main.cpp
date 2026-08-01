@@ -412,6 +412,47 @@ void test_parse_iso8601_local_rejects_invalid_input() {
   TEST_ASSERT_FALSE(local_time::parseIso8601Local("2025-04-31T12:00", ts));
 }
 
+// parseIso8601Utc turns a provider timestamp with an offset marker
+// (Z or +/-HH:MM) into a UTC epoch, regardless of the device timezone.
+// This is the QWeather "2026-08-01T03:16+01:00" case that used to be
+// silently reinterpreted as 03:16 in the device's own timezone.
+void test_parse_iso8601_utc_normalises_offset() {
+  // Force device to CST-8 to prove the parser ignores it.
+  setenv("TZ", "CST-8", 1);
+  tzset();
+  time_t ts = 0;
+  // 03:16 in BST (+01:00) is 02:16 UTC = 1754014560 (Aug 1 2025 02:16Z).
+  TEST_ASSERT_TRUE(
+      local_time::parseIso8601Utc("2025-08-01T03:16+01:00", ts));
+  TEST_ASSERT_EQUAL(1754014560, static_cast<long>(ts));
+  // Explicit Z (UTC) round-trips identically.
+  TEST_ASSERT_TRUE(
+      local_time::parseIso8601Utc("2025-08-01T02:16Z", ts));
+  TEST_ASSERT_EQUAL(1754014560, static_cast<long>(ts));
+  // Negative offset shifts the other direction: 22:00-05:00 wall clock
+  // is 03:00 UTC on the *next* day (Aug 2), i.e. 1754103600.
+  TEST_ASSERT_TRUE(
+      local_time::parseIso8601Utc("2025-08-01T22:00-05:00", ts));
+  TEST_ASSERT_EQUAL(1754103600, static_cast<long>(ts));
+  // Full seconds form is accepted.
+  TEST_ASSERT_TRUE(
+      local_time::parseIso8601Utc("2025-08-01T02:16:30Z", ts));
+  TEST_ASSERT_EQUAL(1754014590, static_cast<long>(ts));
+}
+
+void test_parse_iso8601_utc_rejects_missing_offset_or_garbage() {
+  setenv("TZ", "UTC0", 1);
+  tzset();
+  time_t ts = 0;
+  // No offset marker at all: the caller must reach for parseIso8601Local.
+  TEST_ASSERT_FALSE(local_time::parseIso8601Utc("2025-08-01T02:16", ts));
+  TEST_ASSERT_FALSE(local_time::parseIso8601Utc(nullptr, ts));
+  TEST_ASSERT_FALSE(local_time::parseIso8601Utc("", ts));
+  TEST_ASSERT_FALSE(local_time::parseIso8601Utc("garbage", ts));
+  // Out-of-range fields still rejected.
+  TEST_ASSERT_FALSE(local_time::parseIso8601Utc("2025-13-01T00:00Z", ts));
+}
+
 // Every branch of conditionName() -- the string that actually ends up on the
 // e-paper panel. If someone tweaks the WMO bucket table without updating the
 // UI (or vice versa) this catches the divergence immediately.
@@ -712,6 +753,8 @@ int main(int, char**) {
   RUN_TEST(test_jwt_lifetime_clamps_to_qweather_bounds);
   RUN_TEST(test_parse_iso8601_local_accepts_full_and_minute_form);
   RUN_TEST(test_parse_iso8601_local_rejects_invalid_input);
+  RUN_TEST(test_parse_iso8601_utc_normalises_offset);
+  RUN_TEST(test_parse_iso8601_utc_rejects_missing_offset_or_garbage);
   RUN_TEST(test_condition_name_covers_every_wmo_bucket);
   RUN_TEST(test_condition_name_falls_back_to_mixed_weather);
   RUN_TEST(test_qweather_icon_to_condition_name_end_to_end);

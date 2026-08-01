@@ -85,4 +85,91 @@ inline bool parseIso8601Local(const char* value, time_t& timestamp) {
          roundTrip.tm_sec == second;
 }
 
+// Portable "days since 1970-01-01" for a Gregorian date via Howard
+// Hinnant's civil-days formula (public-domain). Used to compute UTC
+// epochs without depending on timegm (which ESP32 newlib omits) and
+// without touching the process TZ. Range: any y/m/d representable by
+// int; the caller must supply a real Gregorian date.
+inline int64_t daysFromCivil(int y, int m, int d) {
+  y -= m <= 2;
+  const int era = (y >= 0 ? y : y - 399) / 400;
+  const int yoe = y - era * 400;
+  const int doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1;
+  const int doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+  return static_cast<int64_t>(era) * 146097 + doe - 719468;
+}
+
+// Compute the UTC epoch seconds for a Gregorian (y, m, d, h, m, s)
+// tuple that is *already* in UTC. Side-effect-free (no TZ swap).
+inline time_t utcEpochSeconds(int year, int month, int day,
+                              int hour, int minute, int second) {
+  const int64_t days = daysFromCivil(year, month, day);
+  return static_cast<time_t>(days * 86400LL + hour * 3600LL +
+                             minute * 60LL + second);
+}
+
+// Parse "YYYY-MM-DDTHH:MM[:SS]{Z|±HH:MM}" into a UTC epoch. Returns
+// false if the string is missing required fields, is out of range, or
+// carries no timezone marker at all. Use parseIso8601Local() instead
+// when the source is known to be device-local wall clock without an
+// offset.
+//
+// The offset is REQUIRED and interpreted correctly. This is the right
+// entry point for provider timestamps that arrive with an explicit
+// offset attached (QWeather obsTime "+01:00", RFC 3339 in general).
+inline bool parseIso8601Utc(const char* value, time_t& out) {
+  if (value == nullptr) return false;
+  int year = 0, month = 0, day = 0, hour = 0, minute = 0, second = 0;
+  const int fields = sscanf(value, "%d-%d-%dT%d:%d:%d",
+                            &year, &month, &day, &hour, &minute, &second);
+  if (fields < 5 || year < 1970 || month < 1 || month > 12 ||
+      day < 1 || day > 31 || hour < 0 || hour > 23 ||
+      minute < 0 || minute > 59 || second < 0 || second > 59) {
+    return false;
+  }
+
+  // Skip past "YYYY-MM-DD" to find the offset marker.
+  size_t i = 0;
+  while (value[i] && i < 10) ++i;
+  while (value[i] && value[i] != '+' && value[i] != '-' && value[i] != 'Z') ++i;
+
+  int offsetMinutes = 0;
+  if (value[i] == 'Z') {
+    offsetMinutes = 0;
+  } else if (value[i] == '+' || value[i] == '-') {
+    const int sign = (value[i] == '+') ? 1 : -1;
+    int offH = 0, offM = 0;
+    if (sscanf(value + i + 1, "%d:%d", &offH, &offM) != 2) return false;
+    offsetMinutes = sign * (offH * 60 + offM);
+  } else {
+    return false;  // no offset -> caller should use parseIso8601Local
+  }
+
+  out = utcEpochSeconds(year, month, day, hour, minute, second) -
+        static_cast<time_t>(offsetMinutes) * 60;
+  return out > 0;
+}
+
+// Format a UTC epoch as the device-local wall clock string
+// "YYYY-MM-DDTHH:MM:SS". Returns an empty string when epoch is 0 or
+// localtime_r fails. Prints to the caller's buffer to avoid heap.
+inline size_t formatLocalIso(time_t epoch, char* out, size_t outLen) {
+  if (epoch == 0 || out == nullptr || outLen == 0) {
+    if (out != nullptr && outLen > 0) out[0] = '\0';
+    return 0;
+  }
+  struct tm tm = {};
+  if (localtime_r(&epoch, &tm) == nullptr) {
+    out[0] = '\0';
+    return 0;
+  }
+  const int written = snprintf(
+      out, outLen, "%04d-%02d-%02dT%02d:%02d:%02d",
+      tm.tm_year + 1900, tm.tm_mon + 1, tm.tm_mday,
+      tm.tm_hour, tm.tm_min, tm.tm_sec);
+  return (written > 0 && static_cast<size_t>(written) < outLen)
+             ? static_cast<size_t>(written)
+             : 0;
+}
+
 }  // namespace local_time
