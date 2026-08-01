@@ -693,18 +693,56 @@ void handleUploadStream() {
     }
     case UPLOAD_FILE_WRITE: {
       if (g_uploadOk && g_uploadFile) {
-        const size_t written =
-            g_uploadFile.write(upload.buf, upload.currentSize);
-        if (written != upload.currentSize) {
-          g_uploadOk = false;
-          LOG.printf("[sd-web] upload short write on %s\n",
-                     g_uploadTargetPath.c_str());
+        // Retry short writes with a short backoff + flush(). The
+        // reTerminal shares one SPI bus between the SD card and the
+        // e-paper controller, so a mid-upload SPI stall can cause a
+        // single File::write() to return fewer bytes than requested
+        // even when the card itself is healthy. Retrying the residual
+        // bytes at the current file position drains those stalls
+        // without losing the upload; the sd_card::* wrappers cover
+        // open/rename/remove but the raw File::write path is
+        // per-caller. See the "upload short write" log line for the
+        // observed symptom.
+        const uint8_t* buf = upload.buf;
+        size_t remaining = upload.currentSize;
+        constexpr int kMaxRetries = 5;
+        constexpr uint32_t kInitialDelayMs = 25;
+        int attempt = 0;
+        while (remaining > 0) {
+          const size_t written = g_uploadFile.write(buf, remaining);
+          if (written == remaining) break;
+          buf += written;
+          remaining -= written;
+          if (attempt >= kMaxRetries) {
+            g_uploadOk = false;
+            LOG.printf(
+                "[sd-web] upload short write on %s (%u bytes stuck after %d retries)\n",
+                g_uploadTargetPath.c_str(), static_cast<unsigned>(remaining),
+                attempt);
+            break;
+          }
+          // Backoff 25/50/100/200/400 ms + flush() to let the driver
+          // drain any buffered state before we ask it to accept more.
+          const uint32_t backoffMs = kInitialDelayMs << attempt;
+          LOG.printf(
+              "[sd-web] upload write stall on %s (%u bytes left, retry %d)\n",
+              g_uploadTargetPath.c_str(), static_cast<unsigned>(remaining),
+              attempt + 1);
+          g_uploadFile.flush();
+          delay(backoffMs);
+          ++attempt;
         }
       }
       break;
     }
     case UPLOAD_FILE_END: {
-      if (g_uploadFile) g_uploadFile.close();
+      if (g_uploadFile) {
+        // Force any buffered writes to hit the card before we close so
+        // a driver-level failure surfaces as a close-time error rather
+        // than a silent truncated file the user only notices later.
+        g_uploadFile.flush();
+        g_uploadFile.close();
+      }
       LOG.printf("[sd-web] upload end %s (%u bytes) -> %s\n",
                  g_uploadTargetPath.c_str(),
                  static_cast<unsigned>(upload.totalSize),
