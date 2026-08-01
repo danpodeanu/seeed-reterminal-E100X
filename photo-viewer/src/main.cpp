@@ -657,16 +657,19 @@ void powerDownAndSleep(uint64_t sleepSeconds = 0) {
   esp_deep_sleep_start();
 }
 
-// Poll GPIO 3 and GPIO 4. Returns true as soon as either arrow button
-// registers a solid press (LOW for at least ~60 ms). Used by the SD
-// portal loop to detect the "exit portal" gesture. GPIO 5 (green) is
-// ignored here so the user can still cycle the panel/portal without
-// leaving the mode.
-bool arrowPressedNow() {
-  if (digitalRead(PIN_KEY0) == LOW || digitalRead(PIN_KEY1) == LOW) {
+// Poll all three front-panel buttons. Returns true as soon as any of
+// them registers a solid press (LOW for at least ~60 ms). Used by the
+// SD portal loop to detect the "exit portal" gesture. The green button
+// (GPIO 5) is the same one that enters the portal, so treating it as
+// an exit gesture too gives the user a symmetric enter/exit gesture
+// on the same key.
+bool exitButtonPressedNow() {
+  if (digitalRead(PIN_KEY0) == LOW || digitalRead(PIN_KEY1) == LOW ||
+      digitalRead(PIN_KEY2) == LOW) {
     // Debounce: require the press to still be held after a short delay.
     delay(30);
-    if (digitalRead(PIN_KEY0) == LOW || digitalRead(PIN_KEY1) == LOW) {
+    if (digitalRead(PIN_KEY0) == LOW || digitalRead(PIN_KEY1) == LOW ||
+        digitalRead(PIN_KEY2) == LOW) {
       return true;
     }
   }
@@ -726,7 +729,7 @@ void renderPortalOnPanel(const String& ssid, const String& password,
 // true. Brings up the soft-AP + HTTP portal (config_portal for Wi-Fi +
 // Reset tabs, sd_web_portal attached to the same server for SD +
 // Photos tabs), draws the welcome QR screen, and services HTTP
-// requests forever. Exits when the user presses either arrow button
+// requests forever. Exits when the user presses any front-panel button
 // or when the web UI POSTs /exit-portal, at which point we schedule a
 // return to photo mode and reboot so setup() gets a fresh environment
 // (WebServer + softAP tear-down inside a single boot is fiddly).
@@ -746,8 +749,8 @@ void renderPortalOnPanel(const String& ssid, const String& password,
     // is consistent, then wait for the user to press an arrow to bail
     // out. We don't tear down and reboot here because a card might get
     // inserted while we're waiting.
-    renderStatus("No SD card", "Insert a FAT32 card and press an arrow");
-    while (!arrowPressedNow()) delay(50);
+    renderStatus("No SD card", "Insert a FAT32 card and press any button");
+    while (!exitButtonPressedNow()) delay(50);
     sdPortalMode = false;
     photoRefreshOnly = true;
     LOG.println("[portal] no-card exit; restarting into photo mode");
@@ -786,8 +789,8 @@ void renderPortalOnPanel(const String& ssid, const String& password,
 
   if (!config_portal::begin(portalCfg)) {
     renderStatus("Wi-Fi start failed",
-                 "Press an arrow to return to photo mode");
-    while (!arrowPressedNow()) delay(50);
+                 "Press any button to return to photo mode");
+    while (!exitButtonPressedNow()) delay(50);
     sdPortalMode = false;
     photoRefreshOnly = true;
     LOG.println("[portal] AP start failed; restarting into photo mode");
@@ -837,15 +840,16 @@ void renderPortalOnPanel(const String& ssid, const String& password,
 
   pinMode(PIN_KEY0, INPUT_PULLUP);
   pinMode(PIN_KEY1, INPUT_PULLUP);
+  pinMode(PIN_KEY2, INPUT_PULLUP);
 
   while (true) {
     config_portal::loop();
     const bool webExit = sd_web_portal::exitRequested()
                          || config_portal::rebootRequested();
-    if (webExit || arrowPressedNow()) {
+    if (webExit || exitButtonPressedNow()) {
       LOG.println(webExit
                       ? "[portal] web exit requested; leaving portal mode"
-                      : "[portal] arrow pressed; exiting portal mode");
+                      : "[portal] button pressed; exiting portal mode");
       hardware::beep();
       // Give the HTTP server a moment to flush the response to the
       // browser before we tear the AP down.
@@ -863,11 +867,12 @@ void renderPortalOnPanel(const String& ssid, const String& password,
       sdPortalMode = false;
       photoRefreshOnly = true;
       LOG.flush();
-      // Wait for the arrow to be released so we don't immediately
+      // Wait for all buttons to be released so we don't immediately
       // re-toggle after the ESP.restart() boot.
       const uint32_t startWait = millis();
       while ((digitalRead(PIN_KEY0) == LOW ||
-              digitalRead(PIN_KEY1) == LOW) &&
+              digitalRead(PIN_KEY1) == LOW ||
+              digitalRead(PIN_KEY2) == LOW) &&
              millis() - startWait < 2000) {
         delay(10);
       }
