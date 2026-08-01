@@ -143,13 +143,19 @@ void selectSmallLightFont() {
 // visually matches FreeSansBold9/12/18pt7b.
 #if RETERMINAL_MODEL == 1003
 constexpr int SMOOTH_FONT_SMALL_PX = 30;
+constexpr int SMOOTH_FONT_LARGE_PX = 48;  // largest .vlw baked by tools/fonts/make_vlw.py
 constexpr const GFXfont* SMALL_SMOOTH_FALLBACK_FONT = &FreeSansBold18pt7b;
+constexpr const GFXfont* LARGE_SMOOTH_FALLBACK_FONT = &FreeSansBold24pt7b;
 #elif RETERMINAL_MODEL == 1004
 constexpr int SMOOTH_FONT_SMALL_PX = 20;
+constexpr int SMOOTH_FONT_LARGE_PX = 48;
 constexpr const GFXfont* SMALL_SMOOTH_FALLBACK_FONT = &FreeSansBold12pt7b;
+constexpr const GFXfont* LARGE_SMOOTH_FALLBACK_FONT = &FreeSansBold18pt7b;
 #else
 constexpr int SMOOTH_FONT_SMALL_PX = 16;
+constexpr int SMOOTH_FONT_LARGE_PX = 48;
 constexpr const GFXfont* SMALL_SMOOTH_FALLBACK_FONT = &FreeSansBold9pt7b;
+constexpr const GFXfont* LARGE_SMOOTH_FALLBACK_FONT = &FreeSansBold12pt7b;
 #endif
 
 static int g_currentSmoothSize = 0;
@@ -237,6 +243,15 @@ static void applySmoothFont(int size, const GFXfont* fallback) {
 void selectSmallSmoothFont() {
   epaper.setTextSize(1);
   applySmoothFont(SMOOTH_FONT_SMALL_PX, SMALL_SMOOTH_FALLBACK_FONT);
+}
+
+// Select the largest smooth (Unicode-capable) font we bake to SD.
+// tools/fonts/make_vlw.py generates sans_bold_<N>.vlw for every integer
+// N from 12 to 48, so 48 px is the biggest that's actually on disk.
+// Used for the location city label on the "Connecting to Wi-Fi" splash.
+void selectLargeSmoothFont() {
+  epaper.setTextSize(1);
+  applySmoothFont(SMOOTH_FONT_LARGE_PX, LARGE_SMOOTH_FALLBACK_FONT);
 }
 
 // TFT_eSPI's MC/ML/MR datums center the smooth font's yAdvance box on
@@ -350,11 +365,16 @@ void renderStatus(const String& message, const String& detail = "",
   epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, true);
   epaper.setTextDatum(MC_DATUM);
   if (!lineAbove.isEmpty()) {
-    selectSmallFont();
+    // Location city name -- use the largest smooth (Unicode) font we
+    // bake so non-ASCII names ("Muenchen", "Sao Paulo") stay readable.
+    selectLargeSmoothFont();
     epaper.drawString(
         text_render::ellipsize(epaper, lineAbove, config::PANEL_WIDTH - config::ui(60)),
         config::PANEL_WIDTH / 2,
-        config::PANEL_HEIGHT / 2 - config::ui(55), 1);
+        config::PANEL_HEIGHT / 2 - config::ui(70) + smoothCenterYAdjust(), 1);
+    // TFT_eSPI treats loadFont as sticky: setFreeFont alone won't switch
+    // back. Unload so the subsequent selectMediumFont() actually applies.
+    unloadSmoothFontIfLoaded();
   }
   selectMediumFont();
   epaper.drawString(
