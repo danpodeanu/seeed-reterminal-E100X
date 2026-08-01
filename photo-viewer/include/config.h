@@ -29,6 +29,12 @@ constexpr char TIMEZONE[] = "GMT0BST,M3.5.0/1,M10.5.0/2";
 // prepared 4-bit BMP layout without blowing the on-device RGB buffer.
 constexpr char PHOTO_DIR[] = "/photos";
 
+// Server-side thumbnail cache for the /upload-photo browser page. Sits
+// OUTSIDE PHOTO_DIR so the display-rotation enumeration (countPhotos)
+// never picks up thumbnails. Populated on-demand by the SD portal's
+// /thumbnail endpoint; invalidated automatically on upload/delete.
+constexpr char PHOTO_THUMB_DIR[] = "/thumb_cache";
+
 // Photo rotation order. When true, the enumeration is shuffled at each boot
 // so successive photos feel random; when false, files are sorted
 // alphabetically so rotation order is deterministic across boots.

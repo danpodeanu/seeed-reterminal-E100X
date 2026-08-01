@@ -78,6 +78,29 @@ struct Config {
   // portal is embedded next to the shared Wi-Fi config portal, pass a
   // matching nav bar so the user sees the same tabs on every page.
   const char* navHtml = nullptr;
+
+  // --- Optional thumbnail cache -----------------------------------------
+  // When both `thumbnailDir` and `thumbnailGenerator` are set, the portal
+  // exposes GET /thumbnail?path=/photos/foo.png. Cache lookups return
+  // the pre-rendered BMP under `<thumbnailDir>/<basename>`; a miss calls
+  // the generator to build one. On generator failure the cache stores a
+  // small placeholder BMP so corrupted photos never retry (or crash).
+  //
+  // The generator signature is:
+  //   bool gen(const char* sourcePath, const char* destPath, int maxDim);
+  // It should read `sourcePath`, produce a small (at most `maxDim` on
+  // each side) 24bpp BMP at `destPath`, and return true on success. On
+  // any decode/OOM error it must return false without leaving a partial
+  // file. Runs inside an HTTP handler on the main task, so it should
+  // complete in a couple of seconds.
+  //
+  // Cache is invalidated automatically on upload (UPLOAD_FILE_START) and
+  // on /delete-photo, so a re-uploaded file always gets a fresh render.
+  using ThumbnailGenerator = bool (*)(const char* sourcePath,
+                                      const char* destPath, int maxDim);
+  const char* thumbnailDir = nullptr;      // e.g. "/thumb_cache"
+  ThumbnailGenerator thumbnailGenerator = nullptr;
+  int thumbnailMaxDim = 160;               // longest edge of cached BMP
 };
 
 // Build the SSID that begin() would use for the given config, without

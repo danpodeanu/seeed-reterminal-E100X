@@ -55,6 +55,10 @@ bool g_exitRequested = false;
 File g_uploadFile;
 String g_uploadTargetPath;
 bool g_uploadOk = false;
+// Count of write() short-writes recovered during the current upload.
+// Reset on UPLOAD_FILE_START and reported at UPLOAD_FILE_END so a fully
+// healthy upload stays quiet while flaky ones surface a summary line.
+uint32_t g_uploadStallsRecovered = 0;
 
 // ----- helpers -----
 
@@ -160,6 +164,48 @@ String parentOf(const String& path) {
 String joinPath(const String& dir, const String& name) {
   if (dir.length() == 0 || dir == "/") return String("/") + name;
   return dir + "/" + name;
+}
+
+// Returns the last path component of `path`, e.g. "foo.png" for
+// "/photos/foo.png". Uses '/' only; the SD library normalises Windows-
+// style paths to forward slashes on read.
+String basenameOf(const String& path) {
+  const int slash = path.lastIndexOf('/');
+  return slash >= 0 ? path.substring(slash + 1) : path;
+}
+
+// True when `path` lives inside `dir` (matches "<dir>/<basename>" with
+// no further slashes). Used to decide whether to invalidate the
+// thumbnail cache when a file changes.
+bool isDirectChildOf(const String& path, const char* dir) {
+  if (!dir || !dir[0]) return false;
+  const String dirStr(dir);
+  if (!path.startsWith(dirStr)) return false;
+  if (path.length() <= dirStr.length() + 1) return false;
+  if (path[dirStr.length()] != '/') return false;
+  // No additional slashes after the direct child.
+  return path.indexOf('/', dirStr.length() + 1) < 0;
+}
+
+// Returns the thumbnail cache path for `sourcePath` when the cache is
+// configured for the current photos dir, or an empty String otherwise.
+// The cache path is `<thumbnailDir>/<basename-of-source>` so a
+// re-upload of the same filename overwrites the old thumb after
+// invalidation.
+String thumbnailCachePathFor(const String& sourcePath) {
+  if (!g_config.thumbnailDir || !g_config.thumbnailDir[0]) return String();
+  if (!isDirectChildOf(sourcePath, g_config.photosDir)) return String();
+  return joinPath(String(g_config.thumbnailDir), basenameOf(sourcePath));
+}
+
+// Deletes both the content and the "known corrupt" 0-byte marker for a
+// source path. Safe to call for paths outside the photos dir - returns
+// silently in that case. Call from upload-start and delete-photo so a
+// re-uploaded file always rebuilds its thumbnail.
+void invalidateThumbnailFor(const String& sourcePath) {
+  const String cache = thumbnailCachePathFor(sourcePath);
+  if (cache.length() == 0) return;
+  if (sd_card::fileExists(cache)) sd_card::removeFile(cache);
 }
 
 String humanBytes(size_t bytes) {
@@ -685,8 +731,13 @@ void handleUploadStream() {
       // Overwrite by removing first; SD FILE_WRITE opens truncating,
       // but be explicit so a failed open doesn't leave a stale file.
       sd_card::removeFile(g_uploadTargetPath);
+      // Drop the old thumbnail so a re-upload of the same filename
+      // re-renders on next view. Cheap no-op if no thumbnail cache is
+      // configured or the target isn't inside the photos dir.
+      invalidateThumbnailFor(g_uploadTargetPath);
       g_uploadFile = sd_card::openForWrite(g_uploadTargetPath);
       g_uploadOk = static_cast<bool>(g_uploadFile);
+      g_uploadStallsRecovered = 0;
       LOG.printf("[sd-web] upload start %s -> %s\n",
                  g_uploadTargetPath.c_str(), g_uploadOk ? "ok" : "open-fail");
       break;
@@ -701,8 +752,10 @@ void handleUploadStream() {
         // bytes at the current file position drains those stalls
         // without losing the upload; the sd_card::* wrappers cover
         // open/rename/remove but the raw File::write path is
-        // per-caller. See the "upload short write" log line for the
-        // observed symptom.
+        // per-caller. Silent recoveries are counted and reported once
+        // at UPLOAD_FILE_END; only log per-attempt if a stall doesn't
+        // clear after the first retry (which is where a real problem
+        // starts to look different from ordinary SPI backpressure).
         const uint8_t* buf = upload.buf;
         size_t remaining = upload.currentSize;
         constexpr int kMaxRetries = 5;
@@ -710,7 +763,10 @@ void handleUploadStream() {
         int attempt = 0;
         while (remaining > 0) {
           const size_t written = g_uploadFile.write(buf, remaining);
-          if (written == remaining) break;
+          if (written == remaining) {
+            if (attempt > 0) ++g_uploadStallsRecovered;
+            break;
+          }
           buf += written;
           remaining -= written;
           if (attempt >= kMaxRetries) {
@@ -724,10 +780,12 @@ void handleUploadStream() {
           // Backoff 25/50/100/200/400 ms + flush() to let the driver
           // drain any buffered state before we ask it to accept more.
           const uint32_t backoffMs = kInitialDelayMs << attempt;
-          LOG.printf(
-              "[sd-web] upload write stall on %s (%u bytes left, retry %d)\n",
-              g_uploadTargetPath.c_str(), static_cast<unsigned>(remaining),
-              attempt + 1);
+          if (attempt >= 1) {
+            LOG.printf(
+                "[sd-web] upload write stall on %s (%u bytes left, retry %d)\n",
+                g_uploadTargetPath.c_str(), static_cast<unsigned>(remaining),
+                attempt + 1);
+          }
           g_uploadFile.flush();
           delay(backoffMs);
           ++attempt;
@@ -743,10 +801,19 @@ void handleUploadStream() {
         g_uploadFile.flush();
         g_uploadFile.close();
       }
-      LOG.printf("[sd-web] upload end %s (%u bytes) -> %s\n",
-                 g_uploadTargetPath.c_str(),
-                 static_cast<unsigned>(upload.totalSize),
-                 g_uploadOk ? "ok" : "fail");
+      if (g_uploadStallsRecovered > 0) {
+        LOG.printf(
+            "[sd-web] upload end %s (%u bytes, %lu SPI stalls recovered) -> %s\n",
+            g_uploadTargetPath.c_str(),
+            static_cast<unsigned>(upload.totalSize),
+            static_cast<unsigned long>(g_uploadStallsRecovered),
+            g_uploadOk ? "ok" : "fail");
+      } else {
+        LOG.printf("[sd-web] upload end %s (%u bytes) -> %s\n",
+                   g_uploadTargetPath.c_str(),
+                   static_cast<unsigned>(upload.totalSize),
+                   g_uploadOk ? "ok" : "fail");
+      }
       break;
     }
     case UPLOAD_FILE_ABORTED: {
@@ -912,8 +979,110 @@ void handleDeletePhoto() {
   const bool ok = sd_card::removeFile(target);
   LOG.printf("[sd-web] delete-photo %s -> %s\n", target.c_str(),
              ok ? "ok" : "fail");
+  if (ok) invalidateThumbnailFor(target);
   g_server->send(ok ? 200 : 500, "application/json",
                  ok ? "{\"ok\":true}" : "{\"ok\":false}");
+}
+
+// Serve a cached thumbnail (24-bit BMP) for a photo, generating one on
+// first request via the generator installed by the embedding app. Cache
+// path is <thumbnailDir>/<basename-of-source>. A generator failure
+// leaves a 0-byte marker in the cache so the corrupt file is not
+// re-decoded on every page load; a small SVG placeholder is served in
+// that case. The 0-byte marker is cleared on next upload of the same
+// filename, so replacing a broken photo un-poisons the cache.
+void handleThumbnail() {
+  g_server->sendHeader("Cache-Control", "public, max-age=60");
+  if (!g_config.thumbnailDir || !g_config.thumbnailDir[0] ||
+      g_config.thumbnailGenerator == nullptr) {
+    g_server->send(501, "text/plain", "thumbnail cache not configured");
+    return;
+  }
+  String source = g_server->hasArg("path") ? g_server->arg("path") : String();
+  source = normalisePath(source);
+  if (source.length() == 0 ||
+      !isDirectChildOf(source, g_config.photosDir)) {
+    g_server->send(400, "text/plain", "bad path");
+    return;
+  }
+  if (!sd_card::fileExists(source)) {
+    g_server->send(404, "text/plain", "not found");
+    return;
+  }
+  const String cache = joinPath(String(g_config.thumbnailDir),
+                                basenameOf(source));
+
+  // Static SVG placeholder used both when the generator has already
+  // recorded a failure (0-byte cache) and when it fails on this
+  // request. Small enough to inline; browser caches for max-age.
+  static const char kPlaceholderSvg[] PROGMEM =
+      "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32' "
+      "width='32' height='32'>"
+      "<rect width='32' height='32' fill='#e5e7eb'/>"
+      "<path d='M6 24l7-9 5 6 3-4 5 7z' fill='#9ca3af'/>"
+      "<circle cx='11' cy='11' r='2.5' fill='#9ca3af'/>"
+      "<path d='M4 4l24 24M28 4L4 28' stroke='#dc2626' stroke-width='2'/>"
+      "</svg>";
+
+  auto servePlaceholder = [&]() {
+    g_server->send_P(200, PSTR("image/svg+xml"), kPlaceholderSvg);
+  };
+
+  auto streamCacheFile = [&](File& file) {
+    g_server->sendHeader("Content-Type", "image/bmp");
+    g_server->streamFile(file, "image/bmp");
+  };
+
+  // Fast path: cache exists.
+  if (sd_card::fileExists(cache)) {
+    File file = sd_card::openForRead(cache);
+    if (file) {
+      const size_t size = file.size();
+      if (size == 0) {
+        // Marker: last attempt to render this file failed. Serve the
+        // placeholder without re-invoking the generator so a corrupt
+        // photo doesn't burn CPU on every list refresh.
+        file.close();
+        servePlaceholder();
+        return;
+      }
+      streamCacheFile(file);
+      file.close();
+      return;
+    }
+    // File-exists said yes but open said no - fall through to regen.
+  }
+
+  // Miss: build the thumbnail on demand. Ensure the cache dir exists on
+  // first use so the generator's openForWrite has somewhere to land.
+  if (!sd_card::fileExists(g_config.thumbnailDir)) {
+    sd_card::makeDir(g_config.thumbnailDir);
+  }
+
+  const bool ok = g_config.thumbnailGenerator(
+      source.c_str(), cache.c_str(),
+      g_config.thumbnailMaxDim > 0 ? g_config.thumbnailMaxDim : 160);
+  if (ok) {
+    File file = sd_card::openForRead(cache);
+    if (file && file.size() > 0) {
+      LOG.printf("[sd-web] thumbnail %s -> %s (%u bytes)\n",
+                 source.c_str(), cache.c_str(),
+                 static_cast<unsigned>(file.size()));
+      streamCacheFile(file);
+      file.close();
+      return;
+    }
+    if (file) file.close();
+  }
+
+  // Generation failed or produced nothing. Leave a 0-byte marker so
+  // future requests short-circuit to the placeholder; this also gets
+  // cleared automatically on next upload/delete of the source.
+  LOG.printf("[sd-web] thumbnail %s -> generator failed; caching marker\n",
+             source.c_str());
+  File marker = sd_card::openForWrite(cache);
+  if (marker) marker.close();  // 0-byte file
+  servePlaceholder();
 }
 
 // The photo-uploader HTML+JS bundle is defined in
@@ -1079,6 +1248,10 @@ void installHandlers(WebServer& server, const Config& cfg, bool embedded) {
     server.on("/delete-photo", HTTP_POST, handleDeletePhoto);
     server.on("/upload-photo", handlePhotoUploadPage);
     server.on("/exit-portal", HTTP_POST, handleExitPortal);
+    if (cfg.thumbnailDir && cfg.thumbnailDir[0] &&
+        cfg.thumbnailGenerator != nullptr) {
+      server.on("/thumbnail", handleThumbnail);
+    }
   }
 
   if (!embedded) {

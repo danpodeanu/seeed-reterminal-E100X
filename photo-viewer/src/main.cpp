@@ -404,13 +404,28 @@ bool photoPathAt(uint32_t ordinal, String& path) {
 
 bool renderPreparedBmp(const String& path) {
   File file = sd_card::openForRead(path);
-  if (!file) return false;
+  if (!file) {
+    LOG.printf("[photo] bmp open failed: %s\n", path.c_str());
+    return false;
+  }
+  const uint32_t fileSize = static_cast<uint32_t>(file.size());
 
   uint8_t fileHeader[14] = {};
   uint8_t dib[40] = {};
-  if (file.read(fileHeader, sizeof(fileHeader)) != sizeof(fileHeader) ||
-      fileHeader[0] != 'B' || fileHeader[1] != 'M' ||
-      file.read(dib, sizeof(dib)) != sizeof(dib)) {
+  if (file.read(fileHeader, sizeof(fileHeader)) != sizeof(fileHeader)) {
+    LOG.printf("[photo] bmp header short read: %s (%lu bytes)\n",
+               path.c_str(), static_cast<unsigned long>(fileSize));
+    file.close();
+    return false;
+  }
+  if (fileHeader[0] != 'B' || fileHeader[1] != 'M') {
+    LOG.printf("[photo] bmp bad signature: %s (0x%02X%02X, not 'BM')\n",
+               path.c_str(), fileHeader[0], fileHeader[1]);
+    file.close();
+    return false;
+  }
+  if (file.read(dib, sizeof(dib)) != sizeof(dib)) {
+    LOG.printf("[photo] bmp DIB short read: %s\n", path.c_str());
     file.close();
     return false;
   }
@@ -425,6 +440,7 @@ bool renderPreparedBmp(const String& path) {
   // Negating INT32_MIN is undefined behaviour; reject it up front along with
   // any other value that couldn't plausibly be a panel-sized BMP.
   if (signedHeight == INT32_MIN) {
+    LOG.printf("[photo] bmp bogus height (INT32_MIN): %s\n", path.c_str());
     file.close();
     return false;
   }
@@ -434,11 +450,25 @@ bool renderPreparedBmp(const String& path) {
       height != config::PANEL_HEIGHT || planes != 1 ||
       bitsPerPixel != 4 || compression != 0 ||
       pixelOffset < 14 + dibSize + 64) {
+    LOG.printf(
+        "[photo] bmp rejected %s: dibSize=%lu size=%ldx%ld (want %dx%d) "
+        "planes=%u bpp=%u compression=%lu pixelOffset=%lu min=%lu\n",
+        path.c_str(), static_cast<unsigned long>(dibSize),
+        static_cast<long>(width), static_cast<long>(height),
+        static_cast<int>(config::PANEL_WIDTH),
+        static_cast<int>(config::PANEL_HEIGHT),
+        static_cast<unsigned>(planes), static_cast<unsigned>(bitsPerPixel),
+        static_cast<unsigned long>(compression),
+        static_cast<unsigned long>(pixelOffset),
+        static_cast<unsigned long>(14 + dibSize + 64));
+    LOG.println("[photo] hint: run tools/prepare_photos.py to convert to the "
+                "expected 4bpp panel-sized BMP");
     file.close();
     return false;
   }
 
   if (!file.seek(14 + dibSize)) {
+    LOG.printf("[photo] bmp palette seek failed: %s\n", path.c_str());
     file.close();
     return false;
   }
@@ -446,6 +476,8 @@ bool renderPreparedBmp(const String& path) {
   for (int index = 0; index < 16; ++index) {
     uint8_t bgra[4] = {};
     if (file.read(bgra, sizeof(bgra)) != sizeof(bgra)) {
+      LOG.printf("[photo] bmp palette short read (entry %d): %s\n",
+                 index, path.c_str());
       file.close();
       return false;
     }
@@ -468,7 +500,16 @@ bool renderPreparedBmp(const String& path) {
   const size_t sourceBytes = (config::PANEL_WIDTH + 1) / 2;
   const size_t paddedBytes = (sourceBytes + 3) & ~static_cast<size_t>(3);
   uint8_t* row = static_cast<uint8_t*>(malloc(paddedBytes));
-  if (!row || !file.seek(pixelOffset)) {
+  if (!row) {
+    LOG.printf("[photo] bmp row buffer alloc failed (%u bytes): %s\n",
+               static_cast<unsigned>(paddedBytes), path.c_str());
+    free(packed);
+    file.close();
+    return false;
+  }
+  if (!file.seek(pixelOffset)) {
+    LOG.printf("[photo] bmp pixel seek failed (offset %lu): %s\n",
+               static_cast<unsigned long>(pixelOffset), path.c_str());
     free(row);
     free(packed);
     file.close();
@@ -589,14 +630,144 @@ bool renderGenericPhoto(const String& path) {
 bool renderPhoto(const String& path) {
   String lower = path;
   lower.toLowerCase();
-  if (lower.endsWith(".bmp") && renderPreparedBmp(path)) return true;
+  if (lower.endsWith(".bmp")) return renderPreparedBmp(path);
   // PNGs (and any non-BMP file supportedPhotoName() lets through) fall
   // through to the pngle-backed streaming decoder. renderGenericPhoto()
   // returns false with a "[photo] decode failed" line on OOM, so a huge
   // PNG will just skip to the next candidate instead of taking the app
   // down.
   if (lower.endsWith(".png")) return renderGenericPhoto(path);
+  LOG.printf("[photo] unsupported extension (not .bmp/.png): %s\n",
+             path.c_str());
   return false;
+}
+
+// Writes a little-endian value into a buffer at a fixed offset. Used
+// only by the thumbnail BMP writer below.
+inline void writeLe32At(uint8_t* dst, uint32_t value) {
+  dst[0] = static_cast<uint8_t>(value & 0xFF);
+  dst[1] = static_cast<uint8_t>((value >> 8) & 0xFF);
+  dst[2] = static_cast<uint8_t>((value >> 16) & 0xFF);
+  dst[3] = static_cast<uint8_t>((value >> 24) & 0xFF);
+}
+inline void writeLe16At(uint8_t* dst, uint16_t value) {
+  dst[0] = static_cast<uint8_t>(value & 0xFF);
+  dst[1] = static_cast<uint8_t>((value >> 8) & 0xFF);
+}
+
+// Thumbnail generator installed on the SD portal Config so the browser
+// upload page can render a fast preview grid without downloading every
+// full-resolution photo. Decodes via load_image_from_sd (which handles
+// BMP/JPEG/PNG and returns false on any decode/OOM error), then writes
+// a small 24-bit BMP whose longest edge is `maxDim`. Aspect ratio is
+// preserved. On any failure the returned false leaves the caller (the
+// portal's handleThumbnail) to plant a 0-byte marker in the cache so
+// this file is never re-decoded until it is replaced or deleted.
+bool generatePhotoThumbnail(const char* sourcePath, const char* destPath,
+                            int maxDim) {
+  if (!sourcePath || !destPath || maxDim < 8) return false;
+
+  // Two-pass to keep peak RAM low: first decode full-res into an
+  // RgbImage, then resize proportionally. load_image_from_sd would only
+  // do an exact target_w/target_h stretch and we want to preserve
+  // aspect.
+  RgbImage image;
+  if (!load_image_from_sd(sourcePath, 0, 0, &image)) {
+    LOG.printf("[thumb] decode failed for %s\n", sourcePath);
+    return false;
+  }
+  if (image.pixels == nullptr || image.width <= 0 || image.height <= 0) {
+    image_free(&image);
+    LOG.printf("[thumb] empty decode for %s\n", sourcePath);
+    return false;
+  }
+
+  int dstW = image.width;
+  int dstH = image.height;
+  if (dstW > maxDim || dstH > maxDim) {
+    const float scale =
+        static_cast<float>(maxDim) / static_cast<float>(std::max(dstW, dstH));
+    dstW = std::max(1, static_cast<int>(image.width * scale));
+    dstH = std::max(1, static_cast<int>(image.height * scale));
+  }
+  if (dstW != image.width || dstH != image.height) {
+    if (!resize_image(&image, dstW, dstH)) {
+      image_free(&image);
+      LOG.printf("[thumb] resize failed for %s\n", sourcePath);
+      return false;
+    }
+  }
+
+  // 24-bit uncompressed BMP: rows stored bottom-to-top, BGR, padded to
+  // 4-byte multiples. Header layout is the 14-byte file header + 40-byte
+  // BITMAPINFOHEADER (same shape the fast-path renderer already parses).
+  const uint32_t rowBytes = static_cast<uint32_t>(dstW) * 3;
+  const uint32_t paddedRow = (rowBytes + 3) & ~static_cast<uint32_t>(3);
+  const uint32_t pixelBytes = paddedRow * static_cast<uint32_t>(dstH);
+  const uint32_t fileSize = 14 + 40 + pixelBytes;
+
+  uint8_t header[54] = {};
+  header[0] = 'B';
+  header[1] = 'M';
+  writeLe32At(header + 2, fileSize);
+  writeLe32At(header + 10, 54);          // pixel offset
+  writeLe32At(header + 14, 40);          // DIB size
+  writeLe32At(header + 18, static_cast<uint32_t>(dstW));
+  writeLe32At(header + 22, static_cast<uint32_t>(dstH));  // positive = bottom-up
+  writeLe16At(header + 26, 1);           // planes
+  writeLe16At(header + 28, 24);          // bits per pixel
+  writeLe32At(header + 30, 0);           // BI_RGB
+  writeLe32At(header + 34, pixelBytes);
+
+  // Write to a temp file first so a mid-write crash doesn't leave a
+  // truncated cache entry pretending to be a valid BMP.
+  const String finalPath(destPath);
+  const String tempPath = finalPath + ".tmp";
+  sd_card::removeFile(tempPath);
+  File out = sd_card::openForWrite(tempPath);
+  if (!out) {
+    image_free(&image);
+    LOG.printf("[thumb] open write failed for %s\n", tempPath.c_str());
+    return false;
+  }
+  if (out.write(header, sizeof(header)) != sizeof(header)) {
+    out.close();
+    sd_card::removeFile(tempPath);
+    image_free(&image);
+    LOG.printf("[thumb] header write failed for %s\n", tempPath.c_str());
+    return false;
+  }
+
+  // Reused per-row buffer; rows go bottom-up (BMP convention) with BGR
+  // byte order, padded to a 4-byte multiple.
+  std::vector<uint8_t> row(paddedRow, 0);
+  for (int y = dstH - 1; y >= 0; --y) {
+    const uint8_t* src = image.pixels + static_cast<size_t>(y) * dstW * 3;
+    for (int x = 0; x < dstW; ++x) {
+      row[x * 3 + 0] = src[x * 3 + 2];  // B
+      row[x * 3 + 1] = src[x * 3 + 1];  // G
+      row[x * 3 + 2] = src[x * 3 + 0];  // R
+    }
+    if (out.write(row.data(), paddedRow) != paddedRow) {
+      out.close();
+      sd_card::removeFile(tempPath);
+      image_free(&image);
+      LOG.printf("[thumb] row write failed for %s\n", tempPath.c_str());
+      return false;
+    }
+  }
+  out.flush();
+  out.close();
+  image_free(&image);
+
+  sd_card::removeFile(finalPath);
+  if (!sd_card::renameFile(tempPath, finalPath)) {
+    sd_card::removeFile(tempPath);
+    LOG.printf("[thumb] rename failed %s -> %s\n", tempPath.c_str(),
+               finalPath.c_str());
+    return false;
+  }
+  return true;
 }
 
 // NTP sync helpers now live in common/include/ntp_sync.h. The wrapper below
@@ -812,6 +983,9 @@ void renderPortalOnPanel(const String& ssid, const String& password,
 #endif
   sdCfg.panelModel = MODEL_NAME;
   sdCfg.photosDir = config::PHOTO_DIR;
+  sdCfg.thumbnailDir = config::PHOTO_THUMB_DIR;
+  sdCfg.thumbnailGenerator = &generatePhotoThumbnail;
+  sdCfg.thumbnailMaxDim = 160;
   sdCfg.urlQrPath = "/upload-photo";
   // Render the shared nav strip once so sd-web pages display the same
   // tab bar. Cross-portal nav highlight is intentionally left off:
@@ -1171,10 +1345,24 @@ void setup() {
             displayed = true;
             break;
           }
+          LOG.printf("[photo] render failed for %s; trying next candidate\n",
+                     path.c_str());
+        } else {
+          LOG.printf("[photo] photoPathAt(%ld) failed\n",
+                     static_cast<long>(normalized));
         }
         currentPhotoIndex += direction;
       }
     }
+  }
+
+  if (!displayed && sdReady && photoCount > 0) {
+    LOG.println(
+        "[photo] no candidate rendered successfully; showing fallback screen");
+  } else if (!displayed) {
+    LOG.printf("[photo] fallback screen: sdReady=%d photoCount=%lu\n",
+               sdReady ? 1 : 0,
+               static_cast<unsigned long>(photoCount));
   }
 
   if (!displayed) {

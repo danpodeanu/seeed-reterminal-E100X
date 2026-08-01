@@ -806,9 +806,11 @@ async function refreshPhotoList() {
       (items.length === 1 ? "" : "s") + " on the SD card.";
     // Cache-bust thumbnails with a fresh query string so a re-upload of
     // the same filename shows the new pixels instead of the cached one.
+    // Points at /thumbnail (server-cached, small BMP) for speed - the
+    // /download endpoint would ship the full multi-MB source per tile.
     const ts = Date.now();
     grid.innerHTML = items.map((it) => {
-      const src = "/download?path=" +
+      const src = "/thumbnail?path=" +
         encodeURIComponent(photosDir + "/" + it.name) + "&t=" + ts;
       const safeName = escapeHtmlText(it.name);
       const dataName = escapeHtmlText(it.name);
