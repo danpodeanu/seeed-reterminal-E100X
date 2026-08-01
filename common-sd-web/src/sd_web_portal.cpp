@@ -1268,11 +1268,19 @@ void installHandlers(WebServer& server, const Config& cfg, bool embedded) {
     server.on("/delete-photo", HTTP_POST, handleDeletePhoto);
     server.on("/upload-photo", handlePhotoUploadPage);
     server.on("/epdoptimize.mjs", handleEpdoptimizeJs);
-    server.on("/exit-portal", HTTP_POST, handleExitPortal);
     if (cfg.thumbnailDir && cfg.thumbnailDir[0] &&
         cfg.thumbnailGenerator != nullptr) {
       server.on("/thumbnail", handleThumbnail);
     }
+  }
+
+  // The /browse page renders a "Reboot to viewer" button whenever the
+  // embedding app supplied a navHtml strip (see handleBrowse). Register
+  // /exit-portal in that case too, so browser-only embedders (weather /
+  // xkcd) can wire up the same button without needing the full photo
+  // uploader.
+  if (cfg.navHtml && cfg.navHtml[0]) {
+    server.on("/exit-portal", HTTP_POST, handleExitPortal);
   }
 
   if (!embedded) {

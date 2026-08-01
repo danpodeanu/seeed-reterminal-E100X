@@ -46,6 +46,7 @@
 #include "timestamped_logger.h"
 #include "config_portal.h"
 #include "config_portal_ui.h"
+#include "sd_web_portal.h"
 #include "wifi_schema.h"
 #include "xkcd_config_runtime.h"
 #include "xkcd_config_schema.h"
@@ -1350,6 +1351,14 @@ void setup() {
     // portal path skips SD, so call the helper directly. See
     // common/include/epaper_setup.h.
     epaper_setup::finalize(epaper.getSPIinstance());
+    // Mount SD best-effort so the portal's SD browser tab has something
+    // to serve. Failure is silent - the browser just shows an empty
+    // listing.
+    const bool portalSdReady =
+        sd_card::mount(epaper.getSPIinstance(), config::CACHE_DIR);
+    if (!portalSdReady) {
+      LOG.println("[portal] SD mount failed; browser tab will be empty");
+    }
 #if RETERMINAL_MODEL == 1001
     epaper.initGrayMode(GRAY_LEVEL4);
     const GFXfont* titleFont    = &FreeSansBold18pt7b;
@@ -1379,6 +1388,12 @@ void setup() {
     // without any compile-time shared secret. The password is embedded
     // in the QR splash so phones autofill it.
     portalCfg.useAutoApPassword = true;
+    // Nav tab that jumps to the SD browser served by sd_web_portal.
+    static const config_portal::NavTab kExtraTabs[] = {
+        {"SD", "/browse?path=%2F", "sd"},
+    };
+    portalCfg.extraTabs = kExtraTabs;
+    portalCfg.extraTabCount = sizeof(kExtraTabs) / sizeof(kExtraTabs[0]);
     // Feed the current-resolved credentials back into the portal so the
     // Wi-Fi form shows what the device would connect to on the next
     // boot. The portal will redact the password with the __saved__
@@ -1389,6 +1404,17 @@ void setup() {
       return String();
     };
     if (config_portal::begin(portalCfg)) {
+      // Wire the SD browser routes onto config_portal's WebServer.
+      // Browser-only config: no photo uploader.
+      sd_web_portal::Config sdCfg;
+      static String s_navHtml;
+      s_navHtml = config_portal::renderNavStripHtml(portalCfg, nullptr);
+      sdCfg.navHtml = s_navHtml.c_str();
+      if (WebServer* server = config_portal::webServer()) {
+        sd_web_portal::attachRoutes(*server, sdCfg);
+      } else {
+        LOG.println("[portal] webServer() null; SD tab disabled");
+      }
       config_portal::ui::RenderInfo info;
       info.modelLabel = MODEL_NAME;
       info.title = "Configure";
@@ -1420,7 +1446,8 @@ void setup() {
 
       uint32_t lastHeartbeatMs = millis();
       uint32_t greenLowSinceMs = 0;
-      while (!config_portal::rebootRequested()) {
+      while (!config_portal::rebootRequested() &&
+             !sd_web_portal::exitRequested()) {
         config_portal::loop();
         const uint32_t nowMs = millis();
         // Green button in the portal = reboot the device. Convenient exit
@@ -1454,8 +1481,21 @@ void setup() {
         }
         delay(5);
       }
+      // If the "Reboot to viewer" button was clicked, give the HTTP
+      // server ~400 ms to flush the response before we tear the AP
+      // down. Otherwise the browser sees a hung request.
+      if (sd_web_portal::exitRequested()) {
+        LOG.println("[portal] web exit requested -> reboot");
+        const uint32_t drainStart = millis();
+        while (millis() - drainStart < 400) {
+          config_portal::loop();
+          delay(10);
+        }
+      }
+      sd_web_portal::end();
       config_portal::end();
     }
+    if (portalSdReady) SD.end();
     LOG.println("[portal] rebooting to apply configuration");
     delay(200);
     ESP.restart();

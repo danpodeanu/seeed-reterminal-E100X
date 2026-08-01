@@ -47,6 +47,7 @@
 #include "canonical_weather.h"
 #include "config_portal.h"
 #include "config_portal_ui.h"
+#include "sd_web_portal.h"
 #include "wifi_schema.h"
 #include "weather_config_schema.h"
 #include "weather_config_runtime.h"
@@ -1290,6 +1291,15 @@ void setup() {
     // portal path skips SD, so call the helper directly. See
     // common/include/epaper_setup.h.
     epaper_setup::finalize(epaper.getSPIinstance());
+    // SD is optional in weather mode, but we mount it best-effort here
+    // so the portal's SD browser tab can serve /photos, /weather cache,
+    // logs, etc. Failure is silent - the browser just shows an empty
+    // listing.
+    const bool portalSdReady =
+        sd_card::mount(epaper.getSPIinstance(), config::CACHE_DIR);
+    if (!portalSdReady) {
+      LOG.println("[portal] SD mount failed; browser tab will be empty");
+    }
 #if RETERMINAL_MODEL == 1001
     epaper.initGrayMode(GRAY_LEVEL4);
     const GFXfont* titleFont    = &FreeSansBold18pt7b;
@@ -1315,12 +1325,34 @@ void setup() {
     portalCfg.appSchema = &weather_config::kSchema;
     portalCfg.appName = "weather viewer";
     portalCfg.useAutoApPassword = true;
+    // Nav tab that jumps to the SD browser served by sd_web_portal.
+    // The route is registered below via attachRoutes; the config_portal
+    // chrome renders this tab between Settings and Reset.
+    static const config_portal::NavTab kExtraTabs[] = {
+        {"SD", "/browse?path=%2F", "sd"},
+    };
+    portalCfg.extraTabs = kExtraTabs;
+    portalCfg.extraTabCount = sizeof(kExtraTabs) / sizeof(kExtraTabs[0]);
     portalCfg.wifiFallback = [](const char* key) -> String {
       if (strcmp(key, "ssid") == 0) return String(weather_wifi::ssid());
       if (strcmp(key, "password") == 0) return String(weather_wifi::password());
       return String();
     };
     if (config_portal::begin(portalCfg)) {
+      // Wire the SD browser routes onto config_portal's WebServer. This
+      // must happen after begin() succeeds so webServer() is non-null,
+      // and before the portal loop starts so the first request lands on
+      // registered handlers. Browser-only config: no photo uploader.
+      sd_web_portal::Config sdCfg;
+      sdCfg.navHtml = nullptr;  // filled in after we compute nav strip
+      static String s_navHtml;
+      s_navHtml = config_portal::renderNavStripHtml(portalCfg, nullptr);
+      sdCfg.navHtml = s_navHtml.c_str();
+      if (WebServer* server = config_portal::webServer()) {
+        sd_web_portal::attachRoutes(*server, sdCfg);
+      } else {
+        LOG.println("[portal] webServer() null; SD tab disabled");
+      }
       config_portal::ui::RenderInfo info;
       info.modelLabel = MODEL_NAME;
       info.title = "Configure";
@@ -1352,7 +1384,8 @@ void setup() {
 
       uint32_t lastHeartbeatMs = millis();
       uint32_t greenLowSinceMs = 0;
-      while (!config_portal::rebootRequested()) {
+      while (!config_portal::rebootRequested() &&
+             !sd_web_portal::exitRequested()) {
         config_portal::loop();
         const uint32_t nowMs = millis();
         // Green button in the portal = reboot the device. Convenient exit
@@ -1386,8 +1419,21 @@ void setup() {
         }
         delay(5);
       }
+      // If the "Reboot to viewer" button was clicked, give the HTTP
+      // server ~400 ms to flush the response before we tear the AP
+      // down. Otherwise the browser sees a hung request.
+      if (sd_web_portal::exitRequested()) {
+        LOG.println("[portal] web exit requested -> reboot");
+        const uint32_t drainStart = millis();
+        while (millis() - drainStart < 400) {
+          config_portal::loop();
+          delay(10);
+        }
+      }
+      sd_web_portal::end();
       config_portal::end();
     }
+    if (portalSdReady) SD.end();
     LOG.println("[portal] rebooting to apply configuration");
     delay(200);
     ESP.restart();
