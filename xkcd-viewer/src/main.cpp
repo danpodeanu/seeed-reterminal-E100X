@@ -552,15 +552,14 @@ void renderStatus(const String& message, const String& detail = "",
                       config::PANEL_HEIGHT / 2 + config::ui(22), 1);
   }
   if (!helpBelow.isEmpty()) {
-    // Mirrors lineAbove's 55px offset so the pane stays balanced. Used
-    // for the "hold green at boot to reconfigure Wi-Fi" hint on the
-    // "Connecting to..." splash; skipped everywhere else so failure
-    // banners don't get chatty.
+    // Bottom-of-panel hint: used for the "hold green at boot to
+    // reconfigure Wi-Fi" hint on the "Connecting to..." splash;
+    // skipped everywhere else so failure banners don't get chatty.
     selectStatusMessageDetailFont();
     epaper.drawString(text_render::ellipsize(epaper, text_render::displayText(helpBelow),
                                 config::PANEL_WIDTH - config::ui(60), 1),
                       config::PANEL_WIDTH / 2,
-                      config::PANEL_HEIGHT / 2 + config::ui(55), 1);
+                      config::PANEL_HEIGHT - config::ui(24), 1);
   }
   applyGfxFont(nullptr);
   epaper.setTextFont(2);
@@ -1593,7 +1592,7 @@ void setup() {
     LOG.println("[display] showing Wi-Fi connection status");
     renderStatus("Connecting to " + String(xkcd_wifi::ssid()), connectionDetail,
                  stationMac,
-                 "Hold green button for 2 s at boot to reconfigure Wi-Fi");
+                 "Hold green button for 2 seconds at boot to reconfigure Wi-Fi");
   }
   epaper.initGrayMode(GRAY_LEVEL4);
 #elif RETERMINAL_MODEL == 1003
@@ -1606,7 +1605,7 @@ void setup() {
     LOG.println("[display] showing Wi-Fi connection status");
     renderStatus("Connecting to " + String(xkcd_wifi::ssid()), connectionDetail,
                  stationMac,
-                 "Hold green button for 2 s at boot to reconfigure Wi-Fi");
+                 "Hold green button for 2 seconds at boot to reconfigure Wi-Fi");
   }
 #endif
 
