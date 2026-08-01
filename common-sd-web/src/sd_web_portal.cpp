@@ -386,14 +386,9 @@ void handleBrowse() {
 
   sendPageHeader(String("SD: ") + path, breadcrumb(path));
 
-  // Cross-link back to the photo uploader when it's enabled, so the
-  // /browse power-user surface can hop over to the wife-friendly path.
-  if (g_config.urlQrPath && *g_config.urlQrPath) {
-    String hop = F("<p style=\"margin:0 0 12px 0\"><a href=\"");
-    hop += htmlEscape(String(g_config.urlQrPath));
-    hop += F("\">&larr; Back to photo uploader</a></p>");
-    sendPageChunk(hop);
-  }
+  // Top-of-page navigation (rendered by sendPageHeader via navHtml) is
+  // sufficient for hopping between /browse and /upload-photo, so we no
+  // longer emit an extra "Back to photo uploader" link here.
 
   String prelude = flashHtml();
   prelude += F("<section><h2>Contents</h2>");
@@ -746,6 +741,121 @@ void handlePanelInfo() {
   g_server->send(200, "application/json", json);
 }
 
+// Minimal JSON string escaper for filenames coming off the SD card. FAT
+// forbids '"' and '\\' in names, but we're defensive: also escape any
+// remaining control chars so a malformed listing can't break the JSON.
+String jsonEscape(const String& in) {
+  String out;
+  out.reserve(in.length() + 4);
+  for (size_t i = 0; i < in.length(); ++i) {
+    const uint8_t c = static_cast<uint8_t>(in[i]);
+    switch (c) {
+      case '"':  out += "\\\""; break;
+      case '\\': out += "\\\\"; break;
+      case '\b': out += "\\b";  break;
+      case '\f': out += "\\f";  break;
+      case '\n': out += "\\n";  break;
+      case '\r': out += "\\r";  break;
+      case '\t': out += "\\t";  break;
+      default:
+        if (c < 0x20) {
+          char buf[8];
+          snprintf(buf, sizeof(buf), "\\u%04x", c);
+          out += buf;
+        } else {
+          out += static_cast<char>(c);
+        }
+        break;
+    }
+  }
+  return out;
+}
+
+// Enumerates the photos directory as a JSON array of {name,size}. Used
+// by the /upload-photo page to render the "Your photos" thumbnail grid
+// so the user can review and delete previously-uploaded photos without
+// bouncing over to the /browse power-user surface. Filters to the same
+// image extensions the photo-viewer firmware actually renders (bmp/png)
+// plus jpg/jpeg for completeness in tools that accept those.
+void handlePhotosList() {
+  g_server->sendHeader("Cache-Control", "no-store");
+  const char* dir = g_config.photosDir;
+  if (!dir || !dir[0]) {
+    g_server->send(200, "application/json", "[]");
+    return;
+  }
+  File directory = sd_card::openForRead(dir);
+  if (!directory || !directory.isDirectory()) {
+    if (directory) directory.close();
+    g_server->send(200, "application/json", "[]");
+    return;
+  }
+  String json = "[";
+  bool first = true;
+  File entry = directory.openNextFile();
+  while (entry) {
+    if (!entry.isDirectory()) {
+      String name = entry.name();
+      const int slash = name.lastIndexOf('/');
+      if (slash >= 0) name = name.substring(slash + 1);
+      String lower = name;
+      lower.toLowerCase();
+      const bool isImage =
+          lower.endsWith(".bmp") || lower.endsWith(".png") ||
+          lower.endsWith(".jpg") || lower.endsWith(".jpeg");
+      // Same "._..." macOS/FAT sidecar guard used in photo-viewer's
+      // countPhotos(), so those don't clutter the picker.
+      if (isImage && !name.startsWith("._")) {
+        if (!first) json += ',';
+        first = false;
+        json += "{\"name\":\"";
+        json += jsonEscape(name);
+        json += "\",\"size\":";
+        json += String(static_cast<uint32_t>(entry.size()));
+        json += '}';
+      }
+    }
+    entry.close();
+    entry = directory.openNextFile();
+  }
+  directory.close();
+  json += ']';
+  g_server->send(200, "application/json", json);
+}
+
+// Deletes a single file from the photos directory. Filename-only API
+// (no path traversal) so the /upload-photo page can only ever touch its
+// own photos. Returns JSON so the caller can refresh the list without
+// a full navigation.
+void handleDeletePhoto() {
+  g_server->sendHeader("Cache-Control", "no-store");
+  const char* dir = g_config.photosDir;
+  if (!dir || !dir[0] || !g_server->hasArg("name")) {
+    g_server->send(400, "application/json", "{\"ok\":false}");
+    return;
+  }
+  String name = g_server->arg("name");
+  name.trim();
+  // Refuse anything that could escape the photos dir - filename only.
+  if (name.length() == 0 || name.indexOf('/') >= 0 ||
+      name.indexOf('\\') >= 0 || name == "." || name == "..") {
+    g_server->send(400, "application/json", "{\"ok\":false}");
+    return;
+  }
+  for (size_t i = 0; i < name.length(); ++i) {
+    if (static_cast<uint8_t>(name[i]) < 0x20) {
+      g_server->send(400, "application/json", "{\"ok\":false}");
+      return;
+    }
+  }
+  const String target = joinPath(String(dir), name);
+  const bool ok = sd_card::removeFile(target);
+  LOG.printf("[sd-web] delete-photo %s -> %s\n", target.c_str(),
+             ok ? "ok" : "fail");
+  g_server->send(ok ? 200 : 500, "application/json",
+                 ok ? "{\"ok\":true}" : "{\"ok\":false}");
+}
+
 // The photo-uploader HTML+JS bundle is defined in
 // sd_web_portal_photo_upload_page.cpp; declared at namespace scope
 // above so both TUs link to the same external symbol.
@@ -905,6 +1015,8 @@ void installHandlers(WebServer& server, const Config& cfg, bool embedded) {
       sd_card::makeDir(cfg.photosDir);
     }
     server.on("/photo-panel.json", handlePanelInfo);
+    server.on("/photos-list.json", handlePhotosList);
+    server.on("/delete-photo", HTTP_POST, handleDeletePhoto);
     server.on("/upload-photo", handlePhotoUploadPage);
     server.on("/exit-portal", HTTP_POST, handleExitPortal);
   }

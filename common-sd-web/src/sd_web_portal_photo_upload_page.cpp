@@ -98,6 +98,35 @@ canvas {
 footer { text-align: center; color: var(--muted); font-size: 0.8rem;
   padding: 12px 20px 24px; }
 footer a { color: var(--muted); }
+.photo-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 10px;
+}
+.photo-tile {
+  border: 1px solid var(--line); border-radius: 8px; overflow: hidden;
+  background: #fafafa; display: flex; flex-direction: column;
+}
+.photo-tile img {
+  width: 100%; aspect-ratio: 1 / 1; object-fit: cover; display: block;
+  background: #fff;
+}
+.photo-tile .meta {
+  padding: 6px 8px; font-size: 0.75rem; color: var(--muted);
+  border-top: 1px solid var(--line); display: flex;
+  justify-content: space-between; align-items: center; gap: 6px;
+}
+.photo-tile .meta .name {
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  color: var(--ink);
+}
+.photo-tile button.del {
+  padding: 3px 8px; font-size: 0.75rem; border-radius: 6px;
+  border: 1px solid #dc2626; background: #fff; color: #dc2626;
+  cursor: pointer;
+}
+.photo-tile button.del:hover { background: #fef2f2; }
+.photo-tile button.del:disabled { opacity: 0.5; cursor: not-allowed; }
 </style>
 </head>
 <body>
@@ -167,6 +196,12 @@ extern const char kPhotoUploadPageTail[] PROGMEM = R"HTML(<header>
   </div>
 
   <div class="card">
+    <h2>Your photos</h2>
+    <p class="hint" style="margin:0 0 10px 0" id="photosStatus">Loading...</p>
+    <div id="photoGrid" class="photo-grid"></div>
+  </div>
+
+  <div class="card">
     <h2>Done uploading?</h2>
     <p class="hint" style="margin:0 0 10px 0">Switch the panel back to showing photos. You can also press the left or right arrow on the device.</p>
     <div class="row" style="justify-content: flex-end;">
@@ -177,7 +212,6 @@ extern const char kPhotoUploadPageTail[] PROGMEM = R"HTML(<header>
   <div class="card">
     <p class="hint" style="margin:0">Uploaded photos appear on the panel on the next refresh.
       Use the panel's arrow buttons to leave this page.</p>
-    <p class="hint" style="margin:6px 0 0 0"><a href="/browse?path=%2F">Back to file browser</a></p>
   </div>
 </main>
 <footer>reTerminal photo portal</footer>
@@ -696,6 +730,7 @@ async function onUpload() {
     if (!res.ok) throw new Error("HTTP " + res.status);
     $("uploadedBanner").hidden = false;
     resetForNextUpload();
+    refreshPhotoList();
     window.scrollTo({ top: 0, behavior: "smooth" });
   } catch (err) {
     setStatus("Upload failed: " + err.message, "err");
@@ -739,8 +774,86 @@ $("exitPortal").addEventListener("click", async () => {
 });
 window.addEventListener("resize", () => { if (state.bitmap) drawCropStage(); });
 
+// -- Your photos: list, thumbnail, delete --------------------------------
+
+function escapeHtmlText(s) {
+  return String(s).replace(/[&<>"']/g, (c) => ({
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;", "'": "&#39;",
+  }[c]));
+}
+
+function humanKB(bytes) {
+  if (bytes < 1024) return bytes + " B";
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
+  return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+}
+
+async function refreshPhotoList() {
+  const grid = $("photoGrid");
+  const status = $("photosStatus");
+  const photosDir = (state.panel && state.panel.photosDir) || "/photos";
+  try {
+    const r = await fetch("/photos-list.json", { cache: "no-store" });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const items = await r.json();
+    if (!Array.isArray(items) || items.length === 0) {
+      grid.innerHTML = "";
+      status.textContent = "No photos uploaded yet.";
+      return;
+    }
+    items.sort((a, b) => a.name.localeCompare(b.name));
+    status.textContent = items.length + " photo" +
+      (items.length === 1 ? "" : "s") + " on the SD card.";
+    // Cache-bust thumbnails with a fresh query string so a re-upload of
+    // the same filename shows the new pixels instead of the cached one.
+    const ts = Date.now();
+    grid.innerHTML = items.map((it) => {
+      const src = "/download?path=" +
+        encodeURIComponent(photosDir + "/" + it.name) + "&t=" + ts;
+      const safeName = escapeHtmlText(it.name);
+      const dataName = escapeHtmlText(it.name);
+      return (
+        '<div class="photo-tile">' +
+          '<img loading="lazy" alt="' + safeName + '" src="' + src + '">' +
+          '<div class="meta">' +
+            '<span class="name" title="' + safeName + '">' + safeName + '</span>' +
+            '<span>' + humanKB(it.size) + '</span>' +
+            '<button type="button" class="del" data-name="' + dataName + '">Delete</button>' +
+          '</div>' +
+        '</div>'
+      );
+    }).join("");
+    grid.querySelectorAll("button.del").forEach((btn) => {
+      btn.addEventListener("click", onDeletePhoto);
+    });
+  } catch (e) {
+    status.textContent = "Cannot load photo list: " + e.message;
+  }
+}
+
+async function onDeletePhoto(ev) {
+  const btn = ev.currentTarget;
+  const name = btn.getAttribute("data-name") || "";
+  if (!name) return;
+  if (!confirm("Delete \"" + name + "\"? This cannot be undone.")) return;
+  btn.disabled = true;
+  btn.textContent = "Deleting...";
+  try {
+    const fd = new FormData();
+    fd.append("name", name);
+    const r = await fetch("/delete-photo", { method: "POST", body: fd });
+    if (!r.ok) throw new Error("HTTP " + r.status);
+  } catch (e) {
+    alert("Delete failed: " + e.message);
+    btn.disabled = false;
+    btn.textContent = "Delete";
+    return;
+  }
+  refreshPhotoList();
+}
+
 bindCropDrag();
-fetchPanel();
+fetchPanel().then(refreshPhotoList);
 </script>
 </body>
 </html>

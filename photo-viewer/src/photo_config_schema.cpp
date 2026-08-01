@@ -64,6 +64,10 @@ const Field kDebugFields[] = {
      "Log serial to SD card",
      "Tee serial output to /logs/current.log on the SD card. Adds SD I/O per line.",
      FieldType::Bool, "false", nullptr, 0, 0, nullptr},
+    {kKeyPinnedPhoto,
+     "Pinned photo filename",
+     "Debug override: when set, only this photo is shown (filename only, e.g. \"IMG_0001.bmp\"). Leave blank to rotate through all photos in /photos.",
+     FieldType::String, "", nullptr, 0, 63, nullptr},
 };
 
 const Section kSections[] = {

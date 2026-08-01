@@ -32,6 +32,7 @@ const char* ntpSecondary();
 
 bool        randomOrder();
 bool        logToSd();
+const char* pinnedPhoto();
 
 }  // namespace runtime
 }  // namespace photo_config

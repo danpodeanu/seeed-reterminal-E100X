@@ -346,6 +346,27 @@ uint32_t countPhotos() {
     entry = directory.openNextFile();
   }
   directory.close();
+  // Debug override: pinned photo filename shortcuts the entire enumeration
+  // to just the requested file (verified to exist and to be a supported
+  // format). Empty string disables the override.
+  const char* pinned = photo_config::runtime::pinnedPhoto();
+  if (pinned && pinned[0] != '\0') {
+    String pinnedName(pinned);
+    pinnedName.trim();
+    String only;
+    for (const String& p : photoList) {
+      if (baseName(p) == pinnedName) { only = p; break; }
+    }
+    photoList.clear();
+    if (only.length() > 0) {
+      LOG.printf("[photo] pinned to %s\n", only.c_str());
+      photoList.emplace_back(std::move(only));
+    } else {
+      LOG.printf("[photo] pinned filename \"%s\" not found in %s\n",
+                 pinnedName.c_str(), config::PHOTO_DIR);
+    }
+    return static_cast<uint32_t>(photoList.size());
+  }
   if (photo_config::runtime::randomOrder()) {
     // Seeded xorshift32 shuffle. The seed lives in RTC memory and stays
     // fixed across button/timer wakes within a power session, so
