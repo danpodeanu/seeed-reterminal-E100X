@@ -17,6 +17,7 @@ const FIRMWARE_BASE = "./firmware/latest";
 const boardSel = document.getElementById("board");
 const appSel = document.getElementById("app");
 const installer = document.getElementById("installer");
+const installerErase = document.getElementById("installer-erase");
 const status = document.getElementById("status");
 
 let releaseTag = null;
@@ -81,6 +82,7 @@ async function refresh() {
   const board = boardSel.value;
   const url = firmwareUrl(app, board);
   installer.hidden = true;
+  installerErase.hidden = true;
   setStatus("Checking firmware…");
   const ok = await firmwarePresent(url);
   if (!ok) {
@@ -91,8 +93,11 @@ async function refresh() {
     return;
   }
   const manifest = buildManifest(url, releaseTag, app, board);
-  installer.manifest = encodeDataUrl(manifest);
+  const manifestUrl = encodeDataUrl(manifest);
+  installer.manifest = manifestUrl;
   installer.hidden = false;
+  installerErase.manifest = manifestUrl;
+  installerErase.hidden = false;
   setStatus(
     `Ready to flash ${app} ${releaseTag || "latest"} for ${board}.`
   );

@@ -160,13 +160,16 @@
 
         <div class="install-row">
           <esp-web-install-button id="installer" manifest="" hidden>
-            <button slot="activate">Connect and install</button>
+            <button slot="activate">Flash</button>
             <span slot="unsupported">
               Web Serial isn't available in this browser. Try Chrome or Edge.
             </span>
             <span slot="not-allowed">
               This page must be served over HTTPS.
             </span>
+          </esp-web-install-button>
+          <esp-web-install-button id="installer-erase" manifest="" erase-first hidden>
+            <button slot="activate">Flash (erase)</button>
           </esp-web-install-button>
           <span id="status" class="status">Loading latest release&hellip;</span>
         </div>
@@ -176,8 +179,10 @@
       <ol>
         <li>Choose a board and an application above.</li>
         <li>
-          Click <em>Connect and install</em>. The browser will ask which USB
-          serial port to use — pick the reTerminal.
+          Click <em>Flash</em> to write the new firmware while keeping saved
+          settings (Wi-Fi, API keys, cached data). Click <em>Flash (erase)</em>
+          to wipe the entire flash first for a clean factory install. The
+          browser will ask which USB serial port to use — pick the reTerminal.
         </li>
         <li>
           The flasher writes the merged image to flash offset&nbsp;0 and
