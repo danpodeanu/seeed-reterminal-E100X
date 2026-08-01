@@ -30,6 +30,7 @@
 #include "wifi_sta.h"
 #include "climate_sensor.h"
 #include "sd_card.h"
+#include "epaper_setup.h"
 #include "net_http.h"
 #include "log_sd_sink.h"
 #include "text_render.h"
@@ -1335,6 +1336,12 @@ void setup() {
     // mode than "AP up, panel blank".
     LOG.println("[portal] panel: begin");
     epaper.begin();
+    // E1001 (UC8179) Gray4 pushes silently vanish unless the panel SPI
+    // bus is re-inited with a real MISO pin. The normal render path gets
+    // this for free via sd_card::mount() right after epaper.begin(); the
+    // portal path skips SD, so call the helper directly. See
+    // common/include/epaper_setup.h.
+    epaper_setup::finalize(epaper.getSPIinstance());
 #if RETERMINAL_MODEL == 1001
     epaper.initGrayMode(GRAY_LEVEL4);
     const GFXfont* titleFont    = &FreeSansBold18pt7b;
