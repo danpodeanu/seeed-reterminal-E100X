@@ -3,12 +3,13 @@
 #include <Arduino.h>
 
 #include "config.h"
+#include "weather_config_runtime.h"
 #include "weather_data.h"
 
 // Each provider owns its own HTTP call pattern (Open-Meteo is a single GET;
 // QWeather stitches three GETs together after signing an EdDSA JWT) but
 // exposes the same fetch/parse pair. main.cpp routes calls through these
-// via config::WEATHER_PROVIDER.
+// via weather_config::runtime::weatherProvider().
 namespace weather_provider {
 
 bool fetchOpenMeteo(WeatherData& weather, String& responseBody,
@@ -24,7 +25,8 @@ bool parseQWeather(const String& body, WeatherData& weather);
 // diagnostics) must route through this helper -- never hardcode
 // "Open-Meteo" or "QWeather" at a draw site.
 inline const char* name() {
-  return config::WEATHER_PROVIDER == config::WeatherProvider::QWeather
+  return weather_config::runtime::weatherProvider() ==
+                 config::WeatherProvider::QWeather
              ? "QWeather"
              : "Open-Meteo";
 }
