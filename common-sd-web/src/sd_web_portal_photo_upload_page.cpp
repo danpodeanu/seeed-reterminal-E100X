@@ -180,7 +180,7 @@ extern const char kPhotoUploadPageTail[] PROGMEM = R"HTML(<header>
     </div>
     <p class="hint" id="ditherHint" hidden style="margin:-4px 0 10px 0;
        color:#059669;">Using paperlesspaper/epdoptimize with calibrated Spectra 6 palette
-       and auto-selected preset. Bundled with the firmware - no network needed.</p>
+       and auto-selected preset.</p>
     <div class="row" style="gap: 10px; margin-bottom: 10px;">
       <label style="flex: 1; display: flex; align-items: center; gap: 8px;">
         <span>Brightness</span>

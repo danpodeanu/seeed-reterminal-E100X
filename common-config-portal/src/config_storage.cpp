@@ -49,7 +49,15 @@ String PrefsStorage::getString(const char* key, const char* defaultVal) {
   return prefs_.getString(key, defaultVal ? defaultVal : "");
 }
 bool PrefsStorage::putString(const char* key, const char* value) {
-  return prefs_.putString(key, value ? value : "") > 0;
+  // ESP32 Preferences::putString returns strlen(value) on success and 0
+  // on error - so an empty string success looks identical to a real
+  // failure. Verify the key is present after the call to disambiguate;
+  // that keeps optional text fields being cleared from erroring out on
+  // /settings save even though NVS actually stored the empty value.
+  const char* v = value ? value : "";
+  const size_t written = prefs_.putString(key, v);
+  if (written > 0) return true;
+  return v[0] == '\0' && prefs_.isKey(key);
 }
 bool PrefsStorage::remove(const char* key) { return prefs_.remove(key); }
 bool PrefsStorage::clear() { return prefs_.clear(); }
