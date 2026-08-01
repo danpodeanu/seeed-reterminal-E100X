@@ -36,6 +36,33 @@ const char* typeName(FieldType t) {
   return "string";
 }
 
+void appendNavLinks(String& html, const Config& cfg, bool settings, const char* active) {
+  html += F("<a");
+  if (String(active) == "wifi") html += F(" class=\"active\"");
+  html += F(" href=\"/wifi\">Wi-Fi</a>");
+  if (settings) {
+    html += F("<a");
+    if (String(active) == "settings") html += F(" class=\"active\"");
+    html += F(" href=\"/settings\">Settings</a>");
+  }
+  for (size_t i = 0; i < cfg.extraTabCount; ++i) {
+    const NavTab& tab = cfg.extraTabs[i];
+    if (!tab.label || !tab.href) continue;
+    html += F("<a");
+    if (tab.activeKey && active && String(active) == tab.activeKey) {
+      html += F(" class=\"active\"");
+    }
+    html += F(" href=\"");
+    html += htmlEscape(tab.href);
+    html += F("\">");
+    html += htmlEscape(tab.label);
+    html += F("</a>");
+  }
+  html += F("<a");
+  if (String(active) == "reset") html += F(" class=\"active\"");
+  html += F(" href=\"/reset\">Reset</a>");
+}
+
 void appendChrome(String& html, const Config& cfg, const char* title,
                   bool settings, const char* active) {
   html += F("<!doctype html><html><head><meta charset=\"utf-8\">"
@@ -57,17 +84,8 @@ void appendChrome(String& html, const Config& cfg, const char* title,
             ".ssid-list .ssid-name{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}"
             ".ssid-list .ssid-meta{font-size:.85rem;color:#64748b;flex-shrink:0}"
             "@media(prefers-color-scheme:dark){body{background:#0f172a;color:#e5e7eb}header{background:#020617}.card,fieldset{background:#111827;border-color:#334155}input[type=text],input[type=password],input[type=number],select{background:#0f172a;color:#e5e7eb;border-color:#475569}.help{color:#94a3b8}.ssid-list{border-color:#334155}.ssid-list li{border-bottom-color:#1f2937}.ssid-list li:hover,.ssid-list li:focus{background:#1e293b}.ssid-list .ssid-meta{color:#94a3b8}}"
-            "</style></head><body><header><nav><a");
-  if (String(active) == "wifi") html += F(" class=\"active\"");
-  html += F(" href=\"/wifi\">Wi-Fi</a>");
-  if (settings) {
-    html += F("<a");
-    if (String(active) == "settings") html += F(" class=\"active\"");
-    html += F(" href=\"/settings\">Settings</a>");
-  }
-  html += F("<a");
-  if (String(active) == "reset") html += F(" class=\"active\"");
-  html += F(" href=\"/reset\">Reset</a>");
+            "</style></head><body><header><nav>");
+  appendNavLinks(html, cfg, settings, active);
   html += F("</nav><h1>");
   html += htmlEscape(cfg.appName ? cfg.appName : "reTerminal");
   html += F("</h1><p>");
@@ -266,6 +284,15 @@ String renderResetPage(const Config& cfg, bool hasSettings) {
             "}catch(x){m.className='err';m.textContent=x.message;btn.disabled=false;}};"
             "document.getElementById('rebootBtn').onclick=async()=>{let m=document.getElementById('msg');m.className='';m.textContent='Rebooting\u2026';try{await fetch('/reboot',{method:'POST'});}catch(e){}};"
             "</script></main></body></html>");
+  return html;
+}
+
+String renderNavStripHtml(const Config& cfg, const char* activeKey) {
+  String html;
+  html.reserve(256);
+  html += F("<nav>");
+  appendNavLinks(html, cfg, cfg.appSchema != nullptr, activeKey ? activeKey : "");
+  html += F("</nav>");
   return html;
 }
 

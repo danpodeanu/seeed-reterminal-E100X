@@ -382,6 +382,8 @@ IPAddress currentIp() { return g_running ? g_config.apIp : IPAddress(); }
 uint16_t currentPort() { return g_config.httpPort; }
 bool rebootRequested() { return g_rebootRequested; }
 
+WebServer* webServer() { return g_server; }
+
 void end() {
   if (g_dns) { g_dns->stop(); delete g_dns; g_dns = nullptr; }
   if (g_server) { g_server->stop(); delete g_server; g_server = nullptr; }

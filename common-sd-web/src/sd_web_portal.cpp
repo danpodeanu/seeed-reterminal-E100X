@@ -36,6 +36,8 @@ namespace {
 // tool app, or a single opt-in maintenance mode in a viewer app).
 WebServer* g_server = nullptr;
 DNSServer* g_dns = nullptr;
+bool g_ownsServer = false;  // false in embed mode: another module owns it
+bool g_embedded = false;    // true when installed via attachRoutes()
 
 Config g_config;
 String g_ssid;
@@ -263,8 +265,14 @@ void sendPageHeader(const String& title, const String& breadcrumbHtml) {
       "header{padding:1rem 1.25rem}"
       "}"
       "</style>"
-      "</head><body>"
-      "<header><h1>SD Card Portal</h1>"
+      "</head><body>");
+  if (g_config.navHtml && g_config.navHtml[0]) {
+    html += F("<header style=\"background:#14213d;padding:.75rem 1.25rem;box-shadow:none;border-bottom:1px solid #0a1220\"><nav style=\"font-family:system-ui,-apple-system,sans-serif\">");
+    html += g_config.navHtml;
+    html += F("</nav></header>");
+    html += F("<style>header nav a{color:#bfdbfe;margin-right:1rem;text-decoration:none;font-weight:500}header nav a.active{color:#fff;font-weight:700}</style>");
+  }
+  html += F("<header><h1>SD Card Portal</h1>"
       "<div class=\"crumb\">");
   html += breadcrumbHtml;
   html += F("</div></header><main>");
@@ -838,11 +846,66 @@ String urlQrPayload(const IPAddress& ip, uint16_t port, const char* path) {
   return url;
 }
 
+// Register the SD-portal request handlers on `server`. In standalone mode
+// (embedded=false, called from begin()) this also registers "/", captive-
+// portal probes, and onNotFound - handlers that a shared server (typically
+// config_portal's) already owns. In embed mode those are skipped so the
+// two portals don't fight over the same paths.
+void installHandlers(WebServer& server, const Config& cfg, bool embedded) {
+  if (!embedded) {
+    server.on("/", handleRoot);
+  }
+  server.on("/browse", handleBrowse);
+  server.on("/download", handleDownload);
+  server.on("/mkdir", HTTP_POST, handleMkdir);
+  server.on("/delete", HTTP_POST, handleDelete);
+  // Upload uses two callbacks: the final response, and the streaming
+  // handler that receives the multipart chunks.
+  server.on("/upload", HTTP_POST, handleUploadDone, handleUploadStream);
+
+  // Optional photo-upload extension. When the embedding app supplies
+  // panel dimensions + palette, expose:
+  //   GET /photo-panel.json - panel + photos-dir metadata for the JS.
+  //   GET /upload-photo     - the browser-side dither/upload page.
+  // The JS on /upload-photo POSTs the resulting BMP to /upload with
+  // `parent=<photosDir>`, reusing the standard streaming upload path.
+  // Note: /photo-panel.json (not /panel.json) so the endpoint is unique
+  // when the SD portal is embedded alongside config_portal (which also
+  // serves a /panel.json describing its own capabilities).
+  if (cfg.panelWidth > 0 && cfg.panelHeight > 0 && cfg.panelPalette &&
+      cfg.photosDir && cfg.photosDir[0]) {
+    // Ensure the photos directory exists so the first upload succeeds
+    // without the user having to create it in the file browser.
+    if (!sd_card::fileExists(cfg.photosDir)) {
+      sd_card::makeDir(cfg.photosDir);
+    }
+    server.on("/photo-panel.json", handlePanelInfo);
+    server.on("/upload-photo", handlePhotoUploadPage);
+    server.on("/exit-portal", HTTP_POST, handleExitPortal);
+  }
+
+  if (!embedded) {
+    // Captive-portal probes. Apple's probes get the exact "Success"
+    // body so the Captive Network Assistant dismisses itself. Android
+    // and Windows probes get their expected 204/NCSI responses so
+    // those OSes also join silently.
+    server.on("/hotspot-detect.html",        handleAppleProbe);
+    server.on("/library/test/success.html",  handleAppleProbe);
+    server.on("/generate_204", []() { g_server->send(204); });
+    server.on("/gen_204",      []() { g_server->send(204); });
+    server.on("/ncsi.txt", []() {
+      g_server->send(200, "text/plain", "Microsoft NCSI");
+    });
+    server.on("/connecttest.txt", []() {
+      g_server->send(200, "text/plain", "Microsoft Connect Test");
+    });
+    server.onNotFound(handleNotFound);
+  }
+}
+
 bool begin(const Config& cfg) {
   g_config = cfg;
   g_exitRequested = false;
-
-  // Bring the radio into AP mode with the requested static IP.
   WiFi.persistent(false);
   WiFi.mode(WIFI_AP);
   if (!WiFi.softAPConfig(cfg.apIp, cfg.apGateway, cfg.apNetmask)) {
@@ -866,49 +929,9 @@ bool begin(const Config& cfg) {
     g_server = nullptr;
   }
   g_server = new WebServer(cfg.httpPort);
-  g_server->on("/", handleRoot);
-  g_server->on("/browse", handleBrowse);
-  g_server->on("/download", handleDownload);
-  g_server->on("/mkdir", HTTP_POST, handleMkdir);
-  g_server->on("/delete", HTTP_POST, handleDelete);
-  // Upload uses two callbacks: the final response, and the streaming
-  // handler that receives the multipart chunks.
-  g_server->on("/upload", HTTP_POST, handleUploadDone, handleUploadStream);
-
-  // Optional photo-upload extension. When the embedding app supplies
-  // panel dimensions + palette, expose:
-  //   GET /panel.json     - panel + photos-dir metadata for the JS.
-  //   GET /upload-photo   - the browser-side dither/upload page.
-  // The JS on /upload-photo POSTs the resulting BMP to /upload with
-  // `parent=<photosDir>`, reusing the standard streaming upload path.
-  if (cfg.panelWidth > 0 && cfg.panelHeight > 0 && cfg.panelPalette &&
-      cfg.photosDir && cfg.photosDir[0]) {
-    // Ensure the photos directory exists so the first upload succeeds
-    // without the user having to create it in the file browser.
-    if (!sd_card::fileExists(cfg.photosDir)) {
-      sd_card::makeDir(cfg.photosDir);
-    }
-    g_server->on("/panel.json", handlePanelInfo);
-    g_server->on("/upload-photo", handlePhotoUploadPage);
-    g_server->on("/exit-portal", HTTP_POST, handleExitPortal);
-  }
-
-  // Captive-portal probes. Apple's probes get the exact "Success"
-  // body so the Captive Network Assistant dismisses itself. Android
-  // and Windows probes get their expected 204/NCSI responses so
-  // those OSes also join silently.
-  g_server->on("/hotspot-detect.html",        handleAppleProbe);
-  g_server->on("/library/test/success.html",  handleAppleProbe);
-  g_server->on("/generate_204", []() { g_server->send(204); });
-  g_server->on("/gen_204",      []() { g_server->send(204); });
-  g_server->on("/ncsi.txt", []() {
-    g_server->send(200, "text/plain", "Microsoft NCSI");
-  });
-  g_server->on("/connecttest.txt", []() {
-    g_server->send(200, "text/plain", "Microsoft Connect Test");
-  });
-
-  g_server->onNotFound(handleNotFound);
+  g_ownsServer = true;
+  g_embedded = false;
+  installHandlers(*g_server, cfg, /*embedded=*/false);
   g_server->begin();
 
   // DNS hijack: answer every A query with our own IP. Combined with
@@ -929,7 +952,19 @@ bool begin(const Config& cfg) {
   return true;
 }
 
+void attachRoutes(WebServer& server, const Config& cfg) {
+  g_config = cfg;
+  g_exitRequested = false;
+  g_server = &server;
+  g_ownsServer = false;
+  g_embedded = true;
+  g_running = true;
+  installHandlers(server, cfg, /*embedded=*/true);
+  LOG.println("[sd-web] routes attached to external WebServer");
+}
+
 void loop() {
+  if (g_embedded) return;  // shared server is pumped by its owner
   if (g_running && g_server) g_server->handleClient();
   if (g_running && g_dns) g_dns->processNextRequest();
 }
@@ -946,15 +981,19 @@ void end() {
     g_dns = nullptr;
   }
   if (g_server) {
-    g_server->stop();
-    delete g_server;
+    if (g_ownsServer) {
+      g_server->stop();
+      delete g_server;
+    }
     g_server = nullptr;
   }
-  if (g_running) {
+  if (g_running && !g_embedded) {
     WiFi.softAPdisconnect(true);
     WiFi.mode(WIFI_OFF);
-    g_running = false;
   }
+  g_running = false;
+  g_ownsServer = false;
+  g_embedded = false;
 }
 
 }  // namespace sd_web_portal

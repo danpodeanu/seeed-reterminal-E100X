@@ -2,7 +2,7 @@
 //
 // Served at /upload-photo when the embedding app supplies panel
 // dimensions + palette in sd_web_portal::Config. The page fetches
-// /panel.json to learn what the target panel looks like, then:
+// /photo-panel.json to learn what the target panel looks like, then:
 //
 //   1. Waits for the user to pick a photo (input file).
 //   2. Decodes the file into an ImageBitmap. Browsers apply EXIF
@@ -218,8 +218,8 @@ const $ = (id) => document.getElementById(id);
 
 async function fetchPanel() {
   try {
-    const r = await fetch("/panel.json", { cache: "no-store" });
-    if (!r.ok) throw new Error("panel.json " + r.status);
+    const r = await fetch("/photo-panel.json", { cache: "no-store" });
+    if (!r.ok) throw new Error("photo-panel.json " + r.status);
     state.panel = await r.json();
   } catch (e) {
     setStatus("Cannot load panel info: " + e.message, "err");

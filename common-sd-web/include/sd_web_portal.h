@@ -3,6 +3,8 @@
 #include <Arduino.h>
 #include <IPAddress.h>
 
+class WebServer;
+
 // SD-card Wi-Fi portal shared by the tools/sd-web utility and, later,
 // any viewer app that wants to expose its SD card over Wi-Fi for
 // operator-side maintenance (uploading fonts, deleting cache dirs,
@@ -70,6 +72,12 @@ struct Config {
   // "root" (file browser). Set to "/upload-photo" for viewer apps that
   // want the QR to land directly on the photo-upload page.
   const char* urlQrPath = nullptr;
+
+  // Optional cross-portal nav strip HTML fragment injected at the top of
+  // every SD portal page (above the "SD Card Portal" header). When the
+  // portal is embedded next to the shared Wi-Fi config portal, pass a
+  // matching nav bar so the user sees the same tabs on every page.
+  const char* navHtml = nullptr;
 };
 
 // Build the SSID that begin() would use for the given config, without
@@ -92,6 +100,15 @@ String urlQrPayload(const IPAddress& ip, uint16_t port = 80,
 // Start the AP + HTTP server. Returns true on success. Idempotent
 // against duplicate calls (a second call re-applies config).
 bool begin(const Config& cfg = Config{});
+
+// Embed mode: install the SD-portal handlers on an existing WebServer
+// that another module (typically config_portal) already owns and runs.
+// The caller is responsible for starting/pumping the WebServer and for
+// AP/DNS setup - this call only registers routes and stores the config.
+// Routes registered: /browse, /download, /mkdir, /delete, /upload, and,
+// when the photo-uploader is enabled (panelWidth/panelHeight/photosDir
+// non-empty), /photo-panel.json, /upload-photo, /exit-portal.
+void attachRoutes(::WebServer& server, const Config& cfg);
 
 // Service in-flight HTTP requests. Call every loop() iteration; blocks
 // only for the duration of a single request or client-connection tick.

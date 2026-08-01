@@ -6,10 +6,24 @@
 #include <Arduino.h>
 #include <IPAddress.h>
 
+class WebServer;
+
 // Schema-driven Wi-Fi + application settings portal. Call begin() from a
 // viewer's maintenance/configuration mode, then pump loop() until
 // rebootRequested() is true (or until the app exits the mode another way).
 namespace config_portal {
+
+// Extra navigation tab. Rendered by the portal chrome after the built-in
+// Wi-Fi / Settings entries and before Reset. Apps use this to expose extra
+// pages (e.g. SD-card browser, photo uploader) served by handlers they
+// install directly on webServer() after begin() returns.
+struct NavTab {
+  const char* label = nullptr;
+  const char* href = nullptr;
+  // Highlight this tab when appendChrome's `active` string matches. NULL
+  // means "never highlight" (use for tabs whose page renders its own chrome).
+  const char* activeKey = nullptr;
+};
 
 struct Config {
   const char* apSsidPrefix = "ReTerminal ";
@@ -40,6 +54,13 @@ struct Config {
   // sentinel before being sent to the browser.
   using WifiFallbackFn = String (*)(const char* key);
   WifiFallbackFn wifiFallback = nullptr;
+
+  // Optional array of extra navigation tabs the portal chrome renders
+  // between Settings and Reset. The pages behind these tabs must be
+  // registered on webServer() (returned by webServer() after begin())
+  // by the app itself.
+  const NavTab* extraTabs = nullptr;
+  size_t extraTabCount = 0;
 };
 
 String buildSsid(const Config& cfg = Config{});
@@ -48,6 +69,17 @@ String urlQrPayload(const IPAddress& ip, uint16_t port = 80, const char* path = 
 
 bool begin(const Config& cfg);
 void loop();
+
+// Access the running WebServer. Valid after begin() succeeds, invalidated
+// by end(). Apps use this to install extra route handlers (paired with
+// Config::extraTabs) without spinning up a second HTTP listener.
+WebServer* webServer();
+
+// Render a nav-strip HTML fragment identical to the one the portal chrome
+// emits inside <nav>...</nav>. Handy for extra pages that share the portal
+// server but render their own layout - pass the same Config that was used
+// with begin() and the activeKey to highlight (or nullptr).
+String renderNavStripHtml(const Config& cfg, const char* activeKey);
 
 const String& currentSsid();
 const String& currentApPassword();  // empty when the AP is open

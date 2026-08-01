@@ -31,6 +31,10 @@
 #include "sd_card.h"
 #include "sd_web_portal.h"
 #include "sd_web_portal_ui.h"
+#include "config_portal.h"
+#include "config_portal_ui.h"
+#include "wifi_schema.h"
+#include "photo_wifi_credentials.h"
 #include "log_sd_sink.h"
 #include "text_render.h"
 #include "photo_manifest.h"
@@ -648,8 +652,8 @@ bool arrowPressedNow() {
 // Render the SD-portal welcome screen using whichever panel fonts fit.
 // Chooses point sizes that match photo-viewer's renderStatus() so the
 // two look visually related.
-void renderPortalOnPanel(const String& ssid, const IPAddress& ip,
-                        uint16_t port) {
+void renderPortalOnPanel(const String& ssid, const String& password,
+                         const IPAddress& ip, uint16_t port) {
 #if RETERMINAL_MODEL == 1001
   const GFXfont* titleFont = &FreeSansBold18pt7b;
   const GFXfont* subtitleFont = &FreeSans12pt7b;
@@ -672,36 +676,38 @@ void renderPortalOnPanel(const String& ssid, const IPAddress& ip,
   const GFXfont* detailFont = &FreeSans12pt7b;
 #endif
 
-  sd_web_portal::ui::RenderInfo info;
+  config_portal::ui::RenderInfo info;
   info.modelLabel = MODEL_NAME;
-  info.title = "Upload Photo";
-  info.tagline = "Press arrow to exit";
+  info.title = "Configure";
+  info.tagline = "Join the AP for Wi-Fi, SD, photos";
   info.ssid = ssid;
-  info.url = sd_web_portal::urlQrPayload(ip, port, "/upload-photo");
+  info.wifiPassword = password;
+  info.url = String("http://") + ip.toString();
   info.macAddress = wifi_sta::stationMacAddress();
-  info.wifiPayload = sd_web_portal::wifiQrPayload(ssid, nullptr);
-  info.urlPayload = info.url;
-  info.helpPayload = config::PORTAL_HELP_URL;
-  info.helpCaption = config::PORTAL_HELP_CAPTION;
+  info.wifiPayload = config_portal::wifiQrPayload(
+      ssid, password.length() ? password.c_str() : nullptr);
+  info.urlPayload = config_portal::urlQrPayload(ip, port, "/wifi");
   info.fonts.titleFont = titleFont;
   info.fonts.subtitleFont = subtitleFont;
   info.fonts.captionFont = captionFont;
   info.fonts.detailFont = detailFont;
 
-  sd_web_portal::ui::renderPortalScreen<EPaper>(
+  config_portal::ui::renderPortalScreen<EPaper>(
       epaper, config::PANEL_WIDTH, config::PANEL_HEIGHT, PANEL_BLACK,
       PANEL_WHITE, info);
   panel_watchdog::guard([]() { epaper.update(); });
 }
 
 // SD-portal mode entry point. Called from setup() when sdPortalMode is
-// true. Brings up the soft-AP + HTTP portal, draws the welcome QR
-// screen, and services HTTP requests forever. Exits when the user
-// presses either arrow button, at which point we schedule a return to
-// photo mode and reboot so setup() gets a fresh environment (WebServer
-// + softAP tear-down inside a single boot is fiddly).
+// true. Brings up the soft-AP + HTTP portal (config_portal for Wi-Fi +
+// Reset tabs, sd_web_portal attached to the same server for SD +
+// Photos tabs), draws the welcome QR screen, and services HTTP
+// requests forever. Exits when the user presses either arrow button
+// or when the web UI POSTs /exit-portal, at which point we schedule a
+// return to photo mode and reboot so setup() gets a fresh environment
+// (WebServer + softAP tear-down inside a single boot is fiddly).
 [[noreturn]] void runSdWebPortal() {
-  LOG.println("[portal] entering SD Wi-Fi portal mode");
+  LOG.println("[portal] entering configuration portal mode");
 
   epaper.begin();
 #if RETERMINAL_MODEL == 1001
@@ -726,33 +732,35 @@ void renderPortalOnPanel(const String& ssid, const IPAddress& ip,
     ESP.restart();
   }
 
-  sd_web_portal::Config cfg;
-  cfg.apSsidPrefix = config::PORTAL_SSID_PREFIX;
-  cfg.apPassword = config::PORTAL_PASSWORD;
-  cfg.apIp = IPAddress(192, 168, 1, 1);
-  cfg.apGateway = IPAddress(192, 168, 1, 1);
-  cfg.apNetmask = IPAddress(255, 255, 255, 0);
-  cfg.httpPort = config::PORTAL_HTTP_PORT;
-  cfg.maxConnections = config::PORTAL_MAX_CONNECTIONS;
+  // Extra nav tabs the config_portal chrome renders between Settings
+  // and Reset. The pages behind these URLs are served by
+  // sd_web_portal::attachRoutes below - they share the same WebServer.
+  static const config_portal::NavTab kExtraTabs[] = {
+      {"SD",     "/browse?path=%2F", "sd"},
+      {"Photos", "/upload-photo",    "photos"},
+  };
 
-  // Enable the browser-side photo uploader: the portal serves a
-  // /panel.json describing this board's native resolution + palette,
-  // and a /upload-photo page whose JS dithers + encodes a 4-bit BMP
-  // matching the exact layout renderPreparedBmp() consumes.
-  cfg.panelWidth = config::PANEL_WIDTH;
-  cfg.panelHeight = config::PANEL_HEIGHT;
-#if RETERMINAL_MODEL == 1001
-  cfg.panelPalette = "gray4";
-#elif RETERMINAL_MODEL == 1003
-  cfg.panelPalette = "gray16";
-#else
-  cfg.panelPalette = "e6";
-#endif
-  cfg.panelModel = MODEL_NAME;
-  cfg.photosDir = config::PHOTO_DIR;
-  cfg.urlQrPath = "/upload-photo";
+  config_portal::Config portalCfg;
+  portalCfg.wifiSchema = &config_portal::kWifiSchema;
+  portalCfg.appSchema = nullptr;  // photo-viewer has no persistable settings yet
+  portalCfg.appName = "Photo Viewer";
+  portalCfg.helpUrl = config::PORTAL_HELP_URL;
+  portalCfg.apSsidPrefix = config::PORTAL_SSID_PREFIX;
+  portalCfg.apIp = IPAddress(192, 168, 1, 1);
+  portalCfg.apGateway = IPAddress(192, 168, 1, 1);
+  portalCfg.apNetmask = IPAddress(255, 255, 255, 0);
+  portalCfg.httpPort = config::PORTAL_HTTP_PORT;
+  portalCfg.maxConnections = config::PORTAL_MAX_CONNECTIONS;
+  portalCfg.useAutoApPassword = true;
+  portalCfg.extraTabs = kExtraTabs;
+  portalCfg.extraTabCount = sizeof(kExtraTabs) / sizeof(kExtraTabs[0]);
+  portalCfg.wifiFallback = [](const char* key) -> String {
+    if (strcmp(key, "ssid") == 0) return String(photo_wifi::ssid());
+    if (strcmp(key, "password") == 0) return String(photo_wifi::password());
+    return String();
+  };
 
-  if (!sd_web_portal::begin(cfg)) {
+  if (!config_portal::begin(portalCfg)) {
     renderStatus("Wi-Fi start failed",
                  "Press an arrow to return to photo mode");
     while (!arrowPressedNow()) delay(50);
@@ -764,20 +772,52 @@ void renderPortalOnPanel(const String& ssid, const IPAddress& ip,
     ESP.restart();
   }
 
-  renderPortalOnPanel(sd_web_portal::currentSsid(),
-                      sd_web_portal::currentIp(),
-                      sd_web_portal::currentPort());
+  // Build the SD/photo portal config and attach its handlers to the
+  // WebServer config_portal just opened. sd_web_portal::attachRoutes
+  // does NOT touch AP/DNS - those are already owned by config_portal.
+  sd_web_portal::Config sdCfg;
+  sdCfg.panelWidth = config::PANEL_WIDTH;
+  sdCfg.panelHeight = config::PANEL_HEIGHT;
+#if RETERMINAL_MODEL == 1001
+  sdCfg.panelPalette = "gray4";
+#elif RETERMINAL_MODEL == 1003
+  sdCfg.panelPalette = "gray16";
+#else
+  sdCfg.panelPalette = "e6";
+#endif
+  sdCfg.panelModel = MODEL_NAME;
+  sdCfg.photosDir = config::PHOTO_DIR;
+  sdCfg.urlQrPath = "/upload-photo";
+  // Render the shared nav strip once so sd-web pages display the same
+  // tab bar. Cross-portal nav highlight is intentionally left off:
+  // sd-web pages already advertise which page they are via their own
+  // header ("SD Card Portal" + breadcrumb).
+  static String s_navHtml;
+  s_navHtml = config_portal::renderNavStripHtml(portalCfg, nullptr);
+  sdCfg.navHtml = s_navHtml.c_str();
+  WebServer* server = config_portal::webServer();
+  if (server) {
+    sd_web_portal::attachRoutes(*server, sdCfg);
+  } else {
+    LOG.println("[portal] webServer() returned null; SD tabs disabled");
+  }
+
+  renderPortalOnPanel(config_portal::currentSsid(),
+                      config_portal::currentApPassword(),
+                      config_portal::currentIp(),
+                      config_portal::currentPort());
   LOG.printf("[portal] SSID=\"%s\" URL=http://%s:%u/\n",
-             sd_web_portal::currentSsid().c_str(),
-             sd_web_portal::currentIp().toString().c_str(),
-             sd_web_portal::currentPort());
+             config_portal::currentSsid().c_str(),
+             config_portal::currentIp().toString().c_str(),
+             config_portal::currentPort());
 
   pinMode(PIN_KEY0, INPUT_PULLUP);
   pinMode(PIN_KEY1, INPUT_PULLUP);
 
   while (true) {
-    sd_web_portal::loop();
-    const bool webExit = sd_web_portal::exitRequested();
+    config_portal::loop();
+    const bool webExit = sd_web_portal::exitRequested()
+                         || config_portal::rebootRequested();
     if (webExit || arrowPressedNow()) {
       LOG.println(webExit
                       ? "[portal] web exit requested; leaving portal mode"
@@ -788,11 +828,12 @@ void renderPortalOnPanel(const String& ssid, const IPAddress& ip,
       if (webExit) {
         const uint32_t drainStart = millis();
         while (millis() - drainStart < 400) {
-          sd_web_portal::loop();
+          config_portal::loop();
           delay(10);
         }
       }
       sd_web_portal::end();
+      config_portal::end();
       appLog.detachSdSink();
       if (sdReady) SD.end();
       sdPortalMode = false;
@@ -817,6 +858,7 @@ void renderPortalOnPanel(const String& ssid, const IPAddress& ip,
 
 void setup() {
   hardware::setStatusLed(true);
+  photo_wifi::load();
   local_time::configureTimezone(config::TIMEZONE);
   quiet_hours::configure({config::QUIET_HOURS_ENABLED,
                           config::QUIET_START_HOUR,
@@ -989,7 +1031,7 @@ void setup() {
 #if RETERMINAL_MODEL == 1001
   if (showStartupStatus) {
     LOG.println("[display] showing Wi-Fi connection status");
-    renderStatus("Connecting to " + String(WIFI_SSID), statusDetail,
+    renderStatus("Connecting to " + String(photo_wifi::ssid()), statusDetail,
                  stationMac);
   }
   epaper.initGrayMode(GRAY_LEVEL4);
@@ -1001,14 +1043,14 @@ void setup() {
 #if RETERMINAL_MODEL != 1001
   if (showStartupStatus) {
     LOG.println("[display] showing Wi-Fi connection status");
-    renderStatus("Connecting to " + String(WIFI_SSID), statusDetail,
+    renderStatus("Connecting to " + String(photo_wifi::ssid()), statusDetail,
                  stationMac);
   }
 #endif
 
   bool ntpSynchronized = false;
   if (ntpDue) {
-    if (wifi_sta::connectStation(WIFI_SSID, WIFI_PASSWORD, config::WIFI_TIMEOUT_MS)) ntpSynchronized = ntp::synchronizeAndPersist(config::TIMEZONE, config::NTP_SERVER_PRIMARY, config::NTP_SERVER_SECONDARY, config::NTP_DHCP_TIMEOUT_MS, config::NTP_SYNC_TIMEOUT_MS, &lastNtpSyncEpoch);
+    if (wifi_sta::connectStation(photo_wifi::ssid(), photo_wifi::password(), config::WIFI_TIMEOUT_MS)) ntpSynchronized = ntp::synchronizeAndPersist(config::TIMEZONE, config::NTP_SERVER_PRIMARY, config::NTP_SERVER_SECONDARY, config::NTP_DHCP_TIMEOUT_MS, config::NTP_SYNC_TIMEOUT_MS, &lastNtpSyncEpoch);
     if (!ntpSynchronized && !coldBoot) {
       LOG.println("[ntp] using PCF8563 fallback after synchronization failure");
       rtc_sync::restoreSystemClock();
