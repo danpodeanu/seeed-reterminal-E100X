@@ -17,11 +17,18 @@
 
 #include "app_logger.h"
 #include "config.h"
+#include "weather_config_runtime.h"
 #include "weather_data.h"
 
 namespace canonical_weather {
 
 constexpr char SCHEMA_VERSION[] = "reterminal-weather-v2";
+
+// Tolerance for matching the cache-stamped location to the current
+// runtime location. 4 decimal places (~11 m) is finer than any weather
+// API resolves, so this only differentiates "user changed the city"
+// from "rounding drift".
+constexpr double LOCATION_MATCH_EPSILON = 0.001;
 
 namespace detail {
 
@@ -52,6 +59,12 @@ inline int readInt(JsonVariantConst v, int fallback = -1) {
 inline bool serialize(const WeatherData& weather, String& out) {
   JsonDocument doc;
   doc["_schema"] = SCHEMA_VERSION;
+  // Location stamp: rejects cache entries left over from a different
+  // city if the user reconfigures the location in the portal. Rounded
+  // to 4 dp so cosmetic re-entry (51.5074 vs 51.5075) does not blow
+  // the cache away for no reason.
+  doc["lat"] = weather_config::runtime::latitude();
+  doc["lon"] = weather_config::runtime::longitude();
   // Timestamps are stored as UTC epoch seconds. See weather_data.h.
   doc["updateTime"] = static_cast<int64_t>(weather.updateTime);
   detail::writeFloat(doc, "temperatureC", weather.temperatureC);
@@ -107,6 +120,21 @@ inline bool parse(const String& body, WeatherData& weather) {
   if (strcmp(schema, SCHEMA_VERSION) != 0) {
     LOG.printf("[cache] schema %s does not match %s; ignoring\n",
                schema[0] == '\0' ? "(none)" : schema, SCHEMA_VERSION);
+    return false;
+  }
+  // Location stamp check: a cache written for one city must not be
+  // reused after the user picks a different city in the portal. A
+  // missing lat/lon (older cache) also fails so we refetch cleanly.
+  const double cachedLat = doc["lat"] | NAN;
+  const double cachedLon = doc["lon"] | NAN;
+  const double currentLat = weather_config::runtime::latitude();
+  const double currentLon = weather_config::runtime::longitude();
+  if (!isfinite(cachedLat) || !isfinite(cachedLon) ||
+      fabs(cachedLat - currentLat) > LOCATION_MATCH_EPSILON ||
+      fabs(cachedLon - currentLon) > LOCATION_MATCH_EPSILON) {
+    LOG.printf(
+        "[cache] location mismatch: cached=(%.4f,%.4f) current=(%.4f,%.4f); ignoring\n",
+        cachedLat, cachedLon, currentLat, currentLon);
     return false;
   }
   weather = WeatherData{};
