@@ -5,6 +5,7 @@ void test_validate_int_is_strict_and_checks_bounds();
 void test_validate_float_is_strict();
 void test_validate_enum_and_find_field();
 void test_validate_field_checks_literal_pattern();
+void test_timezone_field_accepts_presets_and_custom_and_rejects_empty();
 void test_load_for_get_defaults_stored_values_and_secret_redaction();
 void test_save_writes_every_submitted_field();
 void test_save_secret_sentinel_preserves_and_empty_clears();
@@ -31,6 +32,7 @@ int main(int, char**) {
   RUN_TEST(test_validate_float_is_strict);
   RUN_TEST(test_validate_enum_and_find_field);
   RUN_TEST(test_validate_field_checks_literal_pattern);
+  RUN_TEST(test_timezone_field_accepts_presets_and_custom_and_rejects_empty);
   RUN_TEST(test_load_for_get_defaults_stored_values_and_secret_redaction);
   RUN_TEST(test_save_writes_every_submitted_field);
   RUN_TEST(test_save_secret_sentinel_preserves_and_empty_clears);

@@ -133,6 +133,18 @@ bool validateField(const Schema& s, const Field& f, const char* val, String* err
         ok = false;
       }
       break;
+    case FieldType::Timezone:
+      // Same length policy as String. We deliberately do not validate
+      // the POSIX-TZ grammar: the platform's tzset() is the source of
+      // truth (it silently falls back to UTC on garbage), and users
+      // reaching the "Custom (POSIX)" branch have opted into that.
+      ok = safeVal[0] != '\0';
+      if (ok && (f.minVal != 0 || f.maxVal != 0) &&
+          (strlen(safeVal) < static_cast<size_t>(f.minVal) ||
+           strlen(safeVal) > static_cast<size_t>(f.maxVal))) {
+        ok = false;
+      }
+      break;
     case FieldType::Secret:
     case FieldType::Password:
       ok = safeVal[0] != '\0' || strcmp(safeVal, kSecretSentinel) == 0;

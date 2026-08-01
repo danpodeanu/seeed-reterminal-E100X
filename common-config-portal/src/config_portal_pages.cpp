@@ -1,6 +1,8 @@
 #ifdef ARDUINO
 #include "config_portal.h"
 
+#include "timezone_list.h"
+
 namespace config_portal {
 namespace {
 
@@ -29,6 +31,7 @@ const char* typeName(FieldType t) {
     case FieldType::Enum: return "enum";
     case FieldType::Secret: return "secret";
     case FieldType::Password: return "password";
+    case FieldType::Timezone: return "timezone";
   }
   return "string";
 }
@@ -108,6 +111,29 @@ void appendFieldInput(String& html, const Field& f) {
       }
     }
     html += F("</select>");
+  } else if (f.type == FieldType::Timezone) {
+    // Two controls, one hidden at a time: a <select> of curated
+    // POSIX-TZ presets and a text input for the "Custom (POSIX)"
+    // fallback. Only the select carries `name`; the shared JS reads
+    // the input via the wrapping .field container and submits either
+    // the selected preset or the text depending on the select value.
+    html += F("<select id=\"");
+    html += htmlEscape(f.key);
+    html += F("\" name=\"");
+    html += htmlEscape(f.key);
+    html += F("\" onchange=\"tzToggle(this)\">");
+    for (size_t i = 0; i < kTimezoneOptionCount; ++i) {
+      html += F("<option value=\"");
+      html += htmlEscape(kTimezoneOptions[i].posix);
+      html += F("\">");
+      html += htmlEscape(kTimezoneOptions[i].label);
+      html += F("</option>");
+    }
+    html += F("<option value=\"");
+    html += kTimezoneCustomSentinel;
+    html += F("\">Custom (POSIX)</option></select>"
+              "<input type=\"text\" data-tz-custom placeholder=\"POSIX TZ string\" "
+              "style=\"margin-top:.35rem;display:none\">");
   } else {
     html += F("<input id=\"");
     html += htmlEscape(f.key);
@@ -133,8 +159,10 @@ void appendFieldInput(String& html, const Field& f) {
 }
 
 const char kSharedScript[] PROGMEM = R"JS(
-function valOf(el,type){if(type==='bool')return el.checked?'true':'false';return el.value;}
-function setVal(el,type,v){if(type==='bool')el.checked=(v==='true'||v==='1'||v==='on'||v==='yes');else{if((type==='secret'||type==='password')&&v==='__saved__')el.placeholder='●●●● saved';el.value=v||'';}}
+function tzCustomInput(el){const c=el.closest?el.closest('.field'):null;return c?c.querySelector('input[data-tz-custom]'):null;}
+function tzToggle(sel){const t=tzCustomInput(sel);if(!t)return;t.style.display=(sel.value==='__custom__')?'':'none';}
+function valOf(el,type){if(type==='bool')return el.checked?'true':'false';if(type==='timezone'){if(el.value==='__custom__'){const t=tzCustomInput(el);return t?t.value:'';}return el.value;}return el.value;}
+function setVal(el,type,v){if(type==='bool'){el.checked=(v==='true'||v==='1'||v==='on'||v==='yes');return;}if(type==='timezone'){let matched=false;for(const opt of el.options){if(opt.value===v){el.value=v;matched=true;break;}}if(!matched){el.value='__custom__';}const t=tzCustomInput(el);if(t){t.value=matched?'':(v||'');t.style.display=(el.value==='__custom__')?'':'none';}return;}if((type==='secret'||type==='password')&&v==='__saved__')el.placeholder='●●●● saved';el.value=v||'';}
 async function loadValues(url){const r=await fetch(url,{cache:'no-store'});const j=await r.json();for(const [k,v] of Object.entries(j.values||{})){const el=document.querySelector('[name="'+CSS.escape(k)+'"]');if(el)setVal(el,el.closest('.field')?.dataset.type||'string',v);}}
 async function postForm(url){const data={};document.querySelectorAll('[name]').forEach(el=>{data[el.name]=valOf(el,el.closest('.field')?.dataset.type||'string')});const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(data)});const j=await r.json();if(!r.ok||!j.ok)throw new Error(j.error||'Save failed');return j;}
 )JS";

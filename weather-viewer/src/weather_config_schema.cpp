@@ -32,9 +32,9 @@ const Field kRefreshFields[] = {
      "Deep-sleep interval between automatic refreshes. Range 60..21600.",
      FieldType::Int, "900", nullptr, 60, 21600, nullptr},
     {kKeyTimezone,
-     "Timezone (POSIX TZ)",
-     "POSIX TZ notation, e.g. GMT0BST,M3.5.0/1,M10.5.0/2 for London, PST8PDT for US Pacific.",
-     FieldType::String, "GMT0BST,M3.5.0/1,M10.5.0/2", nullptr, 0, 32, nullptr},
+     "Timezone",
+     "Pick your region or choose \"Custom (POSIX)\" and enter a POSIX TZ string.",
+     FieldType::Timezone, "GMT0BST,M3.5.0/1,M10.5.0/2", nullptr, 0, 32, nullptr},
 };
 
 const Field kQuietFields[] = {

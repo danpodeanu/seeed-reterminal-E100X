@@ -12,7 +12,7 @@ namespace config_portal {
 
 constexpr const char* kSecretSentinel = "__saved__";
 
-enum class FieldType { Bool, Int, Float, String, Enum, Secret, Password };
+enum class FieldType { Bool, Int, Float, String, Enum, Secret, Password, Timezone };
 
 // Pattern support is intentionally tiny: when `pattern` is non-null and
 // non-empty the submitted value must contain it as a literal substring.

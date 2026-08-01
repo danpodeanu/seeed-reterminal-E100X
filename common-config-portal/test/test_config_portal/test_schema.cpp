@@ -2,6 +2,7 @@
 
 #include "config_schema.h"
 #include "test_fixtures.h"
+#include "timezone_list.h"
 
 using namespace config_portal;
 
@@ -48,4 +49,36 @@ void test_validate_field_checks_literal_pattern() {
   TEST_ASSERT_TRUE(validateField(test_fixtures::kSchema, *f, "xkcd", &err));
   TEST_ASSERT_FALSE(validateField(test_fixtures::kSchema, *f, "weather", &err));
   TEST_ASSERT_TRUE(err.length() > 0);
+}
+
+void test_timezone_field_accepts_presets_and_custom_and_rejects_empty() {
+  // A curated preset must resolve to its friendly label.
+  TEST_ASSERT_NOT_NULL(
+      timezoneLabelFor("GMT0BST,M3.5.0/1,M10.5.0/2"));
+  TEST_ASSERT_TRUE(timezoneIsPreset("CST-8"));
+  TEST_ASSERT_FALSE(timezoneIsPreset("Made/Up_Zone"));
+  TEST_ASSERT_NULL(timezoneLabelFor(nullptr));
+  TEST_ASSERT_NULL(timezoneLabelFor(""));
+
+  // FieldType::Timezone validates like a bounded String: any non-empty
+  // value within [minVal, maxVal]. The portal deliberately does not
+  // second-guess tzset() on the exact grammar.
+  const Field tzField = {
+      "tz", "Timezone", nullptr, FieldType::Timezone,
+      "GMT0BST,M3.5.0/1,M10.5.0/2", nullptr, 0, 32, nullptr};
+  const Field* fields = &tzField;
+  const Section section = {"tz", fields, 1};
+  const Schema schema = {"test", &section, 1};
+  String err;
+  TEST_ASSERT_TRUE(validateField(schema, tzField, "CST-8", &err));
+  TEST_ASSERT_TRUE(validateField(schema, tzField,
+                                 "GMT0BST,M3.5.0/1,M10.5.0/2", &err));
+  // Custom (non-preset) POSIX strings must still validate.
+  TEST_ASSERT_TRUE(validateField(schema, tzField, "EAT-3", &err));
+  // Empty is rejected (empty timezone would mean "no clue what to set").
+  TEST_ASSERT_FALSE(validateField(schema, tzField, "", &err));
+  // Overlong strings are rejected against maxVal.
+  String longStr;
+  for (int i = 0; i < 40; ++i) longStr += "X";
+  TEST_ASSERT_FALSE(validateField(schema, tzField, longStr.c_str(), &err));
 }
