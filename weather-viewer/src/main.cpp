@@ -53,7 +53,7 @@
 #include "weather_wifi_credentials.h"
 #include "weather_icons.h"
 #include "weather_quotes.h"
-#include "zenith_background.h"
+#include "weather_background.h"
 
 #if RETERMINAL_MODEL == 1003
 #include "fonts/Roboto_Bold90pt7b.h"
@@ -81,20 +81,20 @@ using namespace ::board;
 // COLOR_SUN, PIN_BUTTON_GREEN, ...) working at every callsite below.
 using namespace theme;
 
-// The zenith ink-wash background can now be enabled on any of the four
+// The ink-wash weather background can now be enabled on any of the four
 // panels via /settings. TFT_eSPI's drawString path for GFX free fonts
 // unconditionally paints a padded fillRect(..., textbgcolor) behind
 // every string whenever textcolor != textbgcolor - the _fillbg / bgfill
 // flag is only checked on the smooth-font path. So the only way to stop
-// body text from stamping visible rectangles onto the zenith picture is
+// body text from stamping visible rectangles onto the picture is
 // to set textbgcolor == textcolor, which trips the "no fill needed"
-// branch inside drawString. When zenith is off we keep the classic
+// branch inside drawString. When the background is off we keep the classic
 // (fg, PANEL_WHITE, true) behaviour so redraws still erase old glyphs
 // and smooth fonts keep their anti-aliasing.
 EPaper epaper;
 
 inline void setBodyTextColor(uint16_t fg) {
-  if (weather_config::runtime::zenithBackgroundEnabled()) {
+  if (weather_config::runtime::weatherBackgroundEnabled()) {
     epaper.setTextColor(fg, fg);
   } else {
     epaper.setTextColor(fg, PANEL_WHITE, true);
@@ -103,8 +103,8 @@ inline void setBodyTextColor(uint16_t fg) {
 
 // Header/alert strip callers know their background color (the strip
 // fillRect that precedes them), so they can keep the classic path and
-// preserve smooth-font anti-aliasing even when zenith is enabled - the
-// backdrop rect just repaints the strip's own color and stays invisible.
+// preserve smooth-font anti-aliasing even when the background is enabled -
+// the backdrop rect just repaints the strip's own color and stays invisible.
 inline void setStripTextColor(uint16_t fg, uint16_t stripColor) {
   epaper.setTextColor(fg, stripColor, true);
 }
@@ -1039,14 +1039,14 @@ void drawAlertBar(const WeatherData& weather) {
 }
 
 void renderWeather(const WeatherData& weather) {
-  // Zenith test background: paint the ink-wash landscape first so the
-  // header, icons, and text render on top of it. Payloads are pre-baked
-  // per model (2bpp on the gray panels, 1bpp black-and-white on the
-  // Spectra-6 panels) so the blit covers every pixel and we skip the
-  // fillSprite step. When the user has toggled the background off in
-  // /settings, fall back to a plain white sprite instead.
-  if (weather_config::runtime::zenithBackgroundEnabled()) {
-    zenith_background::draw(epaper);
+  // Paint the ink-wash landscape first so the header, icons, and text
+  // render on top of it. Payloads are pre-baked per model (2bpp on the
+  // gray panels, 1bpp black-and-white on the Spectra-6 panels) so the
+  // blit covers every pixel and we skip the fillSprite step. When the
+  // user has toggled the background off in /settings, fall back to a
+  // plain white sprite instead.
+  if (weather_config::runtime::weatherBackgroundEnabled()) {
+    weather_background::draw(epaper);
   } else {
     epaper.fillSprite(PANEL_WHITE);
   }

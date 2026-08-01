@@ -122,12 +122,12 @@ constexpr WindSpeedUnit WIND_SPEED_UNIT = WindSpeedUnit::KilometresPerHour;
 // back.
 constexpr bool CLUTTER_FREE_MODE = true;
 
-// Show the bundled zenith ink-wash landscape as the background behind
+// Show a bundled Chinese ink-wash landscape as the background behind
 // the main render instead of a plain white sprite. The image is dithered
 // and faded so headline text stays legible. Applies to all four panels
 // (each has a pre-baked payload matching its size and palette); toggle
 // off in /settings for a plain white background.
-constexpr bool ZENITH_BACKGROUND_ENABLED = true;
+constexpr bool WEATHER_BACKGROUND_ENABLED = true;
 
 // --- Debug knobs ------------------------------------------------------------
 // Show the diagnostic last-refresh badge in the top-right corner.

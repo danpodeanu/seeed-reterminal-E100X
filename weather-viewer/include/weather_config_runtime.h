@@ -44,7 +44,7 @@ const char*  ntpSecondary();
 ::config::TemperatureUnit   temperatureUnit();
 ::config::WindSpeedUnit     windSpeedUnit();
 bool                        clutterFreeMode();
-bool                        zenithBackgroundEnabled();
+bool                        weatherBackgroundEnabled();
 bool                        nwsAlertsEnabled();
 
 // QWeather credentials (NVS-first with secrets.h fallback)

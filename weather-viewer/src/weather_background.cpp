@@ -1,8 +1,8 @@
-#include "zenith_background.h"
+#include "weather_background.h"
 
 #include <pgmspace.h>
 
-namespace zenith_background {
+namespace weather_background {
 namespace {
 
 // Return the color the panel should use for gray level `idx` out of
@@ -68,4 +68,4 @@ void draw(TFT_eSPI& epaper) {
   }
 }
 
-}  // namespace zenith_background
+}  // namespace weather_background

@@ -1,4 +1,4 @@
-"""Regenerate weather-viewer/src/zenith_background_data_e1NNN.cpp for one model.
+"""Regenerate weather-viewer/src/weather_background_data_e1NNN.cpp for one model.
 
 Pipeline: LANCZOS upscale, Gaussian blur to melt the source halftone into
 continuous tone, unsharp mask to bring back edges, contrast auto-fix,
@@ -8,10 +8,10 @@ model's target palette. Output is packed at the model's native bit depth
 and dropped in a per-model PROGMEM cpp guarded with `#if RETERMINAL_MODEL`.
 
 Regenerate a single model:
-    python tools/embed_zenith_background.py --model 1003
-    python tools/embed_zenith_background.py --model 1004
+    python tools/embed_weather_background.py --model 1003
+    python tools/embed_weather_background.py --model 1004
 Regenerate everything:
-    python tools/embed_zenith_background.py --all
+    python tools/embed_weather_background.py --all
 """
 from __future__ import annotations
 
@@ -24,7 +24,7 @@ from typing import Callable, List, Tuple
 from PIL import Image, ImageFilter, ImageOps
 
 REPO = Path(__file__).resolve().parents[1]
-DEFAULT_SRC = REPO / "weather-viewer" / "assets" / "zenith_source.png"
+DEFAULT_SRC = REPO / "weather-viewer" / "assets" / "cloudy_source.png"
 OUT_DIR = REPO / "weather-viewer" / "src"
 
 # Fade the ink-wash toward white so headline text stays legible. 0.55 keeps
@@ -58,18 +58,18 @@ class ModelSpec:
 
 MODELS: List[ModelSpec] = [
     # E1001 UC8179 4-gray landscape.
-    ModelSpec(1001, 800, 480, False, 2, 4, 1, "zenith_background_data_e1001.cpp"),
+    ModelSpec(1001, 800, 480, False, 2, 4, 1, "weather_background_data_e1001.cpp"),
     # E1002 Spectra 6 landscape. Only black and white read cleanly for a
     # dithered gray landscape on this palette, so store 1bpp BW.
-    ModelSpec(1002, 800, 480, False, 1, 2, 1, "zenith_background_data_e1002.cpp"),
+    ModelSpec(1002, 800, 480, False, 1, 2, 1, "weather_background_data_e1002.cpp"),
     # E1003 16-gray landscape. 1872x1404 at 2bpp would be 657 KB. Store
     # at half resolution and let the blitter upscale 2x with nearest
     # neighbour - the picture is a stylised ink wash so soft edges are
     # fine, and this drops the payload to ~164 KB and keeps E1003's
     # firmware well under the flash limit.
-    ModelSpec(1003, 1872, 1404, False, 2, 4, 2, "zenith_background_data_e1003.cpp"),
+    ModelSpec(1003, 1872, 1404, False, 2, 4, 2, "weather_background_data_e1003.cpp"),
     # E1004 Spectra 6 portrait. Same BW rationale as E1002.
-    ModelSpec(1004, 1200, 1600, True, 1, 2, 1, "zenith_background_data_e1004.cpp"),
+    ModelSpec(1004, 1200, 1600, True, 1, 2, 1, "weather_background_data_e1004.cpp"),
 ]
 
 
@@ -124,13 +124,13 @@ def pack(indexed: Image.Image, bpp: int) -> bytes:
 
 def emit_cpp(spec: ModelSpec, payload: bytes, out_path: Path) -> None:
     lines = [
-        f"// AUTO-GENERATED - zenith weather background for reTerminal E{spec.model}.",
+        f"// AUTO-GENERATED - weather background for reTerminal E{spec.model}.",
         f"// Panel {spec.panel_w}x{spec.panel_h}"
         f" ({'portrait' if spec.portrait else 'landscape'}),"
         f" payload {spec.payload_w}x{spec.payload_h}"
         f" @ {spec.bpp}bpp x{spec.scale} nearest-neighbor upscale"
         f" ({spec.levels} gray levels).",
-        "// See tools/embed_zenith_background.py to regenerate.",
+        "// See tools/embed_weather_background.py to regenerate.",
         "",
         f"#if defined(RETERMINAL_MODEL) && RETERMINAL_MODEL == {spec.model}",
         "",
@@ -138,7 +138,7 @@ def emit_cpp(spec: ModelSpec, payload: bytes, out_path: Path) -> None:
         "#include <stdint.h>",
         "#include <stddef.h>",
         "",
-        "namespace zenith_background {",
+        "namespace weather_background {",
         "",
         f"extern const uint16_t kWidth = {spec.payload_w};",
         f"extern const uint16_t kHeight = {spec.payload_h};",
@@ -154,7 +154,7 @@ def emit_cpp(spec: ModelSpec, payload: bytes, out_path: Path) -> None:
         lines.append("  " + ", ".join(f"0x{b:02x}" for b in chunk) + ",")
     lines.append("};")
     lines.append("")
-    lines.append("}  // namespace zenith_background")
+    lines.append("}  // namespace weather_background")
     lines.append("")
     lines.append(f"#endif  // RETERMINAL_MODEL == {spec.model}")
     lines.append("")
