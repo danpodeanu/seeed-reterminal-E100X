@@ -81,6 +81,18 @@ using namespace ::board;
 // COLOR_SUN, PIN_BUTTON_GREEN, ...) working at every callsite below.
 using namespace theme;
 
+// On E1001 we draw the zenith ink-wash landscape as the background, so
+// having drawString paint a padded white rectangle behind each text
+// element is exactly wrong: it stamps out visible rectangles all over the
+// picture. On the other panels the sprite is a uniform PANEL_WHITE, so
+// the fill and transparent look identical - keeping the fill there means
+// TFT_eSPI's drawString still clears any leftover pixels on rerenders.
+#if RETERMINAL_MODEL == 1001
+constexpr bool kFillTextBackground = false;
+#else
+constexpr bool kFillTextBackground = true;
+#endif
+
 EPaper epaper;
 Adafruit_SHT4x sht4;
 
@@ -304,7 +316,7 @@ void selectLargeTemperatureFont() {
 }
 
 void drawBadges(uint32_t background = PANEL_WHITE,
-                bool fillTextBackground = true,
+                bool fillTextBackground = kFillTextBackground,
                 time_t weatherUpdateTime = 0) {
   epaper.setTextColor(PANEL_BLACK, background, fillTextBackground);
   selectSmallFont();
@@ -367,7 +379,7 @@ void renderStatus(const String& message, const String& detail = "",
                   const String& lineAbove = "",
                   const String& helpBelow = "") {
   epaper.fillSprite(PANEL_WHITE);
-  epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, true);
+  epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, kFillTextBackground);
   epaper.setTextDatum(MC_DATUM);
   if (!lineAbove.isEmpty()) {
     // Location city name -- use the largest smooth (Unicode) font we
@@ -646,7 +658,7 @@ void drawWeatherIcon(int cx, int cy, int size, int code, bool isDay = true) {
 
 void drawLargeTemperature(float celsius, int cx, int cy) {
   if (!isfinite(celsius)) {
-    epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, true);
+    epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, kFillTextBackground);
     epaper.setTextDatum(MC_DATUM);
     selectMediumFont();
     epaper.drawString(weather_format::kMissing, cx, cy, 1);
@@ -655,7 +667,7 @@ void drawLargeTemperature(float celsius, int cx, int cy) {
   const int rounded = static_cast<int>(roundf(units::temperatureDisplay(celsius)));
   const bool negative = rounded < 0;
   const String value = String(abs(rounded));
-  epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, true);
+  epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, kFillTextBackground);
   epaper.setTextDatum(MC_DATUM);
   selectLargeTemperatureFont();
   const int textWidth = epaper.textWidth(value, 1);
@@ -681,8 +693,8 @@ void drawLargeTemperature(float celsius, int cx, int cy) {
 void drawHeader(const WeatherData& weather) {
   const int height = config::ui(45);
   epaper.fillRect(0, 0, config::PANEL_WIDTH, height, PANEL_WHITE);
-  drawBadges(PANEL_WHITE, true, weather.updateTime);
-  epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, true);
+  drawBadges(PANEL_WHITE, kFillTextBackground, weather.updateTime);
+  epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, kFillTextBackground);
   epaper.setTextDatum(MC_DATUM);
   String heading;
   const String age = weatherAgeText(weather.updateTime);
@@ -712,7 +724,7 @@ void drawHeader(const WeatherData& weather) {
 void drawForecastCard(const DailyForecast& day, uint8_t index,
                       int left, int top, int width, int height) {
   const int centerX = left + width / 2;
-  epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, true);
+  epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, kFillTextBackground);
   epaper.setTextDatum(TC_DATUM);
   selectMediumFont();
   epaper.drawString(dayLabel(index, day.date), centerX,
@@ -731,7 +743,7 @@ void drawForecastCard(const DailyForecast& day, uint8_t index,
       weather_format::temperature(day.maximumC);
   epaper.drawString(range, centerX, top + config::ui(107), 1);
   if (!weather_config::runtime::clutterFreeMode()) {
-    epaper.setTextColor(PANEL_MUTED, PANEL_WHITE, true);
+    epaper.setTextColor(PANEL_MUTED, PANEL_WHITE, kFillTextBackground);
     String extra;
     if (day.precipitationProbability >= 0) {
       extra = "Rain " + weather_format::integer(day.precipitationProbability) +
@@ -743,7 +755,7 @@ void drawForecastCard(const DailyForecast& day, uint8_t index,
     }
     epaper.drawString(text_render::ellipsize(epaper, extra, width - config::ui(12)), centerX,
                       top + config::ui(130), 1);
-    epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, true);
+    epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, kFillTextBackground);
   }
 }
 
@@ -771,7 +783,7 @@ void renderLandscape(const WeatherData& weather) {
   // "Outdoor temperature" is dropped -- the giant number next to the
   // weather icon already communicates the same thing.  The condition
   // name takes its slot in bold black instead.
-  epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, true);
+  epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, kFillTextBackground);
   epaper.setTextDatum(TC_DATUM);
   selectMediumFont();
   epaper.drawString(app_logic::conditionName(weather.weatherCode), temperatureX,
@@ -813,7 +825,7 @@ void renderLandscape(const WeatherData& weather) {
   // "Feels like" / "Outdoor humidity" above; previously the rain line
   // used PANEL_MUTED which on Gray16 reads as a thinner, lighter font
   // even though the glyph shapes are identical.
-  epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, true);
+  epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, kFillTextBackground);
   epaper.drawString(
       text_render::ellipsize(epaper, rainLine, detailWidth),
       detailX, mainCenterY + config::ui(67), 1);
@@ -821,7 +833,7 @@ void renderLandscape(const WeatherData& weather) {
     epaper.drawString(windLine, detailX,
                       mainCenterY + config::ui(101), 1);
   }
-  epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, true);
+  epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, kFillTextBackground);
 
   epaper.drawFastHLine(config::ui(10), mainBottom,
                        config::PANEL_WIDTH - config::ui(20), PANEL_MUTED);
@@ -853,7 +865,7 @@ void drawPortraitForecastRow(const DailyForecast& day, uint8_t index,
                        PANEL_LIGHT);
   drawWeatherIcon(iconX, centerY, min(height / 5, config::ui(40)),
                   day.weatherCode, true);
-  epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, true);
+  epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, kFillTextBackground);
   epaper.setTextDatum(ML_DATUM);
   selectMediumFont();
   epaper.drawString(dayLabel(index, day.date), textX,
@@ -899,7 +911,7 @@ void renderPortrait(const WeatherData& weather) {
                        config::PANEL_WIDTH * 67 / 100,
                        mainCenterY - config::ui(38));
 
-  epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, true);
+  epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, kFillTextBackground);
   epaper.setTextDatum(MC_DATUM);
   selectMediumFont();
   epaper.drawString(app_logic::conditionName(weather.weatherCode),
@@ -999,7 +1011,7 @@ void drawAlertBar(const WeatherData& weather) {
   epaper.fillRect(0, top, config::PANEL_WIDTH, height, PANEL_LIGHT);
   epaper.drawFastHLine(config::ui(10), top + height,
                        config::PANEL_WIDTH - config::ui(20), PANEL_MUTED);
-  epaper.setTextColor(PANEL_BLACK, PANEL_LIGHT, true);
+  epaper.setTextColor(PANEL_BLACK, PANEL_LIGHT, kFillTextBackground);
   epaper.setTextDatum(MC_DATUM);
   selectSmallFont();
   String line = "! Alert: " + weather.alertTitle;
