@@ -1601,7 +1601,7 @@ void setup() {
     LOG.println("[display] showing Wi-Fi connection status");
     renderStatus("Connecting to " + String(xkcd_wifi::ssid()), connectionDetail,
                  stationMac,
-                 "Hold green button for 2 seconds at boot to reconfigure Wi-Fi");
+                 "Hold green button for 2 seconds to reconfigure Wi-Fi");
   }
   epaper.initGrayMode(GRAY_LEVEL4);
 #elif RETERMINAL_MODEL == 1003
@@ -1614,7 +1614,7 @@ void setup() {
     LOG.println("[display] showing Wi-Fi connection status");
     renderStatus("Connecting to " + String(xkcd_wifi::ssid()), connectionDetail,
                  stationMac,
-                 "Hold green button for 2 seconds at boot to reconfigure Wi-Fi");
+                 "Hold green button for 2 seconds to reconfigure Wi-Fi");
   }
 #endif
 
