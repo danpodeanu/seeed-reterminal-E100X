@@ -1045,8 +1045,14 @@ void renderWeather(const WeatherData& weather) {
   // Zenith test background: paint the ink-wash landscape first so the
   // header, icons, and text render on top of it. E1001 is 800x480 4-gray,
   // which is exactly the native format of the embedded picture, so we
-  // skip the fillSprite - the zenith blit covers every pixel.
-  zenith_background::draw(epaper);
+  // skip the fillSprite - the zenith blit covers every pixel. When the
+  // user has toggled the background off in /settings, fall back to a
+  // plain white sprite like the other panels.
+  if (weather_config::runtime::zenithBackgroundEnabled()) {
+    zenith_background::draw(epaper);
+  } else {
+    epaper.fillSprite(PANEL_WHITE);
+  }
 #else
   epaper.fillSprite(PANEL_WHITE);
 #endif

@@ -40,6 +40,7 @@ constexpr const char* kKeyProvider          = "provider";
 constexpr const char* kKeyTempUnit          = "temp_unit";
 constexpr const char* kKeyWindUnit          = "wind_unit";
 constexpr const char* kKeyClutterFree       = "clutter_free";
+constexpr const char* kKeyZenithBackground  = "zenith_bg";
 constexpr const char* kKeyNwsAlerts         = "nws_alerts";
 
 // QWeather credentials (sensitive; keys stay under 15 chars)

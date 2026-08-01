@@ -42,6 +42,7 @@ struct Cache {
   ::config::TemperatureUnit tempUnit   = ::config::TEMPERATURE_UNIT;
   ::config::WindSpeedUnit   windUnit   = ::config::WIND_SPEED_UNIT;
   bool     clutterFreeMode   = ::config::CLUTTER_FREE_MODE;
+  bool     zenithBackgroundEnabled = ::config::ZENITH_BACKGROUND_ENABLED;
   bool     nwsAlertsEnabled  = ::config::NWS_ALERTS_ENABLED;
 
   String   qwHost         = QWEATHER_API_HOST;
@@ -142,6 +143,8 @@ void load() {
       parseWindUnit(config_portal::storage::getString(prefs, kSchema, kKeyWindUnit));
   g_cache.clutterFreeMode =
       config_portal::storage::getBool(prefs, kSchema, kKeyClutterFree);
+  g_cache.zenithBackgroundEnabled =
+      config_portal::storage::getBool(prefs, kSchema, kKeyZenithBackground);
   g_cache.nwsAlertsEnabled =
       config_portal::storage::getBool(prefs, kSchema, kKeyNwsAlerts);
 
@@ -185,6 +188,7 @@ const char*  ntpSecondary()          { return g_cache.ntpSecondary.c_str(); }
 ::config::TemperatureUnit   temperatureUnit() { return g_cache.tempUnit; }
 ::config::WindSpeedUnit     windSpeedUnit()   { return g_cache.windUnit; }
 bool                        clutterFreeMode() { return g_cache.clutterFreeMode; }
+bool                        zenithBackgroundEnabled() { return g_cache.zenithBackgroundEnabled; }
 bool                        nwsAlertsEnabled(){ return g_cache.nwsAlertsEnabled; }
 
 const char*  qweatherHost()          { return g_cache.qwHost.c_str(); }
