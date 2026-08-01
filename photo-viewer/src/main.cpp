@@ -35,6 +35,8 @@
 #include "config_portal_ui.h"
 #include "wifi_schema.h"
 #include "photo_wifi_credentials.h"
+#include "photo_config_runtime.h"
+#include "photo_config_schema.h"
 #include "log_sd_sink.h"
 #include "text_render.h"
 #include "photo_manifest.h"
@@ -344,7 +346,7 @@ uint32_t countPhotos() {
     entry = directory.openNextFile();
   }
   directory.close();
-  if (config::PHOTO_ORDER_RANDOM) {
+  if (photo_config::runtime::randomOrder()) {
     // Seeded xorshift32 shuffle. The seed lives in RTC memory and stays
     // fixed across button/timer wakes within a power session, so
     // "advance by 1" always lands on the next photo the user last saw.
@@ -579,7 +581,8 @@ bool renderPhoto(const String& path) {
 }
 
 // NTP sync helpers now live in common/include/ntp_sync.h. The wrapper below
-void powerDownAndSleep(uint64_t sleepSeconds = config::SLEEP_SECONDS) {
+void powerDownAndSleep(uint64_t sleepSeconds = 0) {
+  if (sleepSeconds == 0) sleepSeconds = photo_config::runtime::sleepSeconds();
   wifi_sta::disable();
   // Close the log file before SD.end() so its FAT/directory update
   // hits disk cleanly. Safe to call unconditionally -- no-ops when no
@@ -742,7 +745,7 @@ void renderPortalOnPanel(const String& ssid, const String& password,
 
   config_portal::Config portalCfg;
   portalCfg.wifiSchema = &config_portal::kWifiSchema;
-  portalCfg.appSchema = nullptr;  // photo-viewer has no persistable settings yet
+  portalCfg.appSchema = &photo_config::kSchema;
   portalCfg.appName = "Photo Viewer";
   portalCfg.helpUrl = config::PORTAL_HELP_URL;
   portalCfg.apSsidPrefix = config::PORTAL_SSID_PREFIX;
@@ -859,12 +862,13 @@ void renderPortalOnPanel(const String& ssid, const String& password,
 void setup() {
   hardware::setStatusLed(true);
   photo_wifi::load();
-  local_time::configureTimezone(config::TIMEZONE);
-  quiet_hours::configure({config::QUIET_HOURS_ENABLED,
-                          config::QUIET_START_HOUR,
-                          config::QUIET_START_MINUTE,
-                          config::QUIET_END_HOUR,
-                          config::QUIET_END_MINUTE});
+  photo_config::runtime::load();
+  local_time::configureTimezone(photo_config::runtime::timezone());
+  quiet_hours::configure({photo_config::runtime::quietHoursEnabled(),
+                          photo_config::runtime::quietStartHour(),
+                          photo_config::runtime::quietStartMinute(),
+                          photo_config::runtime::quietEndHour(),
+                          photo_config::runtime::quietEndMinute()});
   LOG.begin(115200, SERIAL_8N1, PIN_LOG_RX, PIN_LOG_TX);
   delay(250);
 
@@ -980,7 +984,7 @@ void setup() {
   }
   epaper.begin();
   sdReady = sd_card::mount(epaper.getSPIinstance(), config::PHOTO_DIR);
-  if (sdReady && config::LOG_TO_SD) {
+  if (sdReady && photo_config::runtime::logToSd()) {
     log_sd_sink::install(appLog);
   }
   const uint32_t photoCount = countPhotos();
@@ -1050,7 +1054,7 @@ void setup() {
 
   bool ntpSynchronized = false;
   if (ntpDue) {
-    if (wifi_sta::connectStation(photo_wifi::ssid(), photo_wifi::password(), config::WIFI_TIMEOUT_MS)) ntpSynchronized = ntp::synchronizeAndPersist(config::TIMEZONE, config::NTP_SERVER_PRIMARY, config::NTP_SERVER_SECONDARY, config::NTP_DHCP_TIMEOUT_MS, config::NTP_SYNC_TIMEOUT_MS, &lastNtpSyncEpoch);
+    if (wifi_sta::connectStation(photo_wifi::ssid(), photo_wifi::password(), config::WIFI_TIMEOUT_MS)) ntpSynchronized = ntp::synchronizeAndPersist(photo_config::runtime::timezone(), photo_config::runtime::ntpPrimary(), photo_config::runtime::ntpSecondary(), config::NTP_DHCP_TIMEOUT_MS, config::NTP_SYNC_TIMEOUT_MS, &lastNtpSyncEpoch);
     if (!ntpSynchronized && !coldBoot) {
       LOG.println("[ntp] using PCF8563 fallback after synchronization failure");
       rtc_sync::restoreSystemClock();
@@ -1059,12 +1063,12 @@ void setup() {
   } else {
     LOG.println("[wifi] skipped; clock sync is not due");
   }
-  local_time::configureTimezone(config::TIMEZONE);
-  quiet_hours::configure({config::QUIET_HOURS_ENABLED,
-                          config::QUIET_START_HOUR,
-                          config::QUIET_START_MINUTE,
-                          config::QUIET_END_HOUR,
-                          config::QUIET_END_MINUTE});
+  local_time::configureTimezone(photo_config::runtime::timezone());
+  quiet_hours::configure({photo_config::runtime::quietHoursEnabled(),
+                          photo_config::runtime::quietStartHour(),
+                          photo_config::runtime::quietStartMinute(),
+                          photo_config::runtime::quietEndHour(),
+                          photo_config::runtime::quietEndMinute()});
   if (!wakeEventLogged) {
     wake_report::logWakeEvent(wakeCause, wakePins, true);
   }
@@ -1142,10 +1146,11 @@ void setup() {
                          : "Insert a FAT32 SD card");
   }
 
-  uint64_t nextSleepSeconds = config::SLEEP_SECONDS;
+  const uint64_t configuredSleepSeconds = photo_config::runtime::sleepSeconds();
+  uint64_t nextSleepSeconds = configuredSleepSeconds;
   if (local_time::localClock(localTime)) {
     if (quiet_hours::active(localTime) ||
-        quiet_hours::nextWakeFallsInside(localTime, config::SLEEP_SECONDS)) {
+        quiet_hours::nextWakeFallsInside(localTime, configuredSleepSeconds)) {
       nextSleepSeconds = quiet_hours::secondsUntilEnd(localTime);
       LOG.printf("[quiet] retaining this photo until %s\n",
                  quiet_hours::endLabel().c_str());
