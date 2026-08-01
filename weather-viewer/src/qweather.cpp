@@ -496,6 +496,7 @@ bool parseQWeather(const String& body, WeatherData& weather) {
   LOG.printf("[weather] %.1fC, feels %.1fC, %.0f%% RH, code=%d\n",
              weather.temperatureC, weather.apparentC, weather.humidityPct,
              weather.weatherCode);
+  LOG.printf("[weather] QWeather obsTime=\"%s\"\n", weather.updateTime.c_str());
   if (weather.rainExpected) {
     LOG.printf("[weather] next rain around %s, %.1fmm, probability=%d%%\n",
                weather.nextRainTime.c_str(), weather.nextRainMm,

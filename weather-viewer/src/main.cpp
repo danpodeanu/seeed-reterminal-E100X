@@ -1011,6 +1011,13 @@ void renderWeather(const WeatherData& weather) {
   epaper.setTextSize(1);
   epaper.setFreeFont(nullptr);
   epaper.setTextFont(2);
+  {
+    const String ageForLog = weatherAgeText(weather.updateTime);
+    LOG.printf("[render] source=%s updateTime=\"%s\" header=\"Weather %s\"\n",
+               weather.fromCache ? "cache" : "live",
+               weather.updateTime.c_str(),
+               ageForLog.isEmpty() ? "(no age)" : ageForLog.c_str());
+  }
   LOG.println("[render] refreshing weather panel");
   updatePanel();
   LOG.println("[render] complete");
@@ -1124,6 +1131,23 @@ void setup() {
   // LOG.begin so any storage messages land on the serial console.
   weather_config::runtime::load();
   weather_wifi::load();
+  // Dump the resolved runtime config so an operator can see at a glance
+  // which NVS values are in effect vs. falling back to compile-time /
+  // secrets.h defaults. Helps distinguish "portal saved the wrong thing"
+  // from "portal didn't save at all" when a device comes up unexpectedly.
+  {
+    const auto provider = weather_config::runtime::weatherProvider();
+    const char* providerName =
+        (provider == ::config::WeatherProvider::OpenMeteo) ? "OpenMeteo" : "QWeather";
+    LOG.printf("[config] location=\"%s\" lat=%.4f lon=%.4f\n",
+               weather_config::runtime::locationName(),
+               weather_config::runtime::latitude(),
+               weather_config::runtime::longitude());
+    LOG.printf("[config] provider=%s sleep=%llus tz=\"%s\"\n",
+               providerName,
+               static_cast<unsigned long long>(weather_config::runtime::sleepSeconds()),
+               weather_config::runtime::timezone());
+  }
   // Re-apply timezone / quiet hours now that NVS values are cached (the
   // initial configure calls above ran off the constexpr defaults).
   local_time::configureTimezone(weather_config::runtime::timezone());
