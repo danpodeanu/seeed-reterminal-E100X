@@ -16,9 +16,9 @@ namespace config {
 // --- Location ---------------------------------------------------------------
 // Edit these values for the forecast location. QWeather rounds to two
 // decimals; Open-Meteo uses the full precision.
-constexpr char LOCATION_NAME[] = "Suzhou";
-constexpr double LATITUDE = 31.29834;
-constexpr double LONGITUDE = 120.58319;
+constexpr char LOCATION_NAME[] = "London";
+constexpr double LATITUDE = 51.5074;
+constexpr double LONGITUDE = -0.1278;
 
 // POSIX TZ notation uses the opposite sign: CST-8 means UTC+8.
 constexpr char TIMEZONE[] = "CST-8";
@@ -71,7 +71,7 @@ enum class WeatherProvider {
   OpenMeteo,
   QWeather,
 };
-constexpr WeatherProvider WEATHER_PROVIDER = WeatherProvider::QWeather;
+constexpr WeatherProvider WEATHER_PROVIDER = WeatherProvider::OpenMeteo;
 
 // Language for QWeather's textual fields (condition names, warnings).
 // Common values: "en", "zh" (Simplified Chinese, default upstream),

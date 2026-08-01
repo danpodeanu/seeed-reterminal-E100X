@@ -73,13 +73,13 @@ There are two ways to configure the viewer:
    `YOUR_WIFI_NAME` / `YOUR_QWEATHER_PROJECT_ID` etc. are treated as
    "unconfigured", so leaving them in place launches the portal instead.
 
-The example forecast location is Suzhou. Edit these values in
+The example forecast location is London. Edit these values in
 `include/config.h`:
 
 ```cpp
-constexpr char LOCATION_NAME[] = "Suzhou";
-constexpr double LATITUDE = 31.29834;
-constexpr double LONGITUDE = 120.58319;
+constexpr char LOCATION_NAME[] = "London";
+constexpr double LATITUDE = 51.5074;
+constexpr double LONGITUDE = -0.1278;
 ```
 
 The same latitude / longitude are used regardless of which weather

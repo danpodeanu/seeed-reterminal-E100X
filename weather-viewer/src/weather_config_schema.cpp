@@ -14,16 +14,16 @@ const char* const kWindUnitValues[]   = {"KilometresPerHour", "MilesPerHour", nu
 const Field kLocationFields[] = {
     {kKeyLocationName,
      "Location name",
-     "Display name shown on the panel header (e.g. \"Suzhou\").",
-     FieldType::String, "Suzhou", nullptr, 0, 32, nullptr},
+     "Display name shown on the panel header (e.g. \"London\").",
+     FieldType::String, "London", nullptr, 0, 32, nullptr},
     {kKeyLatitude,
      "Latitude",
      "Decimal degrees; south is negative. QWeather rounds to two decimals.",
-     FieldType::Float, "31.29834", nullptr, 0, 0, nullptr},
+     FieldType::Float, "51.5074", nullptr, 0, 0, nullptr},
     {kKeyLongitude,
      "Longitude",
      "Decimal degrees; west is negative.",
-     FieldType::Float, "120.58319", nullptr, 0, 0, nullptr},
+     FieldType::Float, "-0.1278", nullptr, 0, 0, nullptr},
 };
 
 const Field kRefreshFields[] = {
@@ -75,7 +75,7 @@ const Field kPresentationFields[] = {
     {kKeyProvider,
      "Weather provider",
      "OpenMeteo needs no API key; QWeather requires credentials below.",
-     FieldType::Enum, "QWeather", kProviderValues, 0, 0, nullptr},
+     FieldType::Enum, "OpenMeteo", kProviderValues, 0, 0, nullptr},
     {kKeyTempUnit,
      "Temperature unit",
      "How temperatures are formatted for the panel.",
