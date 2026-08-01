@@ -88,6 +88,15 @@ bool save(Storage& s, const Schema& schema,
     return false;
   }
   bool ok = true;
+  // Save persists every submitted field to NVS, even when the value
+  // matches what NVS already holds (or what the current schema default
+  // resolves to). This keeps user intent stable across firmware
+  // upgrades that change default values -- a field the user actively
+  // reviewed and confirmed lands in NVS explicitly, so a future
+  // firmware whose defaults shift can never silently override it.
+  //
+  // Secret fields keep their existing three-way handling: sentinel ->
+  // leave NVS untouched; empty -> erase; anything else -> write.
   for (const auto& item : submitted) {
     const Field* f = findField(schema, item.first.c_str());
     if (!f) continue;
@@ -98,10 +107,7 @@ bool save(Storage& s, const Schema& schema,
         continue;
       }
     }
-    const String current = readField(s, *f);
-    if (current != item.second) {
-      if (!s.putString(f->key, item.second.c_str())) ok = false;
-    }
+    if (!s.putString(f->key, item.second.c_str())) ok = false;
   }
   s.end();
   if (!ok && err) *err = "storage write failed";

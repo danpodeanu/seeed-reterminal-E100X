@@ -6,7 +6,7 @@ void test_validate_float_is_strict();
 void test_validate_enum_and_find_field();
 void test_validate_field_checks_literal_pattern();
 void test_load_for_get_defaults_stored_values_and_secret_redaction();
-void test_save_skips_unchanged_and_updates_changed();
+void test_save_writes_every_submitted_field();
 void test_save_secret_sentinel_preserves_and_empty_clears();
 void test_save_rejects_invalid_input_and_sets_error();
 void test_typed_getters_use_schema_defaults();
@@ -32,7 +32,7 @@ int main(int, char**) {
   RUN_TEST(test_validate_enum_and_find_field);
   RUN_TEST(test_validate_field_checks_literal_pattern);
   RUN_TEST(test_load_for_get_defaults_stored_values_and_secret_redaction);
-  RUN_TEST(test_save_skips_unchanged_and_updates_changed);
+  RUN_TEST(test_save_writes_every_submitted_field);
   RUN_TEST(test_save_secret_sentinel_preserves_and_empty_clears);
   RUN_TEST(test_save_rejects_invalid_input_and_sets_error);
   RUN_TEST(test_typed_getters_use_schema_defaults);

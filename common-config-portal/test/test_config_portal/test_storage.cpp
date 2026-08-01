@@ -27,13 +27,18 @@ void test_load_for_get_defaults_stored_values_and_secret_redaction() {
   TEST_ASSERT_EQUAL_STRING("", out[5].second.c_str());
 }
 
-void test_save_skips_unchanged_and_updates_changed() {
+void test_save_writes_every_submitted_field() {
+  // Save persists every submitted non-secret field, even when the value
+  // matches what NVS already holds -- so a user actively reviewing
+  // and confirming a form pins the value in NVS and future firmware
+  // default changes cannot silently override it.
   FakeStorage s;
   s.data_["count"] = "5";
   std::map<String, String> form{{"count", "5"}, {"mode", "hourly"}};
   String err;
   TEST_ASSERT_TRUE(storage::save(s, test_fixtures::kSchema, form, &err));
-  TEST_ASSERT_EQUAL(1, s.putCount);
+  TEST_ASSERT_EQUAL(2, s.putCount);
+  TEST_ASSERT_EQUAL_STRING("5", s.data_["count"].c_str());
   TEST_ASSERT_EQUAL_STRING("hourly", s.data_["mode"].c_str());
 }
 
