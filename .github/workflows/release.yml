@@ -81,7 +81,7 @@ jobs:
           ls -la "$OUT"
 
       - name: Upload build artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v7
         with:
           name: firmware-${{ matrix.app }}-${{ matrix.board }}
           path: ${{ matrix.app }}/firmware-${{ matrix.app }}-${{ matrix.board }}.bin
@@ -97,7 +97,7 @@ jobs:
 
     steps:
       - name: Download all firmware artifacts
-        uses: actions/download-artifact@v5
+        uses: actions/download-artifact@v8
         with:
           path: artifacts
 
@@ -108,7 +108,7 @@ jobs:
           ls -la release/
 
       - name: Upload to release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           files: release/*.bin
           fail_on_unmatched_files: true
