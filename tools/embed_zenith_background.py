@@ -24,13 +24,20 @@ DEFAULT_SRC = Path(__file__).resolve().parents[1] / "weather-viewer" / "assets" 
 DEFAULT_OUT = Path(__file__).resolve().parents[1] / "weather-viewer" / "src" / "zenith_background_data.cpp"
 
 
+FADE_STRENGTH = 0.55
+
+
 def refine(img: Image.Image) -> Image.Image:
     w, h = img.size
     sup = img.resize((w * 2, h * 2), Image.LANCZOS)
     sup = sup.filter(ImageFilter.GaussianBlur(radius=1.6))
     sup = sup.filter(ImageFilter.UnsharpMask(radius=1.5, percent=45, threshold=3))
     sup = ImageOps.autocontrast(sup, cutoff=0.5)
-    return sup.resize((w, h), Image.LANCZOS)
+    sup = sup.resize((w, h), Image.LANCZOS)
+    # Blend toward white so overlaid text stays readable. FADE_STRENGTH=0.55
+    # keeps ~45% of the ink, plenty to still read as a landscape.
+    white = Image.new("L", sup.size, 255)
+    return Image.blend(sup, white, FADE_STRENGTH)
 
 
 def to_e1001_palette(refined: Image.Image) -> Image.Image:
