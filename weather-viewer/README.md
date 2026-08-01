@@ -304,7 +304,7 @@ index, and maximum precipitation probability. Open-Meteo chooses the forecast
 models appropriate for the configured coordinates.
 
 For regions where Open-Meteo does not provide native 15-minute model data,
-including Suzhou, exact rain onset remains an hourly forecast estimate rather
+exact rain onset remains an hourly forecast estimate rather
 than a radar nowcast.
 
 HTTPS certificate verification is disabled because the firmware does not
