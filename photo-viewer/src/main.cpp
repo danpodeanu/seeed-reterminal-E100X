@@ -653,22 +653,22 @@ void renderPortalOnPanel(const String& ssid, const IPAddress& ip,
 #if RETERMINAL_MODEL == 1001
   const GFXfont* titleFont = &FreeSansBold18pt7b;
   const GFXfont* subtitleFont = &FreeSans12pt7b;
-  const GFXfont* captionFont = &FreeSansBold12pt7b;
+  const GFXfont* captionFont = &FreeSansBold9pt7b;
   const GFXfont* detailFont = &FreeSans9pt7b;
 #elif RETERMINAL_MODEL == 1002
   const GFXfont* titleFont = &FreeSansBold18pt7b;
   const GFXfont* subtitleFont = &FreeSans12pt7b;
-  const GFXfont* captionFont = &FreeSansBold12pt7b;
+  const GFXfont* captionFont = &FreeSansBold9pt7b;
   const GFXfont* detailFont = &FreeSans9pt7b;
 #elif RETERMINAL_MODEL == 1003
   const GFXfont* titleFont = &FreeSansBold24pt7b;
   const GFXfont* subtitleFont = &FreeSans18pt7b;
-  const GFXfont* captionFont = &FreeSansBold18pt7b;
+  const GFXfont* captionFont = &FreeSansBold12pt7b;
   const GFXfont* detailFont = &FreeSans12pt7b;
 #elif RETERMINAL_MODEL == 1004
   const GFXfont* titleFont = &FreeSansBold24pt7b;
   const GFXfont* subtitleFont = &FreeSans18pt7b;
-  const GFXfont* captionFont = &FreeSansBold18pt7b;
+  const GFXfont* captionFont = &FreeSansBold12pt7b;
   const GFXfont* detailFont = &FreeSans12pt7b;
 #endif
 

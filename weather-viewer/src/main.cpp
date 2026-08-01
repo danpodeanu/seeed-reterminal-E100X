@@ -1256,18 +1256,18 @@ void setup() {
     epaper.initGrayMode(GRAY_LEVEL4);
     const GFXfont* titleFont    = &FreeSansBold18pt7b;
     const GFXfont* subtitleFont = &FreeSans12pt7b;
-    const GFXfont* captionFont  = &FreeSansBold12pt7b;
+    const GFXfont* captionFont  = &FreeSansBold9pt7b;
     const GFXfont* detailFont   = &FreeSans9pt7b;
 #elif RETERMINAL_MODEL == 1003
     epaper.initGrayMode(GRAY_LEVEL16);
     const GFXfont* titleFont    = &FreeSansBold24pt7b;
     const GFXfont* subtitleFont = &FreeSans18pt7b;
-    const GFXfont* captionFont  = &FreeSansBold18pt7b;
+    const GFXfont* captionFont  = &FreeSansBold12pt7b;
     const GFXfont* detailFont   = &FreeSans12pt7b;
 #else
     const GFXfont* titleFont    = &FreeSansBold18pt7b;
     const GFXfont* subtitleFont = &FreeSans12pt7b;
-    const GFXfont* captionFont  = &FreeSansBold12pt7b;
+    const GFXfont* captionFont  = &FreeSansBold9pt7b;
     const GFXfont* detailFont   = &FreeSans9pt7b;
 #endif
     LOG.println("[portal] panel: grayMode initialised");

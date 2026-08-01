@@ -52,7 +52,7 @@ constexpr uint32_t PANEL_WHITE = TFT_GRAY_3;
 constexpr const char* PANEL_LABEL = "reTerminal E1001";
 #define PORTAL_FONT_TITLE     &FreeSansBold18pt7b
 #define PORTAL_FONT_SUBTITLE  &FreeSans12pt7b
-#define PORTAL_FONT_CAPTION   &FreeSansBold12pt7b
+#define PORTAL_FONT_CAPTION   &FreeSansBold9pt7b
 #define PORTAL_FONT_DETAIL    &FreeSans9pt7b
 #define PORTAL_FONT_ERR_TITLE &FreeSansBold24pt7b
 #define PORTAL_FONT_ERR_BODY  &FreeSans12pt7b
@@ -64,7 +64,7 @@ constexpr uint32_t PANEL_WHITE = TFT_WHITE;
 constexpr const char* PANEL_LABEL = "reTerminal E1002";
 #define PORTAL_FONT_TITLE     &FreeSansBold18pt7b
 #define PORTAL_FONT_SUBTITLE  &FreeSans12pt7b
-#define PORTAL_FONT_CAPTION   &FreeSansBold12pt7b
+#define PORTAL_FONT_CAPTION   &FreeSansBold9pt7b
 #define PORTAL_FONT_DETAIL    &FreeSans9pt7b
 #define PORTAL_FONT_ERR_TITLE &FreeSansBold24pt7b
 #define PORTAL_FONT_ERR_BODY  &FreeSans12pt7b
@@ -76,7 +76,7 @@ constexpr uint32_t PANEL_WHITE = TFT_GRAY_15;
 constexpr const char* PANEL_LABEL = "reTerminal E1003";
 #define PORTAL_FONT_TITLE     &FreeSansBold24pt7b
 #define PORTAL_FONT_SUBTITLE  &FreeSans18pt7b
-#define PORTAL_FONT_CAPTION   &FreeSansBold18pt7b
+#define PORTAL_FONT_CAPTION   &FreeSansBold12pt7b
 #define PORTAL_FONT_DETAIL    &FreeSans12pt7b
 #define PORTAL_FONT_ERR_TITLE &FreeSansBold24pt7b
 #define PORTAL_FONT_ERR_BODY  &FreeSans18pt7b
@@ -91,7 +91,7 @@ constexpr const char* PANEL_LABEL = "reTerminal E1004";
 // a solid 12pt for the URL/SSID lines.
 #define PORTAL_FONT_TITLE     &FreeSansBold24pt7b
 #define PORTAL_FONT_SUBTITLE  &FreeSans18pt7b
-#define PORTAL_FONT_CAPTION   &FreeSansBold18pt7b
+#define PORTAL_FONT_CAPTION   &FreeSansBold12pt7b
 #define PORTAL_FONT_DETAIL    &FreeSans12pt7b
 #define PORTAL_FONT_ERR_TITLE &FreeSansBold24pt7b
 #define PORTAL_FONT_ERR_BODY  &FreeSans18pt7b
