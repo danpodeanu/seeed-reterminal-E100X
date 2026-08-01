@@ -123,6 +123,11 @@ bool retryingMkdir(const char* path) {
 // before scheduling another attempt to avoid burning the retry budget
 // on already-clean paths.
 bool retryingRemove(const String& path) {
+  // Cheap short-circuit: if the file already doesn't exist, we're done
+  // without touching SD at all beyond the directory probe. This is the
+  // hot path when the caller uses removeFile() to pre-clear a temporary
+  // that may or may not exist.
+  if (!SD.exists(path)) return true;
   if (SD.remove(path)) return true;
   for (int attempt = 0; attempt < kSdOpRetries - 1; ++attempt) {
     // Probe: if the file already vanished (or never existed), we're
@@ -277,10 +282,13 @@ bool writeFileAtomically(const String& path, const String& contents) {
 }
 
 bool fileExists(const String& path) {
-  File probe = openForRead(path);
-  if (!probe) return false;
-  probe.close();
-  return true;
+  // Use SD.exists() directly instead of openForRead(). openForRead()
+  // is retryingOpen(), which runs the full retry+remount ladder before
+  // deciding a file is missing - so a legitimate "does this cache
+  // entry exist yet?" probe would spend ~1 s and trigger a bus reset
+  // per call. SD.exists() bottoms out in a single VFS open() and
+  // returns cleanly on ENOENT.
+  return SD.exists(path);
 }
 
 }  // namespace sd_card
