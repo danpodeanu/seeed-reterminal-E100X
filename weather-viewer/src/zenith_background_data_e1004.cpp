@@ -1,5 +1,5 @@
 // AUTO-GENERATED - zenith weather background for reTerminal E1004.
-// 1200x1600 (portrait) packed at 1bpp (2 gray levels).
+// Panel 1200x1600 (portrait), payload 1200x1600 @ 1bpp x1 nearest-neighbor upscale (2 gray levels).
 // See tools/embed_zenith_background.py to regenerate.
 
 #if defined(RETERMINAL_MODEL) && RETERMINAL_MODEL == 1004
@@ -14,6 +14,7 @@ extern const uint16_t kWidth = 1200;
 extern const uint16_t kHeight = 1600;
 extern const uint8_t  kBitsPerPixel = 1;
 extern const uint8_t  kLevels = 2;
+extern const uint8_t  kScale = 1;
 extern const size_t kDataLen = 240000;
 
 extern const uint8_t kData[] PROGMEM = {

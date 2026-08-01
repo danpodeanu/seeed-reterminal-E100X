@@ -19,6 +19,7 @@ extern const uint16_t kWidth;
 extern const uint16_t kHeight;
 extern const uint8_t  kBitsPerPixel;   // 1 or 2, MSB-first packing
 extern const uint8_t  kLevels;         // number of gray levels stored
+extern const uint8_t  kScale;          // blitter upscale factor (1 = 1:1)
 extern const size_t   kDataLen;
 extern const uint8_t  kData[];
 

@@ -35,30 +35,41 @@ FADE_STRENGTH = 0.55
 @dataclass(frozen=True)
 class ModelSpec:
     model: int
-    width: int
-    height: int
+    panel_w: int       # panel size in pixels
+    panel_h: int
     portrait: bool     # rotate the landscape source 90 degrees before resize
     bpp: int           # bits per pixel in the packed payload
     levels: int        # number of dither levels (2, 4, ...); must match bpp mask
+    scale: int         # blitter upscale factor (1 = 1:1, 2 = nearest-neighbor 2x2)
     out_file: str
 
     @property
+    def payload_w(self) -> int:
+        return self.panel_w // self.scale
+
+    @property
+    def payload_h(self) -> int:
+        return self.panel_h // self.scale
+
+    @property
     def payload_bytes(self) -> int:
-        return self.width * self.height * self.bpp // 8
+        return self.payload_w * self.payload_h * self.bpp // 8
 
 
 MODELS: List[ModelSpec] = [
     # E1001 UC8179 4-gray landscape.
-    ModelSpec(1001, 800, 480, False, 2, 4, "zenith_background_data_e1001.cpp"),
+    ModelSpec(1001, 800, 480, False, 2, 4, 1, "zenith_background_data_e1001.cpp"),
     # E1002 Spectra 6 landscape. Only black and white read cleanly for a
     # dithered gray landscape on this palette, so store 1bpp BW.
-    ModelSpec(1002, 800, 480, False, 1, 2, "zenith_background_data_e1002.cpp"),
-    # E1003 16-gray landscape - we still dither to 4 levels and let the
-    # blitter spread them across TFT_GRAY_0/5/10/15 to keep the payload
-    # under a megabyte instead of packing full 4bpp.
-    ModelSpec(1003, 1872, 1404, False, 2, 4, "zenith_background_data_e1003.cpp"),
+    ModelSpec(1002, 800, 480, False, 1, 2, 1, "zenith_background_data_e1002.cpp"),
+    # E1003 16-gray landscape. 1872x1404 at 2bpp would be 657 KB. Store
+    # at half resolution and let the blitter upscale 2x with nearest
+    # neighbour - the picture is a stylised ink wash so soft edges are
+    # fine, and this drops the payload to ~164 KB and keeps E1003's
+    # firmware well under the flash limit.
+    ModelSpec(1003, 1872, 1404, False, 2, 4, 2, "zenith_background_data_e1003.cpp"),
     # E1004 Spectra 6 portrait. Same BW rationale as E1002.
-    ModelSpec(1004, 1200, 1600, True, 1, 2, "zenith_background_data_e1004.cpp"),
+    ModelSpec(1004, 1200, 1600, True, 1, 2, 1, "zenith_background_data_e1004.cpp"),
 ]
 
 
@@ -114,8 +125,11 @@ def pack(indexed: Image.Image, bpp: int) -> bytes:
 def emit_cpp(spec: ModelSpec, payload: bytes, out_path: Path) -> None:
     lines = [
         f"// AUTO-GENERATED - zenith weather background for reTerminal E{spec.model}.",
-        f"// {spec.width}x{spec.height} ({'portrait' if spec.portrait else 'landscape'})"
-        f" packed at {spec.bpp}bpp ({spec.levels} gray levels).",
+        f"// Panel {spec.panel_w}x{spec.panel_h}"
+        f" ({'portrait' if spec.portrait else 'landscape'}),"
+        f" payload {spec.payload_w}x{spec.payload_h}"
+        f" @ {spec.bpp}bpp x{spec.scale} nearest-neighbor upscale"
+        f" ({spec.levels} gray levels).",
         "// See tools/embed_zenith_background.py to regenerate.",
         "",
         f"#if defined(RETERMINAL_MODEL) && RETERMINAL_MODEL == {spec.model}",
@@ -126,10 +140,11 @@ def emit_cpp(spec: ModelSpec, payload: bytes, out_path: Path) -> None:
         "",
         "namespace zenith_background {",
         "",
-        f"extern const uint16_t kWidth = {spec.width};",
-        f"extern const uint16_t kHeight = {spec.height};",
+        f"extern const uint16_t kWidth = {spec.payload_w};",
+        f"extern const uint16_t kHeight = {spec.payload_h};",
         f"extern const uint8_t  kBitsPerPixel = {spec.bpp};",
         f"extern const uint8_t  kLevels = {spec.levels};",
+        f"extern const uint8_t  kScale = {spec.scale};",
         f"extern const size_t kDataLen = {len(payload)};",
         "",
         "extern const uint8_t kData[] PROGMEM = {",
@@ -152,7 +167,7 @@ def render_for(spec: ModelSpec, src: Path) -> Path:
         # The source is a landscape ink-wash. Rotate so the mountains
         # occupy the bottom of the portrait frame before we resize.
         img = img.rotate(90, expand=True, resample=Image.BICUBIC)
-    refined = refine(img, (spec.width, spec.height))
+    refined = refine(img, (spec.payload_w, spec.payload_h))
     indexed = dither_to_palette(refined, spec.levels)
     packed = pack(indexed, spec.bpp)
     out_path = OUT_DIR / spec.out_file

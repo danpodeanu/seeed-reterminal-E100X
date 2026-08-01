@@ -39,6 +39,7 @@ void draw(TFT_eSPI& epaper) {
   const uint16_t w = kWidth;
   const uint16_t h = kHeight;
   const uint8_t bpp = kBitsPerPixel;
+  const uint8_t scale = kScale;
   const uint16_t pixelsPerByte = 8 / bpp;
   const uint8_t mask = (1 << bpp) - 1;
   const size_t rowBytes = (size_t)w * bpp / 8;
@@ -50,7 +51,17 @@ void draw(TFT_eSPI& epaper) {
       for (uint8_t p = 0; p < pixelsPerByte; ++p) {
         const uint8_t shift = (pixelsPerByte - 1 - p) * bpp;
         const uint8_t idx = (b >> shift) & mask;
-        epaper.drawPixel(x + p, y, paletteColor(idx));
+        const uint32_t color = paletteColor(idx);
+        const uint16_t px = (x + p) * scale;
+        const uint16_t py = y * scale;
+        if (scale == 1) {
+          epaper.drawPixel(px, py, color);
+        } else {
+          // Nearest-neighbor upscale: paint a scale x scale block per
+          // stored pixel. fillRect is a single primitive on TFT_eSPI so
+          // this avoids scale*scale drawPixel calls per source pixel.
+          epaper.fillRect(px, py, scale, scale, color);
+        }
       }
     }
     row += rowBytes;
