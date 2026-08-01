@@ -115,28 +115,87 @@ bool decompressGzipIfNeeded(String& body) {
   return true;
 }
 
-// QWeather returns "YYYY-MM-DDTHH:MM+HH:MM" timestamps (no seconds field).
-// Normalize to "YYYY-MM-DDTHH:MM:SS" so parseLocalTimestamp() accepts them
-// and slot-vs-observation string comparisons stay consistent.
+// Portable UTC epoch computation via Howard Hinnant's days_from_civil
+// formula (public-domain). Sidesteps the TZ-swap dance normally needed
+// for timegm() on ESP32 newlib, which lacks it. Handles any date in the
+// range time_t supports.
+static int64_t daysFromCivil(int y, int m, int d) {
+  y -= m <= 2;
+  const int era = (y >= 0 ? y : y - 399) / 400;
+  const int yoe = y - era * 400;
+  const int doy = (153 * (m + (m > 2 ? -3 : 9)) + 2) / 5 + d - 1;
+  const int doe = yoe * 365 + yoe / 4 - yoe / 100 + doy;
+  return static_cast<int64_t>(era) * 146097 + doe - 719468;
+}
+
+static time_t utcEpochSeconds(int year, int month, int day,
+                              int hour, int minute, int second) {
+  const int64_t days = daysFromCivil(year, month, day);
+  return static_cast<time_t>(days * 86400LL + hour * 3600LL +
+                             minute * 60LL + second);
+}
+
+// QWeather returns "YYYY-MM-DDTHH:MM+HH:MM" timestamps: no seconds and
+// the offset is the *observation location's* local timezone, NOT the
+// device timezone. If we simply dropped the offset we would later
+// mis-parse the string as the device's local time. For London the
+// observation reads as +01:00 (BST) while the device runs on CST-8, so
+// dropping the offset silently ages every reading by 7 hours.
+//
+// Normalize to "YYYY-MM-DDTHH:MM:SS" in the device's currently-configured
+// local timezone so parseIso8601Local() consumes it correctly and
+// slot-vs-observation string comparisons still work.
 String normalizeTimestamp(const char* raw) {
   if (raw == nullptr) return String();
-  String value(raw);
-  const int plus = value.indexOf('+');
-  const int minus = value.lastIndexOf('-');
-  int cut = -1;
-  if (plus >= 10) {
-    cut = plus;                 // drop "+HH:MM"
-  } else if (minus > 10) {
-    cut = minus;                // drop "-HH:MM" (do not truncate date dashes)
-  } else if (value.endsWith("Z")) {
-    cut = value.length() - 1;
+
+  int year = 0, month = 0, day = 0, hour = 0, minute = 0, second = 0;
+  const int fields = sscanf(raw, "%d-%d-%dT%d:%d:%d",
+                            &year, &month, &day, &hour, &minute, &second);
+  if (fields < 5) return String();
+
+  // Skip past the "YYYY-MM-DD" segment to find the timezone marker.
+  size_t i = 0;
+  while (raw[i] && i < 10) ++i;                     // "YYYY-MM-DD"
+  while (raw[i] && raw[i] != '+' && raw[i] != '-' && raw[i] != 'Z') ++i;
+
+  int offsetMinutes = 0;
+  bool haveOffset = false;
+  if (raw[i] == 'Z') {
+    haveOffset = true;
+  } else if (raw[i] == '+' || raw[i] == '-') {
+    const int sign = (raw[i] == '+') ? 1 : -1;
+    int offH = 0, offM = 0;
+    if (sscanf(raw + i + 1, "%d:%d", &offH, &offM) == 2) {
+      offsetMinutes = sign * (offH * 60 + offM);
+      haveOffset = true;
+    }
   }
-  if (cut > 0) value.remove(cut);
-  // If seconds are missing (length is exactly "YYYY-MM-DDTHH:MM"), append.
-  if (value.length() == 16 && value.charAt(13) == ':') {
-    value += ":00";
+
+  if (!haveOffset) {
+    // Fall back to the historical no-offset behaviour: caller-supplied
+    // strings without a timezone are treated as already in device local
+    // time (this keeps unit tests and OpenMeteo's `current.time` field,
+    // which is already localized, working unchanged).
+    char buf[24];
+    snprintf(buf, sizeof(buf), "%04d-%02d-%02dT%02d:%02d:%02d",
+             year, month, day, hour, minute, second);
+    return String(buf);
   }
-  return value;
+
+  // Observation instant in UTC = local wall clock - offset.
+  const time_t epoch =
+      utcEpochSeconds(year, month, day, hour, minute, second) -
+      static_cast<time_t>(offsetMinutes) * 60;
+  if (epoch <= 0) return String();
+
+  // Reformat as device-local wall clock.
+  struct tm localTm = {};
+  if (localtime_r(&epoch, &localTm) == nullptr) return String();
+  char buf[24];
+  snprintf(buf, sizeof(buf), "%04d-%02d-%02dT%02d:%02d:%02d",
+           localTm.tm_year + 1900, localTm.tm_mon + 1, localTm.tm_mday,
+           localTm.tm_hour, localTm.tm_min, localTm.tm_sec);
+  return String(buf);
 }
 
 float parseFloat(const char* text) {
