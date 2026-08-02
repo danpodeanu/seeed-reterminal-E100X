@@ -8,11 +8,12 @@ git config core.hooksPath .githooks
 
 ## `pre-commit`
 
-Refuses to commit `include/secrets.h` (in any viewer or tool) when it no
-longer matches its sibling `include/secrets.h.example`. This is the
-guardrail that keeps real Wi-Fi and QWeather credentials from being
-committed accidentally now that `secrets.h` is tracked by git.
+Refuses to commit `include/secrets.h` from any viewer or tool. The
+file holds private Wi-Fi and provider credentials, is covered by
+`.gitignore`, and never belongs in version control. The hook is a
+belt-and-braces backstop for the case where someone forces a stage
+with `git add -f` or edits an already-tracked copy from an older
+checkout.
 
-Bypass with `git commit --no-verify` when you're intentionally reshaping
-the template -- remember to update the `.example` in the same commit so
-the hook stops complaining afterwards.
+Bypass with `git commit --no-verify` only when you are absolutely
+sure the staged file contains no real credentials.

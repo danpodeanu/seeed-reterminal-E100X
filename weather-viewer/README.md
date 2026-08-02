@@ -220,23 +220,43 @@ synchronized, the same format intentionally shows a 1970 date.
 
 ### Compile-time configuration
 
-Every setting is editable from the on-device portal. The
-`include/secrets.h` and `include/config.h` values only apply when NVS
-has no stored value.
+Every runtime setting is editable from the on-device portal and
+persists in NVS across reflashes, so **no compile-time configuration
+is required** to build and run the firmware — a stock `pio run` will
+launch the portal on first boot and let you configure Wi-Fi, the
+weather provider, location, and quiet hours from the browser.
 
-```bash
-cp include/secrets.h.example include/secrets.h
-```
+Configuring compile-time defaults is optional but useful when you
+want to flash many devices without having to run the portal on each
+one (automated provisioning), or when you want the firmware to come
+up already knowing the network:
 
-Edit `include/secrets.h` and set `WIFI_SSID` / `WIFI_PASSWORD` (and
-the QWeather fields if you're using that provider). The placeholder
-values `YOUR_WIFI_NAME` / `YOUR_QWEATHER_PROJECT_ID` etc. are treated
-as "unconfigured", so leaving them in place launches the portal
-instead.
+- **`include/secrets.h`** — Wi-Fi credentials and (optionally) the
+  QWeather project/JWT fields. Optional. Create it from the template
+  only if you need those defaults:
 
-User-editable behavior lives in `include/config.h`;
-implementation-level knobs (panel geometry, timing budgets, cache
-paths, retry windows) are in `include/system_config.h`.
+  ```bash
+  cp include/secrets.h.example include/secrets.h
+  # edit include/secrets.h and set WIFI_SSID / WIFI_PASSWORD
+  # (and QWEATHER_* if you're using the QWeather provider)
+  ```
+
+  The placeholder values `YOUR_WIFI_NAME` / `YOUR_QWEATHER_PROJECT_ID`
+  etc. are treated as "unconfigured", so leaving them in place still
+  boots straight into the portal. The real file is covered by
+  `.gitignore`; only the placeholder `.example` belongs in version
+  control.
+
+- **`include/config.h`** — user-facing behavior defaults (weather
+  provider selection, location, refresh cadence, quiet hours,
+  timezone, rain thresholds). Every entry is overridable from the
+  portal at runtime; edit the header only if you want to change what
+  a fresh device comes up with.
+
+- **`include/system_config.h`** — implementation-level knobs (panel
+  geometry, timing budgets, cache paths, retry windows). Included
+  from the bottom of `config.h`; you should not usually need to touch
+  these.
 
 The example forecast location is London:
 
@@ -417,8 +437,10 @@ data, exact rain onset remains an hourly forecast estimate rather
 than a radar nowcast.
 
 HTTPS certificate verification is disabled because the firmware does
-not carry a CA bundle. Wi-Fi credentials are compiled into the
-firmware; keep `include/secrets.h` private.
+not carry a CA bundle. Any Wi-Fi or QWeather credentials you add to
+`include/secrets.h` are compiled into the binary — keep the file
+private (it is `.gitignore`d) and do not publish firmware binaries
+built from a customised copy.
 
 ### Operational notes
 

@@ -1,11 +1,11 @@
 #!/bin/sh
-# Refuse to commit an include/secrets.h that differs from its sibling
-# include/secrets.h.example. This catches the common leak: filling in
-# real Wi-Fi / QWeather credentials on a checkout that now tracks
-# secrets.h (see commit 041a416).
+# Refuse to commit an include/secrets.h. Real credentials must never
+# reach version control; the file is .gitignored and each app builds
+# from its include/secrets.h.example placeholder (copied at CI or
+# local build time).
 #
-# Bypass with `git commit --no-verify` if you *intentionally* changed
-# the template shape -- and then remember to update the .example too.
+# Bypass with `git commit --no-verify` only if you have a very good
+# reason.
 
 set -e
 
@@ -13,26 +13,17 @@ staged=$(git diff --cached --name-only --diff-filter=ACM \
   | grep -E '(^|/)include/secrets\.h$' || true)
 [ -z "$staged" ] && exit 0
 
-fail=0
+printf '\npre-commit: refusing to commit include/secrets.h:\n' >&2
 for f in $staged; do
-  example="${f}.example"
-  if [ ! -f "$example" ]; then
-    printf 'pre-commit: no %s next to %s; skipping template check\n' \
-      "$example" "$f" >&2
-    continue
-  fi
-  # Compare the staged blob (":$f") against the working-tree .example.
-  if ! git show ":$f" | diff -q - "$example" >/dev/null 2>&1; then
-    fail=1
-    printf '\npre-commit: %s differs from %s\n' "$f" "$example" >&2
-    printf '  Real credentials likely leaked into the staged copy.\n' >&2
-    printf '  Restore the placeholder with:\n' >&2
-    printf '    cp %s %s\n' "$example" "$f" >&2
-    printf '    git add %s\n' "$f" >&2
-    printf '  If you *did* mean to change the template shape, also\n' >&2
-    printf '  update %s and rerun the commit.\n' "$example" >&2
-    printf '  Emergency bypass: git commit --no-verify\n' >&2
-  fi
+  printf '  %s\n' "$f" >&2
 done
+printf 'These files are meant to hold private Wi-Fi / provider\n' >&2
+printf 'credentials and are covered by .gitignore. If one is staged\n' >&2
+printf 'you likely ran `git add -f` or edited an already-tracked copy.\n' >&2
+printf 'Unstage with:\n' >&2
+for f in $staged; do
+  printf '  git reset HEAD %s\n' "$f" >&2
+done
+printf 'Emergency bypass: git commit --no-verify\n' >&2
+exit 1
 
-exit $fail

@@ -242,24 +242,10 @@ the firmware.
 ### Building from source
 
 Install [PlatformIO Core](https://platformio.org/install/cli), then
-copy the credentials template:
+build and upload for the exact model, for example:
 
 ```bash
 cd photo-viewer
-cp include/secrets.h.example include/secrets.h
-```
-
-Edit `include/secrets.h`:
-
-```cpp
-#define WIFI_SSID "YOUR_WIFI_NAME"
-#define WIFI_PASSWORD "YOUR_WIFI_PASSWORD"
-```
-
-The real file is excluded by `.gitignore`. Build and upload for the
-exact model, for example:
-
-```bash
 pio run -e reterminal_e1003
 pio run -e reterminal_e1003 \
   --target upload \
@@ -284,13 +270,42 @@ four firmware builds.
 
 ### Settings reference
 
-Every setting is editable from the on-device portal. The
-`include/config.h` values only apply when NVS has no stored value.
+Every runtime setting is editable from the on-device portal and
+persists in NVS across reflashes, so **no compile-time configuration
+is required** to build and run the firmware — a stock `pio run` will
+launch the portal on first boot and let you configure Wi-Fi and
+slideshow preferences from the browser.
 
-User-editable behavior is in `include/config.h`. Implementation-level
-knobs (hardware timing, sensor debounce, dither internals) live in
-`include/system_config.h` and are included from the bottom of
-`config.h`; you should not usually need to touch them.
+Configuring compile-time defaults is optional but useful when you
+want to flash many devices without having to run the portal on each
+one (automated provisioning), or when you want the firmware to come
+up already knowing the Wi-Fi network:
+
+- **`include/secrets.h`** — Wi-Fi credentials. Optional. Create it
+  from the template only if you need those defaults:
+
+  ```bash
+  cp include/secrets.h.example include/secrets.h
+  # edit include/secrets.h:
+  #   #define WIFI_SSID "YOUR_WIFI_NAME"
+  #   #define WIFI_PASSWORD "YOUR_WIFI_PASSWORD"
+  ```
+
+  The real file is covered by `.gitignore`; only the placeholder
+  `.example` belongs in version control. If you skip this step the
+  device boots into the portal instead.
+
+- **`include/config.h`** — user-facing behavior defaults (photo
+  interval, timezone, NTP servers, quiet hours). Every entry is
+  overridable from the portal at runtime; edit the header only if
+  you want to change what a fresh device comes up with.
+
+- **`include/system_config.h`** — implementation-level knobs
+  (hardware timing, sensor debounce, dither internals). Included
+  from the bottom of `config.h`; you should not usually need to
+  touch these.
+
+Reference of the most common `config.h` fields:
 
 - `SLEEP_SECONDS`: normal automatic photo interval.
 - `TIMEZONE`: POSIX timezone used for quiet hours and logs. Its

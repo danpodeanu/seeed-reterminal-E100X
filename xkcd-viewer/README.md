@@ -199,28 +199,43 @@ PIO_PYTHON="$(head -n 1 "$(command -v pio)" | sed 's/^#!//')"
 
 ### Compile-time configuration
 
-There are two ways to configure the viewer:
+Every runtime setting is editable from the on-device portal and
+persists in NVS across reflashes, so **no compile-time configuration
+is required** to build and run the firmware — a stock `pio run` will
+launch the portal on first boot and let you configure Wi-Fi and
+comic preferences from the browser.
 
-1. **On-device portal (recommended).** Every setting that used to live
-   in `include/config.h` is editable from the browser portal, and
-   values persist in NVS across reflashes.
-2. **Compile-time defaults.** The values in `include/secrets.h` and
-   `include/config.h` act as fallbacks when NVS has no value stored.
-   Seed the credentials header once:
+Configuring compile-time defaults is optional but useful when you
+want to flash many devices without having to run the portal on each
+one (automated provisioning), or when you want the firmware to come
+up already knowing the Wi-Fi network:
 
-   ```bash
-   cp include/secrets.h.example include/secrets.h
-   ```
+- **`include/secrets.h`** — Wi-Fi credentials. Optional. If present,
+  the placeholders `WIFI_SSID` / `WIFI_PASSWORD` are used when NVS
+  has no stored SSID (typical for a fresh chip). Create it from the
+  template only if you need those defaults:
 
-   Then edit `include/secrets.h` and set `WIFI_SSID` and
-   `WIFI_PASSWORD`. The real file is excluded by `.gitignore`; only
-   the placeholder example belongs in version control.
+  ```bash
+  cp include/secrets.h.example include/secrets.h
+  # edit include/secrets.h and set WIFI_SSID / WIFI_PASSWORD
+  ```
 
-User-editable behavior is in `include/config.h`. Implementation-level
-knobs (panel geometry, timing budgets, PSRAM/image caps, cache paths,
-layout dimensions) live in `include/system_config.h` and are included
-from the bottom of `config.h`; you should not usually need to touch
-them.
+  The real file is covered by `.gitignore`; only the placeholder
+  `.example` belongs in version control. If you skip this step the
+  CI-shipped placeholder builds fine — the device just falls straight
+  through to the portal.
+
+- **`include/config.h`** — user-facing behavior defaults (sleep
+  interval, timezone, NTP servers, quiet hours, comic pool). Every
+  entry is overridable from the portal at runtime; edit the header
+  only if you want to change what a fresh device comes up with.
+
+- **`include/system_config.h`** — implementation-level knobs (panel
+  geometry, timing budgets, PSRAM/image caps, cache paths, layout
+  dimensions). Included from the bottom of `config.h`; you should
+  not usually need to touch these.
+
+Reference of the most common `config.h` fields:
 
 - `SLEEP_SECONDS`: interval between automatic refreshes.
 - `TIMEZONE`: POSIX timezone used for quiet hours and logs. Its offset
@@ -250,9 +265,10 @@ which selects Seeed_GFX setup 520, 521, 522, or 523. Model-specific
 power-control pins are selected automatically.
 
 HTTPS certificate verification is disabled because the firmware does
-not carry a CA bundle. Wi-Fi credentials are compiled into the
-firmware; keep `include/secrets.h` private and do not publish firmware
-binaries containing real credentials.
+not carry a CA bundle. Any Wi-Fi credentials you add to
+`include/secrets.h` are compiled into the binary — keep the file
+private (it is `.gitignore`d) and do not publish firmware binaries
+built from a customised copy.
 
 ### Time and NTP
 
