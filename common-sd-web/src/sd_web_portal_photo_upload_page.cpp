@@ -361,8 +361,8 @@ function bindCropDrag() {
     if (!dragging) return;
     const dx = (e.clientX - startX) * state.displayScale;
     const dy = (e.clientY - startY) * state.displayScale;
-    state.crop.sx = startSx - dx;
-    state.crop.sy = startSy - dy;
+    state.crop.sx = startSx + dx;
+    state.crop.sy = startSy + dy;
     drawCropStage();
   });
   const finish = (e) => {
