@@ -758,7 +758,13 @@ void drawForecastCard(const DailyForecast& day, uint8_t index,
       weather_format::temperature(day.maximumC);
   epaper.drawString(range, centerX, top + config::ui(107), 1);
   if (!weather_config::runtime::clutterFreeMode()) {
-    setBodyTextColor(PANEL_MUTED);
+    // Muted gray reads fine on a plain white sprite but gets lost on
+    // top of the ink-wash background, so match the rest of the card's
+    // text weight when the background is on.
+    const uint32_t extraColor =
+        weather_config::runtime::weatherBackgroundEnabled() ? PANEL_BLACK
+                                                            : PANEL_MUTED;
+    setBodyTextColor(extraColor);
     String extra;
     if (day.precipitationProbability >= 0) {
       extra = "Rain " + weather_format::integer(day.precipitationProbability) +
