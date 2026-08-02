@@ -121,11 +121,13 @@ struct RenderInfo {
 //   * Two QR codes side by side (landscape) or stacked (portrait):
 //       - "1. Scan to join Wi-Fi" caption ABOVE       (info.fonts.captionFont)
 //       - Wi-Fi QR
-//       - "Wifi name: <ssid>" BELOW                   (info.fonts.captionFont)
-//       - "Wifi password: <pw>" BELOW                 (info.fonts.captionFont)
+//       - "Wi-Fi Name: <ssid>" BELOW                  (info.fonts.captionFont)
+//       - "Wi-Fi Password: <pw>" BELOW                (info.fonts.captionFont)
 //       - "2. Scan to open portal" caption ABOVE
 //       - URL QR
 //       - URL text BELOW                              (info.fonts.captionFont)
+//   * Footer hint centred at the bottom               (info.fonts.captionFont)
+//       "Press green button to return to viewer"
 template <typename EPaper>
 inline void renderPortalScreen(EPaper& epaper, int panelW, int panelH,
                                uint32_t black, uint32_t white,
@@ -166,7 +168,13 @@ inline void renderPortalScreen(EPaper& epaper, int panelW, int panelH,
   const int captionH = epaper.fontHeight(1);
 
   const int headerBottom = y + panelH / 60;
-  const int footerReserve = panelH / 40;
+  // Reserve enough space at the bottom for the "Press green button to
+  // return to viewer" footer hint, drawn in captionFont so it's
+  // readable from arm's length. Margin above matches the general
+  // panelH/60 spacing used elsewhere; margin below is a hair smaller
+  // so the text sits flush without touching the edge.
+  const int footerHintMargin = panelH / 60;
+  const int footerReserve = captionH + footerHintMargin + panelH / 200;
   const int qrRegionTop = headerBottom;
   const int qrRegionBottom = panelH - footerReserve;
 
@@ -253,12 +261,12 @@ inline void renderPortalScreen(EPaper& epaper, int panelW, int panelH,
     }
   };
 
-  // "Wifi name: <ssid>" / "Wifi password: <pw>" - full labels so the
+  // "Wi-Fi Name: <ssid>" / "Wi-Fi Password: <pw>" - full labels so the
   // pane reads naturally even for people who've never used the portal
   // before. Kept as locals so both layouts reuse them.
-  const String wifiNameLine = String("Wifi name: ") + info.ssid;
+  const String wifiNameLine = String("Wi-Fi Name: ") + info.ssid;
   const String wifiPassLine =
-      wifiHasPass ? String("Wifi password: ") + info.wifiPassword : String();
+      wifiHasPass ? String("Wi-Fi Password: ") + info.wifiPassword : String();
 
   if (portrait) {
     const int wifiExtra = wifiHasPass ? bigDetailH : 0;
@@ -322,6 +330,14 @@ inline void renderPortalScreen(EPaper& epaper, int panelW, int panelH,
              helpTop + captionH + panelH / 200, helpModule, black, white);
     }
   }
+
+  // Footer hint centred at the bottom. Rendered in captionFont so
+  // it matches the SSID/URL text weight and stays legible from a few
+  // feet away. Drawn last so it can't be overwritten by QR blocks.
+  epaper.setFreeFont(info.fonts.captionFont);
+  epaper.setTextDatum(BC_DATUM);
+  epaper.drawString("Press green button to return to viewer", panelW / 2,
+                    panelH - panelH / 200, 1);
 
   // Restore default text state so anything printed later renders sanely.
   epaper.setFreeFont(nullptr);
