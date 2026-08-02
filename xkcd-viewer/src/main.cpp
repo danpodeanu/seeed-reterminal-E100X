@@ -1768,9 +1768,13 @@ void setup() {
     const String reason = sdReady
                               ? "No usable cached or downloadable comic"
                               : "Live download failed; check Wi-Fi or insert an SD card";
+    const uint64_t retryMinutes = (nextSleepSeconds + 59ULL) / 60ULL;
+    const String detail =
+        "Retrying in " + String(static_cast<unsigned long>(retryMinutes)) +
+        " minutes. Press the green button to retry now.";
     const String reconfigureHint =
         "Keep the green button pressed for 2 seconds to reconfigure.";
-    renderStatus("XKCD refresh failed", reason, "", reconfigureHint);
+    renderStatus("XKCD refresh failed", detail, reason, reconfigureHint);
   }
 
   // The panel retains the newly rendered frame without power. Do scheduled
