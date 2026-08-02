@@ -32,7 +32,7 @@ details.
 
 ## XKCD Viewer example
 
-![XKCD Viewer displaying XKCD 699, Trimester, on a reTerminal E1003](xkcd-viewer/assets/e1003-xkcd-screenshot.png)
+![XKCD Viewer displaying XKCD 2346, COVID Risk Comfort Zone, on a reTerminal E1003](xkcd-viewer/assets/e1003-xkcd-screenshot.png)
 
 This frame was captured directly from a reTerminal E1003 running the
 [XKCD Viewer](xkcd-viewer/). Comic:

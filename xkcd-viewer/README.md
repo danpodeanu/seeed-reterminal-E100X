@@ -13,7 +13,7 @@ Only Wi-Fi access to XKCD is required.
 
 ## Example output
 
-![XKCD Viewer displaying XKCD 699, Trimester, on a reTerminal E1003](assets/e1003-xkcd-screenshot.png)
+![XKCD Viewer displaying XKCD 2346, COVID Risk Comfort Zone, on a reTerminal E1003](assets/e1003-xkcd-screenshot.png)
 
 Frame captured directly from a reTerminal E1003 using the built-in screenshot
 feature. Comic: [XKCD #699 — Trimester](https://xkcd.com/699/).
