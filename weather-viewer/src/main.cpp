@@ -1542,27 +1542,24 @@ void setup() {
              weather_config::runtime::latitude(),
              weather_config::runtime::longitude());
 
-#if RETERMINAL_MODEL == 1001
+  // Cold-boot "Connecting to Wi-Fi" splash. Pushed BEFORE any
+  // initGrayMode() call so it renders as a fast 1bpp partial refresh
+  // (~1-2 s) rather than paying a full Gray4/Gray16 waveform (~5 s)
+  // for a screen that gets replaced the moment the weather frame is
+  // ready. renderStatus() ends with updatePanel(), so the splash is
+  // actually on the panel before we block on Wi-Fi.
   if (showConnectionStatus) {
     LOG.println("[display] showing Wi-Fi connection status");
     renderStatus("Connecting to " + String(weather_wifi::ssid()), connectionDetail,
                  locationLabel,
                  "To configure device - from sleep, hold green for 2 seconds");
   }
+#if RETERMINAL_MODEL == 1001
   epaper.initGrayMode(GRAY_LEVEL4);
 #elif RETERMINAL_MODEL == 1003
   epaper.initGrayMode(GRAY_LEVEL16);
 #endif
   epaper.fillSprite(PANEL_WHITE);
-
-#if RETERMINAL_MODEL != 1001
-  if (showConnectionStatus) {
-    LOG.println("[display] showing Wi-Fi connection status");
-    renderStatus("Connecting to " + String(weather_wifi::ssid()), connectionDetail,
-                 locationLabel,
-                 "To configure device - from sleep, hold green for 2 seconds");
-  }
-#endif
 
   const bool networkRequired = buttonWake || ntpDue || !cacheLoaded;
   const bool networkAvailable =

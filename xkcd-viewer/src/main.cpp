@@ -1635,33 +1635,24 @@ void setup() {
   const String stationMac = wifi_sta::stationMacAddress();
   LOG.printf("[wifi] station MAC=%s\n", stationMac.c_str());
 
-#if RETERMINAL_MODEL == 1001
-  // On a cold boot show a "Connecting to Wi-Fi" splash before switching
-  // into Gray4, so the ~30 s network phase isn't a black hole. This is
-  // pure UX - it used to be documented as a workaround for a UC8179
-  // Gray4 driver quirk, but the actual driver issue was the SPI bus
-  // being brought up without a real MISO pin (see common/include/
-  // epaper_setup.h). Kept here just so the first frame isn't blank.
+  // Cold-boot "Connecting to Wi-Fi" splash. Pushed BEFORE any
+  // initGrayMode() call so it renders as a fast 1bpp partial refresh
+  // (~1-2 s) rather than paying a full Gray4/Gray16 waveform (~5 s)
+  // for a screen that gets replaced the moment the comic is ready.
+  // renderStatus() ends with updatePanel(), so the splash is actually
+  // on the panel before we block on Wi-Fi.
   if (showConnectionStatus) {
     LOG.println("[display] showing Wi-Fi connection status");
     renderStatus("Connecting to " + String(xkcd_wifi::ssid()), connectionDetail,
                  stationMac,
                  "To configure device - from sleep, hold green for 2 seconds");
   }
+#if RETERMINAL_MODEL == 1001
   epaper.initGrayMode(GRAY_LEVEL4);
 #elif RETERMINAL_MODEL == 1003
   epaper.initGrayMode(GRAY_LEVEL16);
 #endif
   epaper.fillSprite(PANEL_WHITE);
-
-#if RETERMINAL_MODEL != 1001
-  if (showConnectionStatus) {
-    LOG.println("[display] showing Wi-Fi connection status");
-    renderStatus("Connecting to " + String(xkcd_wifi::ssid()), connectionDetail,
-                 stationMac,
-                 "To configure device - from sleep, hold green for 2 seconds");
-  }
-#endif
 
   bool networkAvailable = false;
   if (networkPlanned) {
