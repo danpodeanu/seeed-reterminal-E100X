@@ -88,15 +88,54 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  fonts:
+    name: Prebuilt Unicode fonts
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install font dependencies
+        run: python -m pip install --upgrade Pillow fonttools
+
+      - name: Generate .vlw font sizes 12-48
+        run: |
+          rm -rf release-fonts
+          mkdir -p release-fonts
+          python tools/fonts/make_vlw.py release-fonts
+          cp tools/fonts/LICENSE.dejavu release-fonts/
+          ls -la release-fonts/
+
+      - name: Build sans_bold_fonts.zip
+        working-directory: release-fonts
+        run: |
+          zip -9 ../sans_bold_fonts.zip *.vlw LICENSE.dejavu
+          ls -la ../sans_bold_fonts.zip
+
+      - name: Upload font artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: sans_bold_fonts
+          path: sans_bold_fonts.zip
+          if-no-files-found: error
+          retention-days: 30
+
   publish:
     name: Publish release assets
-    needs: build
+    needs: [build, fonts]
     runs-on: ubuntu-latest
     timeout-minutes: 10
     if: startsWith(github.ref, 'refs/tags/v')
 
     steps:
-      - name: Download all firmware artifacts
+      - name: Download all release artifacts
         uses: actions/download-artifact@v8
         with:
           path: artifacts
@@ -105,12 +144,15 @@ jobs:
         run: |
           mkdir -p release
           find artifacts -type f -name '*.bin' -exec cp {} release/ \;
+          find artifacts -type f -name 'sans_bold_fonts.zip' -exec cp {} release/ \;
           ls -la release/
 
       - name: Upload to release
         uses: softprops/action-gh-release@v3
         with:
-          files: release/*.bin
+          files: |
+            release/*.bin
+            release/sans_bold_fonts.zip
           fail_on_unmatched_files: true
 
       - name: Trigger Pages redeploy on main

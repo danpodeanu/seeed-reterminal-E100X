@@ -391,6 +391,20 @@ Both paths require Pillow and fontTools:
 pip install pillow fonttools
 ```
 
+**Prebuilt fonts (no Python needed).** The repository ships the
+prebuilt `.vlw` set under [`fonts/`](../fonts/), and every tagged
+release attaches a `sans_bold_fonts.zip` bundle. Grab either source
+and copy the files into `/fonts/` on the SD card:
+
+```bash
+# From a clone:
+cp -r fonts/*.vlw /Volumes/XKCD/fonts/
+# Or from a release:
+#   1. Download sans_bold_fonts.zip from
+#      https://github.com/danpodeanu/seeed-reterminal-E100X/releases
+#   2. Unzip it into /Volumes/XKCD/fonts/
+```
+
 DejaVu Sans is licensed under the Bitstream Vera Fonts License; see
 `../tools/fonts/LICENSE.dejavu`.
 
