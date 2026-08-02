@@ -1372,7 +1372,7 @@ void setup() {
 
   if (!displayed) {
     renderStatus("Photo unavailable",
-                 sdReady ? "Hold green button for 2 seconds to open upload portal"
+                 sdReady ? "To upload photos - from sleep, press green"
                          : "Insert a FAT32 SD card");
   }
 
