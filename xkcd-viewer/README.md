@@ -155,7 +155,20 @@ the firmware.
 ### Building from source
 
 Install [PlatformIO Core](https://platformio.org/install/cli), then
-list the available serial ports:
+create the credentials header from the tracked template — the
+firmware includes it directly, so this step is required even if you
+leave the placeholders alone:
+
+```bash
+cd xkcd-viewer
+cp include/secrets.h.example include/secrets.h
+```
+
+The real `secrets.h` is covered by `.gitignore` so it never lands in
+version control. Editing it is optional and covered in
+[Compile-time configuration](#compile-time-configuration) below.
+
+List the available serial ports:
 
 ```bash
 pio device list
@@ -210,20 +223,12 @@ want to flash many devices without having to run the portal on each
 one (automated provisioning), or when you want the firmware to come
 up already knowing the Wi-Fi network:
 
-- **`include/secrets.h`** — Wi-Fi credentials. Optional. If present,
-  the placeholders `WIFI_SSID` / `WIFI_PASSWORD` are used when NVS
-  has no stored SSID (typical for a fresh chip). Create it from the
-  template only if you need those defaults:
-
-  ```bash
-  cp include/secrets.h.example include/secrets.h
-  # edit include/secrets.h and set WIFI_SSID / WIFI_PASSWORD
-  ```
-
-  The real file is covered by `.gitignore`; only the placeholder
-  `.example` belongs in version control. If you skip this step the
-  CI-shipped placeholder builds fine — the device just falls straight
-  through to the portal.
+- **`include/secrets.h`** — Wi-Fi credentials. Required at build time
+  (the copy step in [Building from source](#building-from-source)
+  creates it), but editing is optional. If you fill in `WIFI_SSID` /
+  `WIFI_PASSWORD` those act as defaults when NVS has no stored SSID
+  (typical for a fresh chip); leaving the placeholders untouched
+  boots straight into the portal.
 
 - **`include/config.h`** — user-facing behavior defaults (sleep
   interval, timezone, NTP servers, quiet hours, comic pool). Every

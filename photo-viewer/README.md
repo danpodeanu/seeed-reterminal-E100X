@@ -242,10 +242,22 @@ the firmware.
 ### Building from source
 
 Install [PlatformIO Core](https://platformio.org/install/cli), then
-build and upload for the exact model, for example:
+create the credentials header from the tracked template — the
+firmware includes it directly, so this step is required even if you
+leave the placeholders alone:
 
 ```bash
 cd photo-viewer
+cp include/secrets.h.example include/secrets.h
+```
+
+The real `secrets.h` is covered by `.gitignore` so it never lands in
+version control. Editing it is optional and covered in
+[Settings reference](#settings-reference) below.
+
+Build and upload for the exact model, for example:
+
+```bash
 pio run -e reterminal_e1003
 pio run -e reterminal_e1003 \
   --target upload \
@@ -281,19 +293,17 @@ want to flash many devices without having to run the portal on each
 one (automated provisioning), or when you want the firmware to come
 up already knowing the Wi-Fi network:
 
-- **`include/secrets.h`** — Wi-Fi credentials. Optional. Create it
-  from the template only if you need those defaults:
+- **`include/secrets.h`** — Wi-Fi credentials. Required at build time
+  (the copy step in [Building from source](#building-from-source)
+  creates it), but editing is optional. Fill in `WIFI_SSID` /
+  `WIFI_PASSWORD` to seed defaults:
 
-  ```bash
-  cp include/secrets.h.example include/secrets.h
-  # edit include/secrets.h:
-  #   #define WIFI_SSID "YOUR_WIFI_NAME"
-  #   #define WIFI_PASSWORD "YOUR_WIFI_PASSWORD"
+  ```cpp
+  #define WIFI_SSID "YOUR_WIFI_NAME"
+  #define WIFI_PASSWORD "YOUR_WIFI_PASSWORD"
   ```
 
-  The real file is covered by `.gitignore`; only the placeholder
-  `.example` belongs in version control. If you skip this step the
-  device boots into the portal instead.
+  Leaving the placeholders untouched boots straight into the portal.
 
 - **`include/config.h`** — user-facing behavior defaults (photo
   interval, timezone, NTP servers, quiet hours). Every entry is

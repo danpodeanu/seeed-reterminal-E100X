@@ -192,7 +192,20 @@ the firmware.
 ### Building from source
 
 Install [PlatformIO Core](https://platformio.org/install/cli), then
-build the environment matching the physical device:
+create the credentials header from the tracked template — the
+firmware includes it directly, so this step is required even if you
+leave the placeholders alone:
+
+```bash
+cd weather-viewer
+cp include/secrets.h.example include/secrets.h
+```
+
+The real `secrets.h` is covered by `.gitignore` so it never lands in
+version control. Editing it is optional and covered in
+[Compile-time configuration](#compile-time-configuration) below.
+
+Build the environment matching the physical device:
 
 ```bash
 pio run -e reterminal_e1001
@@ -232,20 +245,13 @@ one (automated provisioning), or when you want the firmware to come
 up already knowing the network:
 
 - **`include/secrets.h`** — Wi-Fi credentials and (optionally) the
-  QWeather project/JWT fields. Optional. Create it from the template
-  only if you need those defaults:
-
-  ```bash
-  cp include/secrets.h.example include/secrets.h
-  # edit include/secrets.h and set WIFI_SSID / WIFI_PASSWORD
-  # (and QWEATHER_* if you're using the QWeather provider)
-  ```
-
-  The placeholder values `YOUR_WIFI_NAME` / `YOUR_QWEATHER_PROJECT_ID`
-  etc. are treated as "unconfigured", so leaving them in place still
-  boots straight into the portal. The real file is covered by
-  `.gitignore`; only the placeholder `.example` belongs in version
-  control.
+  QWeather project/JWT fields. Required at build time (the copy step
+  in [Building from source](#building-from-source) creates it), but
+  editing is optional. Fill in `WIFI_SSID` / `WIFI_PASSWORD` (and the
+  `QWEATHER_*` fields if you're using that provider) to seed
+  defaults; the placeholder values `YOUR_WIFI_NAME` /
+  `YOUR_QWEATHER_PROJECT_ID` etc. are treated as "unconfigured", so
+  leaving them in place still boots straight into the portal.
 
 - **`include/config.h`** — user-facing behavior defaults (weather
   provider selection, location, refresh cadence, quiet hours,
