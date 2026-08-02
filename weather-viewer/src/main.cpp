@@ -1827,8 +1827,10 @@ void setup() {
     const uint64_t retryMinutes = config::FAILURE_RETRY_SECONDS / 60ULL;
     const String detail =
         "Retrying in " + String(static_cast<unsigned long>(retryMinutes)) +
-        " minutes. Press any button to retry now.";
-    renderStatus("Weather unavailable", detail, failureSummary);
+        " minutes. Press the green button to retry now.";
+    const String help =
+        "Keep the green button pressed for 2 seconds to reconfigure.";
+    renderStatus("Weather unavailable", detail, failureSummary, help);
     powerDownAndSleep(config::FAILURE_RETRY_SECONDS);
     return;
   }
