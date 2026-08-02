@@ -114,11 +114,15 @@ footer a { color: var(--muted); }
 .photo-tile .meta {
   padding: 6px 8px; font-size: 0.75rem; color: var(--muted);
   border-top: 1px solid var(--line); display: flex;
-  justify-content: space-between; align-items: center; gap: 6px;
+  flex-direction: column; gap: 4px;
 }
 .photo-tile .meta .name {
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   color: var(--ink);
+}
+.photo-tile .meta .row {
+  display: flex; justify-content: space-between; align-items: center;
+  gap: 6px;
 }
 .photo-tile button.del {
   padding: 3px 8px; font-size: 0.75rem; border-radius: 6px;
@@ -904,9 +908,8 @@ function escapeHtmlText(s) {
 }
 
 function humanKB(bytes) {
-  if (bytes < 1024) return bytes + " B";
-  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
-  return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+  const kb = Math.max(1, Math.round(bytes / 1024));
+  return kb + " KB";
 }
 
 async function refreshPhotoList() {
@@ -940,8 +943,10 @@ async function refreshPhotoList() {
           '<img loading="lazy" alt="' + safeName + '" src="' + src + '">' +
           '<div class="meta">' +
             '<span class="name" title="' + safeName + '">' + safeName + '</span>' +
-            '<span>' + humanKB(it.size) + '</span>' +
-            '<button type="button" class="del" data-name="' + dataName + '">Delete</button>' +
+            '<div class="row">' +
+              '<span>' + humanKB(it.size) + '</span>' +
+              '<button type="button" class="del" data-name="' + dataName + '">Delete</button>' +
+            '</div>' +
           '</div>' +
         '</div>'
       );
