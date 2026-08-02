@@ -9,9 +9,9 @@ The header preserves the same local SHT4x temperature/humidity and battery
 status used by the XKCD Viewer. Outdoor weather is shown separately in the
 main dashboard.
 
-![Weather Viewer showing current conditions and a three-day forecast on a reTerminal E1003](assets/e1003-weather-screenshot.png)
+![Weather Viewer showing current conditions and a three-day forecast on a reTerminal E1001](assets/e1001-weather-screenshot.png)
 
-Frame captured directly from a reTerminal E1003 using the built-in screenshot
+Frame captured directly from a reTerminal E1001 using the built-in screenshot
 export.
 
 ## Features
