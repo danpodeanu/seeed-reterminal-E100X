@@ -268,7 +268,8 @@ void updatePanel() {
 }
 
 void renderStatus(const String& message, const String& detail = "",
-                  const String& lineAbove = "") {
+                  const String& lineAbove = "",
+                  const String& helpBelow = "") {
   epaper.fillSprite(PANEL_WHITE);
   epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, true);
   epaper.setTextDatum(MC_DATUM);
@@ -290,6 +291,13 @@ void renderStatus(const String& message, const String& detail = "",
         text_render::ellipsize(epaper, detail, config::PANEL_WIDTH - config::ui(60)),
         config::PANEL_WIDTH / 2,
         config::PANEL_HEIGHT / 2 + config::ui(22), 1);
+  }
+  if (!helpBelow.isEmpty()) {
+    selectStatusFont();
+    epaper.drawString(
+        text_render::ellipsize(epaper, helpBelow, config::PANEL_WIDTH - config::ui(60)),
+        config::PANEL_WIDTH / 2,
+        config::PANEL_HEIGHT - config::ui(24), 1);
   }
   epaper.setFreeFont(nullptr);
   epaper.setTextFont(2);
@@ -1252,7 +1260,8 @@ void setup() {
   if (showStartupStatus) {
     LOG.println("[display] showing Wi-Fi connection status");
     renderStatus("Connecting to " + String(photo_wifi::ssid()), statusDetail,
-                 stationMac);
+                 stationMac,
+                 "To upload photos - from sleep, press green");
   }
   epaper.initGrayMode(GRAY_LEVEL4);
 #elif RETERMINAL_MODEL == 1003
@@ -1264,7 +1273,8 @@ void setup() {
   if (showStartupStatus) {
     LOG.println("[display] showing Wi-Fi connection status");
     renderStatus("Connecting to " + String(photo_wifi::ssid()), statusDetail,
-                 stationMac);
+                 stationMac,
+                 "To upload photos - from sleep, press green");
   }
 #endif
 
