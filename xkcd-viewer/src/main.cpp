@@ -554,8 +554,8 @@ void renderStatus(const String& message, const String& detail = "",
   }
   if (!helpBelow.isEmpty()) {
     // Bottom-of-panel hint: used for the "hold green at boot to
-    // reconfigure Wi-Fi" hint on the "Connecting to..." splash;
-    // skipped everywhere else so failure banners don't get chatty.
+    // reconfigure Wi-Fi" hint on the "Connecting to..." splash and
+    // the same hint on the "XKCD refresh failed" screen.
     selectStatusMessageDetailFont();
     epaper.drawString(text_render::ellipsize(epaper, text_render::displayText(helpBelow),
                                 config::PANEL_WIDTH - config::ui(60), 1),
@@ -1768,7 +1768,9 @@ void setup() {
     const String reason = sdReady
                               ? "No usable cached or downloadable comic"
                               : "Live download failed; check Wi-Fi or insert an SD card";
-    renderStatus("XKCD refresh failed", reason);
+    const String reconfigureHint =
+        "Keep the green button pressed for 2 seconds to reconfigure.";
+    renderStatus("XKCD refresh failed", reason, "", reconfigureHint);
   }
 
   // The panel retains the newly rendered frame without power. Do scheduled
