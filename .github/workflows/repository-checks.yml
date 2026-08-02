@@ -37,7 +37,7 @@ jobs:
           test -f photo-viewer/tools/prepare_photos.py
           test -f photo-viewer/requirements.txt
           test -f xkcd-viewer/assets/e1003-xkcd-screenshot.png
-          test -f weather-viewer/assets/e1003-weather-screenshot.png
+          test -f weather-viewer/assets/e1001-weather-screenshot.png
 
       - name: Ensure private and generated files are not tracked
         shell: bash
