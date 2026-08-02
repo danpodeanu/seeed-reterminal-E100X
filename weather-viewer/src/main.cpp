@@ -1547,7 +1547,7 @@ void setup() {
     LOG.println("[display] showing Wi-Fi connection status");
     renderStatus("Connecting to " + String(weather_wifi::ssid()), connectionDetail,
                  locationLabel,
-                 "Hold green button for 2 seconds to reconfigure Wi-Fi");
+                 "To configure device - from sleep, hold green for 2 seconds");
   }
   epaper.initGrayMode(GRAY_LEVEL4);
 #elif RETERMINAL_MODEL == 1003
@@ -1560,7 +1560,7 @@ void setup() {
     LOG.println("[display] showing Wi-Fi connection status");
     renderStatus("Connecting to " + String(weather_wifi::ssid()), connectionDetail,
                  locationLabel,
-                 "Hold green button for 2 seconds to reconfigure Wi-Fi");
+                 "To configure device - from sleep, hold green for 2 seconds");
   }
 #endif
 
