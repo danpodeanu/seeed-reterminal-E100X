@@ -15,6 +15,7 @@
 #include <math.h>
 #include <string.h>
 #include <time.h>
+#include <limits.h>
 
 #include "config.h"
 #include "secrets.h"
@@ -329,6 +330,95 @@ void selectLargeTemperatureFont() {
   epaper.setFreeFont(&Roboto_Bold48pt7b);
 #endif
 }
+
+#if RETERMINAL_MODEL == 1003
+// Scale numerator/denominator for the E1003 hero temperature. 3/2 =
+// 1.5x, which reads clearly on the 1872x1404 panel without needing a
+// second bundled font asset. The stroke width of Roboto_Bold90pt7b
+// (~20 px at source) is thick enough that a 1.5x nearest-neighbor
+// upscale never shows more than ~1 px of stair-step per stroke edge.
+constexpr int kLargeTempScaleNum = 3;
+constexpr int kLargeTempScaleDen = 2;
+
+inline int scaleN(int value) {
+  // Integer scale by num/den with round-to-nearest for non-negative
+  // values. Negative values (glyph yOffset is typically negative) are
+  // handled explicitly so rounding tracks the source sign symmetrically.
+  if (value >= 0) {
+    return (value * kLargeTempScaleNum + kLargeTempScaleDen / 2) /
+           kLargeTempScaleDen;
+  }
+  return -(((-value) * kLargeTempScaleNum + kLargeTempScaleDen / 2) /
+          kLargeTempScaleDen);
+}
+
+// Draw one glyph from `font` at the fixed 3:2 scale. `leftX` is the
+// pen position at the start of this glyph, `baselineY` is the shared
+// baseline in output pixels. Returns the pen advance in output
+// pixels. Nearest-neighbor upscaling; skips characters outside the
+// font's coverage instead of asserting so mixed strings degrade
+// silently.
+int drawGlyphScaled150(const GFXfont* font, char c,
+                       int leftX, int baselineY, uint32_t color) {
+  const uint8_t ch = static_cast<uint8_t>(c);
+  if (ch < font->first || ch > font->last) return 0;
+  const GFXglyph* g = &font->glyph[ch - font->first];
+  const int gw = g->width;
+  const int gh = g->height;
+  const int outW = scaleN(gw);
+  const int outH = scaleN(gh);
+  const int gLeft = leftX + scaleN(g->xOffset);
+  const int gTop = baselineY + scaleN(g->yOffset);
+  const uint8_t* bmp = &font->bitmap[g->bitmapOffset];
+  for (int oy = 0; oy < outH; ++oy) {
+    const int sy = (oy * kLargeTempScaleDen) / kLargeTempScaleNum;
+    if (sy >= gh) continue;
+    for (int ox = 0; ox < outW; ++ox) {
+      const int sx = (ox * kLargeTempScaleDen) / kLargeTempScaleNum;
+      if (sx >= gw) continue;
+      const int bitIdx = sy * gw + sx;
+      const uint8_t byte = pgm_read_byte(bmp + (bitIdx >> 3));
+      if (byte & (0x80 >> (bitIdx & 7))) {
+        epaper.drawPixel(gLeft + ox, gTop + oy, color);
+      }
+    }
+  }
+  return scaleN(g->xAdvance);
+}
+
+// Bounding box of `s` in output pixels for the given font at 3:2
+// scale. Also returns the baseline offset from box top (`baselineFromTop`)
+// so callers can center the box vertically and still position the
+// baseline correctly for drawGlyphScaled150.
+void measureScaled150(const GFXfont* font, const char* s,
+                      int& outW, int& outH, int& baselineFromTop) {
+  int totalAdvance = 0;
+  int minTop = INT_MAX;
+  int maxBot = INT_MIN;
+  bool any = false;
+  for (const char* p = s; *p; ++p) {
+    const uint8_t ch = static_cast<uint8_t>(*p);
+    if (ch < font->first || ch > font->last) continue;
+    const GFXglyph* g = &font->glyph[ch - font->first];
+    totalAdvance += g->xAdvance;
+    minTop = min(minTop, static_cast<int>(g->yOffset));
+    maxBot = max(maxBot, static_cast<int>(g->yOffset + g->height));
+    any = true;
+  }
+  if (!any) {
+    outW = 0;
+    outH = 0;
+    baselineFromTop = 0;
+    return;
+  }
+  outW = scaleN(totalAdvance);
+  outH = scaleN(maxBot - minTop);
+  // baseline lives `-minTop` above the box bottom in source coords;
+  // equivalently baseline sits `-minTop` below the box top (minTop is
+  // typically negative for numerals like -126).
+  baselineFromTop = scaleN(-minTop);
+}
+#endif  // RETERMINAL_MODEL == 1003
 
 void drawBadges(uint32_t background = PANEL_WHITE,
                 bool fillTextBackground = true,
@@ -683,6 +773,38 @@ void drawLargeTemperature(float celsius, int cx, int cy) {
   const bool negative = rounded < 0;
   const String value = String(abs(rounded));
   setBodyTextColor(PANEL_BLACK);
+#if RETERMINAL_MODEL == 1003
+  // E1003 hero temperature is rendered 1.5x larger than the bundled
+  // 90pt font by walking Roboto_Bold90pt7b glyphs and blitting each
+  // source pixel at 3:2 nearest-neighbor scale. This avoids shipping
+  // a second font asset just for this panel. The minus sign and
+  // degree glyph are drawn manually so they scale with `textHeight`
+  // automatically.
+  const GFXfont* font = &Roboto_Bold90pt7b;
+  int boxW, boxH, baselineFromTop;
+  measureScaled150(font, value.c_str(), boxW, boxH, baselineFromTop);
+  const int textHeight = boxH;
+  const int minusWidth = negative ? max(4, textHeight / 3) : 0;
+  const int minusGap = negative ? max(2, textHeight / 12) : 0;
+  const int valueLeft = cx - boxW / 2 + (minusWidth + minusGap) / 2;
+  const int valueTop = cy - boxH / 2;
+  const int baselineY = valueTop + baselineFromTop;
+  int pen = valueLeft;
+  for (unsigned i = 0; i < value.length(); ++i) {
+    pen += drawGlyphScaled150(font, value[i], pen, baselineY, PANEL_BLACK);
+  }
+  const int valueCenterX = valueLeft + boxW / 2;
+  if (negative) {
+    const int totalWidth = minusWidth + minusGap + boxW;
+    const int minusLeft = cx - totalWidth / 2;
+    thickLine(minusLeft, cy, minusLeft + minusWidth, cy,
+              max(2, textHeight / 18), PANEL_BLACK);
+  }
+  const int degreeRadius = max(3, textHeight / 15);
+  epaper.drawCircle(valueLeft + boxW + degreeRadius * 2,
+                    cy - textHeight / 3, degreeRadius, PANEL_BLACK);
+  (void)valueCenterX;
+#else
   epaper.setTextDatum(MC_DATUM);
   selectLargeTemperatureFont();
   const int textWidth = epaper.textWidth(value, 1);
@@ -700,6 +822,7 @@ void drawLargeTemperature(float celsius, int cx, int cy) {
   const int degreeRadius = max(3, textHeight / 15);
   epaper.drawCircle(valueCenterX + textWidth / 2 + degreeRadius * 2,
                     cy - textHeight / 3, degreeRadius, PANEL_BLACK);
+#endif
   epaper.setTextSize(1);
   epaper.setFreeFont(nullptr);
   epaper.setTextFont(1);
