@@ -1,241 +1,190 @@
-# Weather display for reTerminal E1001–E1004
+# Weather Viewer for reTerminal E1001–E1004
 
-Turn a Seeed Studio reTerminal E-series device into a low-power weather
-display. The device wakes periodically, downloads current conditions and a
-three-day forecast from Open-Meteo, refreshes the e-paper panel, switches off
-Wi-Fi, and returns to deep sleep.
+A low-power weather display for the Seeed Studio reTerminal E-series.
+The device wakes on a schedule, downloads current conditions and a
+short forecast, refreshes the e-paper panel, then switches Wi-Fi off
+and returns to deep sleep. Between refreshes it draws essentially no
+power while the panel stays visible.
 
-The header preserves the same local SHT4x temperature/humidity and battery
-status used by the XKCD Viewer. Outdoor weather is shown separately in the
-main dashboard.
+The header includes local temperature and humidity from the built-in
+SHT4x sensor plus battery status. The main dashboard shows outdoor
+conditions, the next likely rain, and a three-day outlook.
 
 ![Weather Viewer showing current conditions and a three-day forecast on a reTerminal E1001](assets/e1001-weather-screenshot.png)
 
-Frame captured directly from a reTerminal E1001 using the built-in screenshot
-export.
+*Frame captured directly from a reTerminal E1001 using the built-in
+screenshot feature.*
 
-## Features
+## What it does
 
-- One Arduino/PlatformIO source tree for E1001, E1002, E1003, and E1004.
-- Gray4, six-color, or Gray16 output according to the selected panel.
-- Current outdoor temperature, apparent temperature, humidity, wind, and
-  WMO weather condition.
-- Next likely rain time and probability from the upcoming hourly forecast.
-- Three-day low/high, precipitation probability, and maximum UV forecast.
-- Built-in SHT4x indoor temperature/humidity and battery gauge. A small
-  lightning bolt appears next to the gauge when the SY6974B charger IC
-  reports external USB power at refresh time (V1.2+ E1001/E1002 and all
-  E1003/E1004 boards; older revisions with the ETA6003 charger silently
-  omit the icon).
-- Cold-boot screen with Wi-Fi SSID and station MAC address.
-- Clearly labeled forecast date/time so stale data is easy to identify.
-- Optional SD cache of the last successful forecast.
-- Deep sleep between updates, with a configurable overnight quiet period.
-- No API key, server, Docker container, or SD card required.
+- Refreshes every 15 minutes by default (configurable).
+- Current outdoor temperature, apparent temperature, humidity, wind,
+  and a plain-language weather condition.
+- Time and probability of the next expected rain in the coming 48 h.
+- Three-day low/high with precipitation probability and maximum UV.
+- Severe-weather alert banner across the top when any local alert is
+  active (QWeather in China; US NWS elsewhere in the US).
+- Indoor temperature, humidity, battery percentage, and a USB-power
+  indicator in the header.
+- Overnight quiet hours (default 01:00–07:00) so the panel doesn't
+  refresh while you're asleep.
+- Optional SD-card cache so the last good forecast is redrawn even if
+  the network is down.
+- On-device Wi-Fi and location setup via a captive portal with QR
+  codes.
 
-## Supported models
+## Supported hardware
 
-| PlatformIO environment | Panel | Native output |
+| Environment | Panel | Native output |
 | --- | --- | --- |
-| `reterminal_e1001` | 800×480 UC8179 | Gray4 |
+| `reterminal_e1001` | 800×480 UC8179 | 4-level gray |
 | `reterminal_e1002` | 800×480 ED2208 | six-color |
-| `reterminal_e1003` | 1872×1404 ED103TC2 | Gray16 |
+| `reterminal_e1003` | 1872×1404 ED103TC2 | 16-level gray |
 | `reterminal_e1004` | 1200×1600 T133A01 | six-color |
 
-## Configure
+You will also need:
 
-There are two ways to configure the viewer:
+- A 2.4 GHz Wi-Fi network with internet access.
+- A data-capable USB-C cable for the first flash.
+- **Optional:** a FAT32 or exFAT microSD card for the forecast cache,
+  screenshots, and Unicode fonts (used for non-ASCII location names).
+- **Optional:** a CR1220 coin cell so the onboard PCF8563 hardware
+  clock keeps time while the physical power switch is off.
 
-1. **On-device portal (recommended).** On first boot, or whenever you hold
-   the green button for less than 5 s at boot, the device raises a WPA2
-   access point named `ReTerminal xxxxxx` with a per-device password
-   (generated once and persisted in NVS) and hosts a small captive portal.
-   The e-paper panel renders two QR codes on entry: one that autofills the
-   Wi-Fi credentials on a phone, another that opens `http://192.168.1.1/`.
-   Every setting that used to live in `include/config.h` and every secret
-   from `include/secrets.h` (Wi-Fi + full QWeather credentials) is
-   editable from the browser. Values persist in NVS and survive reflashing.
-   The reset pane wipes the Wi-Fi and app NVS namespaces so the device
-   reverts to the compile-time defaults.
+## Getting started
 
-2. **Compile-time defaults.** The values in `include/secrets.h` and
-   `include/config.h` still act as fallbacks when NVS has no value stored.
-   User-editable behavior lives in `include/config.h`; implementation-level
-   knobs (panel geometry, timing budgets, cache paths, retry windows) are
-   in `include/system_config.h`. To seed the credentials header:
+### 1. Flash the firmware
 
-   ```bash
-   cp include/secrets.h.example include/secrets.h
-   ```
+The fastest path is the web flasher — no installer, no `esptool.py`:
 
-   Edit `include/secrets.h` and set `WIFI_SSID` / `WIFI_PASSWORD` (and the
-   QWeather fields if you're using that provider). The placeholder values
-   `YOUR_WIFI_NAME` / `YOUR_QWEATHER_PROJECT_ID` etc. are treated as
-   "unconfigured", so leaving them in place launches the portal instead.
+> [Flash your reTerminal from the browser →](https://danpodeanu.github.io/seeed-reterminal-E100X/)
 
-The example forecast location is London. Edit these values in
-`include/config.h`:
+Pick the reTerminal model, select **Weather Viewer**, connect over
+USB-C, and Chrome or Edge writes the latest release directly. To
+build from source instead, see [Building from source](#building-from-source).
 
-```cpp
-constexpr char LOCATION_NAME[] = "London";
-constexpr double LATITUDE = 51.5074;
-constexpr double LONGITUDE = -0.1278;
+### 2. Connect the device to Wi-Fi and pick a location
+
+On first boot (and any time no Wi-Fi is configured) the device raises
+its own captive-portal access point and shows two QR codes on the
+panel:
+
+- Scan the first QR from a phone to join the AP — the SSID is
+  `ReTerminal xxxxxx` with a device-specific password (also printed
+  on the panel).
+- Scan the second QR to open the settings page in a browser.
+
+Every setting that used to require editing header files is editable
+from that page: Wi-Fi credentials, weather provider, location
+(latitude/longitude and a display name), timezone, NTP servers, quiet
+hours, refresh cadence, and the QWeather API credentials. Values
+persist in NVS and survive reflashing. The Reset pane wipes the Wi-Fi
+and app namespaces so the device reverts to the compile-time
+defaults.
+
+You can re-enter the portal at any time: **while the device is
+sleeping, hold the green button for 1–5 seconds**. Wait for the first
+beep and keep holding — when the panel switches to the QR-code portal
+you're in.
+
+### 3. Choose a weather provider
+
+Two providers are supported:
+
+- **Open-Meteo** (default). No account, no key, no rate limit
+  configuration required. Works globally.
+- **QWeather** (和风天气). Requires a free QWeather developer account
+  authenticated with an Ed25519 JWT. Better coverage inside mainland
+  China. Set up steps are in [QWeather setup](#qweather-setup) below.
+
+Both providers use the same latitude/longitude and the same on-panel
+layout.
+
+### 4. Optional: insert an SD card
+
+Weather Viewer works without a card. Adding one enables:
+
+- A last-good forecast cache under `/weather/forecast.json`. On a
+  normal wake, a saved forecast is redrawn without a network request
+  as long as it is no older than the sleep interval.
+- Screenshots captured via a long green-button hold, written to
+  `/screenshot.bmp`.
+- Unicode location names (`Muenchen`, `São Paulo`) rendered via
+  `.vlw` smooth fonts in `/fonts/`. Without the fonts, non-ASCII
+  characters fall back to the built-in GFX font and render as
+  garbage.
+
+Fonts can be seeded with the xkcd viewer's preloader (they are
+shared between apps):
+
+```bash
+python3 ../xkcd-viewer/tools/preload_sd.py /Volumes/SD --with-fonts
 ```
 
-The same latitude / longitude are used regardless of which weather
-provider you pick below.
+or via `tools/fonts/make_vlw.py` directly.
 
-`LOCATION_NAME` may contain non-ASCII characters (e.g. "München",
-"São Paulo") - the panel renders the header title, footer provider
-label, and location name via a TFT_eSPI `.vlw` smooth font loaded
-from `/fonts/sans_bold_<size>.vlw` on the SD card. Those files are
-shared with the xkcd viewer; generate them once with
-`xkcd-viewer/tools/preload_sd.py --with-fonts` or
-`tools/fonts/make_vlw.py`. Without the SD card (or the font
-file), those strings fall back to the built-in GFX FreeSansBold
-font and any non-ASCII bytes render as garbage; the rest of the panel
-is unaffected.
+## Using the viewer
 
-### Choosing a weather provider
+- **Every 15 minutes** (default) the device wakes, refreshes the
+  forecast, redraws the panel, and returns to sleep.
+- **Buttons on the front** all wake the device:
+  - Any front button → force an immediate live refresh (bypasses
+    HTTP caches).
+  - **Green button + 1–5 s hold from sleep** → open the Wi-Fi
+    configuration portal (QR codes on the panel).
+  - **Green button + longer hold (>5 s) from sleep** → save a
+    screenshot of the current frame to `/screenshot.bmp`.
+- **Header readouts** update on every refresh:
+  - Indoor temperature and humidity (SHT4x).
+  - Battery percentage plus a lightning bolt when USB power is
+    connected (SY6974B-equipped boards only; older revisions with
+    ETA6003 silently omit the icon).
+- **Severe-weather alerts** appear as a shaded
+  `! Alert: <title> (+N more)` bar above the current-temperature
+  area whenever the configured provider reports an active alert for
+  your location.
+- **Quiet hours** (default 01:00–07:00) suppress automatic refreshes
+  overnight. Cold boots and button wakes still refresh; the last
+  scheduled frame before quiet hours re-labels itself
+  `sleeping until 07:00`.
+- **When the forecast can't be fetched**, the device falls back to a
+  reasonably fresh SD-cached forecast if one exists. If neither is
+  available, an error screen explains what failed and the device
+  enters button-only sleep until you press any front button.
+- **Between refreshes** Wi-Fi is off, the battery-measurement
+  circuit is off, and the e-paper image stays visible for free.
 
-Two providers are supported. Select one in `include/config.h`:
+## Troubleshooting
 
-```cpp
-constexpr WeatherProvider WEATHER_PROVIDER = WeatherProvider::OpenMeteo;
-// constexpr WeatherProvider WEATHER_PROVIDER = WeatherProvider::QWeather;
-```
+- **Panel is stuck on "Connecting to <SSID>"** — the stored Wi-Fi
+  credentials probably don't match your network. Re-enter the portal
+  (hold green 1–5 s while sleeping) and update them.
+- **Panel shows "Weather unavailable"** — either the internet is
+  down, the API credentials are wrong (QWeather), or the location
+  coordinates are invalid. The detail line names which step failed;
+  press any button to retry.
+- **QWeather alert bar never appears** — the free tier requires the
+  *Weather Warning* data resource to be bound to your project in the
+  QWeather console. Without that binding the endpoint returns HTTP
+  403.
+- **Location name renders as boxes on the panel** — the Unicode
+  smooth fonts are missing from the SD card. Regenerate them (see
+  [Getting started, step 4](#4-optional-insert-an-sd-card)) or edit
+  the location name to ASCII.
+- **Log timestamps show 1970-01-01** — the clock hasn't synced yet;
+  NTP runs on cold boot and at most once every six hours after that.
 
-- **Open-Meteo** (default). No account, no key, no rate limit configuration
-  required. Works globally.
-- **QWeather** (和风天气). Requires a free QWeather developer account,
-  authenticated with JWT (EdDSA / Ed25519). Better coverage inside mainland
-  China. Sign up at <https://dev.qweather.com/>, create a project, create a
-  credential of type "JWT", and download the ed25519 private key PEM. Then
-  add to `include/secrets.h`:
+---
 
-  ```cpp
-  #define QWEATHER_API_HOST       "devapi.qweather.com"   // or your paid host
-  #define QWEATHER_PROJECT_ID     "<your project id>"     // JWT "sub"
-  #define QWEATHER_CREDENTIAL_ID  "<your credential id>"  // JWT "kid"
-  #define QWEATHER_PRIVATE_KEY_HEX "<64 hex chars>"
-  ```
+## Technical details
 
-  The QWeather console also shows a **Developer ID** at the account
-  level -- it is not used by the JWT and does not need to be stored.
+Everything below is for developers building, extending, or debugging
+the firmware.
 
-  Extract the 32-byte ed25519 seed as 64 hex characters from the downloaded
-  PEM with:
+### Building from source
 
-  ```bash
-  openssl pkey -in ed25519-private.pem -text -noout
-  ```
-
-  Copy the `priv:` bytes (removing colons and whitespace) into
-  `QWEATHER_PRIVATE_KEY_HEX`. The firmware generates a fresh JWT on
-  every fetch cycle using `rweather/Crypto` and sends it as an
-  `Authorization` bearer token.
-
-  Language for QWeather's textual fields (condition names, warning
-  titles) is controlled by `QWEATHER_LANG` in `include/config.h`.
-  Common values are `"en"`, `"zh"` (Simplified Chinese, upstream
-  default), `"zh-hant"`, `"de"`, `"es"`, `"fr"`, `"ja"`, `"ko"`,
-  `"ru"`. Ignored when the active provider is Open-Meteo.
-
-### Severe-weather alerts
-
-When any severe-weather alert is active for the configured location,
-the firmware renders a shaded `! Alert: <title> (+N more)` bar above
-the current-temperature area. Two independent opt-ins in
-`include/config.h` control which upstream is consulted:
-
-- `QWEATHER_ALERTS_ENABLED` (default `true`): fetch
-  `/v7/warning/now` from QWeather on every refresh. On the free tier
-  the endpoint requires the "Weather Warning" data resource to be
-  bound to your project in the QWeather console; unbound projects
-  return HTTP 403 and no alert bar is shown. Toggle to `false` to
-  skip the guaranteed-to-fail round-trip. Has no effect on the
-  Open-Meteo path.
-- `NWS_ALERTS_ENABLED` (default `false`): fetch
-  `api.weather.gov/alerts/active` from the US National Weather
-  Service. Free, no key, but coverage is US only -- flip to `true`
-  only if the device sits in a US state or territory. Non-US points
-  return HTTP 400 so leaving it on outside the US would just waste
-  bandwidth. Has no effect on the QWeather path.
-
-Open-Meteo itself does not expose a government-alerts endpoint, so
-the Open-Meteo path shows alerts only when `NWS_ALERTS_ENABLED` is on
-and the device is in NWS coverage.
-
-
-The device also synchronizes its system clock after Wi-Fi connects. Configure
-the POSIX timezone and NTP servers in the same file:
-
-```cpp
-constexpr char TIMEZONE[] = "GMT0BST,M3.5.0/1,M10.5.0";
-constexpr char NTP_SERVER_PRIMARY[] = "pool.ntp.org";
-constexpr char NTP_SERVER_SECONDARY[] = "time.cloudflare.com";
-constexpr uint32_t NTP_DHCP_TIMEOUT_MS = 1000;
-```
-
-The firmware requests NTP servers through DHCP option 42 before acquiring its
-Wi-Fi lease. If DHCP supplies no server, or that server does not respond within
-the configured DHCP timeout, it falls back to the two servers above.
-
-After a successful NTP synchronization, the firmware stores UTC in the onboard
-PCF8563 hardware RTC. If a later deep-sleep wake cannot synchronize with NTP,
-the PCF8563 restores the ESP32 clock only when its voltage-low (`VL`) flag is
-clear. An invalid or rolled-back ESP clock is also recovered from the PCF8563
-before NTP eligibility, quiet hours, or cached-forecast freshness is evaluated.
-Cold boots log the stored UTC value and `VL` state. A CR1220 coin cell is
-required for reliable retention while the physical power switch is off.
-
-The London rule uses GMT in winter and BST from the last Sunday in March until
-the last Sunday in October. The centered `Weather at` timestamp still comes
-from Open-Meteo and identifies the weather data's valid time; it is not the
-NTP request time.
-
-The default refresh interval is 15 minutes. Change `SLEEP_SECONDS` in the same
-file if needed.
-
-Automatic refreshes are suppressed overnight by default:
-
-```cpp
-constexpr bool QUIET_HOURS_ENABLED = true;
-constexpr uint8_t QUIET_START_HOUR = 1;
-constexpr uint8_t QUIET_START_MINUTE = 0;
-constexpr uint8_t QUIET_END_HOUR = 7;
-constexpr uint8_t QUIET_END_MINUTE = 0;
-```
-
-Rain timing examines the next 48 hourly intervals and selects the first with
-at least 0.1 mm of forecast liquid precipitation and, when probability data
-is available, at least 30% probability. These values are configurable:
-
-```cpp
-constexpr uint8_t RAIN_FORECAST_HOURS = 48;
-constexpr float RAIN_START_THRESHOLD_MM = 0.1f;
-constexpr uint8_t RAIN_PROBABILITY_THRESHOLD = 30;
-```
-
-An SD card is optional. When present, the firmware atomically stores the last
-successful API response as `/weather/forecast.json`. On normal cold and timer
-wakes, a saved forecast is used without another Open-Meteo request when its
-timestamp is no more than `SLEEP_SECONDS` old. Button wakes remain explicit
-live refreshes. Older forecasts are rejected. A cold boot can still connect for
-NTP before validating the saved timestamp. Without a card, live weather works
-normally.
-
-If neither live weather nor a sufficiently fresh saved forecast is available,
-the display explains the live and cache failures, then enters button-only deep
-sleep. Automatic timer retries remain disabled until a front button or
-hardware reset starts another attempt.
-
-Weather icons are vector graphics built into the firmware, not downloaded
-images, so they consume no network traffic and require no SD cache.
-
-## Build and upload
-
-Build the environment matching the physical device:
+Install [PlatformIO Core](https://platformio.org/install/cli), then
+build the environment matching the physical device:
 
 ```bash
 pio run -e reterminal_e1001
@@ -256,62 +205,225 @@ Monitor logs:
 pio device monitor --port /dev/ttyUSB0 --baud 115200
 ```
 
-Logging uses UART1 on GPIO43/GPIO44, matching the carrier USB-to-UART bridge.
-Every application log line starts with local time in
-`[YYYY-MM-DD HH:MM:SS.mmm]` format. Before the clock is synchronized, the
-same format intentionally shows a 1970 date.
+Logging uses UART1 on GPIO43/GPIO44, matching the carrier USB-to-UART
+bridge. Every application log line starts with local time in
+`[YYYY-MM-DD HH:MM:SS.mmm]` format. Before the clock is
+synchronized, the same format intentionally shows a 1970 date.
 
-## Operation
+### Compile-time configuration
 
-- Cold boot/reset displays the station MAC above `Connecting to <SSID>`.
-- Every startup logs a `[wake]` line with the local time and whether it was a
-  cold boot/reset, scheduled timer, or front-button wake.
-- Timer wakes update every 15 minutes without an intermediate status refresh.
-- Any front button wakes the device, beeps once, and forces an immediate live
-  API update that bypasses HTTP caches.
-- Hold the green GPIO3 button while the device is sleeping. Keep holding it
-  through the first beep until a second beep confirms screenshot mode. With an
-  SD card mounted, the newly rendered weather frame is written as an indexed
-  BMP to `/screenshot.bmp`, replacing the previous screenshot. Remove the card
-  and open that file on a computer to retrieve it.
-- NTP runs on cold boot and at most once every six hours. DHCP-provided NTP is tried
-  first, followed by the configured public servers. NTP failure is logged but
-  does not block the weather request.
-- From 01:00 until 07:00 by default, timer wakes return directly to sleep. The
-  final scheduled refresh before 01:00 changes its title to
-  `sleeping until 07:00`. A cold boot or any front-button wake overrides quiet
-  hours, refreshes once, and then sleeps until 07:00.
-- If a background update fails, an SD-cached forecast is used when available;
-  otherwise the previous e-paper forecast remains visible.
-- On a cold boot where no forecast has yet been shown, an error screen explains
-  whether Wi-Fi or forecast download failed.
-- Wi-Fi is switched off as soon as the Open-Meteo response is parsed, before
-  cache writing, frame composition, and panel refresh. The battery measurement
-  circuit is switched off during sleep.
+Every setting is editable from the on-device portal. The
+`include/secrets.h` and `include/config.h` values only apply when NVS
+has no stored value.
 
-## Weather data
+```bash
+cp include/secrets.h.example include/secrets.h
+```
 
-The firmware calls Open-Meteo directly over HTTPS:
+Edit `include/secrets.h` and set `WIFI_SSID` / `WIFI_PASSWORD` (and
+the QWeather fields if you're using that provider). The placeholder
+values `YOUR_WIFI_NAME` / `YOUR_QWEATHER_PROJECT_ID` etc. are treated
+as "unconfigured", so leaving them in place launches the portal
+instead.
+
+User-editable behavior lives in `include/config.h`;
+implementation-level knobs (panel geometry, timing budgets, cache
+paths, retry windows) are in `include/system_config.h`.
+
+The example forecast location is London:
+
+```cpp
+constexpr char LOCATION_NAME[] = "London";
+constexpr double LATITUDE = 51.5074;
+constexpr double LONGITUDE = -0.1278;
+```
+
+The same latitude/longitude are used regardless of which weather
+provider you pick.
+
+`LOCATION_NAME` may contain non-ASCII characters (e.g. "München",
+"São Paulo") — the panel renders the header title, footer provider
+label, and location name via a TFT_eSPI `.vlw` smooth font loaded
+from `/fonts/sans_bold_<size>.vlw` on the SD card. Those files are
+shared with the xkcd viewer; generate them once with
+`xkcd-viewer/tools/preload_sd.py --with-fonts` or
+`tools/fonts/make_vlw.py`. Without the SD card (or the font file),
+those strings fall back to the built-in GFX FreeSansBold font and any
+non-ASCII bytes render as garbage; the rest of the panel is
+unaffected.
+
+Select a weather provider in `include/config.h`:
+
+```cpp
+constexpr WeatherProvider WEATHER_PROVIDER = WeatherProvider::OpenMeteo;
+// constexpr WeatherProvider WEATHER_PROVIDER = WeatherProvider::QWeather;
+```
+
+### QWeather setup
+
+Sign up at <https://dev.qweather.com/>, create a project, create a
+credential of type "JWT", and download the ed25519 private key PEM.
+Then add to `include/secrets.h`:
+
+```cpp
+#define QWEATHER_API_HOST       "devapi.qweather.com"   // or your paid host
+#define QWEATHER_PROJECT_ID     "<your project id>"     // JWT "sub"
+#define QWEATHER_CREDENTIAL_ID  "<your credential id>"  // JWT "kid"
+#define QWEATHER_PRIVATE_KEY_HEX "<64 hex chars>"
+```
+
+The QWeather console also shows a **Developer ID** at the account
+level — it is not used by the JWT and does not need to be stored.
+
+Extract the 32-byte ed25519 seed as 64 hex characters from the
+downloaded PEM with:
+
+```bash
+openssl pkey -in ed25519-private.pem -text -noout
+```
+
+Copy the `priv:` bytes (removing colons and whitespace) into
+`QWEATHER_PRIVATE_KEY_HEX`. The firmware generates a fresh JWT on
+every fetch cycle using `rweather/Crypto` and sends it as an
+`Authorization` bearer token.
+
+Language for QWeather's textual fields (condition names, warning
+titles) is controlled by `QWEATHER_LANG` in `include/config.h`.
+Common values are `"en"`, `"zh"` (Simplified Chinese, upstream
+default), `"zh-hant"`, `"de"`, `"es"`, `"fr"`, `"ja"`, `"ko"`,
+`"ru"`. Ignored when the active provider is Open-Meteo.
+
+### Severe-weather alerts
+
+Two independent opt-ins in `include/config.h` control which upstream
+is consulted:
+
+- `QWEATHER_ALERTS_ENABLED` (default `true`): fetch
+  `/v7/warning/now` from QWeather on every refresh. On the free tier
+  the endpoint requires the "Weather Warning" data resource to be
+  bound to your project in the QWeather console; unbound projects
+  return HTTP 403 and no alert bar is shown. Toggle to `false` to
+  skip the guaranteed-to-fail round-trip. Has no effect on the
+  Open-Meteo path.
+- `NWS_ALERTS_ENABLED` (default `false`): fetch
+  `api.weather.gov/alerts/active` from the US National Weather
+  Service. Free, no key, but coverage is US only — flip to `true`
+  only if the device sits in a US state or territory. Non-US points
+  return HTTP 400 so leaving it on outside the US would just waste
+  bandwidth. Has no effect on the QWeather path.
+
+Open-Meteo itself does not expose a government-alerts endpoint, so
+the Open-Meteo path shows alerts only when `NWS_ALERTS_ENABLED` is on
+and the device is in NWS coverage.
+
+### Time and NTP
+
+Default time settings in `include/config.h`:
+
+```cpp
+constexpr char TIMEZONE[] = "GMT0BST,M3.5.0/1,M10.5.0";
+constexpr char NTP_SERVER_PRIMARY[] = "pool.ntp.org";
+constexpr char NTP_SERVER_SECONDARY[] = "time.cloudflare.com";
+constexpr uint32_t NTP_DHCP_TIMEOUT_MS = 1000;
+```
+
+The firmware requests NTP servers through DHCP option 42 before
+acquiring its Wi-Fi lease. If DHCP supplies no server, or that server
+does not respond within the configured DHCP timeout, it falls back
+to the two servers above.
+
+After a successful NTP synchronization, the firmware stores UTC in
+the onboard PCF8563 hardware RTC. If a later deep-sleep wake cannot
+synchronize with NTP, the PCF8563 restores the ESP32 clock only when
+its voltage-low (`VL`) flag is clear. An invalid or rolled-back ESP
+clock is also recovered from the PCF8563 before NTP eligibility,
+quiet hours, or cached-forecast freshness is evaluated. Cold boots
+log the stored UTC value and `VL` state. A CR1220 coin cell is
+required for reliable retention while the physical power switch is
+off.
+
+The London rule uses GMT in winter and BST from the last Sunday in
+March until the last Sunday in October. The centered `Weather at`
+timestamp on the panel identifies the weather data's valid time; it
+is not the NTP request time.
+
+### Cadence, quiet hours, and rain thresholds
+
+```cpp
+constexpr uint64_t SLEEP_SECONDS = 15ULL * 60ULL;
+constexpr bool QUIET_HOURS_ENABLED = true;
+constexpr uint8_t QUIET_START_HOUR = 1;
+constexpr uint8_t QUIET_START_MINUTE = 0;
+constexpr uint8_t QUIET_END_HOUR = 7;
+constexpr uint8_t QUIET_END_MINUTE = 0;
+
+constexpr uint8_t RAIN_FORECAST_HOURS = 48;
+constexpr float RAIN_START_THRESHOLD_MM = 0.1f;
+constexpr uint8_t RAIN_PROBABILITY_THRESHOLD = 30;
+```
+
+Rain timing examines the next 48 hourly intervals and selects the
+first with at least 0.1 mm of forecast liquid precipitation and,
+when probability data is available, at least 30% probability.
+
+### Forecast cache
+
+An SD card is optional. When present, the firmware atomically stores
+the last successful API response as `/weather/forecast.json`. On
+normal cold and timer wakes, a saved forecast is used without another
+Open-Meteo request when its timestamp is no more than `SLEEP_SECONDS`
+old. Button wakes remain explicit live refreshes. Older forecasts are
+rejected. A cold boot can still connect for NTP before validating the
+saved timestamp. Without a card, live weather works normally.
+
+If neither live weather nor a sufficiently fresh saved forecast is
+available, the display explains the live and cache failures, then
+enters button-only deep sleep. Automatic timer retries remain
+disabled until a front button or hardware reset starts another
+attempt.
+
+Weather icons are vector graphics built into the firmware, not
+downloaded images, so they consume no network traffic and require no
+SD cache.
+
+### Weather data
+
+The Open-Meteo path calls:
 
 ```text
 https://api.open-meteo.com/v1/forecast
 ```
 
-It requests current temperature, apparent temperature, relative humidity,
-weather code and wind speed; hourly precipitation probability, precipitation,
-rain and showers; plus daily weather code, low/high temperature, maximum UV
-index, and maximum precipitation probability. Open-Meteo chooses the forecast
-models appropriate for the configured coordinates.
+It requests current temperature, apparent temperature, relative
+humidity, weather code and wind speed; hourly precipitation
+probability, precipitation, rain and showers; plus daily weather
+code, low/high temperature, maximum UV index, and maximum
+precipitation probability. Open-Meteo chooses the forecast models
+appropriate for the configured coordinates.
 
-For regions where Open-Meteo does not provide native 15-minute model data,
-exact rain onset remains an hourly forecast estimate rather
+For regions where Open-Meteo does not provide native 15-minute model
+data, exact rain onset remains an hourly forecast estimate rather
 than a radar nowcast.
 
-HTTPS certificate verification is disabled because the firmware does not
-carry a CA bundle. Wi-Fi credentials are compiled into the firmware; keep
-`include/secrets.h` private.
+HTTPS certificate verification is disabled because the firmware does
+not carry a CA bundle. Wi-Fi credentials are compiled into the
+firmware; keep `include/secrets.h` private.
 
-## Development
+### Operational notes
+
+- Cold boot/reset displays the station MAC above `Connecting to
+  <SSID>`.
+- Every startup logs a `[wake]` line with the local time and whether
+  it was a cold boot/reset, scheduled timer, or front-button wake.
+- Timer wakes update every 15 minutes without an intermediate status
+  refresh.
+- Any front button wakes the device, beeps once, and forces an
+  immediate live API update that bypasses HTTP caches.
+- Wi-Fi is switched off as soon as the weather response is parsed,
+  before cache writing, frame composition, and panel refresh. The
+  battery measurement circuit is switched off during sleep.
+
+### Development
 
 Build all targets before submitting changes:
 
@@ -326,14 +438,16 @@ Run the native unit tests:
 pio test -c platformio-test.ini -e native_test
 ```
 
-The tests cover quiet-hour boundaries, wake overrides, and daily refresh
-timing. GitHub Actions runs them alongside all four firmware builds.
+The tests cover quiet-hour boundaries, wake overrides, and daily
+refresh timing. GitHub Actions runs them alongside all four firmware
+builds.
 
-## References
+### References
 
 - [Open-Meteo Weather Forecast API](https://open-meteo.com/en/docs)
+- [QWeather Developer Portal](https://dev.qweather.com/)
 - [Seeed PlatformIO setup](https://wiki.seeedstudio.com/epaper_work_with_platformio/)
 - [Seeed reTerminal E-series Arduino guide](https://wiki.seeedstudio.com/reterminal_e10xx_with_arduino/)
 
-This is an unofficial project and is not affiliated with Open-Meteo or Seeed
-Studio.
+This is an unofficial project and is not affiliated with Open-Meteo,
+QWeather, or Seeed Studio.
