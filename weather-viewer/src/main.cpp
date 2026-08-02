@@ -1285,21 +1285,6 @@ void setup() {
     // the Wi-Fi AP + web server.
     LOG.println("[portal] panel: begin");
     epaper.begin();
-    // E1001 (UC8179) Gray4 pushes silently vanish unless the panel SPI
-    // bus is re-inited with a real MISO pin. The normal render path gets
-    // this for free via sd_card::mount() right after epaper.begin(); the
-    // portal path skips SD, so call the helper directly. See
-    // common/include/epaper_setup.h.
-    epaper_setup::finalize(epaper.getSPIinstance());
-    // SD is optional in weather mode, but we mount it best-effort here
-    // so the portal's SD browser tab can serve /photos, /weather cache,
-    // logs, etc. Failure is silent - the browser just shows an empty
-    // listing.
-    const bool portalSdReady =
-        sd_card::mount(epaper.getSPIinstance(), config::CACHE_DIR);
-    if (!portalSdReady) {
-      LOG.println("[portal] SD mount failed; browser tab will be empty");
-    }
 #if RETERMINAL_MODEL == 1001
     epaper.initGrayMode(GRAY_LEVEL4);
     const GFXfont* titleFont    = &FreeSansBold18pt7b;
@@ -1319,6 +1304,17 @@ void setup() {
     const GFXfont* detailFont   = &FreeSans9pt7b;
 #endif
     LOG.println("[portal] panel: grayMode initialised");
+    // We used to call sd_card::mount here (which internally does
+    // epaper_setup::finalize), but on E1001 that left SPI in a state
+    // TFT_eSPI's epaper.update() would then trample, so subsequent SD
+    // ops via /browse would fail every time with 'bus reset ... failed'.
+    // The pre-SD portal path called epaper_setup::finalize directly for
+    // the same reason: without it, E1001 Gray4 pushes silently vanish.
+    // We call it here for the same effect, then defer sd_card::mount
+    // until after the panel refresh completes (below) so SD.begin() is
+    // the last configurator to touch the SPI bus.
+    epaper_setup::finalize(epaper.getSPIinstance());
+    bool portalSdReady = false;
 
     config_portal::Config portalCfg;
     portalCfg.wifiSchema = &config_portal::kWifiSchema;
@@ -1381,6 +1377,18 @@ void setup() {
       panel_watchdog::guard([]() { epaper.update(); });
       LOG.printf("[portal] panel refresh complete in %u ms\n",
                  static_cast<unsigned>(millis() - updateStart));
+
+      // Now that the panel is done, mount SD so SD.begin() is the last
+      // caller to configure the shared SPI bus. Mounting earlier left
+      // SD in a state that epaper.update() would then break, causing
+      // every /browse to fail with 'bus reset ... failed'. SD is
+      // optional in portal mode - a missing/failing card just leaves
+      // the browser tab empty.
+      portalSdReady =
+          sd_card::mount(epaper.getSPIinstance(), config::CACHE_DIR);
+      if (!portalSdReady) {
+        LOG.println("[portal] SD mount failed; browser tab will be empty");
+      }
 
       uint32_t lastHeartbeatMs = millis();
       uint32_t greenLowSinceMs = 0;
