@@ -59,7 +59,10 @@ void backoffSleep(int attempt) {
 // to recover the "driver wedged" case where SD.open()/rename()/remove()
 // all keep blocking for ~1 s before returning false. SD.end() +
 // SD.begin() flushes the driver's internal state and re-negotiates
-// the card. Returns true if the remount succeeded.
+// the card. Uses the same short polling budget as mount() so a card
+// that needs an extra beat to power-cycle (e.g. right after the Wi-Fi
+// radio powered down mid-refresh) still comes back. Returns true if
+// the remount succeeded.
 bool attemptRemount() {
   if (!g_spi || g_csPin < 0) return false;
   const uint32_t now = millis();
@@ -71,8 +74,24 @@ bool attemptRemount() {
   }
   g_lastRemountMs = now;
   SD.end();
-  delay(50);
-  const bool ok = SD.begin(g_csPin, *g_spi);
+  // Re-run the shared peripheral rail + SPI init the initial mount did.
+  // wifi_sta::disable() and big HTTPS transfers can leave the rail in a
+  // state where a plain SD.begin() sees the card as absent; finalize()
+  // is idempotent and cheap.
+  epaper_setup::finalize(*g_spi);
+  // Poll SD.begin() with the same 250 ms budget as mount(). A cold-ish
+  // card can miss the first CMD0 after a bus reset but respond within a
+  // few tens of ms; a single-shot retry with a 50 ms delay (the old
+  // behaviour) was not enough.
+  constexpr uint32_t kSdRemountBudgetMs = 250;
+  constexpr uint32_t kSdRemountPollMs = 25;
+  const uint32_t startMs = millis();
+  bool ok = SD.begin(g_csPin, *g_spi);
+  while (!ok && (millis() - startMs) < kSdRemountBudgetMs) {
+    SD.end();
+    delay(kSdRemountPollMs);
+    ok = SD.begin(g_csPin, *g_spi);
+  }
   LOG.printf("[sd] bus reset after stalled op -> %s\n",
              ok ? "remounted" : "failed");
   return ok;
