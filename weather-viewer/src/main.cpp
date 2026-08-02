@@ -761,6 +761,20 @@ void drawWeatherIcon(int cx, int cy, int size, int code, bool isDay = true) {
   weather_icons::draw(epaper, cx, cy, size, code, isDay, PANEL_BLACK);
 }
 
+// Bold degree mark next to the hero temperature. The classic single-
+// pixel outline gets swallowed by both the ink-wash background and
+// the sheer size of the digits next to it, so paint a thick ring by
+// stroking `thickness` concentric circles. The interior stays hollow
+// so the mark still reads as "degree" rather than a filled bullet.
+void drawDegreeMark(int cx, int cy, int outerRadius, int thickness,
+                    uint32_t color) {
+  if (thickness < 1) thickness = 1;
+  if (thickness > outerRadius) thickness = outerRadius;
+  for (int t = 0; t < thickness; ++t) {
+    epaper.drawCircle(cx, cy, outerRadius - t, color);
+  }
+}
+
 void drawLargeTemperature(float celsius, int cx, int cy) {
   if (!isfinite(celsius)) {
     setBodyTextColor(PANEL_BLACK);
@@ -800,9 +814,11 @@ void drawLargeTemperature(float celsius, int cx, int cy) {
     thickLine(minusLeft, cy, minusLeft + minusWidth, cy,
               max(2, textHeight / 18), PANEL_BLACK);
   }
-  const int degreeRadius = max(3, textHeight / 15);
-  epaper.drawCircle(valueLeft + boxW + degreeRadius * 2,
-                    cy - textHeight / 3, degreeRadius, PANEL_BLACK);
+  const int degreeRadius = max(3, textHeight / 9);
+  const int degreeThickness = max(2, textHeight / 28);
+  drawDegreeMark(valueLeft + boxW + degreeRadius * 2,
+                 cy - textHeight / 3, degreeRadius, degreeThickness,
+                 PANEL_BLACK);
   (void)valueCenterX;
 #else
   epaper.setTextDatum(MC_DATUM);
@@ -819,9 +835,11 @@ void drawLargeTemperature(float celsius, int cx, int cy) {
     thickLine(minusLeft, cy, minusLeft + minusWidth, cy,
               max(2, textHeight / 18), PANEL_BLACK);
   }
-  const int degreeRadius = max(3, textHeight / 15);
-  epaper.drawCircle(valueCenterX + textWidth / 2 + degreeRadius * 2,
-                    cy - textHeight / 3, degreeRadius, PANEL_BLACK);
+  const int degreeRadius = max(3, textHeight / 9);
+  const int degreeThickness = max(2, textHeight / 28);
+  drawDegreeMark(valueCenterX + textWidth / 2 + degreeRadius * 2,
+                 cy - textHeight / 3, degreeRadius, degreeThickness,
+                 PANEL_BLACK);
 #endif
   epaper.setTextSize(1);
   epaper.setFreeFont(nullptr);
