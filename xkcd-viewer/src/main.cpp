@@ -1684,6 +1684,10 @@ void setup() {
   const bool showConnectionStatus = coldBoot && networkPlanned;
   const String stationMac = wifi_sta::stationMacAddress();
   LOG.printf("[wifi] station MAC=%s\n", stationMac.c_str());
+  // Firmware version appended so a device on the connecting splash
+  // shows both its MAC (for identification on the network) and the
+  // running build (for confirming an SD-driven update landed).
+  const String macAndVersion = stationMac + "  fw " + board::FIRMWARE_VERSION;
 
   // Cold-boot "Connecting to Wi-Fi" splash. Pushed BEFORE any
   // initGrayMode() call so it renders as a fast 1bpp partial refresh
@@ -1694,7 +1698,7 @@ void setup() {
   if (showConnectionStatus) {
     LOG.println("[display] showing Wi-Fi connection status");
     renderStatus("Connecting to " + String(xkcd_wifi::ssid()), connectionDetail,
-                 stationMac,
+                 macAndVersion,
                  "To configure device - from sleep, hold green for 2 seconds");
   }
 #if RETERMINAL_MODEL == 1001

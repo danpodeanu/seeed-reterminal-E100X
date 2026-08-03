@@ -1427,6 +1427,10 @@ void setup() {
 
   const bool showStartupStatus = coldBoot;
   const String stationMac = wifi_sta::stationMacAddress();
+  // Firmware version appended so a device on the connecting splash
+  // shows both its MAC (for identification on the network) and the
+  // running build (for confirming an SD-driven update landed).
+  const String macAndVersion = stationMac + "  fw " + board::FIRMWARE_VERSION;
   String statusDetail;
   if (!sdReady) {
     statusDetail = "No SD card - insert a FAT32 card";
@@ -1440,7 +1444,7 @@ void setup() {
   if (showStartupStatus) {
     LOG.println("[display] showing Wi-Fi connection status");
     renderStatus("Connecting to " + String(photo_wifi::ssid()), statusDetail,
-                 stationMac,
+                 macAndVersion,
                  "To upload photos - from sleep, press green");
   }
   epaper.initGrayMode(GRAY_LEVEL4);
@@ -1453,7 +1457,7 @@ void setup() {
   if (showStartupStatus) {
     LOG.println("[display] showing Wi-Fi connection status");
     renderStatus("Connecting to " + String(photo_wifi::ssid()), statusDetail,
-                 stationMac,
+                 macAndVersion,
                  "To upload photos - from sleep, press green");
   }
 #endif

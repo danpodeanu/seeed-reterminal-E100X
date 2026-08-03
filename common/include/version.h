@@ -18,7 +18,7 @@
 // preprocessor macro (for string concatenation into rodata markers),
 // matching the pattern used for MODEL_NAME / MODEL_NAME_LITERAL.
 
-#define FIRMWARE_VERSION_LITERAL "1.5.0"
+#define FIRMWARE_VERSION_LITERAL "1.5.1"
 
 namespace board {
 
