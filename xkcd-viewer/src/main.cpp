@@ -1339,6 +1339,13 @@ void setup() {
     LOG.printf("[portal] entering config portal (no_wifi=%d gesture=%s)\n",
                wifiUnconfigured,
                gesture == GreenGesture::PortalRequest ? "green-tap" : "auto");
+    // Restore the wall clock from the battery-backed PCF8563 before we
+    // start the portal. NTP isn't available here (Wi-Fi is almost
+    // certainly unconfigured - that's why we're in the portal), and
+    // the ESP32's own RTC drifts several percent per sleep cycle. The
+    // main app path does this too, further down; the portal branch
+    // returns via ESP.restart() so it never reaches that call.
+    rtc_sync::restoreSystemClock();
     // Bring the panel up FIRST so the QR splash renders before we start
     // the Wi-Fi AP + web server. If the panel refresh ever hangs, the
     // AP won't be advertising anyway, so this gives a clearer failure

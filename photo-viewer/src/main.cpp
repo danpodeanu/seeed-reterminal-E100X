@@ -913,6 +913,14 @@ void renderPortalOnPanel(const String& ssid, const String& password,
 [[noreturn]] void runSdWebPortal() {
   LOG.println("[portal] entering configuration portal mode");
 
+  // Restore the wall clock from the battery-backed PCF8563 before we
+  // start the portal. NTP isn't available here (Wi-Fi is almost
+  // certainly unconfigured - that's why the user is in the portal),
+  // and the ESP32's own RTC drifts several percent per sleep cycle. A
+  // valid system clock is what makes the /browse timestamps, upload
+  // log lines, and thumb Cache-Control headers make sense.
+  rtc_sync::restoreSystemClock();
+
   epaper.begin();
 #if RETERMINAL_MODEL == 1001
   epaper.initGrayMode(GRAY_LEVEL4);
