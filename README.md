@@ -97,6 +97,38 @@ For pre-built firmware, the
 the latest GitHub Release for any application × board combination directly
 from Chrome or Edge over USB. See [`docs/`](docs/) for how it is wired up.
 
+## Updating firmware (SD card)
+
+From **v1.5** onward, firmware is updated by dropping a single `.bin` file
+onto the SD card - no cable, no serial console, no host tooling. The device
+verifies the image before rebooting into it, so a wrong-model or corrupted
+file cannot brick a running unit.
+
+1. Download the release asset for your app + board from the [Releases page](https://github.com/danpodeanu/seeed-reterminal-E100X/releases) - for example, `firmware-weather-viewer-reterminal_e1003.bin`.
+2. Copy it to the root of the SD card as **`/update.bin`** (the filename is fixed and the same across apps and boards; the device tells them apart by an embedded tag inside the image).
+3. Insert the SD card and wake the device (any button, or wait for the next automatic refresh).
+
+At the next wake, the running firmware:
+
+- streams `/update.bin` into the inactive OTA slot,
+- verifies the embedded `reterminal-ota:E100x` model tag matches this board,
+- lets ESP-IDF verify the SHA-256 baked into the image,
+- switches the boot partition and reboots into the new image, then
+- renames `/update.bin` to `update.bin.applied-<epoch>` on success, or `update.bin.failed-<reason>-<epoch>` on any failure (so the same bad file can't boot-loop the device).
+
+The running firmware version is printed as `[boot] fw <version>` on the
+serial log and shown on the Wi-Fi / config portal screen, next to the
+device MAC, so you can confirm the upgrade landed without opening the
+serial console.
+
+**One-time migration to the OTA-capable partition layout.** Devices flashed
+with **v1.4 or earlier** use a single-slot partition layout with no room for
+a second OTA image. Upgrading to v1.5 requires a **one-time USB reflash**
+(the [web flasher](https://danpodeanu.github.io/seeed-reterminal-E100X/)
+works fine) to lay down the new partition table. Wi-Fi credentials and
+other NVS settings survive the migration; SPIFFS is wiped but the apps do
+not use it. Every update after that first hop is SD-driven.
+
 ## Testing
 
 Each application has native unit tests for its production decision logic:

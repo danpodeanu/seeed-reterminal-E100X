@@ -22,6 +22,16 @@ them from a phone through the built-in Wi-Fi upload portal.
   opens the Wi-Fi upload portal.
 - On-device Wi-Fi setup and photo upload from a phone through a
   captive-portal web page.
+- **Portrait / landscape mode on E1004** (native 1200x1600 portrait).
+  Pick *Native*, *RotateCW*, or *RotateCCW* in the portal; the browser
+  crops and rotates uploads to match. Changes take effect on the very
+  next upload - no reboot required.
+- Low-battery *please recharge* screen instead of silently refusing to
+  refresh, so you can see at a glance that the frame needs charging.
+- **SD-card firmware updates from v1.5 onward** - drop a signed
+  `firmware-*.bin` from the [Releases page](https://github.com/danpodeanu/seeed-reterminal-E100X/releases)
+  onto the SD card as `/update.bin`. See the top-level
+  [README](../README.md#updating-firmware-sd-card) for details.
 - No cloud, no account, no telemetry. NTP once every six hours is the
   only outbound traffic during normal operation.
 
@@ -190,7 +200,11 @@ stored on the SD card without removing it from the frame:
 4. The page previews the image, applies the same crop-to-cover,
    gamma, and dithering pipeline used by `prepare_photos.py`, and
    streams the resulting 4-bit BMP straight to `/photos/` on the SD
-   card. A success banner ("Uploaded. Next panel refresh will show
+   card. On E1004 the crop aspect follows the *Panel orientation*
+   setting in the portal (Native / RotateCW / RotateCCW), so an
+   E1004 mounted portrait gets a portrait crop and a wall-mounted
+   landscape unit gets a landscape crop with no re-flashing. A
+   success banner ("Uploaded. Next panel refresh will show
    this photo.") persists so the next upload can be prepared without
    page reload. On the Spectra 6 panels (E1002 and E1004) the browser
    runs [`epdoptimize`](https://github.com/paperlesspaper/epdoptimize)
@@ -329,6 +343,13 @@ Reference of the most common `config.h` fields:
 - `PHOTO_ORDER_RANDOM`: `true` shuffles the photo enumeration at
   each boot so successive frames feel random; `false` sorts
   alphabetically for a deterministic order across boots.
+- `orientation` (E1004 only, portal-only, no compile-time default):
+  `Native`, `RotateCW`, or `RotateCCW`. Controls the crop aspect the
+  browser uploader offers so photos taken in portrait or landscape
+  fill the physical panel correctly. E1001-E1003 are landscape-native
+  and ignore this setting. Changing it in the portal takes effect
+  immediately - the `/upload-photo` page's crop rectangle re-orients
+  itself on the next tab focus without a reboot.
 
 ### Buttons and pins
 
