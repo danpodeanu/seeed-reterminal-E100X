@@ -23,6 +23,7 @@
 #include "battery_gauge.h"
 #include "ntp_sync.h"
 #include "board_pins.h"
+#include "version.h"
 #include "hardware.h"
 #include "local_time.h"
 #include "wake_report.h"
@@ -1431,6 +1432,7 @@ void setup() {
       info.wifiPassword = config_portal::currentApPassword();
       info.url = String("http://") + config_portal::currentIp().toString();
       info.macAddress = wifi_sta::stationMacAddress();
+      info.firmwareVersion = board::FIRMWARE_VERSION;
       info.wifiPayload = config_portal::wifiQrPayload(
           info.ssid,
           info.wifiPassword.length() ? info.wifiPassword.c_str() : nullptr);
@@ -1540,6 +1542,7 @@ void setup() {
   LOG.println();
   LOG.println("============================================");
   LOG.printf(" reTerminal %s standalone XKCD / %s\n", MODEL_NAME, COLOR_MODE_NAME);
+  LOG.printf(" Firmware v%s\n", board::FIRMWARE_VERSION);
   LOG.println("============================================");
 
   LOG.printf("[boot] wake cause=%d pins=0x%llx, PSRAM=%luK, "

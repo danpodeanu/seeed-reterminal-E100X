@@ -21,6 +21,7 @@
 
 #include "app_logger.h"
 #include "board_pins.h"
+#include "version.h"
 #include "config.h"
 #include "driver.h"
 #include "epaper_setup.h"
@@ -148,6 +149,7 @@ void renderPortalScreen() {
   info.ssid = ssid;
   info.url = url;
   info.macAddress = wifi_sta::stationMacAddress();
+  info.firmwareVersion = board::FIRMWARE_VERSION;
   info.wifiPayload = wifiPayload;
   info.urlPayload = url;
   info.helpPayload = config::HELP_URL;

@@ -11,6 +11,7 @@
 #include "board_pins.h"
 #include "sd_card.h"
 #include "sd_ota_pure.h"
+#include "version.h"
 
 namespace {
 
@@ -82,8 +83,8 @@ Result apply(const Options& opts) {
     return Result::NoFile;
   }
   const size_t total = f.size();
-  LOG.printf("[ota] starting OTA from %s (%u bytes), tag=\"%s\"\n",
-       opts.path, (unsigned)total, kSdOtaTag);
+  LOG.printf("[ota] starting OTA from %s (%u bytes), running v%s, tag=\"%s\"\n",
+       opts.path, (unsigned)total, board::FIRMWARE_VERSION, kSdOtaTag);
 
   const esp_partition_t* target = esp_ota_get_next_update_partition(nullptr);
   if (!target) {

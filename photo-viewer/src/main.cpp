@@ -21,6 +21,7 @@
 #include "battery_gauge.h"
 #include "ntp_sync.h"
 #include "board_pins.h"
+#include "version.h"
 #include "hardware.h"
 #include "local_time.h"
 #include "wake_report.h"
@@ -991,6 +992,7 @@ void renderPortalOnPanel(const String& ssid, const String& password,
   info.wifiPassword = password;
   info.url = String("http://") + ip.toString();
   info.macAddress = wifi_sta::stationMacAddress();
+  info.firmwareVersion = board::FIRMWARE_VERSION;
   info.wifiPayload = config_portal::wifiQrPayload(
       ssid, password.length() ? password.c_str() : nullptr);
   info.urlPayload = config_portal::urlQrPayload(ip, port, "/wifi");
@@ -1292,6 +1294,7 @@ void setup() {
   LOG.println("============================================");
   LOG.printf(" reTerminal %s standalone Photo Viewer / %s\n",
              MODEL_NAME, COLOR_MODE_NAME);
+  LOG.printf(" Firmware v%s\n", board::FIRMWARE_VERSION);
   LOG.println("============================================");
   LOG.printf("[boot] wake cause=%d pins=0x%llx, PSRAM=%luK, "
              "KEY0=%s KEY1=%s KEY2=%s\n",

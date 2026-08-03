@@ -95,6 +95,10 @@ struct RenderInfo {
   String ssid;
   String url;
   String macAddress;
+  // Optional firmware version string (e.g. "1.4.0"). Rendered on its
+  // own detail line under the MAC when non-null and non-empty; omitted
+  // entirely otherwise so older callers keep their existing layout.
+  const char* firmwareVersion = nullptr;
   String wifiPayload;
   String urlPayload;
   // Optional third QR (e.g. "Help" -> GitHub README URL). Rendered
@@ -147,6 +151,11 @@ inline void renderPortalScreen(EPaper& epaper, int panelW, int panelH,
   y += panelH / 120;
   epaper.drawString(String("Device MAC ") + info.macAddress, panelW / 2, y, 1);
   y += detailFontH;
+  if (info.firmwareVersion && info.firmwareVersion[0]) {
+    epaper.drawString(String("Firmware v") + info.firmwareVersion,
+                      panelW / 2, y, 1);
+    y += detailFontH;
+  }
 
   // ---- QR sizing. ----
   // Reserve room for two captions + two QR + two SSID/URL lines. In
