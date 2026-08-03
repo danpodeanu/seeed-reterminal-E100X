@@ -393,6 +393,32 @@ function rescaleFromCrop() {
   return ctx.getImageData(0, 0, pw, ph);
 }
 
+// Build a small JPEG thumbnail from the original (pre-dither) picture
+// using the same crop rect that goes to the panel. This runs in the
+// browser so the ESP32 never has to decode the original - the on-device
+// BMP loader tries to allocate width*height*3 in one contiguous chunk,
+// which OOMs on anything large (a 4-bpp BMP that's 1.3 MB on disk
+// expands to ~7 MB of RGB). Longest side ~192 px keeps the JPEG in the
+// 5-15 KB range, small enough to POST and cheap for the panel to
+// re-serve on future browse loads.
+async function buildThumbnailBlob() {
+  if (!state.bitmap || !state.crop) return null;
+  const c = state.crop;
+  const maxDim = 192;
+  const scale = Math.min(1, maxDim / Math.max(c.sw, c.sh));
+  const tw = Math.max(1, Math.round(c.sw * scale));
+  const th = Math.max(1, Math.round(c.sh * scale));
+  const cv = document.createElement("canvas");
+  cv.width = tw; cv.height = th;
+  const ctx = cv.getContext("2d");
+  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingQuality = "high";
+  ctx.drawImage(state.bitmap, c.sx, c.sy, c.sw, c.sh, 0, 0, tw, th);
+  return await new Promise((resolve) => {
+    cv.toBlob((b) => resolve(b), "image/jpeg", 0.82);
+  });
+}
+
 // Gamma-correct RGB in place. gamma > 1 lifts mid-tones (brighter);
 // gamma < 1 crushes them (darker). Uses a 256-entry lookup table so the
 // per-pixel cost is a table read, not a pow() call. Skipped when gamma
@@ -839,6 +865,13 @@ async function onUpload() {
   setStatus("Encoding BMP...");
   const bmp = encode4bitBmp(state.currentIndices, state.panel.width,
                             state.panel.height, state.currentPalette);
+  // Build the thumbnail from the original picture up front so we still
+  // have state.bitmap around (resetForNextUpload closes it). We POST it
+  // AFTER the photo upload succeeds - the photo upload's
+  // invalidateThumbnailFor runs at UPLOAD_FILE_START and would delete
+  // any thumb we wrote first.
+  let thumbBlob = null;
+  try { thumbBlob = await buildThumbnailBlob(); } catch (_) {}
   const fd = new FormData();
   fd.append("file", bmp, state.fileBase + ".bmp");
   const parent = state.panel.photosDir || "/photos";
@@ -849,6 +882,19 @@ async function onUpload() {
       body: fd,
     });
     if (!res.ok) throw new Error("HTTP " + res.status);
+    if (thumbBlob) {
+      // Best-effort: any error here just means the panel will fall
+      // back to the on-device generator (or a placeholder), never
+      // fatal to the upload the user just made.
+      try {
+        const tfd = new FormData();
+        tfd.append("file", thumbBlob, state.fileBase + ".bmp");
+        await fetch(
+          "/upload?parent=" + encodeURIComponent(parent) + "&dest=thumb",
+          { method: "POST", body: tfd },
+        );
+      } catch (_) {}
+    }
     $("uploadedBanner").hidden = false;
     resetForNextUpload();
     refreshPhotoList();

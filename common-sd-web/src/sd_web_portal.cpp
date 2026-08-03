@@ -732,14 +732,41 @@ void handleUploadStream() {
         g_uploadTargetPath = String();
         return;
       }
-      g_uploadTargetPath = joinPath(parent, name);
-      // Overwrite by removing first; SD FILE_WRITE opens truncating,
-      // but be explicit so a failed open doesn't leave a stale file.
-      sd_card::removeFile(g_uploadTargetPath);
-      // Drop the old thumbnail so a re-upload of the same filename
-      // re-renders on next view. Cheap no-op if no thumbnail cache is
-      // configured or the target isn't inside the photos dir.
-      invalidateThumbnailFor(g_uploadTargetPath);
+      // dest=thumb means the client is uploading a pre-rendered
+      // thumbnail (built in the browser from the original photo) for a
+      // just-uploaded file. Redirect the write into the thumb cache so
+      // the on-device generator - which OOMs on large BMPs - never
+      // runs. The source path (parent+name) must live directly under
+      // the photos dir; thumbnailCachePathFor enforces that.
+      const bool destThumb = g_server->hasArg("dest") &&
+                             g_server->arg("dest") == "thumb";
+      if (destThumb) {
+        const String sourcePath = joinPath(parent, name);
+        const String cachePath = thumbnailCachePathFor(sourcePath);
+        if (cachePath.length() == 0) {
+          g_uploadOk = false;
+          g_uploadTargetPath = String();
+          LOG.printf(
+              "[sd-web] thumb upload rejected for %s (cache not configured "
+              "or parent not photos dir)\n",
+              sourcePath.c_str());
+          return;
+        }
+        if (!sd_card::fileExists(g_config.thumbnailDir)) {
+          sd_card::makeDir(g_config.thumbnailDir);
+        }
+        g_uploadTargetPath = cachePath;
+        sd_card::removeFile(g_uploadTargetPath);
+      } else {
+        g_uploadTargetPath = joinPath(parent, name);
+        // Overwrite by removing first; SD FILE_WRITE opens truncating,
+        // but be explicit so a failed open doesn't leave a stale file.
+        sd_card::removeFile(g_uploadTargetPath);
+        // Drop the old thumbnail so a re-upload of the same filename
+        // re-renders on next view. Cheap no-op if no thumbnail cache is
+        // configured or the target isn't inside the photos dir.
+        invalidateThumbnailFor(g_uploadTargetPath);
+      }
       g_uploadFile = sd_card::openForWrite(g_uploadTargetPath);
       g_uploadOk = static_cast<bool>(g_uploadFile);
       g_uploadStallsRecovered = 0;
@@ -834,6 +861,16 @@ void handleUploadStream() {
 }
 
 void handleUploadDone() {
+  // dest=thumb: browser-side thumbnail POST. Reply with a plain
+  // JSON body instead of the /browse redirect the interactive uploader
+  // wants - the JS fetch() would otherwise follow the 302 and pull the
+  // full browse HTML for nothing.
+  if (g_server->hasArg("dest") && g_server->arg("dest") == "thumb") {
+    g_server->sendHeader("Cache-Control", "no-store");
+    g_server->send(g_uploadOk ? 200 : 500, "application/json",
+                   g_uploadOk ? "{\"ok\":true}" : "{\"ok\":false}");
+    return;
+  }
   const String parent = g_server->hasArg("parent")
                             ? normalisePath(g_server->arg("parent"))
                             : String("/");
@@ -1049,8 +1086,18 @@ void handleThumbnail() {
   };
 
   auto streamCacheFile = [&](File& file) {
-    g_server->sendHeader("Content-Type", "image/bmp");
-    g_server->streamFile(file, "image/bmp");
+    // Sniff the first two bytes so browser-uploaded JPEG thumbnails
+    // (0xFF 0xD8) get served with the right content-type. The
+    // on-device generator falls back to 24-bit BMP (0x42 0x4D). A
+    // clean seek(0) after peek keeps streamFile happy.
+    uint8_t magic[2] = {0, 0};
+    file.read(magic, sizeof(magic));
+    file.seek(0);
+    const char* mime = (magic[0] == 0xFF && magic[1] == 0xD8)
+                           ? "image/jpeg"
+                           : "image/bmp";
+    g_server->sendHeader("Content-Type", mime);
+    g_server->streamFile(file, mime);
   };
 
   // Fast path: cache exists.
