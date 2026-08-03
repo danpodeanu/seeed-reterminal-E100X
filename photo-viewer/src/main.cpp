@@ -1253,7 +1253,7 @@ void setup() {
                sensorReadings.batteryPct, sensorReadings.batteryVoltage,
                low_battery::kThresholdPct);
     renderStatus("Please recharge",
-                 "Plug in a USB-C cable to continue.",
+                 "Plug in a USB-C cable then press the green button to continue.",
                  "Battery low");
     powerDownAndSleep(config::SLEEP_SECONDS);
     return;
