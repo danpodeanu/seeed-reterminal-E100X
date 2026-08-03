@@ -40,6 +40,22 @@ constexpr char PHOTO_THUMB_DIR[] = "/thumb_cache";
 // alphabetically so rotation order is deterministic across boots.
 constexpr bool PHOTO_ORDER_RANDOM = true;
 
+// --- Panel orientation ------------------------------------------------------
+// E1004 is a 1200x1600 portrait panel that some users install rotated 90
+// degrees so it reads as 1600x1200 landscape. RotateCW means the device
+// is rotated clockwise from its native mounting (the panel's native top
+// edge ends up on the user's right); RotateCCW is the opposite. `Native`
+// means no rotation and is the correct choice on every board except a
+// physically-rotated E1004: E1001/E1002/E1003 are landscape-native, so
+// their "native" orientation is already landscape and this setting is
+// hard-locked to `Native` on those boards (see photo_config_runtime).
+enum class Orientation : uint8_t {
+  Native      = 0,
+  RotateCW    = 1,
+  RotateCCW   = 2,
+};
+constexpr Orientation ORIENTATION_DEFAULT = Orientation::Native;
+
 // --- Quiet hours ------------------------------------------------------------
 // Automatic refreshes are suppressed overnight. The current photo remains on
 // the e-paper panel without any sleep message or overlay. Any user button may

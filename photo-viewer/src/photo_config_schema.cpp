@@ -7,6 +7,9 @@ using config_portal::Field;
 using config_portal::FieldType;
 using config_portal::Section;
 
+const char* const kOrientationValues[] = {"Native", "RotateCW", "RotateCCW",
+                                          nullptr};
+
 const Field kRefreshFields[] = {
     {kKeySleepSeconds,
      "Sleep between photo changes (s)",
@@ -57,6 +60,10 @@ const Field kPhotoFields[] = {
      "Random photo order",
      "When on, photo order is shuffled at each boot. When off, files are shown in alphabetical order.",
      FieldType::Bool, "true", nullptr, 0, 0, nullptr},
+    {kKeyOrientation,
+     "Panel orientation",
+     "Only meaningful on E1004 (the other boards are landscape-native and ignore this). RotateCW = device physically rotated 90 degrees clockwise from its default mounting; RotateCCW is the mirror. Photos are rotated in the browser during upload; drop-in prepared BMPs on the SD card are not re-rotated.",
+     FieldType::Enum, "Native", kOrientationValues, 0, 0, nullptr},
 };
 
 const Field kBatteryFields[] = {

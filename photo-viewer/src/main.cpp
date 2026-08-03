@@ -36,6 +36,7 @@
 #include "wifi_schema.h"
 #include "photo_wifi_credentials.h"
 #include "photo_config_runtime.h"
+#include "photo_geom.h"
 #include "photo_config_schema.h"
 #include "log_sd_sink.h"
 #include "text_render.h"
@@ -597,63 +598,139 @@ bool renderGenericPhoto(const String& path) {
     return false;
   }
 
+  // Rotated mode: scale/fit inside the effective (rotated) rect, then
+  // rotate each pixel into the native panel framebuffer at push time. In
+  // "Native" mode: effective dims equal the native panel dims and the code
+  // path collapses to the historical one.
+  const int effW = photo_config::runtime::effectivePanelWidth();
+  const int effH = photo_config::runtime::effectivePanelHeight();
+  const ::config::Orientation orient = photo_config::runtime::orientation();
+
   const float scale = min(
-      static_cast<float>(config::PANEL_WIDTH) / image.width,
-      static_cast<float>(config::PANEL_HEIGHT) / image.height);
+      static_cast<float>(effW) / image.width,
+      static_cast<float>(effH) / image.height);
   int targetWidth = max(2, static_cast<int>(image.width * scale));
   int targetHeight = max(1, static_cast<int>(image.height * scale));
-  targetWidth = min(targetWidth, config::PANEL_WIDTH);
-  targetHeight = min(targetHeight, config::PANEL_HEIGHT);
+  targetWidth = min(targetWidth, effW);
+  targetHeight = min(targetHeight, effH);
   if (targetWidth & 1) --targetWidth;
-  int targetX = (config::PANEL_WIDTH - targetWidth) / 2;
+  int targetX = (effW - targetWidth) / 2;
   if (targetX & 1) --targetX;
-  const int targetY = (config::PANEL_HEIGHT - targetHeight) / 2;
+  const int targetY = (effH - targetHeight) / 2;
 
-  const size_t packedSize =
-      static_cast<size_t>(targetWidth) * targetHeight / 2;
-  uint8_t* packed = static_cast<uint8_t*>(ps_malloc(packedSize));
-  if (!packed) packed = static_cast<uint8_t*>(malloc(packedSize));
-  if (!packed) {
+  if (orient == ::config::Orientation::Native) {
+    // Historical fast path: pack row-by-row and blit as a sub-rect.
+    const size_t packedSize =
+        static_cast<size_t>(targetWidth) * targetHeight / 2;
+    uint8_t* packed = static_cast<uint8_t*>(ps_malloc(packedSize));
+    if (!packed) packed = static_cast<uint8_t*>(malloc(packedSize));
+    if (!packed) {
+      image_free(&image);
+      LOG.println("[photo] fallback panel buffer allocation failed");
+      return false;
+    }
+    for (int y = 0; y < targetHeight; ++y) {
+      const int sourceY =
+          min(image.height - 1,
+              static_cast<int>((static_cast<int64_t>(y) * image.height) /
+                               targetHeight));
+      uint8_t* destination =
+          packed + static_cast<size_t>(y) * targetWidth / 2;
+      for (int x = 0; x < targetWidth; x += 2) {
+        uint8_t codes[2] = {};
+        for (int offset = 0; offset < 2; ++offset) {
+          const int outputX = x + offset;
+          const int sourceX =
+              min(image.width - 1,
+                  static_cast<int>(
+                      (static_cast<int64_t>(outputX) * image.width) /
+                      targetWidth));
+          const uint8_t* pixel =
+              image.pixels +
+              (static_cast<size_t>(sourceY) * image.width + sourceX) * 3;
+          codes[offset] = fallbackPanelCode(
+              pixel[0], pixel[1], pixel[2], targetX + outputX, targetY + y);
+        }
+        destination[x / 2] =
+            static_cast<uint8_t>((codes[0] << 4) | (codes[1] & 0x0F));
+      }
+      if ((y & 31) == 0) delay(1);
+    }
     image_free(&image);
-    LOG.println("[photo] fallback panel buffer allocation failed");
-    return false;
-  }
 
-  for (int y = 0; y < targetHeight; ++y) {
-    const int sourceY =
-        min(image.height - 1,
-            static_cast<int>((static_cast<int64_t>(y) * image.height) /
-                             targetHeight));
-    uint8_t* destination =
-        packed + static_cast<size_t>(y) * targetWidth / 2;
-    for (int x = 0; x < targetWidth; x += 2) {
-      uint8_t codes[2] = {};
-      for (int offset = 0; offset < 2; ++offset) {
-        const int outputX = x + offset;
+    epaper.fillSprite(PANEL_WHITE);
+    epaper.pushImage(targetX, targetY, targetWidth, targetHeight,
+                     reinterpret_cast<uint16_t*>(packed));
+    free(packed);
+  } else {
+    // Rotated: allocate a full-panel-sized native framebuffer, prefill
+    // with PANEL_WHITE nibbles, and stamp each rotated photo pixel with a
+    // read-modify-write. Full-panel allocation (~960 KB on E1004) lives in
+    // PSRAM. The RMW cost is negligible compared to a panel refresh.
+    const size_t nativePacked =
+        static_cast<size_t>(::config::PANEL_WIDTH) *
+        static_cast<size_t>(::config::PANEL_HEIGHT) / 2;
+    uint8_t* packed = static_cast<uint8_t*>(ps_malloc(nativePacked));
+    if (!packed) packed = static_cast<uint8_t*>(malloc(nativePacked));
+    if (!packed) {
+      image_free(&image);
+      LOG.println("[photo] fallback panel buffer allocation failed");
+      return false;
+    }
+    // Palette code for PANEL_WHITE, packed as two nibbles per byte.
+    const uint8_t whiteCode =
+        fallbackPanelCode(0xFF, 0xFF, 0xFF, 0, 0) & 0x0F;
+    memset(packed, static_cast<int>((whiteCode << 4) | whiteCode),
+           nativePacked);
+
+    for (int y = 0; y < targetHeight; ++y) {
+      const int sourceY =
+          min(image.height - 1,
+              static_cast<int>((static_cast<int64_t>(y) * image.height) /
+                               targetHeight));
+      const int effY = targetY + y;
+      for (int x = 0; x < targetWidth; ++x) {
         const int sourceX =
             min(image.width - 1,
-                static_cast<int>(
-                    (static_cast<int64_t>(outputX) * image.width) /
-                    targetWidth));
+                static_cast<int>((static_cast<int64_t>(x) * image.width) /
+                                 targetWidth));
+        const int effX = targetX + x;
         const uint8_t* pixel =
             image.pixels +
             (static_cast<size_t>(sourceY) * image.width + sourceX) * 3;
-        codes[offset] = fallbackPanelCode(
-            pixel[0], pixel[1], pixel[2], targetX + outputX, targetY + y);
+        // Native destination coord depends on rotation direction.
+        int nx, ny;
+        photo_geom::effToNative(static_cast<uint8_t>(orient),
+                                effW, effH, effX, effY, nx, ny);
+        const uint8_t code = fallbackPanelCode(
+            pixel[0], pixel[1], pixel[2], effX, effY) & 0x0F;
+        const size_t byteIdx =
+            static_cast<size_t>(ny) *
+                (::config::PANEL_WIDTH / 2) +
+            static_cast<size_t>(nx / 2);
+        const uint8_t existing = packed[byteIdx];
+        if ((nx & 1) == 0) {
+          packed[byteIdx] = static_cast<uint8_t>((code << 4) |
+                                                  (existing & 0x0F));
+        } else {
+          packed[byteIdx] = static_cast<uint8_t>((existing & 0xF0) | code);
+        }
       }
-      destination[x / 2] =
-          static_cast<uint8_t>((codes[0] << 4) | (codes[1] & 0x0F));
+      if ((y & 31) == 0) delay(1);
     }
-    if ((y & 31) == 0) delay(1);
-  }
-  image_free(&image);
+    image_free(&image);
 
-  epaper.fillSprite(PANEL_WHITE);
-  epaper.pushImage(targetX, targetY, targetWidth, targetHeight,
-                   reinterpret_cast<uint16_t*>(packed));
-  free(packed);
-  LOG.printf("[photo] compatibility render %s at %dx%d\n",
-             path.c_str(), targetWidth, targetHeight);
+    epaper.fillSprite(PANEL_WHITE);
+    epaper.pushImage(0, 0, ::config::PANEL_WIDTH, ::config::PANEL_HEIGHT,
+                     reinterpret_cast<uint16_t*>(packed));
+    free(packed);
+  }
+
+  LOG.printf("[photo] compatibility render %s at %dx%d (%s)\n",
+             path.c_str(), targetWidth, targetHeight,
+             orient == ::config::Orientation::Native      ? "native"
+             : orient == ::config::Orientation::RotateCW  ? "rotate-cw"
+                                                          : "rotate-ccw");
   LOG.println("[render] refreshing panel");
   updatePanel();
   LOG.println("[render] complete");
@@ -1032,6 +1109,17 @@ void renderPortalOnPanel(const String& ssid, const String& password,
   sdCfg.panelPalette = "e6";
 #endif
   sdCfg.panelModel = MODEL_NAME;
+  switch (photo_config::runtime::orientation()) {
+    case ::config::Orientation::RotateCW:
+      sdCfg.panelOrientation = "rotate_cw";
+      break;
+    case ::config::Orientation::RotateCCW:
+      sdCfg.panelOrientation = "rotate_ccw";
+      break;
+    default:
+      sdCfg.panelOrientation = "native";
+      break;
+  }
   sdCfg.photosDir = config::PHOTO_DIR;
   sdCfg.thumbnailDir = config::PHOTO_THUMB_DIR;
   sdCfg.thumbnailGenerator = &generatePhotoThumbnail;

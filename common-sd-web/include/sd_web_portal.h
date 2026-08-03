@@ -66,6 +66,13 @@ struct Config {
   int panelHeight = 0;
   const char* panelPalette = nullptr;
   const char* panelModel = nullptr;    // e.g. "E1001" - shown in the UI
+  // Panel installation orientation. One of "native", "rotate_cw",
+  // "rotate_ccw". Only meaningful on the portrait-native E1004 - the
+  // other boards are landscape-native and should pass "native" (the
+  // default). Rotated modes tell the browser to swap the crop-rect
+  // aspect and rotate the raster pixels so the BMP header dims stay
+  // native (panelWidth x panelHeight) but the content is pre-rotated.
+  const char* panelOrientation = "native";
   const char* photosDir = nullptr;     // e.g. "/photos"
 
   // Path the on-panel URL QR code should point to. Empty/nullptr means

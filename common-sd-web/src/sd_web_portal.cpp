@@ -905,6 +905,8 @@ void handlePanelInfo() {
   json += g_config.panelModel ? g_config.panelModel : "";
   json += "\",\"photosDir\":\"";
   json += g_config.photosDir ? g_config.photosDir : "";
+  json += "\",\"orientation\":\"";
+  json += g_config.panelOrientation ? g_config.panelOrientation : "native";
   json += "\"}";
   g_server->sendHeader("Cache-Control", "no-store");
   g_server->send(200, "application/json", json);

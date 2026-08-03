@@ -5,6 +5,7 @@
 
 #include "app_logic.h"
 #include "low_battery.h"
+#include "photo_geom.h"
 #include "photo_manifest.h"
 
 void setUp() {}
@@ -193,6 +194,74 @@ void test_photo_manifest_ignores_nested_matching_field_names() {
       static_cast<int>(inspectStr(json, "v1", found)));
 }
 
+// Landscape rotation for E1004. Native panel is 1200 x 1600 (portrait);
+// effective landscape frame is 1600 x 1200.
+void test_photo_geom_native_is_identity() {
+  int nx, ny;
+  photo_geom::effToNative(photo_geom::kNative,
+                          /*effW=*/1200, /*effH=*/1600,
+                          /*eX=*/17, /*eY=*/23, nx, ny);
+  TEST_ASSERT_EQUAL_INT(17, nx);
+  TEST_ASSERT_EQUAL_INT(23, ny);
+}
+
+void test_photo_geom_rotate_cw_maps_corners() {
+  const int effW = 1600, effH = 1200;
+  int nx, ny;
+  // Top-left of the effective frame lands at native top-right on E1004.
+  photo_geom::effToNative(photo_geom::kRotateCW, effW, effH, 0, 0, nx, ny);
+  TEST_ASSERT_EQUAL_INT(0, nx);
+  TEST_ASSERT_EQUAL_INT(effW - 1, ny);
+  // Top-right of effective -> native top-left.
+  photo_geom::effToNative(photo_geom::kRotateCW, effW, effH, effW - 1, 0,
+                          nx, ny);
+  TEST_ASSERT_EQUAL_INT(0, nx);
+  TEST_ASSERT_EQUAL_INT(0, ny);
+  // Bottom-right of effective -> native bottom-left.
+  photo_geom::effToNative(photo_geom::kRotateCW, effW, effH,
+                          effW - 1, effH - 1, nx, ny);
+  TEST_ASSERT_EQUAL_INT(effH - 1, nx);
+  TEST_ASSERT_EQUAL_INT(0, ny);
+}
+
+void test_photo_geom_rotate_ccw_maps_corners() {
+  const int effW = 1600, effH = 1200;
+  int nx, ny;
+  photo_geom::effToNative(photo_geom::kRotateCCW, effW, effH, 0, 0,
+                          nx, ny);
+  TEST_ASSERT_EQUAL_INT(effH - 1, nx);
+  TEST_ASSERT_EQUAL_INT(0, ny);
+  photo_geom::effToNative(photo_geom::kRotateCCW, effW, effH, effW - 1, 0,
+                          nx, ny);
+  TEST_ASSERT_EQUAL_INT(effH - 1, nx);
+  TEST_ASSERT_EQUAL_INT(effW - 1, ny);
+  photo_geom::effToNative(photo_geom::kRotateCCW, effW, effH,
+                          effW - 1, effH - 1, nx, ny);
+  TEST_ASSERT_EQUAL_INT(0, nx);
+  TEST_ASSERT_EQUAL_INT(effW - 1, ny);
+}
+
+void test_photo_geom_rotate_cw_and_ccw_are_inverses() {
+  // Chaining a CW and CCW mapping (with swapped effective / native dims on
+  // the way back) must return the original point. Guards the sign in the
+  // "effW - 1 - eX" style expressions.
+  const int effW = 1600, effH = 1200;
+  for (int eX = 0; eX < effW; eX += 137) {
+    for (int eY = 0; eY < effH; eY += 91) {
+      int nx, ny;
+      photo_geom::effToNative(photo_geom::kRotateCW, effW, effH, eX, eY,
+                              nx, ny);
+      // Undo CW by treating native as the effective frame of a CCW mapping:
+      // native dims are (effH, effW) after the CW turn.
+      int backX, backY;
+      photo_geom::effToNative(photo_geom::kRotateCCW, effH, effW, nx, ny,
+                              backX, backY);
+      TEST_ASSERT_EQUAL_INT(eX, backX);
+      TEST_ASSERT_EQUAL_INT(eY, backY);
+    }
+  }
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_low_battery_warns_when_below_threshold);
@@ -216,5 +285,9 @@ int main(int, char**) {
   RUN_TEST(test_photo_manifest_rejects_mismatched_schema);
   RUN_TEST(test_photo_manifest_rejects_missing_version_field);
   RUN_TEST(test_photo_manifest_ignores_nested_matching_field_names);
+  RUN_TEST(test_photo_geom_native_is_identity);
+  RUN_TEST(test_photo_geom_rotate_cw_maps_corners);
+  RUN_TEST(test_photo_geom_rotate_ccw_maps_corners);
+  RUN_TEST(test_photo_geom_rotate_cw_and_ccw_are_inverses);
   return UNITY_END();
 }

@@ -20,6 +20,7 @@ struct Cache {
   String   ntpSecondary = ::config::NTP_SERVER_SECONDARY;
 
   bool     randomOrder = ::config::PHOTO_ORDER_RANDOM;
+  ::config::Orientation orientation = ::config::ORIENTATION_DEFAULT;
   bool     logToSd     = ::config::LOG_TO_SD;
   String   pinnedPhoto;  // empty = disabled (rotate through all photos)
   bool     lowBatteryWarn = ::config::LOW_BATTERY_WARN_ENABLED;
@@ -27,6 +28,12 @@ struct Cache {
 
 Cache g_cache;
 bool  g_loaded = false;
+
+::config::Orientation parseOrientation(const String& s) {
+  if (s == "RotateCW") return ::config::Orientation::RotateCW;
+  if (s == "RotateCCW") return ::config::Orientation::RotateCCW;
+  return ::config::Orientation::Native;
+}
 
 }  // namespace
 
@@ -60,6 +67,8 @@ void load() {
 
   g_cache.randomOrder =
       config_portal::storage::getBool(prefs, kSchema, kKeyRandomOrder);
+  g_cache.orientation = parseOrientation(
+      config_portal::storage::getString(prefs, kSchema, kKeyOrientation));
   g_cache.logToSd =
       config_portal::storage::getBool(prefs, kSchema, kKeyLogToSd);
   g_cache.pinnedPhoto =
@@ -83,6 +92,23 @@ const char* ntpPrimary()        { return g_cache.ntpPrimary.c_str(); }
 const char* ntpSecondary()      { return g_cache.ntpSecondary.c_str(); }
 
 bool        randomOrder()       { return g_cache.randomOrder; }
+::config::Orientation orientation() {
+  // Only E1004 is a portrait-native panel that can be physically rotated.
+  // On the other boards the panel is landscape at the driver level, so
+  // "no rotation" (Native) is already what the user wants and the setting
+  // is hard-locked here to keep call sites simple.
+  if (::config::MODEL != 1004) return ::config::Orientation::Native;
+  return g_cache.orientation;
+}
+bool        isLandscape() {
+  return orientation() != ::config::Orientation::Native;
+}
+int         effectivePanelWidth() {
+  return isLandscape() ? ::config::PANEL_HEIGHT : ::config::PANEL_WIDTH;
+}
+int         effectivePanelHeight() {
+  return isLandscape() ? ::config::PANEL_WIDTH : ::config::PANEL_HEIGHT;
+}
 bool        logToSd()           { return g_cache.logToSd; }
 const char* pinnedPhoto()       { return g_cache.pinnedPhoto.c_str(); }
 bool        lowBatteryWarn()    { return g_cache.lowBatteryWarn; }

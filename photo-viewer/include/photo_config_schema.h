@@ -27,6 +27,7 @@ constexpr const char* kKeyNtpPrimary     = "ntp1";
 constexpr const char* kKeyNtpSecondary   = "ntp2";
 
 constexpr const char* kKeyRandomOrder    = "rand_order";
+constexpr const char* kKeyOrientation    = "orientation";
 constexpr const char* kKeyLogToSd        = "log_to_sd";
 constexpr const char* kKeyPinnedPhoto    = "pinned_photo";
 constexpr const char* kKeyLowBatteryWarn = "low_batt_warn";

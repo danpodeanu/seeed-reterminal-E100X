@@ -269,9 +269,24 @@ async function fetchPanel() {
     return;
   }
   const p = state.panel;
+  // Landscape modes: effective dims are the panel dims swapped. The
+  // photo is prepared at (effW, effH) and then rotated during BMP encode
+  // so the on-panel BMP header dims stay at native (panel.width x
+  // panel.height). The device blits the rotated raster as-is.
+  const orient = p.orientation || "native";
+  if (orient === "rotate_cw" || orient === "rotate_ccw") {
+    p.effWidth = p.height;
+    p.effHeight = p.width;
+  } else {
+    p.effWidth = p.width;
+    p.effHeight = p.height;
+  }
   const paletteLabel = ({ gray4: "4 gray levels", gray16: "16 gray levels",
     e6: "6 colors" })[p.palette] || p.palette;
-  $("panelLabel").textContent = `${p.model || "Panel"}: ${p.width} x ${p.height}, ${paletteLabel}`;
+  const orientLabel = orient === "rotate_cw"  ? " (rotated CW)"
+                    : orient === "rotate_ccw" ? " (rotated CCW)"
+                    : "";
+  $("panelLabel").textContent = `${p.model || "Panel"}: ${p.effWidth} x ${p.effHeight}${orientLabel}, ${paletteLabel}`;
 }
 
 function setStatus(text, kind) {
@@ -339,7 +354,7 @@ function drawCropStage() {
   ctx.strokeRect(rx, ry, rw, rh);
 
   const hint = $("cropHint");
-  const rectC = coverRect(bm.width, bm.height, state.panel.width, state.panel.height);
+  const rectC = coverRect(bm.width, bm.height, state.panel.effWidth, state.panel.effHeight);
   if (rectC.maxSx === 0 && rectC.maxSy === 0)
     hint.textContent = "Photo already matches the panel aspect ratio.";
   else if (rectC.maxSx === 0)
@@ -380,9 +395,13 @@ function bindCropDrag() {
   cv.addEventListener("pointercancel", finish);
 }
 
-// Take the current crop from state.bitmap into a panel-sized ImageData.
+// Take the current crop from state.bitmap into an effective-panel-sized
+// ImageData. Effective dims equal panel dims in native mode; they're
+// swapped in rotated modes so we can dither at the physically-visible
+// resolution and rotate at BMP encode time.
 function rescaleFromCrop() {
-  const { width: pw, height: ph } = state.panel;
+  const pw = state.panel.effWidth;
+  const ph = state.panel.effHeight;
   const c = state.crop;
   const cv = document.createElement("canvas");
   cv.width = pw; cv.height = ph;
@@ -617,10 +636,19 @@ function dither(imageData, palette, method) {
 // 4-bit BMP writer. Layout matches photo-viewer's fast path:
 //   BITMAPFILEHEADER (14) + BITMAPINFOHEADER (40) + 16*RGBQUAD palette
 //   + rows bottom-up, 4-byte aligned.
-function encode4bitBmp(indices, width, height, palette) {
-  const packedRow = (width + 1) >> 1;
+// Encode a 4-bit BMP. The `indices` buffer is `srcW x srcH` in
+// row-major top-down order (the same layout the dither pipeline
+// produces). `bmpW`/`bmpH` are the BMP header dims. When orientation
+// is "native" (default), srcW/srcH must equal bmpW/bmpH and pixels
+// are packed straight through. When orientation is rotated, the BMP
+// header dims stay at the panel's native size and each
+// destination pixel is pulled from the rotated source coordinate, so
+// the on-panel `renderPreparedBmp` path can blit the result as-is
+// without knowing anything about rotation.
+function encode4bitBmp(indices, srcW, srcH, palette, bmpW, bmpH, orientation) {
+  const packedRow = (bmpW + 1) >> 1;
   const stride = (packedRow + 3) & ~3;
-  const pixelBytes = stride * height;
+  const pixelBytes = stride * bmpH;
   const paletteBytes = 16 * 4;
   const pixelOffset = 14 + 40 + paletteBytes;
   const fileSize = pixelOffset + pixelBytes;
@@ -632,8 +660,8 @@ function encode4bitBmp(indices, width, height, palette) {
   dv.setUint32(10, pixelOffset, true);
   // BITMAPINFOHEADER
   dv.setUint32(14, 40, true);
-  dv.setInt32(18, width, true);
-  dv.setInt32(22, height, true);
+  dv.setInt32(18, bmpW, true);
+  dv.setInt32(22, bmpH, true);
   dv.setUint16(26, 1, true);
   dv.setUint16(28, 4, true);
   dv.setUint32(30, 0, true);              // BI_RGB
@@ -653,13 +681,30 @@ function encode4bitBmp(indices, width, height, palette) {
   }
   // Pixel data, bottom-up.
   const pixels = new Uint8Array(buf, pixelOffset, pixelBytes);
-  for (let y = 0; y < height; y++) {
-    const srcRow = (height - 1 - y) * width;
-    const dstRow = y * stride;
-    for (let x = 0; x < width; x += 2) {
-      const left = indices[srcRow + x] & 0x0F;
-      const right = (x + 1 < width) ? (indices[srcRow + x + 1] & 0x0F) : 0;
-      pixels[dstRow + (x >> 1)] = (left << 4) | right;
+  // Row `y` in the top-down image occupies BMP raster row (bmpH-1-y).
+  for (let ny = 0; ny < bmpH; ny++) {
+    const dstRow = (bmpH - 1 - ny) * stride;
+    for (let nx = 0; nx < bmpW; nx += 2) {
+      let leftIdx, rightIdx;
+      // Map native (nx, ny) -> effective source (ex, ey).
+      if (orientation === "rotate_cw") {
+        // Forward: (ex, ey) native = (ey, effW - 1 - ex).
+        // Inverse: ex = effW - 1 - ny, ey = nx.
+        leftIdx = (nx) * srcW + (srcW - 1 - ny);
+        rightIdx = (nx + 1 < bmpW) ? ((nx + 1) * srcW + (srcW - 1 - ny)) : -1;
+      } else if (orientation === "rotate_ccw") {
+        // Forward: (ex, ey) native = (effH - 1 - ey, ex).
+        // Inverse: ex = ny, ey = effH - 1 - nx.
+        leftIdx = (srcH - 1 - nx) * srcW + ny;
+        rightIdx = (nx + 1 < bmpW) ? ((srcH - 1 - (nx + 1)) * srcW + ny) : -1;
+      } else {
+        const srcRow = ny * srcW;
+        leftIdx = srcRow + nx;
+        rightIdx = (nx + 1 < bmpW) ? srcRow + nx + 1 : -1;
+      }
+      const left = indices[leftIdx] & 0x0F;
+      const right = rightIdx >= 0 ? (indices[rightIdx] & 0x0F) : 0;
+      pixels[dstRow + (nx >> 1)] = (left << 4) | right;
     }
   }
   return new Blob([buf], { type: "image/bmp" });
@@ -698,7 +743,7 @@ async function runPipeline() {
   }
   const t1 = performance.now();
   const cv = $("preview");
-  cv.width = state.panel.width; cv.height = state.panel.height;
+  cv.width = state.panel.effWidth; cv.height = state.panel.effHeight;
   const ctx = cv.getContext("2d");
   ctx.putImageData(new ImageData(preview, cv.width, cv.height), 0, 0);
   state.currentIndices = indices;
@@ -845,8 +890,10 @@ async function onPick(e) {
     setStatus("Could not decode this file: " + err.message, "err");
     return;
   }
-  // Initial crop is a centred cover-fit rectangle at panel aspect.
-  const { width: pw, height: ph } = state.panel;
+  // Initial crop is a centred cover-fit rectangle at effective panel
+  // aspect (equals native aspect in native-orientation mode; swapped when rotated).
+  const pw = state.panel.effWidth;
+  const ph = state.panel.effHeight;
   const r = coverRect(state.bitmap.width, state.bitmap.height, pw, ph);
   state.crop = {
     sx: Math.round(r.maxSx / 2),
@@ -863,8 +910,11 @@ async function onUpload() {
   if (!state.currentIndices) return;
   $("upload").disabled = true;
   setStatus("Encoding BMP...");
-  const bmp = encode4bitBmp(state.currentIndices, state.panel.width,
-                            state.panel.height, state.currentPalette);
+  const bmp = encode4bitBmp(state.currentIndices,
+                            state.panel.effWidth, state.panel.effHeight,
+                            state.currentPalette,
+                            state.panel.width, state.panel.height,
+                            state.panel.orientation || "native");
   // Build the thumbnail from the original picture up front so we still
   // have state.bitmap around (resetForNextUpload closes it). We POST it
   // AFTER the photo upload succeeds - the photo upload's

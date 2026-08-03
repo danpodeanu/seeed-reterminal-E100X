@@ -31,6 +31,10 @@ const char* ntpPrimary();
 const char* ntpSecondary();
 
 bool        randomOrder();
+::config::Orientation orientation();
+bool        isLandscape();
+int         effectivePanelWidth();
+int         effectivePanelHeight();
 bool        logToSd();
 const char* pinnedPhoto();
 bool        lowBatteryWarn();
