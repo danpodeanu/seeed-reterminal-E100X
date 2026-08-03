@@ -22,6 +22,7 @@ struct Cache {
   bool     randomOrder = ::config::PHOTO_ORDER_RANDOM;
   bool     logToSd     = ::config::LOG_TO_SD;
   String   pinnedPhoto;  // empty = disabled (rotate through all photos)
+  bool     lowBatteryWarn = ::config::LOW_BATTERY_WARN_ENABLED;
 };
 
 Cache g_cache;
@@ -63,6 +64,8 @@ void load() {
       config_portal::storage::getBool(prefs, kSchema, kKeyLogToSd);
   g_cache.pinnedPhoto =
       config_portal::storage::getString(prefs, kSchema, kKeyPinnedPhoto);
+  g_cache.lowBatteryWarn =
+      config_portal::storage::getBool(prefs, kSchema, kKeyLowBatteryWarn);
 
   g_loaded = true;
 }
@@ -82,6 +85,7 @@ const char* ntpSecondary()      { return g_cache.ntpSecondary.c_str(); }
 bool        randomOrder()       { return g_cache.randomOrder; }
 bool        logToSd()           { return g_cache.logToSd; }
 const char* pinnedPhoto()       { return g_cache.pinnedPhoto.c_str(); }
+bool        lowBatteryWarn()    { return g_cache.lowBatteryWarn; }
 
 }  // namespace runtime
 }  // namespace photo_config

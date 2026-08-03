@@ -136,6 +136,13 @@ const Field kDebugFields[] = {
      FieldType::Bool, "false", nullptr, 0, 0, nullptr},
 };
 
+const Field kBatteryFields[] = {
+    {kKeyLowBatteryWarn,
+     "Show low-battery warning",
+     "When the battery drops below 5% (on boards with a battery sensor), replace the forecast with a 'please recharge' screen.",
+     FieldType::Bool, "true", nullptr, 0, 0, nullptr},
+};
+
 const Section kSections[] = {
     {"Location", kLocationFields,
      sizeof(kLocationFields) / sizeof(kLocationFields[0])},
@@ -151,6 +158,8 @@ const Section kSections[] = {
      sizeof(kQweatherFields) / sizeof(kQweatherFields[0])},
     {"Debug", kDebugFields,
      sizeof(kDebugFields) / sizeof(kDebugFields[0])},
+    {"Battery", kBatteryFields,
+     sizeof(kBatteryFields) / sizeof(kBatteryFields[0])},
 };
 
 }  // namespace

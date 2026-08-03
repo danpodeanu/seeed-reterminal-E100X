@@ -68,6 +68,14 @@ constexpr char NTP_SERVER_SECONDARY[] = "time.cloudflare.com";
 // troubleshooting a specific misbehaviour.
 constexpr bool LOG_TO_SD = false;
 
+// --- Low-battery warning ----------------------------------------------------
+// When the battery gauge reads below low_battery::kThresholdPct (5%) on a
+// board with a working charger IC (SY6974B), replace the photo with a
+// full-screen "please recharge" message and go back to deep sleep.
+// Older boards without SY6974B silently skip the check because we can't
+// tell if the ADC reading corresponds to a real battery.
+constexpr bool LOW_BATTERY_WARN_ENABLED = true;
+
 // --- SD Wi-Fi portal --------------------------------------------------------
 // When either arrow button is pressed the viewer flips into an SD-card
 // Wi-Fi portal mode: it stops advancing photos, brings up an open Wi-Fi

@@ -28,6 +28,7 @@ constexpr const char* kKeyDateLocale       = "date_locale";
 constexpr const char* kKeyDebugBadges      = "dbg_badges";
 constexpr const char* kKeyForceComic       = "dbg_force";
 constexpr const char* kKeyLogToSd          = "log_to_sd";
+constexpr const char* kKeyLowBatteryWarn   = "low_batt_warn";
 
 constexpr const char* kNamespace = "xkcd";
 

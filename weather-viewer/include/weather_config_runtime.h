@@ -59,5 +59,8 @@ bool         qweatherAlertsEnabled();
 bool         debugShowStatusBadges();
 bool         logToSd();
 
+// Battery
+bool         lowBatteryWarn();
+
 }  // namespace runtime
 }  // namespace weather_config

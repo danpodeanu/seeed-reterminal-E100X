@@ -54,6 +54,7 @@ constexpr const char* kKeyQwAlerts          = "qw_alerts";
 // Debug
 constexpr const char* kKeyDebugBadges       = "dbg_badges";
 constexpr const char* kKeyLogToSd           = "log_to_sd";
+constexpr const char* kKeyLowBatteryWarn    = "low_batt_warn";
 
 constexpr const char* kNamespace = "weather";
 

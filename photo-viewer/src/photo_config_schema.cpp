@@ -59,6 +59,13 @@ const Field kPhotoFields[] = {
      FieldType::Bool, "true", nullptr, 0, 0, nullptr},
 };
 
+const Field kBatteryFields[] = {
+    {kKeyLowBatteryWarn,
+     "Show low-battery warning",
+     "When the battery drops below 5% (on boards with a battery sensor), replace the photo with a 'please recharge' screen.",
+     FieldType::Bool, "true", nullptr, 0, 0, nullptr},
+};
+
 const Field kDebugFields[] = {
     {kKeyLogToSd,
      "Log serial to SD card",
@@ -79,6 +86,8 @@ const Section kSections[] = {
      sizeof(kNtpFields) / sizeof(kNtpFields[0])},
     {"Photos", kPhotoFields,
      sizeof(kPhotoFields) / sizeof(kPhotoFields[0])},
+    {"Battery", kBatteryFields,
+     sizeof(kBatteryFields) / sizeof(kBatteryFields[0])},
     {"Debug", kDebugFields,
      sizeof(kDebugFields) / sizeof(kDebugFields[0])},
 };

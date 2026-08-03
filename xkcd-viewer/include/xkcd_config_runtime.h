@@ -36,6 +36,7 @@ float        minDisplayScale();
 bool         debugShowStatusBadges();
 int32_t      debugForceComic();
 bool         logToSd();
+bool         lowBatteryWarn();
 
 }  // namespace runtime
 }  // namespace xkcd_config

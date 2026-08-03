@@ -54,6 +54,7 @@ struct Cache {
 
   bool     debugShowStatusBadges = ::config::DEBUG_SHOW_STATUS_BADGES;
   bool     logToSd               = ::config::LOG_TO_SD;
+  bool     lowBatteryWarn        = ::config::LOW_BATTERY_WARN_ENABLED;
 };
 
 Cache g_cache;
@@ -164,6 +165,8 @@ void load() {
       config_portal::storage::getBool(prefs, kSchema, kKeyDebugBadges);
   g_cache.logToSd =
       config_portal::storage::getBool(prefs, kSchema, kKeyLogToSd);
+  g_cache.lowBatteryWarn =
+      config_portal::storage::getBool(prefs, kSchema, kKeyLowBatteryWarn);
 
   g_loaded = true;
 }
@@ -200,6 +203,7 @@ bool         qweatherAlertsEnabled() { return g_cache.qwAlertsEnabled; }
 
 bool         debugShowStatusBadges() { return g_cache.debugShowStatusBadges; }
 bool         logToSd()               { return g_cache.logToSd; }
+bool         lowBatteryWarn()        { return g_cache.lowBatteryWarn; }
 
 }  // namespace runtime
 }  // namespace weather_config

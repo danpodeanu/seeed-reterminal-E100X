@@ -38,6 +38,7 @@
 #include "weather_format.h"
 #include "quiet_hours.h"
 #include "sensors.h"
+#include "low_battery.h"
 #include "pcf8563_utc.h"
 #include "screenshot_bmp.h"
 #include "panel_watchdog.h"
@@ -1673,6 +1674,19 @@ void setup() {
     rtc_sync::readAndLog(storedRtc);
   }
   epaper.begin();
+  if (low_battery::shouldWarn(weather_config::runtime::lowBatteryWarn(),
+                              sensorReadings.chargerValid,
+                              sensorReadings.externalPower,
+                              sensorReadings.batteryPct)) {
+    LOG.printf("[battery] %d%% (%.3fV) below %d%% -- rendering recharge screen\n",
+               sensorReadings.batteryPct, sensorReadings.batteryVoltage,
+               low_battery::kThresholdPct);
+    renderStatus("Please recharge",
+                 "Plug in a USB-C cable to continue.",
+                 "Battery low");
+    powerDownAndSleep(config::SLEEP_SECONDS);
+    return;
+  }
   sdReady = sd_card::mount(epaper.getSPIinstance(), config::CACHE_DIR);
   if (sdReady && weather_config::runtime::logToSd()) {
     log_sd_sink::install(appLog);

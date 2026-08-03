@@ -42,6 +42,7 @@
 #include "photo_manifest.h"
 #include "quiet_hours.h"
 #include "sensors.h"
+#include "low_battery.h"
 #include "image_loader.h"
 #include "pcf8563_utc.h"
 #include "secrets.h"
@@ -1236,14 +1237,27 @@ void setup() {
     return;
   }
 
+  sensors::readAll(PIN_BATTERY_ENABLE, PIN_BATTERY_ADC, sht4, config::SENSOR_READ_ATTEMPTS, config::SENSOR_RETRY_DELAY_MS, sensorReadings);
   if (coldBoot) {
-    sensors::readAll(PIN_BATTERY_ENABLE, PIN_BATTERY_ADC, sht4, config::SENSOR_READ_ATTEMPTS, config::SENSOR_RETRY_DELAY_MS, sensorReadings);
     if (!hardwareRtcCheckedEarly) {
       pcf8563::Reading storedRtc;
       rtc_sync::readAndLog(storedRtc);
     }
   }
   epaper.begin();
+  if (low_battery::shouldWarn(photo_config::runtime::lowBatteryWarn(),
+                              sensorReadings.chargerValid,
+                              sensorReadings.externalPower,
+                              sensorReadings.batteryPct)) {
+    LOG.printf("[battery] %d%% (%.3fV) below %d%% -- rendering recharge screen\n",
+               sensorReadings.batteryPct, sensorReadings.batteryVoltage,
+               low_battery::kThresholdPct);
+    renderStatus("Please recharge",
+                 "Plug in a USB-C cable to continue.",
+                 "Battery low");
+    powerDownAndSleep(config::SLEEP_SECONDS);
+    return;
+  }
   sdReady = sd_card::mount(epaper.getSPIinstance(), config::PHOTO_DIR);
   if (sdReady && photo_config::runtime::logToSd()) {
     log_sd_sink::install(appLog);

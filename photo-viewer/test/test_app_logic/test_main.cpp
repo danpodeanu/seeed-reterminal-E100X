@@ -4,10 +4,47 @@
 #include <vector>
 
 #include "app_logic.h"
+#include "low_battery.h"
 #include "photo_manifest.h"
 
 void setUp() {}
 void tearDown() {}
+
+void test_low_battery_warns_when_below_threshold() {
+  // enabled + charger present + not on USB + pct < 5 -> warn
+  TEST_ASSERT_TRUE(low_battery::shouldWarn(true, true, false, 4));
+  TEST_ASSERT_TRUE(low_battery::shouldWarn(true, true, false, 0));
+}
+
+void test_low_battery_skips_when_disabled() {
+  TEST_ASSERT_FALSE(low_battery::shouldWarn(false, true, false, 0));
+}
+
+void test_low_battery_skips_when_charger_missing() {
+  // Older E1001/E1002 without SY6974B: chargerValid=false -> skip
+  TEST_ASSERT_FALSE(low_battery::shouldWarn(true, false, false, 0));
+}
+
+void test_low_battery_skips_when_charging() {
+  // externalPower=true means USB is plugged in
+  TEST_ASSERT_FALSE(low_battery::shouldWarn(true, true, true, 2));
+}
+
+void test_low_battery_skips_when_pct_uninitialised() {
+  // sensors::Readings default pct=-1 (readAll not called yet)
+  TEST_ASSERT_FALSE(low_battery::shouldWarn(true, true, false, -1));
+}
+
+void test_low_battery_skips_at_or_above_threshold() {
+  TEST_ASSERT_FALSE(low_battery::shouldWarn(true, true, false, 5));
+  TEST_ASSERT_FALSE(low_battery::shouldWarn(true, true, false, 100));
+}
+
+void test_low_battery_custom_threshold() {
+  // Used at build time to force the screen without draining a battery
+  TEST_ASSERT_TRUE(low_battery::shouldWarn(true, true, false, 50, 100));
+  TEST_ASSERT_FALSE(low_battery::shouldWarn(true, true, false, 50, 20));
+}
 
 void test_startup_beep_only_for_cold_boot_and_button_wake() {
   TEST_ASSERT_TRUE(app_logic::startupBeepRequired(true, false));
@@ -158,6 +195,13 @@ void test_photo_manifest_ignores_nested_matching_field_names() {
 
 int main(int, char**) {
   UNITY_BEGIN();
+  RUN_TEST(test_low_battery_warns_when_below_threshold);
+  RUN_TEST(test_low_battery_skips_when_disabled);
+  RUN_TEST(test_low_battery_skips_when_charger_missing);
+  RUN_TEST(test_low_battery_skips_when_charging);
+  RUN_TEST(test_low_battery_skips_when_pct_uninitialised);
+  RUN_TEST(test_low_battery_skips_at_or_above_threshold);
+  RUN_TEST(test_low_battery_custom_threshold);
   RUN_TEST(test_startup_beep_only_for_cold_boot_and_button_wake);
   RUN_TEST(test_quiet_hours_boundaries);
   RUN_TEST(test_sleep_until_same_time_means_next_day);

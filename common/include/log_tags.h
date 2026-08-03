@@ -54,5 +54,6 @@ inline constexpr char DEBUG[]      = "debug";
 
 // Sensors
 inline constexpr char SENSOR[]   = "sensor";
+inline constexpr char BATTERY[]  = "battery";
 
 }  // namespace log_tags

@@ -33,6 +33,7 @@ const char* ntpSecondary();
 bool        randomOrder();
 bool        logToSd();
 const char* pinnedPhoto();
+bool        lowBatteryWarn();
 
 }  // namespace runtime
 }  // namespace photo_config
