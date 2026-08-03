@@ -1430,7 +1430,8 @@ void setup() {
   // Firmware version appended so a device on the connecting splash
   // shows both its MAC (for identification on the network) and the
   // running build (for confirming an SD-driven update landed).
-  const String macAndVersion = stationMac + "  fw " + board::FIRMWARE_VERSION;
+  const String macAndVersion =
+      String("MAC: ") + stationMac + "  Firmware: " + board::FIRMWARE_VERSION;
   String statusDetail;
   if (!sdReady) {
     statusDetail = "No SD card - insert a FAT32 card";

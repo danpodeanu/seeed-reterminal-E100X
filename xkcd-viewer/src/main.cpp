@@ -1687,7 +1687,8 @@ void setup() {
   // Firmware version appended so a device on the connecting splash
   // shows both its MAC (for identification on the network) and the
   // running build (for confirming an SD-driven update landed).
-  const String macAndVersion = stationMac + "  fw " + board::FIRMWARE_VERSION;
+  const String macAndVersion =
+      String("MAC: ") + stationMac + "  Firmware: " + board::FIRMWARE_VERSION;
 
   // Cold-boot "Connecting to Wi-Fi" splash. Pushed BEFORE any
   // initGrayMode() call so it renders as a fast 1bpp partial refresh

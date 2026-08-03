@@ -485,7 +485,8 @@ void drawBadges(uint32_t background = PANEL_WHITE,
 
 void renderStatus(const String& message, const String& detail = "",
                   const String& lineAbove = "",
-                  const String& helpBelow = "") {
+                  const String& helpBelow = "",
+                  const String& subLineAbove = "") {
   epaper.fillSprite(PANEL_WHITE);
   setBodyTextColor(PANEL_BLACK);
   epaper.setTextDatum(MC_DATUM);
@@ -500,6 +501,15 @@ void renderStatus(const String& message, const String& detail = "",
     // TFT_eSPI treats loadFont as sticky: setFreeFont alone won't switch
     // back. Unload so the subsequent selectMediumFont() actually applies.
     unloadSmoothFontIfLoaded();
+  }
+  if (!subLineAbove.isEmpty()) {
+    // ASCII-only technical sub-line (e.g. MAC + firmware) drawn between
+    // the city and the "Connecting to..." message in the small font.
+    selectSmallFont();
+    epaper.drawString(
+        text_render::ellipsize(epaper, subLineAbove, config::PANEL_WIDTH - config::ui(60)),
+        config::PANEL_WIDTH / 2,
+        config::PANEL_HEIGHT / 2 - config::ui(40), 1);
   }
   selectMediumFont();
   epaper.drawString(
@@ -1736,11 +1746,12 @@ void setup() {
       cacheLoaded ? "Live update not required" : "Live update required";
   const String stationMac = wifi_sta::stationMacAddress();
   const String locationLabel = String(weather_config::runtime::locationName());
-  // Firmware version appended so the connecting splash tells the user
-  // both the configured location and the running build (for confirming
-  // an SD-driven update landed).
-  const String locationAndVersion =
-      locationLabel + "  fw " + board::FIRMWARE_VERSION;
+  // Firmware version + MAC form the small ASCII-only sub-line under the
+  // large city label so the connecting splash tells the user which build
+  // is running (for confirming an SD-driven update landed) and which
+  // device is joining the AP.
+  const String macAndVersion =
+      String("MAC: ") + stationMac + "  Firmware: " + board::FIRMWARE_VERSION;
   LOG.printf("[wifi] station MAC=%s\n", stationMac.c_str());
   LOG.printf("[location] %s (%.4f, %.4f)\n", locationLabel.c_str(),
              weather_config::runtime::latitude(),
@@ -1755,8 +1766,9 @@ void setup() {
   if (showConnectionStatus) {
     LOG.println("[display] showing Wi-Fi connection status");
     renderStatus("Connecting to " + String(weather_wifi::ssid()), connectionDetail,
-                 locationAndVersion,
-                 "To configure device - from sleep, hold green for 2 seconds");
+                 locationLabel,
+                 "To configure device - from sleep, hold green for 2 seconds",
+                 macAndVersion);
   }
 #if RETERMINAL_MODEL == 1001
   epaper.initGrayMode(GRAY_LEVEL4);
@@ -1781,7 +1793,8 @@ void setup() {
         weather_config::runtime::weatherProvider() == config::WeatherProvider::QWeather
             ? "Clock not synced - times inaccurate, QWeather may fail"
             : "Clock not synced - displayed times may be inaccurate";
-    renderStatus("Connecting to " + String(weather_wifi::ssid()), warning, locationAndVersion);
+    renderStatus("Connecting to " + String(weather_wifi::ssid()), warning, locationLabel,
+                 "", macAndVersion);
   }
   local_time::configureTimezone(weather_config::runtime::timezone());
   quiet_hours::configure({weather_config::runtime::quietHoursEnabled(),
