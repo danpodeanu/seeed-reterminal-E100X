@@ -1550,6 +1550,11 @@ void setup() {
 
       uint32_t lastHeartbeatMs = millis();
       uint32_t greenLowSinceMs = 0;
+      // Drop any TWDT subscription the panel refresh above installed
+      // before entering the infinite HTTP loop - it never returns to
+      // Arduino's loop() where the WDT would otherwise be fed. No-op
+      // outside E1003.
+      panel_watchdog::disarmCurrentTask();
       while (!config_portal::rebootRequested() &&
              !sd_web_portal::exitRequested()) {
         config_portal::loop();

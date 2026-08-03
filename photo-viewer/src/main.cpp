@@ -63,6 +63,30 @@ constexpr int PIN_KEY0 = 3;
 constexpr int PIN_KEY1 = 4;
 constexpr int PIN_KEY2 = 5;
 
+// Which physical key is the "green / portal" button, and which is the
+// "previous" arrow. The button layout changed between the older three
+// boards and E1004:
+//   * E1001 / E1002 / E1003 - front strip is [GREEN | RIGHT | LEFT],
+//     wired to GPIO3 / GPIO4 / GPIO5 respectively. Matches
+//     weather-viewer/xkcd-viewer's PIN_BUTTON_GREEN=3 / RIGHT=4 /
+//     LEFT=5 wiring, and confirmed by an E1003 wake log
+//     (`pins=0x8 -> GPIO3` when the user pressed green).
+//   * E1004 - front strip is [RIGHT | LEFT | GREEN], wired to
+//     GPIO3 / GPIO4 / GPIO5. Photo-viewer's original mapping was
+//     written for this board.
+// Every other place in this file talks about wake in terms of key0Wake
+// / key1Wake / key2Wake (physical pins); these two constants are the
+// only spots that map "green" and "previous" onto whichever of those
+// three the current board actually wires them to. Anything that isn't
+// portal or previous is treated as "advance one photo".
+#if RETERMINAL_MODEL == 1004
+constexpr int PIN_PORTAL_KEY = PIN_KEY2;   // GPIO5 - green
+constexpr int PIN_PREV_KEY   = PIN_KEY1;   // GPIO4 - left arrow
+#else
+constexpr int PIN_PORTAL_KEY = PIN_KEY0;   // GPIO3 - green
+constexpr int PIN_PREV_KEY   = PIN_KEY2;   // GPIO5 - left arrow
+#endif
+
 #if RETERMINAL_MODEL == 1001
 constexpr uint32_t PANEL_WHITE = TFT_GRAY_3;
 constexpr uint32_t PANEL_BLACK = TFT_GRAY_0;
@@ -1039,6 +1063,13 @@ void renderPortalOnPanel(const String& ssid, const String& password,
   pinMode(PIN_KEY1, INPUT_PULLUP);
   pinMode(PIN_KEY2, INPUT_PULLUP);
 
+  // The portal's HTTP loop below never returns to Arduino's loop(), so
+  // arduino-esp32 can't feed the task WDT for us. On E1003, the panel
+  // refresh we did above armed a 120 s WDT; drop the subscription now
+  // so the portal doesn't get panic-reset ~2 min in. No-op on E1001 /
+  // E1002 / E1004 where panel_watchdog::guard is a no-op.
+  panel_watchdog::disarmCurrentTask();
+
   while (true) {
     config_portal::loop();
     const bool webExit = sd_web_portal::exitRequested()
@@ -1105,6 +1136,13 @@ void setup() {
   const bool key0Wake = (wakePins & (1ULL << PIN_KEY0)) != 0;
   const bool key1Wake = (wakePins & (1ULL << PIN_KEY1)) != 0;
   const bool key2Wake = (wakePins & (1ULL << PIN_KEY2)) != 0;
+  // Board-specific role mapping (see PIN_PORTAL_KEY / PIN_PREV_KEY at
+  // the top of this file for why the physical-to-role mapping isn't
+  // constant across board revisions).
+  const bool portalKeyWake =
+      (wakePins & (1ULL << PIN_PORTAL_KEY)) != 0;
+  const bool prevKeyWake =
+      (wakePins & (1ULL << PIN_PREV_KEY)) != 0;
 
   // Beep immediately on any physical button wake so the user gets
   // instant feedback, even if we're about to spend several seconds
@@ -1140,13 +1178,13 @@ void setup() {
       // the flag and force a same-photo redraw so nothing looks stale.
       sdPortalMode = false;
       photoRefreshOnly = true;
-    } else if (key2Wake) {
+    } else if (portalKeyWake) {
       // Green: enter the upload portal.
       LOG.println("[boot] green pressed; entering upload portal");
       sdPortalMode = true;
     }
     // Arrow wakes fall through unmodified; app_logic::photoDirection()
-    // maps key1Wake -> previous and everything else -> next.
+    // maps prevKeyWake -> previous and everything else -> next.
   }
 
   if (sdPortalMode) {
@@ -1327,14 +1365,14 @@ void setup() {
   if (sdReady && photoCount > 0) {
     // Direction rules:
     //   - photoRefreshOnly (set on portal-mode exit) redraws current photo.
-    //   - key1Wake (left arrow) steps back one photo.
+    //   - prevKeyWake (left arrow) steps back one photo.
     //   - Anything else (green button, right arrow, timer, cold boot) advances.
     int direction;
     if (photoRefreshOnly) {
       direction = 0;
       photoRefreshOnly = false;
     } else {
-      direction = app_logic::photoDirection(key1Wake);
+      direction = app_logic::photoDirection(prevKeyWake);
     }
     if (currentPhotoIndex < 0) currentPhotoIndex = 0;
     else currentPhotoIndex += direction;

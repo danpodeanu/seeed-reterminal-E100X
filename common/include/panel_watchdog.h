@@ -42,16 +42,37 @@ inline void guard(Refresh&& refresh, uint32_t timeoutSeconds = 120) {
   // fall through to init() otherwise.
   if (esp_task_wdt_reconfigure(&cfg) != ESP_OK) {
     esp_task_wdt_init(&cfg);
-  }
-  const bool subscribed = esp_task_wdt_add(nullptr) == ESP_OK;
+  }  const bool subscribed = esp_task_wdt_add(nullptr) == ESP_OK;
   LOG.printf("[wdt] panel refresh guarded, panic reset in %us%s\n",
              (unsigned)timeoutSeconds,
              subscribed ? "" : " (subscribe failed)");
   refresh();
-  if (subscribed) esp_task_wdt_delete(nullptr);
+  // Always try to unsubscribe on exit - not just when our add()
+  // returned ESP_OK. arduino-esp32's startup can auto-subscribe the
+  // loopTask under some menuconfigs; in that case our add() returns
+  // ESP_ERR_INVALID_STATE ("already subscribed") but the task is
+  // still bound to the reconfigured 120 s timeout we just installed.
+  // If we then skip the delete, any long-running code path after the
+  // refresh - most notably the config portal, whose infinite HTTP
+  // loop never returns to Arduino's loop() (where arduino-esp32
+  // would feed the WDT) - panics the CPU ~120 s in. Deleting
+  // unconditionally makes the guard scope tight: the WDT is only
+  // watching us while refresh() runs; anything after that is on its
+  // own timing. Ignore the return value - "not subscribed" is fine.
+  esp_task_wdt_delete(nullptr);
   // Deliberately leave TWDT running - reverting to the Arduino default
   // requires re-init and it's harmless to leave a 120 s guard armed
   // through sleep prep; the next wake reconfigures it anyway.
+}
+
+// Explicitly drop the current task's TWDT subscription. Call before
+// entering any long-running loop that doesn't return through Arduino's
+// loop() (e.g. the config portal's `while (true) { config_portal::loop();
+// ... }` in the viewers). Belt-and-braces defence against a future
+// refresh path forgetting to unsubscribe; safe to call even if the
+// task was never subscribed. No-op on non-E1003 targets.
+inline void disarmCurrentTask() {
+  esp_task_wdt_delete(nullptr);
 }
 
 }  // namespace panel_watchdog
@@ -63,6 +84,7 @@ template <typename Refresh>
 inline void guard(Refresh&& refresh, uint32_t /*timeoutSeconds*/ = 120) {
   refresh();
 }
+inline void disarmCurrentTask() {}
 }  // namespace panel_watchdog
 
 #endif
