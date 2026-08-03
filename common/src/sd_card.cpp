@@ -261,6 +261,93 @@ bool mount(SPIClass& spi, const char* cacheDir) {
   return true;
 }
 
+bool formatCard(SPIClass& spi, const char* cacheDir, String& error) {
+  // Guarantee a live driver + volume before we start swinging at raw
+  // sectors. If nothing's mounted (or the last mount failed), do a
+  // fresh SD.begin with format_if_empty=true so a card with no valid
+  // filesystem still comes back in a usable state we can then wipe and
+  // reformat properly.
+  auto pumpMount = [&](bool formatIfEmpty) -> bool {
+    if (!SD.begin(board::PIN_SD_CS, spi, 4000000, "/sd", 5, formatIfEmpty)) {
+      SD.end();
+      delay(50);
+      return SD.begin(board::PIN_SD_CS, spi, 4000000, "/sd", 5, formatIfEmpty);
+    }
+    return true;
+  };
+  epaper_setup::finalize(spi);
+  pinMode(board::PIN_SD_CS, OUTPUT);
+  digitalWrite(board::PIN_SD_CS, HIGH);
+  if (!pumpMount(false)) {
+    // Card with a filesystem the driver couldn't parse (or no FS at
+    // all). Retry allowing the SD library's built-in mkfs fallback so
+    // the card is at least driver-visible for the raw wipe below.
+    if (!pumpMount(true)) {
+      error = F("SD card could not be initialised");
+      LOG.println("[sd] format: card unresponsive; cannot proceed");
+      return false;
+    }
+    LOG.println("[sd] format: card had no filesystem; recovered via mkfs");
+  }
+  g_spi = &spi;
+  g_csPin = board::PIN_SD_CS;
+
+  const uint32_t totalSectors = SD.numSectors();
+  LOG.printf("[sd] format: card=%luMB (%lu sectors); wiping partition table\n",
+             static_cast<unsigned long>(SD.cardSize() / (1024UL * 1024UL)),
+             static_cast<unsigned long>(totalSectors));
+
+  // Zero enough of the front of the card to destroy any existing
+  // partitioning scheme (MBR, GPT primary header + partition entries)
+  // AND the standard FAT32 partition-1 VBR at LBA 2048, so a leftover
+  // superblock inside the old partition can't fool f_mount into
+  // thinking a filesystem still exists after the wipe.
+  uint8_t sector[512] = {};
+  bool wipeOk = true;
+  for (uint32_t s = 0; s < 34 && wipeOk; ++s) {
+    wipeOk = SD.writeRAW(sector, s);
+  }
+  if (wipeOk && totalSectors > 2049) {
+    wipeOk = SD.writeRAW(sector, 2048);
+  }
+  if (!wipeOk) {
+    error = F("SD card write failed while erasing partition table");
+    LOG.println("[sd] format: raw sector wipe failed");
+    return false;
+  }
+
+  // Drop the driver so the re-mount picks up a fresh view of an
+  // apparently-empty card. FR_NO_FILESYSTEM will fire on the next
+  // f_mount (nothing to parse now) and format_if_empty=true will
+  // trigger f_mkfs(FM_ANY). FatFs's f_mkfs, when neither FM_SFD nor an
+  // existing MBR is present, writes a fresh MBR partition table with
+  // one primary FAT32 partition covering the card, then formats
+  // inside it - which is exactly the layout Windows/macOS/Linux
+  // expect. FM_ANY picks FAT32 for anything >= 512 MB.
+  SD.end();
+  delay(100);
+  epaper_setup::finalize(spi);
+  if (!pumpMount(true)) {
+    error = F("SD card mkfs failed after erase");
+    LOG.println("[sd] format: post-wipe mount+mkfs failed");
+    g_spi = nullptr;
+    g_csPin = -1;
+    return false;
+  }
+  LOG.printf("[sd] format: fresh FAT32 filesystem, card=%lluMB\n",
+             static_cast<unsigned long long>(
+                 SD.cardSize() / (1024ULL * 1024ULL)));
+
+  // Re-plant the cache directory the caller relies on.
+  if (cacheDir && cacheDir[0] &&
+      !fileExists(cacheDir) && !retryingMkdir(cacheDir)) {
+    LOG.printf("[sd] format: could not create %s on fresh card\n", cacheDir);
+    error = F("SD formatted but cache directory could not be created");
+    return false;
+  }
+  return true;
+}
+
 bool readFile(const String& path, String& out, size_t maxBytes) {
   File file = openForRead(path);
   if (!file) return false;

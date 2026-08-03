@@ -369,6 +369,21 @@ bool begin(const Config& cfg) {
   g_server->on("/reboot", HTTP_POST, []() { g_rebootRequested = true; sendJson(200, "{\"ok\":true}"); });
   g_server->on("/reset", []() { sendHtml(200, renderResetPage(g_config, g_config.appSchema != nullptr)); });
   g_server->on("/reset.json", HTTP_POST, handleReset);
+  g_server->on("/format-sd.json", HTTP_POST, []() {
+    if (!g_config.sdFormat) { handleNotFound(); return; }
+    LOG.println("[cfg-portal] SD format requested via /format-sd.json");
+    String err;
+    const bool ok = g_config.sdFormat(err);
+    if (!ok) {
+      LOG.printf("[cfg-portal] SD format failed: %s\n",
+                 err.length() ? err.c_str() : "unknown");
+      if (!err.length()) err = F("SD format failed");
+      sendJson(500, json::errorJson(err.c_str()));
+      return;
+    }
+    LOG.println("[cfg-portal] SD format: ok");
+    sendJson(200, "{\"ok\":true}");
+  });
   g_server->on("/panel.json", handlePanel);
   g_server->on("/generate_204", redirectRoot);
   g_server->on("/hotspot-detect.html", redirectRoot);

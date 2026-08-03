@@ -69,6 +69,23 @@ struct Config {
   // when it isn't. Photo-viewer sets this to "/upload-photo" so the
   // portal opens the photo management page after Wi-Fi is set.
   const char* postConfigLandingPath = nullptr;
+
+  // Optional "Erase SD card" action on the /reset page. When both are
+  // set, the reset page renders an extra card that POSTs to
+  // /format-sd.json; the portal calls the callback there and returns
+  // the JSON status. The callback is responsible for the actual
+  // formatting (portal itself has no SD dependency); it should write a
+  // human-readable message into `error` on failure. Recreating any
+  // cache/photos directories the caller owns is the callback's job -
+  // the portal only wires up the button and the HTTP round-trip.
+  using SdFormatFn = bool (*)(String& error);
+  SdFormatFn sdFormat = nullptr;
+  // Optional short label describing what actually lives on the card
+  // (e.g. "photos and thumbnails", "weather cache and logs"). Shown in
+  // the format confirmation copy so the user knows what they're about
+  // to lose. Falls back to a generic "all files on the SD card" when
+  // null.
+  const char* sdFormatWarning = nullptr;
 };
 
 String buildSsid(const Config& cfg = Config{});

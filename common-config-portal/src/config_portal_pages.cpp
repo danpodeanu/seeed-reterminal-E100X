@@ -273,7 +273,33 @@ String renderResetPage(const Config& cfg, bool hasSettings) {
             "<button class=\"secondary\" type=\"button\" id=\"resetBtn\" disabled "
             "style=\"background:#b91c1c\">Restore defaults and reboot</button>"
             "<button class=\"secondary\" type=\"button\" id=\"rebootBtn\">Reboot to viewer</button>"
-            "<span id=\"msg\" class=\"msg\"></span></section><script>"
+            "<span id=\"msg\" class=\"msg\"></span></section>");
+  if (cfg.sdFormat) {
+    html += F("<section class=\"card\"><h2>Erase SD card</h2>"
+              "<p>Reformat the microSD card as a fresh FAT32 volume with a new "
+              "MBR partition table. Use this to recover a card the device can't "
+              "mount, or to wipe it before handing the device to someone else.</p>"
+              "<ul class=\"help\">"
+              "<li><b>All files on the card will be lost</b>");
+    if (cfg.sdFormatWarning && cfg.sdFormatWarning[0]) {
+      html += F(" (");
+      html += htmlEscape(cfg.sdFormatWarning);
+      html += F(")");
+    }
+    html += F(".</li>"
+              "<li>The card is remounted in place; you don't need to remove it.</li>"
+              "<li>This cannot be undone.</li>"
+              "</ul>"
+              "<p><label style=\"font-weight:650\">"
+              "Type <code>FORMAT</code> to confirm: "
+              "<input type=\"text\" id=\"fmtConfirm\" autocomplete=\"off\" "
+              "style=\"width:8rem;margin-left:.5rem\" placeholder=\"FORMAT\">"
+              "</label></p>"
+              "<button class=\"secondary\" type=\"button\" id=\"fmtBtn\" disabled "
+              "style=\"background:#b91c1c\">Erase SD card</button>"
+              "<span id=\"fmtMsg\" class=\"msg\"></span></section>");
+  }
+  html += F("<script>"
             "let btn=document.getElementById('resetBtn');"
             "document.getElementById('confirmChk').onchange=e=>{btn.disabled=!e.target.checked;};"
             "btn.onclick=async()=>{let m=document.getElementById('msg');m.className='';"
@@ -282,8 +308,19 @@ String renderResetPage(const Config& cfg, bool hasSettings) {
             "if(!r.ok||!j.ok)throw new Error(j.error||'reset failed');"
             "m.className='ok';m.textContent='Done. Rebooting\u2026';"
             "}catch(x){m.className='err';m.textContent=x.message;btn.disabled=false;}};"
-            "document.getElementById('rebootBtn').onclick=async()=>{let m=document.getElementById('msg');m.className='';m.textContent='Rebooting\u2026';try{await fetch('/reboot',{method:'POST'});}catch(e){}};"
-            "</script></main></body></html>");
+            "document.getElementById('rebootBtn').onclick=async()=>{let m=document.getElementById('msg');m.className='';m.textContent='Rebooting\u2026';try{await fetch('/reboot',{method:'POST'});}catch(e){}};");
+  if (cfg.sdFormat) {
+    html += F("let fb=document.getElementById('fmtBtn');"
+              "let fi=document.getElementById('fmtConfirm');"
+              "fi.oninput=()=>{fb.disabled=fi.value.trim()!=='FORMAT';};"
+              "fb.onclick=async()=>{let m=document.getElementById('fmtMsg');m.className='';"
+              "m.textContent='Formatting SD card\u2026 this may take up to a minute.';fb.disabled=true;"
+              "try{let r=await fetch('/format-sd.json',{method:'POST'});let j=await r.json();"
+              "if(!r.ok||!j.ok)throw new Error(j.error||'format failed');"
+              "m.className='ok';m.textContent='SD card reformatted.';fi.value='';"
+              "}catch(x){m.className='err';m.textContent=x.message;fb.disabled=fi.value.trim()!=='FORMAT';}};");
+  }
+  html += F("</script></main></body></html>");
   return html;
 }
 

@@ -976,6 +976,10 @@ void renderPortalOnPanel(const String& ssid, const String& password,
     if (strcmp(key, "password") == 0) return String(photo_wifi::password());
     return String();
   };
+  portalCfg.sdFormat = [](String& error) -> bool {
+    return sd_card::formatCard(epaper.getSPIinstance(), config::PHOTO_DIR, error);
+  };
+  portalCfg.sdFormatWarning = "photos, thumbnails, and cached metadata";
 
   if (!config_portal::begin(portalCfg)) {
     renderStatus("Wi-Fi start failed",

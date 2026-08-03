@@ -72,4 +72,25 @@ bool makeDir(const String& path);
 // Retrying SD.rmdir wrapper. Fails if the directory is non-empty.
 bool removeDir(const String& path);
 
+// Reformat the SD card to a fresh MBR + FAT32 filesystem, then re-mount.
+//
+// Steps:
+//   1. Ensure the card is mounted so we can hit its raw sectors.
+//   2. Zero the first 34 sectors (kills MBR at sector 0, any FAT VBR at
+//      sector 1 in an SFD layout, and any GPT primary header at sector 1
+//      + protective MBR / primary partition entries in sectors 2-33).
+//   3. Zero the standard FAT32-partition-1 VBR at sector 2048 so a lingering
+//      old superblock inside the partition can't be mistaken for a live FS.
+//   4. SD.end() / SD.begin(format_if_empty=true) - the wiped card comes back
+//      as FR_NO_FILESYSTEM, which triggers f_mkfs(FM_ANY) inside sd_diskio.
+//      Because we don't set FM_SFD, FatFs writes a fresh MBR partition table
+//      itself; the resulting card is FAT32 with a standard PC-style layout
+//      and reads on Windows/macOS/Linux without special drivers.
+//   5. Recreate `cacheDir` so the caller's post-mount code doesn't have to.
+//
+// Writes to `error` on failure so callers (HTTP handlers) can surface it.
+// Returns true on success. On success the card is remounted and usable via
+// the normal SD.* API without a further mount() call.
+bool formatCard(SPIClass& spi, const char* cacheDir, String& error);
+
 }  // namespace sd_card

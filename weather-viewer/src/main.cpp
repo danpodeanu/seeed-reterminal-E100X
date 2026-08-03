@@ -1488,6 +1488,10 @@ void setup() {
       if (strcmp(key, "password") == 0) return String(weather_wifi::password());
       return String();
     };
+    portalCfg.sdFormat = [](String& error) -> bool {
+      return sd_card::formatCard(epaper.getSPIinstance(), config::CACHE_DIR, error);
+    };
+    portalCfg.sdFormatWarning = "cached weather forecasts and logs";
     if (config_portal::begin(portalCfg)) {
       // Wire the SD browser routes onto config_portal's WebServer. This
       // must happen after begin() succeeds so webServer() is non-null,

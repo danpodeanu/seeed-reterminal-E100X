@@ -1405,6 +1405,10 @@ void setup() {
       if (strcmp(key, "password") == 0) return String(xkcd_wifi::password());
       return String();
     };
+    portalCfg.sdFormat = [](String& error) -> bool {
+      return sd_card::formatCard(epaper.getSPIinstance(), config::CACHE_DIR, error);
+    };
+    portalCfg.sdFormatWarning = "the cached comic archive and index";
     if (config_portal::begin(portalCfg)) {
       // Wire the SD browser routes onto config_portal's WebServer.
       // Browser-only config: no photo uploader.
