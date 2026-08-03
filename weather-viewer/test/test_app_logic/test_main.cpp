@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <string>
 #include <time.h>
 
 #include "app_logic.h"
@@ -729,6 +730,79 @@ void test_wmo_to_bucket_falls_back_to_universal_for_unknown() {
   TEST_ASSERT_EQUAL(IDX_UNIVERSAL, wmoToBucketIndex(100)); // above range
 }
 
+#include "sd_ota_pure.h"
+
+// ---------------------------------------------------------------------------
+// sd_ota::TagScanner - streaming search for the model tag inside the
+// incoming OTA image. Naive one-pass matcher because our tag has no
+// self-overlap; these tests pin that assumption.
+// ---------------------------------------------------------------------------
+
+namespace {
+constexpr const char kTag[] = "reterminal-ota:E1004";
+constexpr size_t kTagLen = sizeof(kTag) - 1;
+
+// Feed helper: run the scanner over a std::string treated as bytes.
+bool scan(const char* stream, size_t n) {
+  sd_ota::TagScanner s(reinterpret_cast<const uint8_t*>(kTag), kTagLen);
+  s.feed(reinterpret_cast<const uint8_t*>(stream), n);
+  return s.found;
+}
+}  // namespace
+
+void test_sd_ota_tag_empty_stream_no_match() {
+  TEST_ASSERT_FALSE(scan("", 0));
+}
+
+void test_sd_ota_tag_exact_match_alone() {
+  TEST_ASSERT_TRUE(scan(kTag, kTagLen));
+}
+
+void test_sd_ota_tag_embedded_in_larger_payload() {
+  const std::string payload =
+      std::string("\x00\x01\x02random header\xffmore", 20) + kTag +
+      std::string("trailer bytes", 13);
+  TEST_ASSERT_TRUE(scan(payload.data(), payload.size()));
+}
+
+void test_sd_ota_tag_missing_when_wrong_model() {
+  // Same shape, different model - must NOT match.
+  const char other[] = "reterminal-ota:E1001";
+  TEST_ASSERT_FALSE(scan(other, sizeof(other) - 1));
+}
+
+void test_sd_ota_tag_split_across_chunks() {
+  // Split the tag across a chunk boundary at every possible position; the
+  // scanner must find it because it carries state between feed() calls.
+  for (size_t cut = 1; cut < kTagLen; ++cut) {
+    sd_ota::TagScanner s(reinterpret_cast<const uint8_t*>(kTag), kTagLen);
+    s.feed(reinterpret_cast<const uint8_t*>(kTag), cut);
+    TEST_ASSERT_FALSE_MESSAGE(s.found, "matched too early");
+    s.feed(reinterpret_cast<const uint8_t*>(kTag) + cut, kTagLen - cut);
+    TEST_ASSERT_TRUE_MESSAGE(s.found, "did not match after boundary");
+  }
+}
+
+void test_sd_ota_tag_partial_then_restart() {
+  // "reterminal-ota:E10..." then falls off, then the real tag arrives.
+  // The naive restart works because 'r' does not repeat inside our tag
+  // until well past position 1 - guarding the "tag has no self-overlap"
+  // assumption. If someone renames the tag to something like
+  // "reter reterminal..." this test would catch the regression.
+  const std::string junk = "reterminal-ota:E10ZZ";  // wrong tail
+  std::string stream = junk + std::string(kTag) + "trailer";
+  TEST_ASSERT_TRUE(scan(stream.data(), stream.size()));
+}
+
+void test_sd_ota_tag_stays_matched_across_more_data() {
+  // Once matched, further feed() calls do not un-match.
+  sd_ota::TagScanner s(reinterpret_cast<const uint8_t*>(kTag), kTagLen);
+  s.feed(reinterpret_cast<const uint8_t*>(kTag), kTagLen);
+  TEST_ASSERT_TRUE(s.found);
+  s.feed(reinterpret_cast<const uint8_t*>("more junk"), 9);
+  TEST_ASSERT_TRUE(s.found);
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_startup_beep_only_for_cold_boot_and_button_wake);
@@ -765,5 +839,12 @@ int main(int, char**) {
   RUN_TEST(test_display_text_preserves_3byte_utf8_city_names);
   RUN_TEST(test_wmo_to_bucket_covers_shared_ranges);
   RUN_TEST(test_wmo_to_bucket_falls_back_to_universal_for_unknown);
+  RUN_TEST(test_sd_ota_tag_empty_stream_no_match);
+  RUN_TEST(test_sd_ota_tag_exact_match_alone);
+  RUN_TEST(test_sd_ota_tag_embedded_in_larger_payload);
+  RUN_TEST(test_sd_ota_tag_missing_when_wrong_model);
+  RUN_TEST(test_sd_ota_tag_split_across_chunks);
+  RUN_TEST(test_sd_ota_tag_partial_then_restart);
+  RUN_TEST(test_sd_ota_tag_stays_matched_across_more_data);
   return UNITY_END();
 }

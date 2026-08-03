@@ -56,4 +56,7 @@ inline constexpr char DEBUG[]      = "debug";
 inline constexpr char SENSOR[]   = "sensor";
 inline constexpr char BATTERY[]  = "battery";
 
+// Firmware / OTA
+inline constexpr char OTA[]      = "ota";
+
 }  // namespace log_tags

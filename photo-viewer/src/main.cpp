@@ -29,6 +29,7 @@
 #include "wifi_sta.h"
 #include "climate_sensor.h"
 #include "sd_card.h"
+#include "sd_ota.h"
 #include "sd_web_portal.h"
 #include "sd_web_portal_ui.h"
 #include "config_portal.h"
@@ -1350,6 +1351,22 @@ void setup() {
   if (sdReady && photo_config::runtime::logToSd()) {
     log_sd_sink::install(appLog);
   }
+  // SD-driven firmware update. See common/src/sd_ota.cpp for the shared
+  // implementation; if anything fails the current firmware is untouched.
+  if (sdReady && sd_ota::hasUpdate()) {
+    renderStatus("Updating firmware",
+                 "Please wait, do not power off the device.",
+                 "Firmware update");
+    const auto otaResult = sd_ota::apply();
+    if (otaResult == sd_ota::Result::Applied) {
+      delay(1000);
+      ESP.restart();
+    }
+    renderStatus("Firmware update failed",
+                 "The old firmware is still running. See serial log for details.",
+                 "Firmware update");
+    delay(3000);
+  }
   const uint32_t photoCount = countPhotos();
   const char* pinned = photo_config::runtime::pinnedPhoto();
   if (pinned && pinned[0] != '\0') {
@@ -1548,6 +1565,10 @@ void setup() {
                  quiet_hours::endLabel().c_str());
     }
   }
+  // Reached the successful sleep path: if this boot came from a fresh
+  // SD-OTA install, mark the running image valid so the ESP-IDF rollback
+  // watchdog does not revert us on the next boot. Safe no-op otherwise.
+  sd_ota::confirmRunningImage();
   powerDownAndSleep(nextSleepSeconds);
 }
 

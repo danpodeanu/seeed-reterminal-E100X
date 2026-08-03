@@ -30,6 +30,7 @@
 #include "wifi_sta.h"
 #include "climate_sensor.h"
 #include "sd_card.h"
+#include "sd_ota.h"
 #include "epaper_setup.h"
 #include "net_http.h"
 #include "log_sd_sink.h"
@@ -1617,6 +1618,22 @@ void setup() {
   if (sdReady && xkcd_config::runtime::logToSd()) {
     log_sd_sink::install(appLog);
   }
+  // SD-driven firmware update. See common/src/sd_ota.cpp for the shared
+  // implementation; if anything fails the current firmware is untouched.
+  if (sdReady && sd_ota::hasUpdate()) {
+    renderStatus("Updating firmware",
+                 "Please wait, do not power off the device.",
+                 "Firmware update");
+    const auto otaResult = sd_ota::apply();
+    if (otaResult == sd_ota::Result::Applied) {
+      delay(1000);
+      ESP.restart();
+    }
+    renderStatus("Firmware update failed",
+                 "The old firmware is still running. See serial log for details.",
+                 "Firmware update");
+    delay(3000);
+  }
   if (screenshotRequested && !sdReady) {
     LOG.println("[screenshot] request ignored: SD card is unavailable");
     screenshotRequested = false;
@@ -1853,6 +1870,10 @@ void setup() {
     }
   }
 
+  // Reached the successful sleep path: mark the running image valid so
+  // ESP-IDF's rollback watchdog does not revert an SD-OTA install on the
+  // next boot. Safe no-op if this isn't a pending-verify image.
+  sd_ota::confirmRunningImage();
   powerDownAndSleep(nextSleepSeconds);
 }
 

@@ -39,17 +39,18 @@ constexpr int PIN_LOG_RX = 44;
 constexpr int PIN_LOG_TX = 43;
 
 #if RETERMINAL_MODEL == 1001
-constexpr char MODEL_NAME[] = "E1001";
+#define MODEL_NAME_LITERAL "E1001"
 constexpr char COLOR_MODE_NAME[] = "Gray4";
 #elif RETERMINAL_MODEL == 1002
-constexpr char MODEL_NAME[] = "E1002";
+#define MODEL_NAME_LITERAL "E1002"
 constexpr char COLOR_MODE_NAME[] = "six-color";
 #elif RETERMINAL_MODEL == 1003
-constexpr char MODEL_NAME[] = "E1003";
+#define MODEL_NAME_LITERAL "E1003"
 constexpr char COLOR_MODE_NAME[] = "Gray16";
 #elif RETERMINAL_MODEL == 1004
-constexpr char MODEL_NAME[] = "E1004";
+#define MODEL_NAME_LITERAL "E1004"
 constexpr char COLOR_MODE_NAME[] = "six-color";
 #endif
+constexpr char MODEL_NAME[] = MODEL_NAME_LITERAL;
 
 }  // namespace board
