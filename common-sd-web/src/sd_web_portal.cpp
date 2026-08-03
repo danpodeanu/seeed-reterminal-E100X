@@ -906,7 +906,11 @@ void handlePanelInfo() {
   json += "\",\"photosDir\":\"";
   json += g_config.photosDir ? g_config.photosDir : "";
   json += "\",\"orientation\":\"";
-  json += g_config.panelOrientation ? g_config.panelOrientation : "native";
+  {
+    const char* live = g_config.panelOrientationFn ? g_config.panelOrientationFn() : nullptr;
+    if (!live || !live[0]) live = g_config.panelOrientation ? g_config.panelOrientation : "native";
+    json += live;
+  }
   json += "\"}";
   g_server->sendHeader("Cache-Control", "no-store");
   g_server->send(200, "application/json", json);

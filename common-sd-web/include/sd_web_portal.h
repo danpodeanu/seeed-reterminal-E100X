@@ -73,6 +73,13 @@ struct Config {
   // aspect and rotate the raster pixels so the BMP header dims stay
   // native (panelWidth x panelHeight) but the content is pre-rotated.
   const char* panelOrientation = "native";
+  // Optional live getter for orientation - consulted on every request
+  // instead of the static `panelOrientation` string. Photo-viewer uses
+  // this so the upload page picks up an orientation change made on the
+  // /settings tab without waiting for the next reboot. Returning nullptr
+  // (or leaving the field null) falls back to `panelOrientation`.
+  using PanelOrientationFn = const char* (*)();
+  PanelOrientationFn panelOrientationFn = nullptr;
   const char* photosDir = nullptr;     // e.g. "/photos"
 
   // Path the on-panel URL QR code should point to. Empty/nullptr means

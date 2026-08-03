@@ -138,7 +138,8 @@ void handleWifiValues() {
   sendJson(200, json::valuesToJson(values));
 }
 
-void handleSave(const Schema& schema, storage::Storage& store, bool reboot) {
+void handleSave(const Schema& schema, storage::Storage& store, bool reboot,
+                void (*onSuccess)() = nullptr) {
   String err;
   std::map<String, String> submitted;
   if (!json::parseSubmissionJson(schema, g_server->arg("plain"), submitted, &err)) {
@@ -149,6 +150,11 @@ void handleSave(const Schema& schema, storage::Storage& store, bool reboot) {
     sendJson(400, json::errorJson(err.c_str()));
     return;
   }
+  // Fire post-save hook AFTER the write is durable but BEFORE the
+  // response is sent, so the very next request the browser makes (e.g.
+  // /photo-panel.json after saving the orientation setting) already
+  // sees the refreshed runtime cache.
+  if (onSuccess) onSuccess();
   if (reboot) {
     g_rebootRequested = true;
     sendJson(200, "{\"ok\":true,\"reboot\":true}");
@@ -365,7 +371,10 @@ bool begin(const Config& cfg) {
   g_server->on("/scan.json", handleScan);
   g_server->on("/settings", []() { if (!g_config.appSchema) handleNotFound(); else sendHtml(200, renderSettingsPage(g_config, *g_config.appSchema, *g_config.wifiSchema)); });
   g_server->on("/settings.json", HTTP_GET, []() { if (!g_config.appSchema) handleNotFound(); else handleValues(*g_config.appSchema, g_appStorage); });
-  g_server->on("/settings.json", HTTP_POST, []() { if (!g_config.appSchema) handleNotFound(); else handleSave(*g_config.appSchema, g_appStorage, false); });
+  g_server->on("/settings.json", HTTP_POST, []() {
+    if (!g_config.appSchema) { handleNotFound(); return; }
+    handleSave(*g_config.appSchema, g_appStorage, false, g_config.onAppSaved);
+  });
   g_server->on("/reboot", HTTP_POST, []() { g_rebootRequested = true; sendJson(200, "{\"ok\":true}"); });
   g_server->on("/reset", []() { sendHtml(200, renderResetPage(g_config, g_config.appSchema != nullptr)); });
   g_server->on("/reset.json", HTTP_POST, handleReset);

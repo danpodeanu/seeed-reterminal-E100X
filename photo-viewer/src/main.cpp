@@ -1085,6 +1085,11 @@ void renderPortalOnPanel(const String& ssid, const String& password,
     return sd_card::formatCard(epaper.getSPIinstance(), config::PHOTO_DIR, error);
   };
   portalCfg.sdFormatWarning = "photos, thumbnails, and cached metadata";
+  // Reload the runtime cache from NVS whenever the user saves settings,
+  // so orientation / palette / etc. take effect on the next portal
+  // request (e.g. the crop aspect on /upload-photo) without needing to
+  // reboot the device.
+  portalCfg.onAppSaved = &photo_config::runtime::load;
 
   if (!config_portal::begin(portalCfg)) {
     renderStatus("Wi-Fi start failed",
@@ -1112,17 +1117,20 @@ void renderPortalOnPanel(const String& ssid, const String& password,
   sdCfg.panelPalette = "e6";
 #endif
   sdCfg.panelModel = MODEL_NAME;
-  switch (photo_config::runtime::orientation()) {
-    case ::config::Orientation::RotateCW:
-      sdCfg.panelOrientation = "rotate_cw";
-      break;
-    case ::config::Orientation::RotateCCW:
-      sdCfg.panelOrientation = "rotate_ccw";
-      break;
-    default:
-      sdCfg.panelOrientation = "native";
-      break;
-  }
+  // Live-refresh orientation from the runtime cache on every panel-info
+  // request. Lets the /upload-photo page's crop aspect follow a change
+  // made on /settings without having to reboot (paired with the config
+  // portal's onAppSaved hook below that reloads the cache from NVS).
+  sdCfg.panelOrientationFn = []() -> const char* {
+    switch (photo_config::runtime::orientation()) {
+      case ::config::Orientation::RotateCW:  return "rotate_cw";
+      case ::config::Orientation::RotateCCW: return "rotate_ccw";
+      default:                               return "native";
+    }
+  };
+  // Retain the static field as a safe fallback (e.g. if the runtime
+  // cache is somehow uninitialised when the JS fetches).
+  sdCfg.panelOrientation = sdCfg.panelOrientationFn();
   sdCfg.photosDir = config::PHOTO_DIR;
   sdCfg.thumbnailDir = config::PHOTO_THUMB_DIR;
   sdCfg.thumbnailGenerator = &generatePhotoThumbnail;

@@ -1081,6 +1081,40 @@ fetchPanel().then(() => {
   refreshPhotoList();
   initEpdoIfSupported();
 });
+
+// If the user changes orientation/palette on a separate /settings tab
+// and then comes back here, re-fetch panel info and re-initialise the
+// crop rectangle at the new aspect. Only meaningful for the "both tabs
+// open" case; a single-tab flow already sees the change on the next
+// fetch. We compare against a snapshot so we don't re-run the pipeline
+// on every focus change when nothing actually differs.
+document.addEventListener("visibilitychange", async () => {
+  if (document.visibilityState !== "visible" || !state.panel) return;
+  const prev = {
+    orient: state.panel.orientation || "native",
+    palette: state.panel.palette,
+  };
+  await fetchPanel();
+  if (!state.panel) return;
+  const changed = ((state.panel.orientation || "native") !== prev.orient) ||
+                  (state.panel.palette !== prev.palette);
+  if (!changed) return;
+  if (state.bitmap) {
+    // Recompute the initial crop at the new effective panel aspect and
+    // re-run the pipeline so the preview reflects the new orientation/
+    // palette without the user having to re-pick the file.
+    const r = coverRect(state.bitmap.width, state.bitmap.height,
+                        state.panel.effWidth, state.panel.effHeight);
+    state.crop = {
+      sx: Math.round(r.maxSx / 2),
+      sy: Math.round(r.maxSy / 2),
+      sw: r.sw,
+      sh: r.sh,
+    };
+    drawCropStage();
+    runPipeline();
+  }
+});
 </script>
 </body>
 </html>

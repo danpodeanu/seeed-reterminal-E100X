@@ -86,6 +86,15 @@ struct Config {
   // to lose. Falls back to a generic "all files on the SD card" when
   // null.
   const char* sdFormatWarning = nullptr;
+
+  // Optional callback fired after a successful POST /settings.json save
+  // (before the response is sent). Photo-viewer wires this to reload the
+  // runtime settings cache from NVS so live-mutable behaviour (e.g. photo
+  // orientation, which the upload page then re-fetches) updates without
+  // requiring a reboot. Not called for Wi-Fi saves (those always need a
+  // reconnect, so a reboot is the natural next step anyway).
+  using SavedFn = void (*)();
+  SavedFn onAppSaved = nullptr;
 };
 
 String buildSsid(const Config& cfg = Config{});
