@@ -183,12 +183,14 @@
         <li>Choose a board and an application above.</li>
         <li>
           <em>Flash (preserve settings)</em> writes only the app image and
-          otadata, keeping saved Wi-Fi credentials and portal config.
-          <em>Flash (delete settings)</em> writes the merged image at
-          offset&nbsp;0, which resets stored config (Wi-Fi, API keys) but
-          keeps SPIFFS. <em>Flash (erase)</em> wipes the entire flash
-          first for a clean factory install. The browser will ask which
-          USB serial port to use — pick the reTerminal.
+          otadata, keeping saved Wi-Fi credentials and portal config. The
+          flasher will show an <em>&ldquo;Erase device?&rdquo;</em> prompt
+          &mdash; leave the checkbox unchecked and click <em>Next</em> to
+          keep your settings. <em>Flash (delete settings)</em> writes the
+          merged image at offset&nbsp;0, which resets stored config
+          (Wi-Fi, API keys) but keeps SPIFFS. <em>Flash (erase)</em> wipes
+          the entire flash first for a clean factory install. The browser
+          will ask which USB serial port to use &mdash; pick the reTerminal.
         </li>
         <li>
           The device reboots into the app on its own.

@@ -67,12 +67,19 @@ function buildFullManifest(url, version, app, board) {
 // Manifest for "preserve settings" - writes only otadata (0xE000) and
 // the app-only image (0x10000), skipping bootloader (0x0) / partitions
 // (0x8000) / NVS (0x9000). NVS survives, Wi-Fi credentials keep working.
+//
+// new_install_prompt_erase MUST be true here: ESP Web Tools' default for
+// firmware without Improv Serial is to call esploader.eraseFlash() before
+// writing any parts, which would wipe the bootloader / partition table
+// and boot-loop the device with "invalid header: 0xffffffff". With this
+// flag set, the flasher shows an ASK_ERASE prompt with the checkbox off
+// by default -- clicking Next through it skips the pre-write erase.
 function buildPreserveManifest(otaUrl, version, app, board) {
   return {
     name: `${app} for ${board} (preserve settings)`,
     version: version || "latest",
     home_assistant_domain: null,
-    new_install_prompt_erase: false,
+    new_install_prompt_erase: true,
     builds: [
       {
         chipFamily: "ESP32-S3",
