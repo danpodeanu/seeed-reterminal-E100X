@@ -32,6 +32,14 @@ screenshot feature.*
   the network is down.
 - On-device Wi-Fi and location setup via a captive portal with QR
   codes.
+- **Over-the-air firmware updates from v1.5 onward** - drop the app-only
+  `firmware-*-ota.bin` from the [Releases page](https://github.com/danpodeanu/seeed-reterminal-E100X/releases)
+  onto the SD card as `/update.bin` and the device applies it on the
+  next wake, or reconnect USB and re-run the
+  [web flasher](https://danpodeanu.github.io/seeed-reterminal-E100X/)
+  with the *Erase device* checkbox left unchecked to keep Wi-Fi
+  credentials, portal config, and the cached forecast. See the top-level
+  [README](../README.md#updating-firmware-sd-card) for details.
 
 ## Supported hardware
 
