@@ -13,9 +13,13 @@
 const REPO = "danpodeanu/seeed-reterminal-E100X";
 const LATEST_URL = `https://api.github.com/repos/${REPO}/releases/latest`;
 const FIRMWARE_BASE = "./firmware/latest";
+// Reset otadata to point at app0 whenever we (re)flash the app slot in
+// preserve-settings mode. Same blob for every board.
+const BOOT_APP0_URL = `${FIRMWARE_BASE}/boot_app0.bin`;
 
 const boardSel = document.getElementById("board");
 const appSel = document.getElementById("app");
+const installerPreserve = document.getElementById("installer-preserve");
 const installer = document.getElementById("installer");
 const installerErase = document.getElementById("installer-erase");
 const status = document.getElementById("status");
@@ -27,15 +31,25 @@ function setStatus(text, isError = false) {
   status.classList.toggle("error", isError);
 }
 
-function assetName(app, board) {
+function fullAssetName(app, board) {
   return `firmware-${app}-${board}-full.bin`;
 }
 
-function firmwareUrl(app, board) {
-  return `${FIRMWARE_BASE}/${assetName(app, board)}`;
+function otaAssetName(app, board) {
+  return `firmware-${app}-${board}-ota.bin`;
 }
 
-function buildManifest(url, version, app, board) {
+function fullFirmwareUrl(app, board) {
+  return `${FIRMWARE_BASE}/${fullAssetName(app, board)}`;
+}
+
+function otaFirmwareUrl(app, board) {
+  return `${FIRMWARE_BASE}/${otaAssetName(app, board)}`;
+}
+
+// Manifest for "delete settings" / "erase" - single merged image at 0x0
+// that spans NVS at 0x9000 and therefore wipes it.
+function buildFullManifest(url, version, app, board) {
   return {
     name: `${app} for ${board}`,
     version: version || "latest",
@@ -45,6 +59,27 @@ function buildManifest(url, version, app, board) {
       {
         chipFamily: "ESP32-S3",
         parts: [{ path: url, offset: 0 }],
+      },
+    ],
+  };
+}
+
+// Manifest for "preserve settings" - writes only otadata (0xE000) and
+// the app-only image (0x10000), skipping bootloader (0x0) / partitions
+// (0x8000) / NVS (0x9000). NVS survives, Wi-Fi credentials keep working.
+function buildPreserveManifest(otaUrl, version, app, board) {
+  return {
+    name: `${app} for ${board} (preserve settings)`,
+    version: version || "latest",
+    home_assistant_domain: null,
+    new_install_prompt_erase: false,
+    builds: [
+      {
+        chipFamily: "ESP32-S3",
+        parts: [
+          { path: BOOT_APP0_URL, offset: 0xe000 },
+          { path: otaUrl, offset: 0x10000 },
+        ],
       },
     ],
   };
@@ -80,24 +115,36 @@ async function firmwarePresent(url) {
 async function refresh() {
   const app = appSel.value;
   const board = boardSel.value;
-  const url = firmwareUrl(app, board);
+  const fullUrl = fullFirmwareUrl(app, board);
+  const otaUrl = otaFirmwareUrl(app, board);
+  installerPreserve.hidden = true;
   installer.hidden = true;
   installerErase.hidden = true;
   setStatus("Checking firmware…");
-  const ok = await firmwarePresent(url);
-  if (!ok) {
+  const [fullOk, otaOk] = await Promise.all([
+    firmwarePresent(fullUrl),
+    firmwarePresent(otaUrl),
+  ]);
+  if (!fullOk) {
     setStatus(
       `No firmware for ${app} on ${board} at ${releaseTag || "the latest release"}.`,
       true
     );
     return;
   }
-  const manifest = buildManifest(url, releaseTag, app, board);
-  const manifestUrl = encodeDataUrl(manifest);
-  installer.manifest = manifestUrl;
+  const fullManifest = encodeDataUrl(
+    buildFullManifest(fullUrl, releaseTag, app, board)
+  );
+  installer.manifest = fullManifest;
   installer.hidden = false;
-  installerErase.manifest = manifestUrl;
+  installerErase.manifest = fullManifest;
   installerErase.hidden = false;
+  if (otaOk) {
+    installerPreserve.manifest = encodeDataUrl(
+      buildPreserveManifest(otaUrl, releaseTag, app, board)
+    );
+    installerPreserve.hidden = false;
+  }
   setStatus(
     `Ready to flash ${app} ${releaseTag || "latest"} for ${board}.`
   );

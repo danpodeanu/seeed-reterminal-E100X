@@ -81,7 +81,12 @@ jobs:
             0xe000   "$BOOT_APP0" \
             0x10000  "$BUILD_DIR/firmware.bin"
           cp "$BUILD_DIR/firmware.bin" "$OTA"
-          ls -la "$FULL" "$OTA"
+          # boot_app0.bin resets otadata so the freshly-flashed app0 is
+          # selected next boot. Preserve-settings flashing pairs it with
+          # the -ota image at 0x10000 while leaving NVS (Wi-Fi/portal
+          # config) at 0x9000 untouched. Same blob for every env.
+          cp "$BOOT_APP0" boot_app0.bin
+          ls -la "$FULL" "$OTA" boot_app0.bin
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v7
@@ -90,6 +95,15 @@ jobs:
           path: |
             ${{ matrix.app }}/firmware-${{ matrix.app }}-${{ matrix.board }}-full.bin
             ${{ matrix.app }}/firmware-${{ matrix.app }}-${{ matrix.board }}-ota.bin
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload boot_app0 (once)
+        if: matrix.app == 'photo-viewer' && matrix.board == 'reterminal_e1001'
+        uses: actions/upload-artifact@v7
+        with:
+          name: boot_app0
+          path: ${{ matrix.app }}/boot_app0.bin
           if-no-files-found: error
           retention-days: 30
 

@@ -62,6 +62,14 @@ jobs:
               --pattern 'firmware-*.bin' \
               --dir site/firmware/latest \
               || echo "No matching firmware-*.bin assets on latest release yet."
+            # boot_app0.bin is pulled separately: the pattern above does
+            # not match it, but the preserve-settings flow needs it at
+            # 0xE000 to reset otadata back to app0.
+            gh release download \
+              --repo "${{ github.repository }}" \
+              --pattern 'boot_app0.bin' \
+              --dir site/firmware/latest \
+              || echo "No boot_app0.bin asset on latest release yet."
             ls -la site/firmware/latest
           else
             echo "No published release yet; skipping firmware download."
