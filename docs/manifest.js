@@ -20,7 +20,6 @@ const BOOT_APP0_URL = `${FIRMWARE_BASE}/boot_app0.bin`;
 const boardSel = document.getElementById("board");
 const appSel = document.getElementById("app");
 const installerPreserve = document.getElementById("installer-preserve");
-const installer = document.getElementById("installer");
 const installerErase = document.getElementById("installer-erase");
 const status = document.getElementById("status");
 
@@ -47,8 +46,13 @@ function otaFirmwareUrl(app, board) {
   return `${FIRMWARE_BASE}/${otaAssetName(app, board)}`;
 }
 
-// Manifest for "delete settings" / "erase" - single merged image at 0x0
-// that spans NVS at 0x9000 and therefore wipes it.
+// Manifest for "erase & install" - single merged image at offset 0 that
+// covers bootloader / partitions / otadata / app. Because our firmware
+// doesn't implement Improv Serial, ESP Web Tools always treats this as
+// a "new install" and, with new_install_prompt_erase: false, silently
+// runs esploader.eraseFlash() before writing (see _renderDashboardNoImprov
+// in esp-web-tools). That's exactly the semantics we want for this
+// button: full chip erase, then lay down a known-good image.
 function buildFullManifest(url, version, app, board) {
   return {
     name: `${app} for ${board}`,
@@ -125,7 +129,6 @@ async function refresh() {
   const fullUrl = fullFirmwareUrl(app, board);
   const otaUrl = otaFirmwareUrl(app, board);
   installerPreserve.hidden = true;
-  installer.hidden = true;
   installerErase.hidden = true;
   setStatus("Checking firmware…");
   const [fullOk, otaOk] = await Promise.all([
@@ -142,8 +145,6 @@ async function refresh() {
   const fullManifest = encodeDataUrl(
     buildFullManifest(fullUrl, releaseTag, app, board)
   );
-  installer.manifest = fullManifest;
-  installer.hidden = false;
   installerErase.manifest = fullManifest;
   installerErase.hidden = false;
   if (otaOk) {

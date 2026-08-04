@@ -160,7 +160,7 @@
 
         <div class="install-row">
           <esp-web-install-button id="installer-preserve" manifest="" hidden>
-            <button slot="activate">Flash (preserve settings)</button>
+            <button slot="activate">Flash (keep settings)</button>
             <span slot="unsupported">
               Web Serial isn't available in this browser. Try Chrome or Edge.
             </span>
@@ -168,11 +168,8 @@
               This page must be served over HTTPS.
             </span>
           </esp-web-install-button>
-          <esp-web-install-button id="installer" manifest="" hidden>
-            <button slot="activate">Flash (delete settings)</button>
-          </esp-web-install-button>
-          <esp-web-install-button id="installer-erase" manifest="" erase-first hidden>
-            <button slot="activate">Flash (erase)</button>
+          <esp-web-install-button id="installer-erase" manifest="" hidden>
+            <button slot="activate">Flash (erase &amp; install)</button>
           </esp-web-install-button>
           <span id="status" class="status">Loading latest release&hellip;</span>
         </div>
@@ -182,14 +179,13 @@
       <ol>
         <li>Choose a board and an application above.</li>
         <li>
-          <em>Flash (preserve settings)</em> writes only the app image and
+          <em>Flash (keep settings)</em> writes only the app image and
           otadata, keeping saved Wi-Fi credentials and portal config. The
           flasher will show an <em>&ldquo;Erase device?&rdquo;</em> prompt
           &mdash; leave the checkbox unchecked and click <em>Next</em> to
-          keep your settings. <em>Flash (delete settings)</em> writes the
-          merged image at offset&nbsp;0, which resets stored config
-          (Wi-Fi, API keys) but keeps SPIFFS. <em>Flash (erase)</em> wipes
-          the entire flash first for a clean factory install. The browser
+          keep your settings. <em>Flash (erase &amp; install)</em> wipes
+          the entire flash first for a clean factory install, then writes
+          bootloader, partition table, otadata and the app. The browser
           will ask which USB serial port to use &mdash; pick the reTerminal.
         </li>
         <li>
