@@ -486,7 +486,8 @@ void drawBadges(uint32_t background = PANEL_WHITE,
 void renderStatus(const String& message, const String& detail = "",
                   const String& lineAbove = "",
                   const String& helpBelow = "",
-                  const String& subLineAbove = "") {
+                  const String& subLineAbove = "",
+                  const String& subHelpBelow = "") {
   epaper.fillSprite(PANEL_WHITE);
   setBodyTextColor(PANEL_BLACK);
   epaper.setTextDatum(MC_DATUM);
@@ -503,8 +504,9 @@ void renderStatus(const String& message, const String& detail = "",
     unloadSmoothFontIfLoaded();
   }
   if (!subLineAbove.isEmpty()) {
-    // ASCII-only technical sub-line (e.g. MAC + firmware) drawn between
-    // the city and the "Connecting to..." message in the small font.
+    // Small ASCII line above the main message. Used by "Weather
+    // unavailable" to keep a long failure summary readable without
+    // shrinking the main title.
     selectSmallFont();
     epaper.drawString(
         text_render::ellipsize(epaper, subLineAbove, config::PANEL_WIDTH - config::ui(60)),
@@ -522,6 +524,16 @@ void renderStatus(const String& message, const String& detail = "",
         text_render::ellipsize(epaper, detail, config::PANEL_WIDTH - config::ui(60)),
         config::PANEL_WIDTH / 2,
         config::PANEL_HEIGHT / 2 + config::ui(25), 1);
+  }
+  if (!subHelpBelow.isEmpty()) {
+    // Small ASCII sub-line (MAC + firmware) drawn just above the bottom
+    // help hint so it stays informative without competing with the main
+    // "Connecting to..." message.
+    selectSmallFont();
+    epaper.drawString(
+        text_render::ellipsize(epaper, subHelpBelow, config::PANEL_WIDTH - config::ui(60)),
+        config::PANEL_WIDTH / 2,
+        config::PANEL_HEIGHT - config::ui(46), 1);
   }
   if (!helpBelow.isEmpty()) {
     selectSmallFont();
@@ -1768,7 +1780,7 @@ void setup() {
     renderStatus("Connecting to " + String(weather_wifi::ssid()), connectionDetail,
                  locationLabel,
                  "To configure device - from sleep, hold green for 2 seconds",
-                 macAndVersion);
+                 "", macAndVersion);
   }
 #if RETERMINAL_MODEL == 1001
   epaper.initGrayMode(GRAY_LEVEL4);
@@ -1794,7 +1806,7 @@ void setup() {
             ? "Clock not synced - times inaccurate, QWeather may fail"
             : "Clock not synced - displayed times may be inaccurate";
     renderStatus("Connecting to " + String(weather_wifi::ssid()), warning, locationLabel,
-                 "", macAndVersion);
+                 "", "", macAndVersion);
   }
   local_time::configureTimezone(weather_config::runtime::timezone());
   quiet_hours::configure({weather_config::runtime::quietHoursEnabled(),
@@ -1900,7 +1912,7 @@ void setup() {
         " minutes. Press the green button to retry now.";
     const String help =
         "Keep the green button pressed for 2 seconds to reconfigure.";
-    renderStatus("Weather unavailable", detail, failureSummary, help);
+    renderStatus("Weather unavailable", detail, "", help, failureSummary);
     powerDownAndSleep(config::FAILURE_RETRY_SECONDS);
     return;
   }

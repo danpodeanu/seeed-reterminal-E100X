@@ -297,7 +297,8 @@ void updatePanel() {
 
 void renderStatus(const String& message, const String& detail = "",
                   const String& lineAbove = "",
-                  const String& helpBelow = "") {
+                  const String& helpBelow = "",
+                  const String& subHelpBelow = "") {
   epaper.fillSprite(PANEL_WHITE);
   epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, true);
   epaper.setTextDatum(MC_DATUM);
@@ -319,6 +320,16 @@ void renderStatus(const String& message, const String& detail = "",
         text_render::ellipsize(epaper, detail, config::PANEL_WIDTH - config::ui(60)),
         config::PANEL_WIDTH / 2,
         config::PANEL_HEIGHT / 2 + config::ui(22), 1);
+  }
+  if (!subHelpBelow.isEmpty()) {
+    // Small ASCII sub-line (e.g. MAC + firmware) drawn just above the
+    // bottom help hint so it stays informative without competing with
+    // the main "Connecting to..." message.
+    selectStatusFont();
+    epaper.drawString(
+        text_render::ellipsize(epaper, subHelpBelow, config::PANEL_WIDTH - config::ui(60)),
+        config::PANEL_WIDTH / 2,
+        config::PANEL_HEIGHT - config::ui(46), 1);
   }
   if (!helpBelow.isEmpty()) {
     selectStatusFont();
@@ -1445,8 +1456,9 @@ void setup() {
   if (showStartupStatus) {
     LOG.println("[display] showing Wi-Fi connection status");
     renderStatus("Connecting to " + String(photo_wifi::ssid()), statusDetail,
-                 macAndVersion,
-                 "To upload photos - from sleep, press green");
+                 "",
+                 "To upload photos - from sleep, press green",
+                 macAndVersion);
   }
   epaper.initGrayMode(GRAY_LEVEL4);
 #elif RETERMINAL_MODEL == 1003
@@ -1458,8 +1470,9 @@ void setup() {
   if (showStartupStatus) {
     LOG.println("[display] showing Wi-Fi connection status");
     renderStatus("Connecting to " + String(photo_wifi::ssid()), statusDetail,
-                 macAndVersion,
-                 "To upload photos - from sleep, press green");
+                 "",
+                 "To upload photos - from sleep, press green",
+                 macAndVersion);
   }
 #endif
 

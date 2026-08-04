@@ -532,7 +532,8 @@ void drawBadges(uint32_t background = PANEL_WHITE,
 
 void renderStatus(const String& message, const String& detail = "",
                   const String& lineAbove = "",
-                  const String& helpBelow = "") {
+                  const String& helpBelow = "",
+                  const String& subHelpBelow = "") {
   epaper.fillSprite(PANEL_WHITE);
   epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, true);
   epaper.setTextDatum(MC_DATUM);
@@ -554,6 +555,16 @@ void renderStatus(const String& message, const String& detail = "",
                                 config::PANEL_WIDTH - config::ui(60), 1),
                       config::PANEL_WIDTH / 2,
                       config::PANEL_HEIGHT / 2 + config::ui(22), 1);
+  }
+  if (!subHelpBelow.isEmpty()) {
+    // Small ASCII sub-line (MAC + firmware) drawn just above the bottom
+    // help hint so it stays informative without competing with the main
+    // "Connecting to..." message.
+    selectStatusMessageDetailFont();
+    epaper.drawString(text_render::ellipsize(epaper, text_render::displayText(subHelpBelow),
+                                config::PANEL_WIDTH - config::ui(60), 1),
+                      config::PANEL_WIDTH / 2,
+                      config::PANEL_HEIGHT - config::ui(46), 1);
   }
   if (!helpBelow.isEmpty()) {
     // Bottom-of-panel hint: used for the "hold green at boot to
@@ -1699,8 +1710,9 @@ void setup() {
   if (showConnectionStatus) {
     LOG.println("[display] showing Wi-Fi connection status");
     renderStatus("Connecting to " + String(xkcd_wifi::ssid()), connectionDetail,
-                 macAndVersion,
-                 "To configure device - from sleep, hold green for 2 seconds");
+                 "",
+                 "To configure device - from sleep, hold green for 2 seconds",
+                 macAndVersion);
   }
 #if RETERMINAL_MODEL == 1001
   epaper.initGrayMode(GRAY_LEVEL4);
