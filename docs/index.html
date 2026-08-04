@@ -159,17 +159,14 @@
         </div>
 
         <div class="install-row">
-          <esp-web-install-button id="installer-preserve" manifest="" hidden>
-            <button slot="activate">Flash (keep settings)</button>
+          <esp-web-install-button id="installer" manifest="" hidden>
+            <button slot="activate">Flash</button>
             <span slot="unsupported">
               Web Serial isn't available in this browser. Try Chrome or Edge.
             </span>
             <span slot="not-allowed">
               This page must be served over HTTPS.
             </span>
-          </esp-web-install-button>
-          <esp-web-install-button id="installer-erase" manifest="" hidden>
-            <button slot="activate">Flash (erase &amp; install)</button>
           </esp-web-install-button>
           <span id="status" class="status">Loading latest release&hellip;</span>
         </div>
@@ -179,14 +176,21 @@
       <ol>
         <li>Choose a board and an application above.</li>
         <li>
-          <em>Flash (keep settings)</em> writes only the app image and
-          otadata, keeping saved Wi-Fi credentials and portal config. The
-          flasher will show an <em>&ldquo;Erase device?&rdquo;</em> prompt
-          &mdash; leave the checkbox unchecked and click <em>Next</em> to
-          keep your settings. <em>Flash (erase &amp; install)</em> wipes
-          the entire flash first for a clean factory install, then writes
-          bootloader, partition table, otadata and the app. The browser
-          will ask which USB serial port to use &mdash; pick the reTerminal.
+          Click <em>Flash</em> and pick the reTerminal's USB serial port.
+          The flasher asks <em>&ldquo;Erase device?&rdquo;</em>:
+          <ul>
+            <li>
+              Leave the checkbox <strong>unchecked</strong> to keep saved
+              Wi-Fi credentials and portal config &mdash; only bootloader,
+              partitions, otadata and the app are rewritten; NVS and SPIFFS
+              are left alone.
+            </li>
+            <li>
+              <strong>Check</strong> the box for a factory-fresh install
+              &mdash; the whole flash is erased first, wiping stored config
+              and cached data.
+            </li>
+          </ul>
         </li>
         <li>
           The device reboots into the app on its own.

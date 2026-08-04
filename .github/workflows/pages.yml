@@ -62,14 +62,22 @@ jobs:
               --pattern 'firmware-*.bin' \
               --dir site/firmware/latest \
               || echo "No matching firmware-*.bin assets on latest release yet."
-            # boot_app0.bin is pulled separately: the pattern above does
-            # not match it, but the preserve-settings flow needs it at
-            # 0xE000 to reset otadata back to app0.
-            gh release download \
-              --repo "${{ github.repository }}" \
-              --pattern 'boot_app0.bin' \
-              --dir site/firmware/latest \
-              || echo "No boot_app0.bin asset on latest release yet."
+            # The three shared blobs (boot_app0.bin, bootloader.bin,
+            # partitions.bin) are byte-identical across every env; the
+            # web flasher's single-button manifest writes them alongside
+            # the app-only -ota.bin so a "keep settings" flash lays down
+            # a complete boot chain (bootloader / partitions / otadata /
+            # app) at 0x0 / 0x8000 / 0xE000 / 0x10000 while leaving NVS
+            # (0x9000) and SPIFFS (0x610000) untouched. Downloaded
+            # separately because the firmware-*.bin pattern above skips
+            # them.
+            for asset in boot_app0.bin bootloader.bin partitions.bin; do
+              gh release download \
+                --repo "${{ github.repository }}" \
+                --pattern "$asset" \
+                --dir site/firmware/latest \
+                || echo "No $asset asset on latest release yet."
+            done
             ls -la site/firmware/latest
           else
             echo "No published release yet; skipping firmware download."

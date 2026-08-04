@@ -81,12 +81,18 @@ jobs:
             0xe000   "$BOOT_APP0" \
             0x10000  "$BUILD_DIR/firmware.bin"
           cp "$BUILD_DIR/firmware.bin" "$OTA"
-          # boot_app0.bin resets otadata so the freshly-flashed app0 is
-          # selected next boot. Preserve-settings flashing pairs it with
-          # the -ota image at 0x10000 while leaving NVS (Wi-Fi/portal
-          # config) at 0x9000 untouched. Same blob for every env.
+          # boot_app0.bin, bootloader.bin, and partitions.bin are byte-
+          # identical across all 12 envs (same ESP32-S3 config, same
+          # partition table). The web flasher's single-button manifest
+          # writes them alongside the -ota image so a "keep settings"
+          # flash lays down a complete boot chain at 0x0 / 0x8000 /
+          # 0xe000 / 0x10000, skipping only NVS (0x9000) and SPIFFS.
+          # Publishing them once (from the photo/e1001 job below) keeps
+          # the release asset count down.
           cp "$BOOT_APP0" boot_app0.bin
-          ls -la "$FULL" "$OTA" boot_app0.bin
+          cp "$BUILD_DIR/bootloader.bin" bootloader.bin
+          cp "$BUILD_DIR/partitions.bin" partitions.bin
+          ls -la "$FULL" "$OTA" boot_app0.bin bootloader.bin partitions.bin
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v7
@@ -98,12 +104,15 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      - name: Upload boot_app0 (once)
+      - name: Upload shared boot chain (once)
         if: matrix.app == 'photo-viewer' && matrix.board == 'reterminal_e1001'
         uses: actions/upload-artifact@v7
         with:
-          name: boot_app0
-          path: ${{ matrix.app }}/boot_app0.bin
+          name: shared-boot-chain
+          path: |
+            ${{ matrix.app }}/boot_app0.bin
+            ${{ matrix.app }}/bootloader.bin
+            ${{ matrix.app }}/partitions.bin
           if-no-files-found: error
           retention-days: 30
 

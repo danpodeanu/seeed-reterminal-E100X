@@ -13,14 +13,18 @@
 const REPO = "danpodeanu/seeed-reterminal-E100X";
 const LATEST_URL = `https://api.github.com/repos/${REPO}/releases/latest`;
 const FIRMWARE_BASE = "./firmware/latest";
-// Reset otadata to point at app0 whenever we (re)flash the app slot in
-// preserve-settings mode. Same blob for every board.
+// Shared boot chain -- byte-identical across every env, published once
+// per release. Written alongside the per-env -ota.bin at the four
+// arduino-esp32 partition offsets so a "keep settings" flash lays down
+// bootloader / partitions / otadata / app while leaving NVS (0x9000)
+// and SPIFFS (0x610000) untouched.
+const BOOTLOADER_URL = `${FIRMWARE_BASE}/bootloader.bin`;
+const PARTITIONS_URL = `${FIRMWARE_BASE}/partitions.bin`;
 const BOOT_APP0_URL = `${FIRMWARE_BASE}/boot_app0.bin`;
 
 const boardSel = document.getElementById("board");
 const appSel = document.getElementById("app");
-const installerPreserve = document.getElementById("installer-preserve");
-const installerErase = document.getElementById("installer-erase");
+const installer = document.getElementById("installer");
 const status = document.getElementById("status");
 
 let releaseTag = null;
@@ -30,57 +34,32 @@ function setStatus(text, isError = false) {
   status.classList.toggle("error", isError);
 }
 
-function fullAssetName(app, board) {
-  return `firmware-${app}-${board}-full.bin`;
-}
-
 function otaAssetName(app, board) {
   return `firmware-${app}-${board}-ota.bin`;
-}
-
-function fullFirmwareUrl(app, board) {
-  return `${FIRMWARE_BASE}/${fullAssetName(app, board)}`;
 }
 
 function otaFirmwareUrl(app, board) {
   return `${FIRMWARE_BASE}/${otaAssetName(app, board)}`;
 }
 
-// Manifest for "erase & install" - single merged image at offset 0 that
-// covers bootloader / partitions / otadata / app. Because our firmware
-// doesn't implement Improv Serial, ESP Web Tools always treats this as
-// a "new install" and, with new_install_prompt_erase: false, silently
-// runs esploader.eraseFlash() before writing (see _renderDashboardNoImprov
-// in esp-web-tools). That's exactly the semantics we want for this
-// button: full chip erase, then lay down a known-good image.
-function buildFullManifest(url, version, app, board) {
+// Single-button manifest. Writes bootloader / partitions / otadata / app
+// as four separate parts so the two ASK_ERASE outcomes have clean
+// semantics:
+//
+// * checkbox unchecked -> esptool-js sector-erases only the sectors it
+//   writes. NVS (0x9000..0xDFFF) and SPIFFS (0x610000+) are never
+//   touched, so Wi-Fi credentials and cached data survive.
+// * checkbox checked -> ESP Web Tools calls esploader.eraseFlash()
+//   first (full chip erase), then writes the same four parts. NVS and
+//   SPIFFS are wiped; the device comes up in factory-fresh state.
+//
+// new_install_prompt_erase MUST be true here: with it false, ESP Web
+// Tools' _renderDashboardNoImprov path (our firmware doesn't do Improv
+// Serial) auto-calls _startInstall(true) -> esploader.eraseFlash(),
+// removing the user's ability to keep NVS at all.
+function buildManifest(otaUrl, version, app, board) {
   return {
     name: `${app} for ${board}`,
-    version: version || "latest",
-    home_assistant_domain: null,
-    new_install_prompt_erase: false,
-    builds: [
-      {
-        chipFamily: "ESP32-S3",
-        parts: [{ path: url, offset: 0 }],
-      },
-    ],
-  };
-}
-
-// Manifest for "preserve settings" - writes only otadata (0xE000) and
-// the app-only image (0x10000), skipping bootloader (0x0) / partitions
-// (0x8000) / NVS (0x9000). NVS survives, Wi-Fi credentials keep working.
-//
-// new_install_prompt_erase MUST be true here: ESP Web Tools' default for
-// firmware without Improv Serial is to call esploader.eraseFlash() before
-// writing any parts, which would wipe the bootloader / partition table
-// and boot-loop the device with "invalid header: 0xffffffff". With this
-// flag set, the flasher shows an ASK_ERASE prompt with the checkbox off
-// by default -- clicking Next through it skips the pre-write erase.
-function buildPreserveManifest(otaUrl, version, app, board) {
-  return {
-    name: `${app} for ${board} (preserve settings)`,
     version: version || "latest",
     home_assistant_domain: null,
     new_install_prompt_erase: true,
@@ -88,6 +67,8 @@ function buildPreserveManifest(otaUrl, version, app, board) {
       {
         chipFamily: "ESP32-S3",
         parts: [
+          { path: BOOTLOADER_URL, offset: 0x0000 },
+          { path: PARTITIONS_URL, offset: 0x8000 },
           { path: BOOT_APP0_URL, offset: 0xe000 },
           { path: otaUrl, offset: 0x10000 },
         ],
@@ -126,33 +107,21 @@ async function firmwarePresent(url) {
 async function refresh() {
   const app = appSel.value;
   const board = boardSel.value;
-  const fullUrl = fullFirmwareUrl(app, board);
   const otaUrl = otaFirmwareUrl(app, board);
-  installerPreserve.hidden = true;
-  installerErase.hidden = true;
+  installer.hidden = true;
   setStatus("Checking firmware…");
-  const [fullOk, otaOk] = await Promise.all([
-    firmwarePresent(fullUrl),
-    firmwarePresent(otaUrl),
-  ]);
-  if (!fullOk) {
+  const otaOk = await firmwarePresent(otaUrl);
+  if (!otaOk) {
     setStatus(
       `No firmware for ${app} on ${board} at ${releaseTag || "the latest release"}.`,
       true
     );
     return;
   }
-  const fullManifest = encodeDataUrl(
-    buildFullManifest(fullUrl, releaseTag, app, board)
+  installer.manifest = encodeDataUrl(
+    buildManifest(otaUrl, releaseTag, app, board)
   );
-  installerErase.manifest = fullManifest;
-  installerErase.hidden = false;
-  if (otaOk) {
-    installerPreserve.manifest = encodeDataUrl(
-      buildPreserveManifest(otaUrl, releaseTag, app, board)
-    );
-    installerPreserve.hidden = false;
-  }
+  installer.hidden = false;
   setStatus(
     `Ready to flash ${app} ${releaseTag || "latest"} for ${board}.`
   );
@@ -167,4 +136,3 @@ boardSel.addEventListener("change", refresh);
 appSel.addEventListener("change", refresh);
 
 boot();
-
