@@ -104,7 +104,7 @@ onto the SD card - no cable, no serial console, no host tooling. The device
 verifies the image before rebooting into it, so a wrong-model or corrupted
 file cannot brick a running unit.
 
-1. Download the release asset for your app + board from the [Releases page](https://github.com/danpodeanu/seeed-reterminal-E100X/releases) - for example, `firmware-weather-viewer-reterminal_e1003.bin`.
+1. Download the **`-ota.bin`** release asset for your app + board from the [Releases page](https://github.com/danpodeanu/seeed-reterminal-E100X/releases) - for example, `firmware-weather-viewer-reterminal_e1003-ota.bin`. The matching `-full.bin` is only for USB / web-flasher first-flash and will **not** work over SD (see below).
 2. Copy it to the root of the SD card as **`/update.bin`** (the filename is fixed and the same across apps and boards; the device tells them apart by an embedded tag inside the image).
 3. Insert the SD card and wake the device (any button, or wait for the next automatic refresh).
 
@@ -120,6 +120,14 @@ The running firmware version is printed as `[boot] fw <version>` on the
 serial log and shown on the Wi-Fi / config portal screen, next to the
 device MAC, so you can confirm the upgrade landed without opening the
 serial console.
+
+**Two asset flavours per app + board.** Every release ships both:
+
+- `firmware-<app>-<board>-full.bin` - merged bootloader + partitions + OTA
+  selector + app, flashed at 0x0. Used by the **web flasher** and by any
+  direct `esptool` USB flash. Do **not** feed this to SD OTA.
+- `firmware-<app>-<board>-ota.bin` - app-only image consumed by
+  `esp_ota_write` during SD OTA. Copy this one to `/update.bin`.
 
 **One-time migration to the OTA-capable partition layout.** Devices flashed
 with **v1.4 or earlier** use a single-slot partition layout with no room for

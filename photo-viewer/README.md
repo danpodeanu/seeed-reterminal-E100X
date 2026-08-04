@@ -28,8 +28,8 @@ them from a phone through the built-in Wi-Fi upload portal.
   next upload - no reboot required.
 - Low-battery *please recharge* screen instead of silently refusing to
   refresh, so you can see at a glance that the frame needs charging.
-- **SD-card firmware updates from v1.5 onward** - drop a signed
-  `firmware-*.bin` from the [Releases page](https://github.com/danpodeanu/seeed-reterminal-E100X/releases)
+- **SD-card firmware updates from v1.5 onward** - drop the app-only
+  `firmware-*-ota.bin` from the [Releases page](https://github.com/danpodeanu/seeed-reterminal-E100X/releases)
   onto the SD card as `/update.bin`. See the top-level
   [README](../README.md#updating-firmware-sd-card) for details.
 - No cloud, no account, no telemetry. NTP once every six hours is the

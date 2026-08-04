@@ -66,25 +66,30 @@ jobs:
             echo "boot_app0.bin not found" >&2
             exit 1
           fi
-          OUT="firmware-${{ matrix.app }}-${{ matrix.board }}.bin"
+          FULL="firmware-${{ matrix.app }}-${{ matrix.board }}-full.bin"
+          OTA="firmware-${{ matrix.app }}-${{ matrix.board }}-ota.bin"
           # Offsets match the arduino-esp32 partition table used by the
-          # Seeed reTerminal E100X boards. The merged image is flashed
-          # at 0x0 and includes bootloader, partitions, OTA selector,
-          # and application.
+          # Seeed reTerminal E100X boards. The merged (-full) image is
+          # flashed at 0x0 via USB / web flasher and includes bootloader,
+          # partitions, OTA selector, and application. The -ota image is
+          # the app-only firmware.bin fed to esp_ota_write (SD OTA path).
           python -m esptool --chip esp32s3 merge_bin \
-            --output "$OUT" \
+            --output "$FULL" \
             --flash_mode dio --flash_freq 80m --flash_size 8MB \
             0x0000   "$BUILD_DIR/bootloader.bin" \
             0x8000   "$BUILD_DIR/partitions.bin" \
             0xe000   "$BOOT_APP0" \
             0x10000  "$BUILD_DIR/firmware.bin"
-          ls -la "$OUT"
+          cp "$BUILD_DIR/firmware.bin" "$OTA"
+          ls -la "$FULL" "$OTA"
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v7
         with:
           name: firmware-${{ matrix.app }}-${{ matrix.board }}
-          path: ${{ matrix.app }}/firmware-${{ matrix.app }}-${{ matrix.board }}.bin
+          path: |
+            ${{ matrix.app }}/firmware-${{ matrix.app }}-${{ matrix.board }}-full.bin
+            ${{ matrix.app }}/firmware-${{ matrix.app }}-${{ matrix.board }}-ota.bin
           if-no-files-found: error
           retention-days: 30
 

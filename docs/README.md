@@ -17,7 +17,7 @@ Hosted at:
 - Looks up the repository's latest GitHub Release through the public API
   so the version tag can be displayed in the status line.
 - Points the ESP Web Tools install button at
-  `./firmware/latest/firmware-<app>-<board>.bin`, which is bundled with
+  `./firmware/latest/firmware-<app>-<board>-full.bin`, which is bundled with
   this Pages deployment (see below).
 - The install button connects to the reTerminal over USB serial, writes
   the merged image at flash offset 0, and reboots.
@@ -47,11 +47,12 @@ the flasher and the binaries share an origin.
 Two workflows cooperate:
 
 1. `.github/workflows/release.yml` runs on tag pushes (`v*`). For every
-   application × board combination it builds the firmware with
+   application x board combination it builds the firmware with
    PlatformIO, merges the bootloader, partition table, OTA selector, and
    application into a single image with `esptool merge_bin`, and
-   attaches the result to the GitHub Release as
-   `firmware-<app>-<board>.bin`.
+   attaches both flavours to the GitHub Release:
+   `firmware-<app>-<board>-full.bin` (merged, for USB / web flasher) and
+   `firmware-<app>-<board>-ota.bin` (app-only, for SD OTA).
 2. `.github/workflows/pages.yml` runs on `release: published`, on
    changes under `docs/`, and on manual dispatch. It downloads every
    `firmware-*.bin` from the latest release into `/firmware/latest/`,

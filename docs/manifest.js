@@ -28,7 +28,7 @@ function setStatus(text, isError = false) {
 }
 
 function assetName(app, board) {
-  return `firmware-${app}-${board}.bin`;
+  return `firmware-${app}-${board}-full.bin`;
 }
 
 function firmwareUrl(app, board) {
