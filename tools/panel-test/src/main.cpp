@@ -296,6 +296,7 @@ void setup() {
   LOG.printf("[panel-test] %d x %d, %d palette entries\n", PANEL_WIDTH,
              PANEL_HEIGHT, PALETTE_COUNT);
 
+  epaper_setup::prepare();
   epaper.begin();
   // E1001 in particular relies on this - Setup520 declares TFT_MISO=-1
   // and the first large Gray4 push after initGrayMode(4) silently

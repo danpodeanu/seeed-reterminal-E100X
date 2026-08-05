@@ -215,6 +215,7 @@ void setup() {
     LOG.println("[time] no Wi-Fi credentials; using PCF8563 only");
   }
 
+  epaper_setup::prepare();
   epaper.begin();
   epaper_setup::finalize(epaper.getSPIinstance());
 #if RETERMINAL_MODEL == 1001

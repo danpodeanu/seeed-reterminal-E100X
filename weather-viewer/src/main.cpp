@@ -1700,6 +1700,7 @@ void setup() {
     pcf8563::Reading storedRtc;
     rtc_sync::readAndLog(storedRtc);
   }
+  epaper_setup::prepare();
   epaper.begin();
   if (low_battery::shouldWarn(weather_config::runtime::lowBatteryWarn(),
                               sensorReadings.chargerValid,

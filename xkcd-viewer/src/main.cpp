@@ -1615,6 +1615,7 @@ void setup() {
     rtc_sync::readAndLog(storedRtc);
   }
 
+  epaper_setup::prepare();
   epaper.begin();
   if (low_battery::shouldWarn(xkcd_config::runtime::lowBatteryWarn(),
                               sensorReadings.chargerValid,
