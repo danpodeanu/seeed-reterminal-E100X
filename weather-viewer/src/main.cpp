@@ -1463,6 +1463,7 @@ void setup() {
     // Bring the panel up FIRST so the QR splash renders before we start
     // the Wi-Fi AP + web server.
     LOG.println("[portal] panel: begin");
+    epaper_setup::prepare();
     epaper.begin();
 #if RETERMINAL_MODEL == 1001
     epaper.initGrayMode(GRAY_LEVEL4);

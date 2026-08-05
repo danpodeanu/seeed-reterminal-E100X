@@ -1038,6 +1038,7 @@ void renderPortalOnPanel(const String& ssid, const String& password,
   // log lines, and thumb Cache-Control headers make sense.
   rtc_sync::restoreSystemClock();
 
+  epaper_setup::prepare();
   epaper.begin();
 #if RETERMINAL_MODEL == 1001
   epaper.initGrayMode(GRAY_LEVEL4);

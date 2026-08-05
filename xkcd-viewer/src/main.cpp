@@ -1365,6 +1365,7 @@ void setup() {
     // AP won't be advertising anyway, so this gives a clearer failure
     // mode than "AP up, panel blank".
     LOG.println("[portal] panel: begin");
+    epaper_setup::prepare();
     epaper.begin();
 #if RETERMINAL_MODEL == 1001
     epaper.initGrayMode(GRAY_LEVEL4);

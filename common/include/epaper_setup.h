@@ -7,6 +7,11 @@
 // individual apps so the requirement lives in exactly one place.
 namespace epaper_setup {
 
+// Enable the shared peripheral power rail before EPaper::begin() sends the
+// panel controller's reset and initialization sequence. This matters after
+// deep sleep, where the apps deliberately left the rail off.
+void prepare();
+
 // Finish attaching the panel's SPI bus to real GPIOs and enable the
 // shared peripheral power rail.
 //
