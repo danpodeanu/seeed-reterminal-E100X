@@ -83,8 +83,7 @@ differ between models, so consult each application's README before building or
 uploading firmware.
 
 All three applications support E1001, E1002, E1003, and E1004, with
-model-specific firmware included in every release. E1001, E1002, and E1003
-have been tested on real hardware. E1004 is built by CI but has not yet been
+model-specific firmware included in every release. All four models have been
 tested on real hardware.
 
 ## Getting started
