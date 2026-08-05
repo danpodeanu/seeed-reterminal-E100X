@@ -1131,8 +1131,15 @@ bool renderComic(const Comic& comic, RgbImage& image, ImageLayout layout) {
   // font loaded, so this reuses it (no SD reload).  Loading the title
   // font afterwards costs one load instead of two.
   selectFooterFont();
-  epaper.setTextColor(PANEL_BLACK, PANEL_STATUS_BACKGROUND,
-                      !PANEL_STATUS_DITHERED);
+  if (PANEL_STATUS_DITHERED && g_currentSmoothSize == 0) {
+    // TFT_eSPI's bgfill flag applies only to smooth fonts. GFX FreeFont
+    // fallbacks still fill their full bounding box whenever fg != bg, so
+    // use the one-colour overload to make the fallback truly transparent.
+    epaper.setTextColor(PANEL_BLACK);
+  } else {
+    epaper.setTextColor(PANEL_BLACK, PANEL_STATUS_BACKGROUND,
+                        !PANEL_STATUS_DITHERED);
+  }
   epaper.setTextDatum(MC_DATUM);
   int footerY =
       (layout.footerDividerY + config::PANEL_HEIGHT) / 2 -

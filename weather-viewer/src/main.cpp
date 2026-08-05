@@ -1137,13 +1137,17 @@ void renderFooter(const WeatherData& weather) {
   epaper.drawFastHLine(config::ui(10), top,
                        config::PANEL_WIDTH - config::ui(20), PANEL_MUTED);
   selectSmallSmoothFont();
-  // Smooth fonts always anti-alias against an explicit background color;
-  // in transparent mode (bgFill=false) the AA blender still needs the
-  // correct bg or every glyph collapses to solid PANEL_BLACK.  On a
-  // dithered status bar we keep bgFill off so glyphs don't punch solid
-  // rectangles through the dither pattern; on solid bars we fill for
-  // crisp edges.
-  epaper.setTextColor(PANEL_BLACK, PANEL_STATUS_BACKGROUND, !PANEL_STATUS_DITHERED);
+  if (PANEL_STATUS_DITHERED && g_currentSmoothSize == 0) {
+    // TFT_eSPI's bgfill flag applies only to smooth fonts. GFX FreeFont
+    // fallbacks still fill their full bounding box whenever fg != bg, so
+    // use the one-colour overload to make the fallback truly transparent.
+    epaper.setTextColor(PANEL_BLACK);
+  } else {
+    // Smooth-font anti-aliasing still needs the explicit band colour even
+    // when its rectangular background fill is disabled.
+    epaper.setTextColor(PANEL_BLACK, PANEL_STATUS_BACKGROUND,
+                        !PANEL_STATUS_DITHERED);
+  }
   const int footerYAdjust = smoothCenterYAdjust();
 
   // Left: provider name. Measure its width first so we know where the
