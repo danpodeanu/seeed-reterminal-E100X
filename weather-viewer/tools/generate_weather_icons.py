@@ -43,7 +43,7 @@ BUCKETS = [
 # Per-board (small, mid, large) pixel sizes. Derived from drawWeatherIcon
 # call-sites in main.cpp:
 #   forecast card = min(width/7, ui(32))
-#   portrait row  = min(height/5, ui(40))
+#   portrait row  = min(height*3/5, PANEL_WIDTH*14/100)
 #   landscape hero = min(PANEL_WIDTH*27/100, ...)
 #   portrait main  = min(PANEL_WIDTH*35/100, ...)
 # The largest slot for each board sets the "large" entry; small/mid cover
@@ -52,7 +52,7 @@ SIZES_BY_MODEL = {
     1001: (32, 48, 216),   # 800x480 landscape, 1:1 scale
     1002: (32, 48, 216),   # same panel dimensions as 1001
     1003: (72, 96, 512),   # 1872x1404 Gray16, 9/4 scale
-    1004: (48, 64, 420),   # 1200x1600 portrait, 3/2 scale
+    1004: (48, 168, 420),  # 1200x1600 portrait, 3/2 scale
 }
 
 

@@ -977,7 +977,9 @@ void drawPortraitForecastRow(const DailyForecast& day, uint8_t index,
 
   epaper.drawFastHLine(margin, top, config::PANEL_WIDTH - 2 * margin,
                        PANEL_LIGHT);
-  drawWeatherIcon(iconX, centerY, min(height / 5, config::ui(40)),
+  const int iconSize =
+      min(height * 3 / 5, config::PANEL_WIDTH * 14 / 100);
+  drawWeatherIcon(iconX, centerY, iconSize,
                   day.weatherCode, true);
   setBodyTextColor(PANEL_BLACK);
   epaper.setTextDatum(ML_DATUM);
