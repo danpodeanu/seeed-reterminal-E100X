@@ -365,6 +365,10 @@ void selectStatusFont() {
 // ship, so we drop to the non-bold 9pt cut for the same visual step
 // down.
 void selectComicDateFont() {
+#if RETERMINAL_MODEL == 1001 || RETERMINAL_MODEL == 1002
+  applyGfxFont(nullptr);
+  epaper.setTextFont(2);
+#else
   applyGfxFont(
 #if RETERMINAL_MODEL == 1003
       &FreeSansBold12pt7b
@@ -374,6 +378,7 @@ void selectComicDateFont() {
       &FreeSans9pt7b
 #endif
   );
+#endif
 }
 
 // TFT_eSPI's MC/ML/MR datums center the smooth font's yAdvance box on
