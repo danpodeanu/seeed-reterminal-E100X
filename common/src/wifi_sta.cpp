@@ -9,6 +9,24 @@
 #include "app_logger.h"
 
 namespace wifi_sta {
+namespace {
+
+volatile uint8_t g_lastDisconnectReason = 0;
+
+const char* statusName(wl_status_t status) {
+  switch (status) {
+    case WL_IDLE_STATUS:     return "idle";
+    case WL_NO_SSID_AVAIL:   return "network not found";
+    case WL_SCAN_COMPLETED:  return "scan completed";
+    case WL_CONNECTED:       return "connected";
+    case WL_CONNECT_FAILED:  return "authentication or association failed";
+    case WL_CONNECTION_LOST: return "connection lost";
+    case WL_DISCONNECTED:    return "disconnected";
+    default:                 return "unknown status";
+  }
+}
+
+}  // namespace
 
 String stationMacAddress() {
   uint8_t mac[6] = {};
@@ -49,11 +67,20 @@ bool connectStation(const char* ssid, const char* password,
     esp_sntp_setservername(index, nullptr);
   esp_sntp_servermode_dhcp(true);
 #endif
+  g_lastDisconnectReason = 0;
+  const wifi_event_id_t disconnectEventId = WiFi.onEvent(
+      [](WiFiEvent_t /*event*/, WiFiEventInfo_t info) {
+        g_lastDisconnectReason = info.wifi_sta_disconnected.reason;
+      },
+      ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
+  LOG.printf("[wifi] connecting to \"%s\" (timeout=%lu ms)\n", ssid,
+             static_cast<unsigned long>(timeoutMs));
   WiFi.begin(ssid, password);
   const uint32_t started = millis();
   while (WiFi.status() != WL_CONNECTED &&
          millis() - started < timeoutMs) {
     if (shouldAbort && shouldAbort()) {
+      WiFi.removeEvent(disconnectEventId);
       LOG.println("[wifi] connection cancelled");
       if (failureReason) *failureReason = "Wi-Fi connection cancelled";
       return false;
@@ -61,10 +88,22 @@ bool connectStation(const char* ssid, const char* password,
     delay(250);
   }
   if (WiFi.status() != WL_CONNECTED) {
-    LOG.println("[wifi] connection timed out");
+    const wl_status_t status = WiFi.status();
+    const uint8_t reason = g_lastDisconnectReason;
+    WiFi.removeEvent(disconnectEventId);
+    if (reason != 0) {
+      LOG.printf("[wifi] connection failed: %s (reason=%u, status=%s)\n",
+                 WiFi.STA.disconnectReasonName(
+                     static_cast<wifi_err_reason_t>(reason)),
+                 static_cast<unsigned>(reason), statusName(status));
+    } else {
+      LOG.printf("[wifi] connection failed: %s (no disconnect reason received)\n",
+                 statusName(status));
+    }
     if (failureReason) *failureReason = "Wi-Fi connection timed out";
     return false;
   }
+  WiFi.removeEvent(disconnectEventId);
   LOG.printf("[wifi] connected, IP=%s RSSI=%d\n",
              WiFi.localIP().toString().c_str(), WiFi.RSSI());
   return true;
