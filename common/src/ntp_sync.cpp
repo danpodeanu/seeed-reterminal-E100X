@@ -37,13 +37,15 @@ bool startDhcpIfAvailable(uint32_t timeoutMs) {
   if (server == nullptr || ip_addr_isany(server)) return false;
   char address[48] = {};
   ipaddr_ntoa_r(server, address, sizeof(address));
-  LOG.printf("[ntp] trying DHCP server %s\n", address);
+  LOG.printf("[ntp] starting SNTP with DHCP server %s\n", address);
   syncCompleted = false;
   if (esp_sntp_enabled()) esp_sntp_stop();
   esp_sntp_setoperatingmode(SNTP_OPMODE_POLL);
   esp_sntp_init();
   if (waitForSync(timeoutMs)) return true;
-  LOG.println("[ntp] DHCP server timed out; trying configured servers");
+  LOG.printf(
+      "[ntp] DHCP server %s timed out after %lu ms; trying configured servers\n",
+      address, static_cast<unsigned long>(timeoutMs));
 #else
   (void)timeoutMs;
 #endif

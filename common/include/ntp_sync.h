@@ -11,6 +11,8 @@ namespace ntp {
 using OnSyncedFn = void (*)(time_t now);
 
 // Runs the full sync: DHCP-supplied server first, configured servers second.
+// dhcpTimeoutMs must cover the framework's randomized SNTP startup delay in
+// addition to the server response time.
 // On success invokes `onSynced(now)` so the caller can update its own
 // RTC_DATA_ATTR epoch and mirror the time to a hardware RTC.
 bool synchronizeClock(const char* timezone, const char* primary,

@@ -38,7 +38,8 @@ constexpr char NTP_SERVER_SECONDARY[] = "time.cloudflare.com";
 // primary function of this tool - if NTP takes too long, we'd rather
 // come up with an unsynced clock and get the portal running.
 constexpr uint32_t WIFI_TIMEOUT_MS = 15000;
-constexpr uint32_t NTP_DHCP_TIMEOUT_MS = 1000;
+// Arduino-ESP32 can defer the initial SNTP request by up to five seconds.
+constexpr uint32_t NTP_DHCP_TIMEOUT_MS = 6000;
 constexpr uint32_t NTP_SYNC_TIMEOUT_MS = 8000;
 
 }  // namespace config

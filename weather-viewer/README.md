@@ -372,13 +372,15 @@ Default time settings in `include/config.h`:
 constexpr char TIMEZONE[] = "GMT0BST,M3.5.0/1,M10.5.0";
 constexpr char NTP_SERVER_PRIMARY[] = "pool.ntp.org";
 constexpr char NTP_SERVER_SECONDARY[] = "time.cloudflare.com";
-constexpr uint32_t NTP_DHCP_TIMEOUT_MS = 1000;
+constexpr uint32_t NTP_DHCP_TIMEOUT_MS = 6000;
 ```
 
 The firmware requests NTP servers through DHCP option 42 before
 acquiring its Wi-Fi lease. If DHCP supplies no server, or that server
 does not respond within the configured DHCP timeout, it falls back
-to the two servers above.
+to the two servers above. The six-second default includes up to five
+seconds of randomized SNTP startup delay in Arduino-ESP32; it is not
+solely a server-response timeout.
 
 After a successful NTP synchronization, the firmware stores UTC in
 the onboard PCF8563 hardware RTC. If a later deep-sleep wake cannot
