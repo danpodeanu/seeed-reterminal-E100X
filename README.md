@@ -82,9 +82,10 @@ family. Panel resolution, color capabilities, peripherals, and pin mappings
 differ between models, so consult each application's README before building or
 uploading firmware.
 
-> **Hardware coverage:** the XKCD Viewer and Weather Viewer have only been
-> verified on E1001 and E1003. Builds for E1002 and E1004 are produced by CI
-> but have not yet been tested on real hardware.
+> **Hardware coverage:** v1.7 promotes E1002 to hardware-tested support across
+> the Photo, Weather, and XKCD viewers. Weather and XKCD also remain
+> hardware-verified on E1001 and E1003. E1004 firmware is built by CI but has
+> not yet been tested on real hardware.
 
 ## Getting started
 
@@ -148,6 +149,11 @@ pio test -c platformio-test.ini -e native_test
 
 Use the same command inside `weather-viewer` or `photo-viewer`. Their GitHub
 Actions workflows run these tests on every relevant push and pull request.
+
+Release qualification builds all 12 application × board combinations. For
+v1.7, E1002 was also exercised on-device across cold boot, button-wake portal
+entry, full Weather/XKCD rendering, Photo portal QR rendering, and operation
+without optional SD-card Unicode fonts.
 
 ## Contributing
 

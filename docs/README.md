@@ -16,11 +16,12 @@ Hosted at:
   application (XKCD Viewer / Weather Viewer / Photo Viewer).
 - Looks up the repository's latest GitHub Release through the public API
   so the version tag can be displayed in the status line.
-- Points the ESP Web Tools install button at
-  `./firmware/latest/firmware-<app>-<board>-full.bin`, which is bundled with
-  this Pages deployment (see below).
-- The install button connects to the reTerminal over USB serial, writes
-  the merged image at flash offset 0, and reboots.
+- Builds an ESP Web Tools manifest from the shared `bootloader.bin`,
+  `partitions.bin`, and `boot_app0.bin` assets plus the selected
+  `firmware-<app>-<board>-ota.bin`, all bundled with this Pages deployment.
+- The single **Flash** button writes those four parts at their standard
+  offsets. Leaving **Erase device?** unchecked preserves NVS settings and
+  SPIFFS data; checking it performs a factory-fresh full-chip erase first.
 
 ## Files
 
@@ -51,13 +52,16 @@ Two workflows cooperate:
    PlatformIO, merges the bootloader, partition table, OTA selector, and
    application into a single image with `esptool merge_bin`, and
    attaches both flavours to the GitHub Release:
-   `firmware-<app>-<board>-full.bin` (merged, for USB / web flasher) and
-   `firmware-<app>-<board>-ota.bin` (app-only, for SD OTA).
-2. `.github/workflows/pages.yml` runs on `release: published`, on
-   changes under `docs/`, and on manual dispatch. It downloads every
-   `firmware-*.bin` from the latest release into `/firmware/latest/`,
-   assembles it alongside `docs/`, and deploys the combined site to
-   GitHub Pages.
+   `firmware-<app>-<board>-full.bin` (merged, for direct USB flashing) and
+   `firmware-<app>-<board>-ota.bin` (app-only, for SD OTA and the web
+   flasher). It also publishes the shared three-part boot chain and
+   `sans_bold_fonts.zip`.
+2. After all release assets are uploaded, `release.yml` dispatches
+   `.github/workflows/pages.yml` on `main`. The Pages workflow also runs
+   for changes under `docs/` and on manual dispatch. It downloads every
+   firmware binary plus the shared boot chain from the latest release into
+   `/firmware/latest/`, assembles it alongside `docs/`, and deploys the
+   combined site to GitHub Pages.
 
 The flasher never needs a static per-release manifest committed to the
 repository.

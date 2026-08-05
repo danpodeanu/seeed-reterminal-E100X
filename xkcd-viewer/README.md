@@ -47,6 +47,10 @@ screenshot feature.*
 | `reterminal_e1003` | 1872×1404 ED103TC2 | 16-level gray |
 | `reterminal_e1004` | 1200×1600 T133A01 | six-color |
 
+> **E1002 status:** hardware-tested and supported from v1.7, including
+> full-frame comic rendering, the configuration portal, and GFX font fallback
+> when optional Unicode fonts are absent from the SD card.
+
 You will also need:
 
 - A 2.4 GHz Wi-Fi network with internet access.

@@ -48,6 +48,10 @@ them from a phone through the built-in Wi-Fi upload portal.
 | `reterminal_e1003` | 1872×1404 | 16-level gray |
 | `reterminal_e1004` | 1200×1600 | six-color |
 
+> **E1002 status:** hardware-tested and supported from v1.7, including cold
+> boot, photo rendering, and reopening the QR-code upload portal after a photo
+> has been displayed.
+
 Use the matching firmware target and photo-preparation model. Files
 prepared for one model are intentionally rejected by another when
 their dimensions do not match.
