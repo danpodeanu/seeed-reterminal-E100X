@@ -30,6 +30,7 @@
 #include "wifi_sta.h"
 #include "climate_sensor.h"
 #include "sd_card.h"
+#include "epaper_setup.h"
 #include "sd_ota.h"
 #include "sd_web_portal.h"
 #include "sd_web_portal_ui.h"
@@ -1044,21 +1045,13 @@ void renderPortalOnPanel(const String& ssid, const String& password,
   epaper.initGrayMode(GRAY_LEVEL16);
 #endif
 
-  sdReady = sd_card::mount(epaper.getSPIinstance(), config::PHOTO_DIR);
-  if (!sdReady) {
-    // No card - show the same message the photo path uses so behaviour
-    // is consistent, then wait for the user to press an arrow to bail
-    // out. We don't tear down and reboot here because a card might get
-    // inserted while we're waiting.
-    renderStatus("No SD card", "Insert a FAT32 card and press any button");
-    while (!exitButtonPressedNow()) delay(50);
-    sdPortalMode = false;
-    photoRefreshOnly = true;
-    LOG.println("[portal] no-card exit; restarting into photo mode");
-    LOG.flush();
-    delay(200);
-    ESP.restart();
-  }
+  // A cold boot with no photos may have mounted SD while deciding to enter
+  // the portal. Release it before the panel refresh: SD and e-paper share
+  // this SPI bus, and leaving SD as its last configurator corrupts E1002
+  // six-colour portal frames after a deep-sleep button wake.
+  if (sdReady) SD.end();
+  sdReady = false;
+  epaper_setup::finalize(epaper.getSPIinstance());
 
   // Extra nav tabs the config_portal chrome renders between Settings
   // and Reset. The pages behind these URLs are served by
@@ -1165,6 +1158,14 @@ void renderPortalOnPanel(const String& ssid, const String& password,
                       config_portal::currentApPassword(),
                       config_portal::currentIp(),
                       config_portal::currentPort());
+
+  // Mount only after the panel update, matching the weather/xkcd portal
+  // paths. SD.begin() is then the final owner of the shared SPI setup and
+  // the photo-management routes can use the card for the rest of the session.
+  sdReady = sd_card::mount(epaper.getSPIinstance(), config::PHOTO_DIR);
+  if (!sdReady) {
+    LOG.println("[portal] SD mount failed; photo tabs will be unavailable");
+  }
   LOG.printf("[portal] SSID=\"%s\" URL=http://%s:%u/\n",
              config_portal::currentSsid().c_str(),
              config_portal::currentIp().toString().c_str(),
