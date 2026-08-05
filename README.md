@@ -82,10 +82,10 @@ family. Panel resolution, color capabilities, peripherals, and pin mappings
 differ between models, so consult each application's README before building or
 uploading firmware.
 
-> **Hardware coverage:** v1.7 promotes E1002 to hardware-tested support across
-> the Photo, Weather, and XKCD viewers. Weather and XKCD also remain
-> hardware-verified on E1001 and E1003. E1004 firmware is built by CI but has
-> not yet been tested on real hardware.
+All three applications support E1001, E1002, E1003, and E1004, with
+model-specific firmware included in every release. E1001, E1002, and E1003
+have been tested on real hardware. E1004 is built by CI but has not yet been
+tested on real hardware.
 
 ## Getting started
 
@@ -100,10 +100,11 @@ from Chrome or Edge over USB. See [`docs/`](docs/) for how it is wired up.
 
 ## Updating firmware (SD card)
 
-From **v1.5** onward, firmware is updated by dropping a single `.bin` file
-onto the SD card - no cable, no serial console, no host tooling. The device
-verifies the image before rebooting into it, so a wrong-model or corrupted
-file cannot brick a running unit.
+Firmware can be updated by dropping a single `.bin` file onto the SD card -
+no cable, no serial console, no host tooling. The device verifies the image
+before rebooting into it, so a wrong-model or corrupted file cannot brick a
+running unit. Devices running v1.4 or earlier first need the one-time
+partition-layout migration described below.
 
 1. Download the **`-ota.bin`** release asset for your app + board from the [Releases page](https://github.com/danpodeanu/seeed-reterminal-E100X/releases) - for example, `firmware-weather-viewer-reterminal_e1003-ota.bin`. The matching `-full.bin` is only for USB / web-flasher first-flash and will **not** work over SD (see below).
 2. Copy it to the root of the SD card as **`/update.bin`** (the filename is fixed and the same across apps and boards; the device tells them apart by an embedded tag inside the image).
@@ -150,10 +151,7 @@ pio test -c platformio-test.ini -e native_test
 Use the same command inside `weather-viewer` or `photo-viewer`. Their GitHub
 Actions workflows run these tests on every relevant push and pull request.
 
-Release qualification builds all 12 application × board combinations. For
-v1.7, E1002 was also exercised on-device across cold boot, button-wake portal
-entry, full Weather/XKCD rendering, Photo portal QR rendering, and operation
-without optional SD-card Unicode fonts.
+Release qualification builds all 12 application × board combinations.
 
 ## Contributing
 

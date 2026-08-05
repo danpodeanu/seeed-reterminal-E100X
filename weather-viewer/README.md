@@ -32,7 +32,7 @@ screenshot feature.*
   the network is down.
 - On-device Wi-Fi and location setup via a captive portal with QR
   codes.
-- **Over-the-air firmware updates from v1.5 onward** - drop the app-only
+- **SD-card firmware updates** - drop the app-only
   `firmware-*-ota.bin` from the [Releases page](https://github.com/danpodeanu/seeed-reterminal-E100X/releases)
   onto the SD card as `/update.bin` and the device applies it on the
   next wake, or reconnect USB and re-run the
@@ -50,9 +50,8 @@ screenshot feature.*
 | `reterminal_e1003` | 1872×1404 ED103TC2 | 16-level gray |
 | `reterminal_e1004` | 1200×1600 T133A01 | six-color |
 
-> **E1002 status:** hardware-tested and supported from v1.7, including
-> full-frame weather rendering, the configuration portal, and GFX font
-> fallback when optional Unicode fonts are absent from the SD card.
+Use the firmware environment matching your device; panel drivers and
+dimensions differ between models.
 
 You will also need:
 

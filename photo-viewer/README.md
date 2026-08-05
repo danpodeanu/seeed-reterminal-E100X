@@ -28,7 +28,7 @@ them from a phone through the built-in Wi-Fi upload portal.
   next upload - no reboot required.
 - Low-battery *please recharge* screen instead of silently refusing to
   refresh, so you can see at a glance that the frame needs charging.
-- **Over-the-air firmware updates from v1.5 onward** - drop the app-only
+- **SD-card firmware updates** - drop the app-only
   `firmware-*-ota.bin` from the [Releases page](https://github.com/danpodeanu/seeed-reterminal-E100X/releases)
   onto the SD card as `/update.bin` and the device applies it on the
   next wake, or reconnect USB and re-run the
@@ -47,10 +47,6 @@ them from a phone through the built-in Wi-Fi upload portal.
 | `reterminal_e1002` | 800×480 | six-color |
 | `reterminal_e1003` | 1872×1404 | 16-level gray |
 | `reterminal_e1004` | 1200×1600 | six-color |
-
-> **E1002 status:** hardware-tested and supported from v1.7, including cold
-> boot, photo rendering, and reopening the QR-code upload portal after a photo
-> has been displayed.
 
 Use the matching firmware target and photo-preparation model. Files
 prepared for one model are intentionally rejected by another when
