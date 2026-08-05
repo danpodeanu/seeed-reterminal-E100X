@@ -48,6 +48,7 @@ inline constexpr char PRECACHE[] = "precache";
 
 // UI / IO
 inline constexpr char BUTTON[]     = "button";
+inline constexpr char FONT[]       = "font";
 inline constexpr char LAYOUT[]     = "layout";
 inline constexpr char SCREENSHOT[] = "screenshot";
 inline constexpr char DEBUG[]      = "debug";

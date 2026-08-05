@@ -39,6 +39,7 @@
 #include <Wire.h>
 
 #include "board_pins.h"
+#include "peripheral_power.h"
 
 namespace {
 
@@ -131,8 +132,7 @@ void dumpChargerRegisters(uint8_t addr) {
 // -------- SD helpers --------
 
 bool mountSd() {
-  pinMode(board::PIN_SD_ENABLE, OUTPUT);
-  digitalWrite(board::PIN_SD_ENABLE, HIGH);
+  peripheral_power::enable();
   pinMode(board::PIN_SD_DETECT, INPUT_PULLUP);
   pinMode(board::PIN_SD_CS, OUTPUT);
   digitalWrite(board::PIN_SD_CS, HIGH);
@@ -141,7 +141,7 @@ bool mountSd() {
   sdSpi.begin(board::PIN_SD_SCK, board::PIN_SD_MISO, board::PIN_SD_MOSI, -1);
   if (!SD.begin(board::PIN_SD_CS, sdSpi)) {
     logSerial.println("[scan] SD mount failed -- log will be UART-only");
-    digitalWrite(board::PIN_SD_ENABLE, LOW);
+    peripheral_power::disable();
     return false;
   }
   logSerial.printf("[scan] SD mounted, appending to %s\n", kLogPath);

@@ -45,7 +45,9 @@
 #include "image_loader.h"
 #include "pcf8563_utc.h"
 #include "screenshot_bmp.h"
+#include "smooth_font_manager.h"
 #include "panel_watchdog.h"
+#include "peripheral_power.h"
 #include "timestamped_logger.h"
 #include "config_portal.h"
 #include "config_portal_ui.h"
@@ -114,6 +116,7 @@ constexpr DitherPalette PANEL_PALETTE = PAL_E6;
 #endif
 
 EPaper epaper;
+smooth_fonts::Manager smoothFontManager(epaper);
 Adafruit_SHT4x sht4;
 
 bool sdReady = false;
@@ -282,72 +285,8 @@ constexpr const GFXfont* TITLE_FALLBACK_FONT = &FreeSansBold12pt7b;
 constexpr const GFXfont* FOOTER_FALLBACK_FONT = &FreeSansBold9pt7b;
 #endif
 
-// Non-zero when a smooth font of that pixel size is currently loaded via
-// TFT_eSPI::loadFont; zero when we're back on GFX fonts / built-ins.
-static int g_currentSmoothSize = 0;
-// Set to true when a .vlw load has already failed once so we don't
-// re-check the SD or spam the log on every subsequent select*.
-static bool g_smoothFontsUnavailable = false;
-
-static bool smoothFontFileExists(int size) {
-  if (!sdReady) return false;
-  return sd_card::fileExists(String("/fonts/sans_bold_") + size + ".vlw");
-}
-
-static void unloadSmoothFontIfLoaded() {
-  if (g_currentSmoothSize != 0) {
-    epaper.unloadFont();
-    g_currentSmoothSize = 0;
-  }
-}
-
-// Install a GFX FreeFont (or the built-in font when passed nullptr),
-// releasing any smooth-font resources first.  Callers that want to
-// stay on the built-in font 2 after this should call setTextFont(2)
-// themselves - matches the previous behavior.
-static void applyGfxFont(const GFXfont* font) {
-  unloadSmoothFontIfLoaded();
-  epaper.setFreeFont(font);
-}
-
-// Install the smooth font at `size` (pixels).  Falls back to `fallback`
-// (a GFX FreeFont at roughly the same visual size) when the SD/.vlw is
-// unavailable or has already failed once this boot.  Loading is
-// idempotent when the requested size is already active.
-static void applySmoothFont(int size, const GFXfont* fallback) {
-  if (g_smoothFontsUnavailable || !sdReady) {
-    unloadSmoothFontIfLoaded();
-    epaper.setFreeFont(fallback);
-    return;
-  }
-  if (g_currentSmoothSize == size) return;
-  if (g_currentSmoothSize != 0) {
-    epaper.unloadFont();
-    g_currentSmoothSize = 0;
-  }
-  if (!smoothFontFileExists(size)) {
-    LOG.printf("[font] /fonts/sans_bold_%d.vlw probe failed; falling back to GFX font for this call\n",
-               size);
-    // Do NOT set g_smoothFontsUnavailable: a probe miss on the SPI SD is
-    // often transient. Latching would kill Unicode for the whole boot.
-    epaper.setFreeFont(fallback);
-    return;
-  }
-  epaper.setFreeFont(nullptr);
-  const uint32_t t0 = millis();
-  // TFT_eSPI::loadFont builds "/" + name + ".vlw" internally, so pass
-  // the subdir as part of the name to get "/fonts/sans_bold_XX.vlw".
-  epaper.loadFont(String("fonts/sans_bold_") + size, SD);
-  g_currentSmoothSize = size;
-  LOG.printf("[font] loaded sans_bold_%d in %lu ms (yAdvance=%u ascent=%u descent=%u)\n",
-             size, (unsigned long)(millis() - t0),
-             (unsigned)epaper.gFont.yAdvance,
-             (unsigned)epaper.gFont.ascent,
-             (unsigned)epaper.gFont.descent);
-}
-
 void selectStatusFont() {
-  applyGfxFont(
+  smoothFontManager.selectGfx(
 #if RETERMINAL_MODEL == 1003
       &FreeSansBold18pt7b
 #elif RETERMINAL_MODEL == 1004
@@ -365,20 +304,20 @@ void selectStatusFont() {
 // ship, so we drop to the non-bold 9pt cut for the same visual step
 // down.
 void selectComicDateFont() {
-#if RETERMINAL_MODEL == 1001 || RETERMINAL_MODEL == 1002
-  applyGfxFont(nullptr);
-  epaper.setTextFont(2);
-#else
-  applyGfxFont(
+  if constexpr (panel_traits::IS_COMPACT) {
+    smoothFontManager.selectGfx(nullptr);
+    epaper.setTextFont(2);
+  } else {
+    smoothFontManager.selectGfx(
 #if RETERMINAL_MODEL == 1003
-      &FreeSansBold12pt7b
+        &FreeSansBold12pt7b
 #elif RETERMINAL_MODEL == 1004
-      &FreeSansBold9pt7b
+        &FreeSansBold9pt7b
 #else
-      &FreeSans9pt7b
+        &FreeSans9pt7b
 #endif
-  );
-#endif
+    );
+  }
 }
 
 // TFT_eSPI's MC/ML/MR datums center the smooth font's yAdvance box on
@@ -389,7 +328,7 @@ void selectComicDateFont() {
 // Returns 0 when a smooth font is not loaded so GFX callers are
 // unaffected.
 static int smoothCenterYAdjust() {
-  if (g_currentSmoothSize == 0) return 0;
+  if (!smoothFontManager.smoothLoaded()) return 0;
   const int yA = static_cast<int>(epaper.gFont.yAdvance);
   const int mA = static_cast<int>(epaper.gFont.maxAscent);
   const int a  = static_cast<int>(epaper.gFont.ascent);
@@ -399,29 +338,35 @@ static int smoothCenterYAdjust() {
 
 void selectCacheStatsFont() {
 #if RETERMINAL_MODEL == 1003
-  applyGfxFont(&FreeSans9pt7b);
+  smoothFontManager.selectGfx(&FreeSans9pt7b);
 #elif RETERMINAL_MODEL == 1004
-  applyGfxFont(&FreeSans9pt7b);
+  smoothFontManager.selectGfx(&FreeSans9pt7b);
 #else
-  applyGfxFont(nullptr);
+  smoothFontManager.selectGfx(nullptr);
   epaper.setTextFont(2);
 #endif
 }
 
-void selectTitleFont() {
-  applySmoothFont(SMOOTH_FONT_TITLE_PX, TITLE_FALLBACK_FONT);
+smooth_fonts::Selection selectTitleFont() {
+  return smoothFontManager.select(
+      SMOOTH_FONT_TITLE_PX, TITLE_FALLBACK_FONT, sdReady);
 }
 
-void selectFooterFont() {
-  applySmoothFont(SMOOTH_FONT_FOOTER_PX, FOOTER_FALLBACK_FONT);
+smooth_fonts::Selection selectFooterFont() {
+  return smoothFontManager.select(
+      SMOOTH_FONT_FOOTER_PX, FOOTER_FALLBACK_FONT, sdReady);
 }
 
 // Message screens (boot / Wi-Fi status / errors) render short strings the
 // firmware controls, so they use the bitmap GFX fonts directly.  Skipping
 // the .vlw path keeps the fast-path fast and avoids leaving a smooth font
 // loaded when the next screen is a comic that wants a different size.
-void selectStatusMessageTitleFont() { applyGfxFont(TITLE_FALLBACK_FONT); }
-void selectStatusMessageDetailFont() { applyGfxFont(FOOTER_FALLBACK_FONT); }
+void selectStatusMessageTitleFont() {
+  smoothFontManager.selectGfx(TITLE_FALLBACK_FONT);
+}
+void selectStatusMessageDetailFont() {
+  smoothFontManager.selectGfx(FOOTER_FALLBACK_FONT);
+}
 
 // Formats a comic's publication date as a fixed "AA-BB-CCCC" (or
 // "CCCC-AA-BB" for YMD) string, honouring config::DATE_LOCALE. Returns an
@@ -531,7 +476,7 @@ void drawBadges(uint32_t background = PANEL_WHITE,
                                 terminalWidth, terminalHeight, PANEL_BLACK, PANEL_WHITE,
                                 sensorReadings.chargerValid && sensorReadings.externalPower);
 
-  applyGfxFont(nullptr);
+  smoothFontManager.selectGfx(nullptr);
   epaper.setTextFont(2);
 }
 
@@ -581,7 +526,7 @@ void renderStatus(const String& message, const String& detail = "",
                       config::PANEL_WIDTH / 2,
                       config::PANEL_HEIGHT - config::ui(24), 1);
   }
-  applyGfxFont(nullptr);
+  smoothFontManager.selectGfx(nullptr);
   epaper.setTextFont(2);
   drawBadges();
   updatePanel();
@@ -882,11 +827,11 @@ ImageLayout calculateLayout(const Comic& comic, int sourceWidth, int sourceHeigh
   // the smooth font failed to load (GFX path preserves legacy sizing).
   const int smoothYA = static_cast<int>(epaper.gFont.yAdvance);
   layout.footerLineHeightPx =
-      (g_currentSmoothSize > 0 && smoothYA > 0)
+      (smoothFontManager.smoothLoaded() && smoothYA > 0)
           ? smoothYA + config::ui(2)
           : config::FOOTER_LINE_HEIGHT;
   layout.footerBandPaddingPx =
-      (g_currentSmoothSize > 0 && smoothYA > 0)
+      (smoothFontManager.smoothLoaded() && smoothYA > 0)
           ? config::ui(4)
           : config::FOOTER_VERTICAL_PADDING;
   // Leave the smooth footer font loaded so renderComic can reuse it
@@ -1135,8 +1080,9 @@ bool renderComic(const Comic& comic, RgbImage& image, ImageLayout layout) {
   // Render the footer first: calculateLayout left the footer smooth
   // font loaded, so this reuses it (no SD reload).  Loading the title
   // font afterwards costs one load instead of two.
-  selectFooterFont();
-  if (PANEL_STATUS_DITHERED && g_currentSmoothSize == 0) {
+  const smooth_fonts::Selection footerFont = selectFooterFont();
+  if (PANEL_STATUS_DITHERED &&
+      footerFont == smooth_fonts::Selection::GfxFallback) {
     // TFT_eSPI's bgfill flag applies only to smooth fonts. GFX FreeFont
     // fallbacks still fill their full bounding box whenever fg != bg, so
     // use the one-colour overload to make the fallback truly transparent.
@@ -1165,7 +1111,7 @@ bool renderComic(const Comic& comic, RgbImage& image, ImageLayout layout) {
   selectTitleFont();
   epaper.drawString(text_render::ellipsize(epaper, text_render::displayText(heading), config::PANEL_WIDTH - config::ui(380), 1),
                     config::PANEL_WIDTH / 2, config::ui(24) + smoothCenterYAdjust(), 1);
-  applyGfxFont(nullptr);
+  smoothFontManager.selectGfx(nullptr);
   epaper.setTextFont(2);
 
   // Publication date: bottom-right of the image area, just above the
@@ -1180,7 +1126,7 @@ bool renderComic(const Comic& comic, RgbImage& image, ImageLayout layout) {
     epaper.drawString(publishedDate,
                       config::PANEL_WIDTH - config::CONTENT_MARGIN_X,
                       layout.footerDividerY - config::ui(2), 1);
-    applyGfxFont(nullptr);
+    smoothFontManager.selectGfx(nullptr);
     epaper.setTextFont(2);
   }
 
@@ -1210,8 +1156,7 @@ void powerDownAndSleep(uint64_t sleepSeconds = xkcd_config::runtime::sleepSecond
   // sink is attached.
   appLog.detachSdSink();
   if (sdReady) SD.end();
-  pinMode(PIN_SD_ENABLE, OUTPUT);
-  digitalWrite(PIN_SD_ENABLE, LOW);
+  peripheral_power::disable();
   pinMode(PIN_BATTERY_ENABLE, OUTPUT);
   digitalWrite(PIN_BATTERY_ENABLE, LOW);
 
@@ -1377,8 +1322,7 @@ void setup() {
     // AP won't be advertising anyway, so this gives a clearer failure
     // mode than "AP up, panel blank".
     LOG.println("[portal] panel: begin");
-    epaper_setup::prepare();
-    epaper.begin();
+    epaper_setup::begin(epaper);
 #if RETERMINAL_MODEL == 1001
     epaper.initGrayMode(GRAY_LEVEL4);
     const GFXfont* titleFont    = &FreeSansBold18pt7b;
@@ -1398,14 +1342,9 @@ void setup() {
     const GFXfont* detailFont   = &FreeSans9pt7b;
 #endif
     LOG.println("[portal] panel: grayMode initialised");
-    // We used to call sd_card::mount here (which internally does
-    // epaper_setup::finalize), but on E1001 that left SPI in a state
-    // TFT_eSPI's epaper.update() would then trample, so subsequent SD
-    // ops via /browse would fail every time with 'bus reset ... failed'.
-    // Call epaper_setup::finalize directly for the E1001 MISO fixup and
-    // defer sd_card::mount until after the panel refresh completes
-    // (below) so SD.begin() is the last configurator to touch SPI.
-    epaper_setup::finalize(epaper.getSPIinstance());
+    // Defer mounting SD until after the panel refresh so SD.begin() is the
+    // last configurator to touch the shared SPI bus. epaper_setup::begin()
+    // has already applied the E1001 MISO fix needed for Gray4 transfers.
     bool portalSdReady = false;
 
     config_portal::Config portalCfg;
@@ -1627,8 +1566,7 @@ void setup() {
     rtc_sync::readAndLog(storedRtc);
   }
 
-  epaper_setup::prepare();
-  epaper.begin();
+  epaper_setup::begin(epaper);
   if (low_battery::shouldWarn(xkcd_config::runtime::lowBatteryWarn(),
                               sensorReadings.chargerValid,
                               sensorReadings.externalPower,
@@ -1715,12 +1653,10 @@ void setup() {
   const String macAndVersion =
       String("MAC: ") + stationMac + "  Firmware: " + board::FIRMWARE_VERSION;
 
-  // Cold-boot "Connecting to Wi-Fi" splash. Pushed BEFORE any
-  // initGrayMode() call so it renders as a fast 1bpp partial refresh
-  // (~1-2 s) rather than paying a full Gray4/Gray16 waveform (~5 s)
-  // for a screen that gets replaced the moment the comic is ready.
-  // renderStatus() ends with updatePanel(), so the splash is actually
-  // on the panel before we block on Wi-Fi.
+  // Cold-boot "Connecting to Wi-Fi" splash. On gray panels this is pushed
+  // before initGrayMode() for a faster monochrome refresh; six-color panels
+  // use their native controller mode. renderStatus() completes the update
+  // before Wi-Fi connection blocks.
   if (showConnectionStatus) {
     LOG.println("[display] showing Wi-Fi connection status");
     renderStatus("Connecting to " + String(xkcd_wifi::ssid()), connectionDetail,
@@ -1737,7 +1673,7 @@ void setup() {
 
   bool networkAvailable = false;
   if (networkPlanned) {
-    networkAvailable = wifi_sta::connectStation(xkcd_wifi::ssid(), xkcd_wifi::password(), config::WIFI_TIMEOUT_MS, nullptr, networkOperationShouldStop);
+    networkAvailable = wifi_sta::connectStation(xkcd_wifi::ssid(), xkcd_wifi::password(), config::WIFI_TIMEOUT_MS, nullptr, networkOperationShouldStop).connected;
   } else {
     LOG.println("[wifi] skipped; using the local XKCD cache");
   }
@@ -1818,7 +1754,7 @@ void setup() {
   // download flips `acquired`.
   if (app_logic::liveRecoveryAllowed(sdReady, acquired, networkAvailable)) {
     LOG.println("[cache] no usable local comic; trying one live refresh");
-    networkAvailable = wifi_sta::connectStation(xkcd_wifi::ssid(), xkcd_wifi::password(), config::WIFI_TIMEOUT_MS, nullptr, networkOperationShouldStop);
+    networkAvailable = wifi_sta::connectStation(xkcd_wifi::ssid(), xkcd_wifi::password(), config::WIFI_TIMEOUT_MS, nullptr, networkOperationShouldStop).connected;
     if (networkAvailable) {
       if (local_time::refreshDue(coldBoot, lastNtpSyncEpoch, config::NTP_REFRESH_SECONDS)) ntp::synchronizeAndPersist(xkcd_config::runtime::timezone(), xkcd_config::runtime::ntpPrimary(), xkcd_config::runtime::ntpSecondary(), config::NTP_DHCP_TIMEOUT_MS, config::NTP_SYNC_TIMEOUT_MS, &lastNtpSyncEpoch);
       acquired = acquireComic(true, comic, image, layout);
@@ -1865,7 +1801,7 @@ void setup() {
     armMaintenanceButtonCancellation();
     networkOperationDeadlineMs =
         millis() + config::ARCHIVE_MAINTENANCE_DEADLINE_MS;
-    if (wifi_sta::connectStation(xkcd_wifi::ssid(), xkcd_wifi::password(), config::WIFI_TIMEOUT_MS, nullptr, networkOperationShouldStop)) {
+    if (wifi_sta::connectStation(xkcd_wifi::ssid(), xkcd_wifi::password(), config::WIFI_TIMEOUT_MS, nullptr, networkOperationShouldStop).connected) {
       refreshArchiveCache();
       if (local_time::clockIsValid()) lastArchiveRefreshEpoch = time(nullptr);
     } else if (maintenanceCancellationRequested()) {

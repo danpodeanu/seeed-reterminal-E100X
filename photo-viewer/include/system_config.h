@@ -9,39 +9,23 @@
 
 #include <Arduino.h>
 
-namespace config {
-
 // --- Hardware model (build-time) --------------------------------------------
 #ifndef RETERMINAL_MODEL
 #define RETERMINAL_MODEL 1001
 #endif
 
-constexpr int MODEL = RETERMINAL_MODEL;
+#include "panel_traits.h"
 
-#if RETERMINAL_MODEL == 1001 || RETERMINAL_MODEL == 1002
-constexpr int PANEL_WIDTH = 800;
-constexpr int PANEL_HEIGHT = 480;
-constexpr int UI_SCALE_NUMERATOR = 1;
-constexpr int UI_SCALE_DENOMINATOR = 1;
-#elif RETERMINAL_MODEL == 1003
-constexpr int PANEL_WIDTH = 1872;
-constexpr int PANEL_HEIGHT = 1404;
-constexpr int UI_SCALE_NUMERATOR = 9;
-constexpr int UI_SCALE_DENOMINATOR = 4;
-#elif RETERMINAL_MODEL == 1004
-constexpr int PANEL_WIDTH = 1200;
-constexpr int PANEL_HEIGHT = 1600;
-constexpr int UI_SCALE_NUMERATOR = 3;
-constexpr int UI_SCALE_DENOMINATOR = 2;
-#else
-#error "Unsupported RETERMINAL_MODEL"
-#endif
+namespace config {
+
+constexpr int MODEL = panel_traits::MODEL;
+constexpr int PANEL_WIDTH = panel_traits::WIDTH;
+constexpr int PANEL_HEIGHT = panel_traits::HEIGHT;
 
 // Convert a coordinate authored for the E1001 panel (800x480) into the
 // equivalent number of pixels on the active panel.
 constexpr int ui(int e1001Pixels) {
-  return (e1001Pixels * UI_SCALE_NUMERATOR + UI_SCALE_DENOMINATOR / 2) /
-         UI_SCALE_DENOMINATOR;
+  return panel_traits::scaleUi(e1001Pixels);
 }
 
 // --- Timeouts ---------------------------------------------------------------

@@ -242,7 +242,6 @@ bool mount(SPIClass& spi, const char* cacheDir) {
   }
   if (!mounted) {
     LOG.println("[sd] mount failed; insert a FAT32/exFAT card");
-    digitalWrite(board::PIN_SD_ENABLE, LOW);
     return false;
   }
   // Capture the bus + CS so attemptRemount() can reset the driver
@@ -252,7 +251,6 @@ bool mount(SPIClass& spi, const char* cacheDir) {
   if (!fileExists(cacheDir) && !retryingMkdir(cacheDir)) {
     LOG.printf("[sd] could not create %s\n", cacheDir);
     SD.end();
-    digitalWrite(board::PIN_SD_ENABLE, LOW);
     return false;
   }
   LOG.printf("[sd] mounted, card=%lluMB\n",

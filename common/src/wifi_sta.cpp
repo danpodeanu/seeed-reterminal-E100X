@@ -45,15 +45,16 @@ void disable() {
   LOG.println("[wifi] powered down");
 }
 
-bool connectStation(const char* ssid, const char* password,
-                    uint32_t timeoutMs,
-                    String* failureReason,
-                    ShouldAbortFn shouldAbort) {
+ConnectResult connectStation(const char* ssid, const char* password,
+                             uint32_t timeoutMs,
+                             String* failureReason,
+                             ShouldAbortFn shouldAbort) {
   if (failureReason) *failureReason = "";
-  if (strcmp(ssid, "YOUR_WIFI_NAME") == 0) {
+  if (!ssid || strcmp(ssid, "YOUR_WIFI_NAME") == 0) {
     LOG.println("[wifi] edit include/secrets.h first");
     if (failureReason) *failureReason = "Wi-Fi is not configured";
-    return false;
+    return {ConnectOutcome::NotConfigured, false,
+            static_cast<uint8_t>(WiFi.status()), 0};
   }
   WiFi.persistent(false);
   WiFi.setSleep(true);
@@ -80,10 +81,12 @@ bool connectStation(const char* ssid, const char* password,
   while (WiFi.status() != WL_CONNECTED &&
          millis() - started < timeoutMs) {
     if (shouldAbort && shouldAbort()) {
+      const uint8_t status = static_cast<uint8_t>(WiFi.status());
+      const uint8_t reason = g_lastDisconnectReason;
       WiFi.removeEvent(disconnectEventId);
       LOG.println("[wifi] connection cancelled");
       if (failureReason) *failureReason = "Wi-Fi connection cancelled";
-      return false;
+      return {ConnectOutcome::Cancelled, false, status, reason};
     }
     delay(250);
   }
@@ -101,12 +104,14 @@ bool connectStation(const char* ssid, const char* password,
                  statusName(status));
     }
     if (failureReason) *failureReason = "Wi-Fi connection timed out";
-    return false;
+    return {ConnectOutcome::Failed, false, static_cast<uint8_t>(status),
+            reason};
   }
   WiFi.removeEvent(disconnectEventId);
   LOG.printf("[wifi] connected, IP=%s RSSI=%d\n",
              WiFi.localIP().toString().c_str(), WiFi.RSSI());
-  return true;
+  return {ConnectOutcome::Connected, true,
+          static_cast<uint8_t>(WiFi.status()), 0};
 }
 
 }  // namespace wifi_sta

@@ -2,14 +2,11 @@
 
 #include <SPI.h>
 
-// Bring-up glue that every consumer of the reTerminal e-paper stack
-// must run once, straight after EPaper::begin(). Kept out of the
-// individual apps so the requirement lives in exactly one place.
+// Bring-up glue that every consumer of the reTerminal e-paper stack uses.
 namespace epaper_setup {
 
-// Enable the shared peripheral power rail before EPaper::begin() sends the
-// panel controller's reset and initialization sequence. This matters after
-// deep sleep, where the apps deliberately left the rail off.
+// Internal stages remain public for SD bus recovery. Application code should
+// call begin() below rather than invoking EPaper::begin() directly.
 void prepare();
 
 // Finish attaching the panel's SPI bus to real GPIOs and enable the
@@ -24,12 +21,21 @@ void prepare();
 // (board::PIN_SD_MISO), which is what SD.begin() happens to do as a
 // side effect via sd_card::mount().
 //
-// Historically the viewer apps only worked because they mounted SD
-// straight after epaper.begin(); tools that don't touch SD were left
-// looking at a stuck panel until this coupling was untangled. Any new
-// app or tool that talks to the panel must call this helper directly.
+// Historically the viewer apps only worked because they mounted SD straight
+// after panel initialization; tools that did not touch SD were left looking
+// at a stuck panel until this coupling was untangled.
 //
 // Idempotent: safe to call more than once.
 void finalize(SPIClass& panelSpi);
+
+// The mandatory panel startup sequence: power and settle the shared rail,
+// initialize the controller, then attach the shared SPI bus to its complete
+// pin set. This ordering is required after deep sleep and on every model.
+template <typename EPaper>
+void begin(EPaper& epaper) {
+  prepare();
+  epaper.begin();
+  finalize(epaper.getSPIinstance());
+}
 
 }  // namespace epaper_setup

@@ -33,6 +33,8 @@
 #include "driver.h"
 #include "epaper_setup.h"
 #include "hardware.h"
+#include "panel_traits.h"
+#include "peripheral_power.h"
 
 #ifndef EPAPER_ENABLE
 #error "Seeed_GFX did not select a reTerminal E-series driver; check common/include/driver.h"
@@ -48,12 +50,13 @@ EPaper epaper;
 
 namespace {
 
+constexpr int PANEL_WIDTH = panel_traits::WIDTH;
+constexpr int PANEL_HEIGHT = panel_traits::HEIGHT;
+
 // Panel geometry + palette selection. Keeping the arrays static and the
 // counts constexpr makes every draw call inlineable and avoids any
 // PSRAM allocation for what is essentially a boot-and-sleep utility.
 #if RETERMINAL_MODEL == 1001
-constexpr int PANEL_WIDTH = 800;
-constexpr int PANEL_HEIGHT = 480;
 constexpr uint32_t PANEL_BLACK = TFT_GRAY_0;
 constexpr uint32_t PANEL_WHITE = TFT_GRAY_3;
 constexpr const char* PANEL_LABEL = "reTerminal E1001 - Gray4";
@@ -65,8 +68,6 @@ constexpr const char* PALETTE_NAMES[] = {"W", "L", "D", "K"};
 constexpr bool PALETTE_DARK[] = {false, false, true, true};
 constexpr uint32_t RAMP[] = {TFT_GRAY_3, TFT_GRAY_2, TFT_GRAY_1, TFT_GRAY_0};
 #elif RETERMINAL_MODEL == 1002
-constexpr int PANEL_WIDTH = 800;
-constexpr int PANEL_HEIGHT = 480;
 constexpr uint32_t PANEL_BLACK = TFT_BLACK;
 constexpr uint32_t PANEL_WHITE = TFT_WHITE;
 constexpr const char* PANEL_LABEL = "reTerminal E1002 - Spectra E6";
@@ -77,8 +78,6 @@ constexpr const char* PALETTE_NAMES[] = {"W", "Y", "G", "B", "R", "K"};
 constexpr bool PALETTE_DARK[] = {false, false, false, true, true, true};
 constexpr uint32_t RAMP[] = {TFT_WHITE, TFT_BLACK};
 #elif RETERMINAL_MODEL == 1003
-constexpr int PANEL_WIDTH = 1872;
-constexpr int PANEL_HEIGHT = 1404;
 constexpr uint32_t PANEL_BLACK = TFT_GRAY_0;
 constexpr uint32_t PANEL_WHITE = TFT_GRAY_15;
 constexpr const char* PANEL_LABEL = "reTerminal E1003 - Gray16";
@@ -95,8 +94,6 @@ constexpr bool PALETTE_DARK[] = {false, false, false, false, false, false, false
 constexpr uint32_t RAMP[] = {TFT_GRAY_15, TFT_GRAY_13, TFT_GRAY_11, TFT_GRAY_9,
                              TFT_GRAY_7, TFT_GRAY_5, TFT_GRAY_3, TFT_GRAY_0};
 #elif RETERMINAL_MODEL == 1004
-constexpr int PANEL_WIDTH = 1200;
-constexpr int PANEL_HEIGHT = 1600;
 constexpr uint32_t PANEL_BLACK = TFT_BLACK;
 constexpr uint32_t PANEL_WHITE = TFT_WHITE;
 constexpr const char* PANEL_LABEL = "reTerminal E1004 - Spectra E6";
@@ -278,6 +275,7 @@ void powerDownAndSleep() {
   LOG.printf("[panel-test] wake config: %s\n", esp_err_to_name(wakeResult));
   LOG.flush();
   delay(50);
+  peripheral_power::disable();
   esp_deep_sleep_start();
 }
 
@@ -296,19 +294,14 @@ void setup() {
   LOG.printf("[panel-test] %d x %d, %d palette entries\n", PANEL_WIDTH,
              PANEL_HEIGHT, PALETTE_COUNT);
 
-  epaper_setup::prepare();
-  epaper.begin();
-  // E1001 in particular relies on this - Setup520 declares TFT_MISO=-1
-  // and the first large Gray4 push after initGrayMode(4) silently
-  // vanishes without it. See common/include/epaper_setup.h.
-  epaper_setup::finalize(epaper.getSPIinstance());
+  epaper_setup::begin(epaper);
 #if RETERMINAL_MODEL == 1001
   epaper.initGrayMode(GRAY_LEVEL4);
 #elif RETERMINAL_MODEL == 1003
   epaper.initGrayMode(GRAY_LEVEL16);
 #endif
   // E1002 (ED2208) and E1004 (T133A01) drive their six-colour palettes
-  // straight out of epaper.begin() - no gray-mode init, matching how
+  // straight out of panel startup - no gray-mode init, matching how
   // the viewer apps hand them off directly to draw calls.
   renderPattern();
   LOG.println("[panel-test] refreshing panel");

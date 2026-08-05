@@ -133,7 +133,7 @@ Filenames sorted alphabetically define the display order (unless
 - **When the SD card is missing or empty** the panel shows a clear
   error and how to recover. Unreadable and incompatible files are
   skipped up to `MAX_PHOTO_ATTEMPTS`; the next wake tries again.
-- **Between refreshes** Wi-Fi is off, SD power is off, the battery
+- **Between refreshes** Wi-Fi is off, the shared peripheral rail is off, the battery
   measurement circuit is off, and the e-paper image stays visible for
   free.
 

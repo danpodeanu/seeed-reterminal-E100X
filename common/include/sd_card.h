@@ -6,8 +6,8 @@
 #include <stddef.h>
 
 // SD-card helpers shared by every viewer app: mount + safe read/write.
-// All three apps repeat the same mount sequence (SD_ENABLE high, share
-// the epaper SPI bus, create a cache directory), and two of them repeat
+// All three apps repeat the same mount sequence (shared peripheral rail
+// enabled, share the e-paper SPI bus, create a cache directory), and two repeat
 // a bounded-size read plus an atomic write. Keep the retry/error paths
 // in one place so future changes need only touch one file.
 //

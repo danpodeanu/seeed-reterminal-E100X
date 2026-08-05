@@ -136,7 +136,7 @@ The details are in [Pre-populating an SD card](#pre-populating-an-sd-card).
   the newest comic and adds up to ten unseen historical comics. Any
   button press cancels the maintenance work and shows another comic
   immediately.
-- **Between refreshes** Wi-Fi is off, SD power is off, and the e-paper
+- **Between refreshes** Wi-Fi is off, the shared peripheral rail is off, and the e-paper
   image stays visible for free.
 
 ## Troubleshooting

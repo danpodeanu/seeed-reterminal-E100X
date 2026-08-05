@@ -43,8 +43,8 @@ any viewer app can bolt this on:
 
 1. Add `symlink://../../common-sd-web` to the target app's
    `platformio.ini` `lib_deps`, plus `ricmoo/QRCode @ ^0.0.1`.
-2. Call `sd_web_portal::begin()` after `epaper_setup::finalize` and
-   `sd_card::mount`.
+2. Start the panel with `epaper_setup::begin()`, render its status screen,
+   mount SD with `sd_card::mount`, then call `sd_web_portal::begin()`.
 3. Pump `sd_web_portal::loop()` from your Arduino `loop()`.
 4. Use the `sd_web_portal::ui::` template helpers to draw the QR codes
    on the panel (or roll your own UI).

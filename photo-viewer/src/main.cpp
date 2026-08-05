@@ -31,6 +31,7 @@
 #include "climate_sensor.h"
 #include "sd_card.h"
 #include "epaper_setup.h"
+#include "peripheral_power.h"
 #include "sd_ota.h"
 #include "sd_web_portal.h"
 #include "sd_web_portal_ui.h"
@@ -903,8 +904,7 @@ void powerDownAndSleep(uint64_t sleepSeconds = 0) {
   // sink is attached.
   appLog.detachSdSink();
   if (sdReady) SD.end();
-  pinMode(PIN_SD_ENABLE, OUTPUT);
-  digitalWrite(PIN_SD_ENABLE, LOW);
+  peripheral_power::disable();
   pinMode(PIN_BATTERY_ENABLE, OUTPUT);
   digitalWrite(PIN_BATTERY_ENABLE, LOW);
 
@@ -1038,21 +1038,16 @@ void renderPortalOnPanel(const String& ssid, const String& password,
   // log lines, and thumb Cache-Control headers make sense.
   rtc_sync::restoreSystemClock();
 
-  epaper_setup::prepare();
-  epaper.begin();
+  // A cold boot with no photos may have mounted SD while deciding to enter
+  // the portal. Release it before the panel takes ownership of the bus.
+  if (sdReady) SD.end();
+  sdReady = false;
+  epaper_setup::begin(epaper);
 #if RETERMINAL_MODEL == 1001
   epaper.initGrayMode(GRAY_LEVEL4);
 #elif RETERMINAL_MODEL == 1003
   epaper.initGrayMode(GRAY_LEVEL16);
 #endif
-
-  // A cold boot with no photos may have mounted SD while deciding to enter
-  // the portal. Release it before the panel refresh: SD and e-paper share
-  // this SPI bus, and leaving SD as its last configurator corrupts E1002
-  // six-colour portal frames after a deep-sleep button wake.
-  if (sdReady) SD.end();
-  sdReady = false;
-  epaper_setup::finalize(epaper.getSPIinstance());
 
   // Extra nav tabs the config_portal chrome renders between Settings
   // and Reset. The pages behind these URLs are served by
@@ -1357,8 +1352,7 @@ void setup() {
       rtc_sync::readAndLog(storedRtc);
     }
   }
-  epaper_setup::prepare();
-  epaper.begin();
+  epaper_setup::begin(epaper);
   if (low_battery::shouldWarn(photo_config::runtime::lowBatteryWarn(),
                               sensorReadings.chargerValid,
                               sensorReadings.externalPower,
@@ -1481,7 +1475,7 @@ void setup() {
 
   bool ntpSynchronized = false;
   if (ntpDue) {
-    if (wifi_sta::connectStation(photo_wifi::ssid(), photo_wifi::password(), config::WIFI_TIMEOUT_MS)) ntpSynchronized = ntp::synchronizeAndPersist(photo_config::runtime::timezone(), photo_config::runtime::ntpPrimary(), photo_config::runtime::ntpSecondary(), config::NTP_DHCP_TIMEOUT_MS, config::NTP_SYNC_TIMEOUT_MS, &lastNtpSyncEpoch);
+    if (wifi_sta::connectStation(photo_wifi::ssid(), photo_wifi::password(), config::WIFI_TIMEOUT_MS).connected) ntpSynchronized = ntp::synchronizeAndPersist(photo_config::runtime::timezone(), photo_config::runtime::ntpPrimary(), photo_config::runtime::ntpSecondary(), config::NTP_DHCP_TIMEOUT_MS, config::NTP_SYNC_TIMEOUT_MS, &lastNtpSyncEpoch);
     if (!ntpSynchronized && !coldBoot) {
       LOG.println("[ntp] using PCF8563 fallback after synchronization failure");
       rtc_sync::restoreSystemClock();

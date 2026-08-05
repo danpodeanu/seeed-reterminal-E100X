@@ -22,13 +22,26 @@ void disable();
 // maintenance-cancel button; weather and photo pass nullptr.
 using ShouldAbortFn = bool (*)();
 
-// Connect to the given SSID/password with a wall-clock timeout. Returns
-// true on success. On failure, `failureReason` (when non-null) receives
-// a short user-facing description, matching what weather-viewer displays
-// on its error panel.
-bool connectStation(const char* ssid, const char* password,
-                    uint32_t timeoutMs,
-                    String* failureReason = nullptr,
-                    ShouldAbortFn shouldAbort = nullptr);
+enum class ConnectOutcome : uint8_t {
+  Connected,
+  NotConfigured,
+  Cancelled,
+  Failed,
+};
+
+struct ConnectResult {
+  ConnectOutcome outcome;
+  bool connected;
+  uint8_t stationStatus;
+  uint8_t disconnectReason;
+};
+
+// Connect to the given SSID/password with a wall-clock timeout. Detailed
+// station and driver causes are returned for programmatic handling and console
+// logging; `failureReason` remains the short text suitable for device screens.
+ConnectResult connectStation(const char* ssid, const char* password,
+                             uint32_t timeoutMs,
+                             String* failureReason = nullptr,
+                             ShouldAbortFn shouldAbort = nullptr);
 
 }  // namespace wifi_sta

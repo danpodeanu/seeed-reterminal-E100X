@@ -3,12 +3,12 @@
 #include <Arduino.h>
 
 #include "board_pins.h"
+#include "peripheral_power.h"
 
 namespace epaper_setup {
 
 void prepare() {
-  pinMode(board::PIN_SD_ENABLE, OUTPUT);
-  digitalWrite(board::PIN_SD_ENABLE, HIGH);
+  peripheral_power::enable();
   delay(10);
 }
 

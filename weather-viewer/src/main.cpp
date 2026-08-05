@@ -43,7 +43,9 @@
 #include "low_battery.h"
 #include "pcf8563_utc.h"
 #include "screenshot_bmp.h"
+#include "smooth_font_manager.h"
 #include "panel_watchdog.h"
+#include "peripheral_power.h"
 #include "timestamped_logger.h"
 #include "theme.h"
 #include "weather_data.h"
@@ -97,6 +99,7 @@ using namespace theme;
 // (fg, PANEL_WHITE, true) behaviour so redraws still erase old glyphs
 // and smooth fonts keep their anti-aliasing.
 EPaper epaper;
+smooth_fonts::Manager smoothFontManager(epaper);
 
 inline void setBodyTextColor(uint16_t fg) {
   if (weather_config::runtime::weatherBackgroundEnabled()) {
@@ -190,100 +193,24 @@ constexpr const GFXfont* SMALL_SMOOTH_FALLBACK_FONT = &FreeSansBold9pt7b;
 constexpr const GFXfont* LARGE_SMOOTH_FALLBACK_FONT = &FreeSansBold12pt7b;
 #endif
 
-static int g_currentSmoothSize = 0;
-static bool g_smoothFontsUnavailable = false;
-// Sizes we have already opened successfully at least once this boot. Set
-// entries let a later applySmoothFont() call skip the SD.exists()/open()
-// probe and go straight to loadFont(), which avoids a rare SD flake
-// between the header and footer causing the footer to silently drop to
-// the GFX fallback.
-static int g_smoothFontVerifiedSizes[4] = {0, 0, 0, 0};
-
-static bool smoothFontSizeVerified(int size) {
-  for (int slot : g_smoothFontVerifiedSizes) {
-    if (slot == size) return true;
-  }
-  return false;
-}
-
-static void rememberSmoothFontSizeVerified(int size) {
-  for (int& slot : g_smoothFontVerifiedSizes) {
-    if (slot == size) return;
-    if (slot == 0) {
-      slot = size;
-      return;
-    }
-  }
-}
-
-static bool smoothFontFileExists(int size) {
-  if (!sdReady) return false;
-  return sd_card::fileExists(String("/fonts/sans_bold_") + size + ".vlw");
-}
-
-static void unloadSmoothFontIfLoaded() {
-  if (g_currentSmoothSize != 0) {
-    epaper.unloadFont();
-    g_currentSmoothSize = 0;
-  }
-}
-
-// Install the smooth font at `size` (pixels) for the next drawString
-// calls.  Falls back to `fallback` (a GFX FreeFont at roughly the same
-// cap-height) when the SD is not mounted, the .vlw is missing, or a
-// previous load has already failed this boot.  Mirrors the xkcd-viewer
-// helper of the same shape - keeps behaviour consistent across apps.
-static void applySmoothFont(int size, const GFXfont* fallback) {
-  if (g_smoothFontsUnavailable || !sdReady) {
-    unloadSmoothFontIfLoaded();
-    epaper.setFreeFont(fallback);
-    return;
-  }
-  if (g_currentSmoothSize == size) return;
-  if (g_currentSmoothSize != 0) {
-    epaper.unloadFont();
-    g_currentSmoothSize = 0;
-  }
-  if (!smoothFontSizeVerified(size) && !smoothFontFileExists(size)) {
-    LOG.printf("[font] /fonts/sans_bold_%d.vlw probe failed; falling back to GFX font for this call\n",
-               size);
-    // Do NOT set g_smoothFontsUnavailable: a probe miss on the SPI SD is
-    // often transient. Latching it here converts one SD hiccup into
-    // "the whole boot renders without Unicode", which is much worse
-    // than a one-frame fallback. Later calls will retry the probe.
-    epaper.setFreeFont(fallback);
-    return;
-  }
-  epaper.setFreeFont(nullptr);
-  const uint32_t t0 = millis();
-  // TFT_eSPI::loadFont builds "/" + name + ".vlw" internally, so pass
-  // the subdir as part of the name to get "/fonts/sans_bold_XX.vlw".
-  epaper.loadFont(String("fonts/sans_bold_") + size, SD);
-  g_currentSmoothSize = size;
-  rememberSmoothFontSizeVerified(size);
-  LOG.printf("[font] loaded sans_bold_%d in %lu ms (yAdvance=%u ascent=%u descent=%u)\n",
-             size, (unsigned long)(millis() - t0),
-             (unsigned)epaper.gFont.yAdvance,
-             (unsigned)epaper.gFont.ascent,
-             (unsigned)epaper.gFont.descent);
-}
-
 // Select the smooth (Unicode-capable) small font.  Its cap-height
 // matches selectSmallFont() so switching between the two keeps the
 // header and footer visually consistent.  Used for the header title,
 // the footer provider label, and the footer location name.
-void selectSmallSmoothFont() {
+smooth_fonts::Selection selectSmallSmoothFont() {
   epaper.setTextSize(1);
-  applySmoothFont(SMOOTH_FONT_SMALL_PX, SMALL_SMOOTH_FALLBACK_FONT);
+  return smoothFontManager.select(
+      SMOOTH_FONT_SMALL_PX, SMALL_SMOOTH_FALLBACK_FONT, sdReady);
 }
 
 // Select the largest smooth (Unicode-capable) font we bake to SD.
 // tools/fonts/make_vlw.py generates sans_bold_<N>.vlw for every integer
 // N from 12 to 48, so 48 px is the biggest that's actually on disk.
 // Used for the location city label on the "Connecting to Wi-Fi" splash.
-void selectLargeSmoothFont() {
+smooth_fonts::Selection selectLargeSmoothFont() {
   epaper.setTextSize(1);
-  applySmoothFont(SMOOTH_FONT_LARGE_PX, LARGE_SMOOTH_FALLBACK_FONT);
+  return smoothFontManager.select(
+      SMOOTH_FONT_LARGE_PX, LARGE_SMOOTH_FALLBACK_FONT, sdReady);
 }
 
 // TFT_eSPI's MC/ML/MR datums center the smooth font's yAdvance box on
@@ -293,7 +220,7 @@ void selectLargeSmoothFont() {
 // align the cap-center with the caller's y.  Returns 0 when a smooth
 // font is not loaded so GFX callers are unaffected.
 static int smoothCenterYAdjust() {
-  if (g_currentSmoothSize == 0) return 0;
+  if (!smoothFontManager.smoothLoaded()) return 0;
   const int yA = static_cast<int>(epaper.gFont.yAdvance);
   const int mA = static_cast<int>(epaper.gFont.maxAscent);
   const int a  = static_cast<int>(epaper.gFont.ascent);
@@ -501,7 +428,7 @@ void renderStatus(const String& message, const String& detail = "",
         config::PANEL_HEIGHT / 2 - config::ui(70) + smoothCenterYAdjust(), 1);
     // TFT_eSPI treats loadFont as sticky: setFreeFont alone won't switch
     // back. Unload so the subsequent selectMediumFont() actually applies.
-    unloadSmoothFontIfLoaded();
+    smoothFontManager.unload();
   }
   if (!subLineAbove.isEmpty()) {
     // Small ASCII line above the main message. Used by "Weather
@@ -897,7 +824,7 @@ void drawHeader(const WeatherData& weather) {
   // fonts, but TFT_eSPI's drawString stays on the smooth-font path as
   // long as one is loaded, which would shrink e.g. the large outdoor
   // temperature down to 16 px.  renderFooter reloads the same size.
-  unloadSmoothFontIfLoaded();
+  smoothFontManager.unload();
   epaper.drawFastHLine(config::ui(10), config::ui(44),
                        config::PANEL_WIDTH - config::ui(20), PANEL_BLACK);
 }
@@ -1136,8 +1063,9 @@ void renderFooter(const WeatherData& weather) {
   text_render::fillStatusBackground(epaper, top, config::PANEL_HEIGHT - top, config::PANEL_WIDTH, config::PANEL_HEIGHT, PANEL_STATUS_BACKGROUND, PANEL_STATUS_DITHERED, PANEL_STATUS_DITHER_COLOR, PANEL_STATUS_DITHER_THRESHOLD);
   epaper.drawFastHLine(config::ui(10), top,
                        config::PANEL_WIDTH - config::ui(20), PANEL_MUTED);
-  selectSmallSmoothFont();
-  if (PANEL_STATUS_DITHERED && g_currentSmoothSize == 0) {
+  const smooth_fonts::Selection footerFont = selectSmallSmoothFont();
+  if (PANEL_STATUS_DITHERED &&
+      footerFont == smooth_fonts::Selection::GfxFallback) {
     // TFT_eSPI's bgfill flag applies only to smooth fonts. GFX FreeFont
     // fallbacks still fill their full bounding box whenever fg != bg, so
     // use the one-colour overload to make the fallback truly transparent.
@@ -1191,7 +1119,7 @@ void renderFooter(const WeatherData& weather) {
   // Restore the GFX small font in case any later footer additions rely
   // on it; also releases the .vlw resources so the next full-panel
   // repaint doesn't hold onto them.
-  unloadSmoothFontIfLoaded();
+  smoothFontManager.unload();
   selectSmallFont();
 }
 
@@ -1262,8 +1190,7 @@ void powerDownAndSleep(uint64_t sleepSeconds = config::SLEEP_SECONDS,
   // sink is attached.
   appLog.detachSdSink();
   if (sdReady) SD.end();
-  pinMode(PIN_SD_ENABLE, OUTPUT);
-  digitalWrite(PIN_SD_ENABLE, LOW);
+  peripheral_power::disable();
   pinMode(PIN_BATTERY_ENABLE, OUTPUT);
   digitalWrite(PIN_BATTERY_ENABLE, LOW);
 
@@ -1467,8 +1394,7 @@ void setup() {
     // Bring the panel up FIRST so the QR splash renders before we start
     // the Wi-Fi AP + web server.
     LOG.println("[portal] panel: begin");
-    epaper_setup::prepare();
-    epaper.begin();
+    epaper_setup::begin(epaper);
 #if RETERMINAL_MODEL == 1001
     epaper.initGrayMode(GRAY_LEVEL4);
     const GFXfont* titleFont    = &FreeSansBold18pt7b;
@@ -1488,16 +1414,9 @@ void setup() {
     const GFXfont* detailFont   = &FreeSans9pt7b;
 #endif
     LOG.println("[portal] panel: grayMode initialised");
-    // We used to call sd_card::mount here (which internally does
-    // epaper_setup::finalize), but on E1001 that left SPI in a state
-    // TFT_eSPI's epaper.update() would then trample, so subsequent SD
-    // ops via /browse would fail every time with 'bus reset ... failed'.
-    // The pre-SD portal path called epaper_setup::finalize directly for
-    // the same reason: without it, E1001 Gray4 pushes silently vanish.
-    // We call it here for the same effect, then defer sd_card::mount
-    // until after the panel refresh completes (below) so SD.begin() is
-    // the last configurator to touch the SPI bus.
-    epaper_setup::finalize(epaper.getSPIinstance());
+    // Defer mounting SD until after the panel refresh so SD.begin() is the
+    // last configurator to touch the shared SPI bus. epaper_setup::begin()
+    // has already applied the E1001 MISO fix needed for Gray4 transfers.
     bool portalSdReady = false;
 
     config_portal::Config portalCfg;
@@ -1704,8 +1623,7 @@ void setup() {
     pcf8563::Reading storedRtc;
     rtc_sync::readAndLog(storedRtc);
   }
-  epaper_setup::prepare();
-  epaper.begin();
+  epaper_setup::begin(epaper);
   if (low_battery::shouldWarn(weather_config::runtime::lowBatteryWarn(),
                               sensorReadings.chargerValid,
                               sensorReadings.externalPower,
@@ -1775,12 +1693,10 @@ void setup() {
              weather_config::runtime::latitude(),
              weather_config::runtime::longitude());
 
-  // Cold-boot "Connecting to Wi-Fi" splash. Pushed BEFORE any
-  // initGrayMode() call so it renders as a fast 1bpp partial refresh
-  // (~1-2 s) rather than paying a full Gray4/Gray16 waveform (~5 s)
-  // for a screen that gets replaced the moment the weather frame is
-  // ready. renderStatus() ends with updatePanel(), so the splash is
-  // actually on the panel before we block on Wi-Fi.
+  // Cold-boot "Connecting to Wi-Fi" splash. On gray panels this is pushed
+  // before initGrayMode() for a faster monochrome refresh; six-color panels
+  // use their native controller mode. renderStatus() completes the update
+  // before Wi-Fi connection blocks.
   if (showConnectionStatus) {
     LOG.println("[display] showing Wi-Fi connection status");
     renderStatus("Connecting to " + String(weather_wifi::ssid()), connectionDetail,
@@ -1797,7 +1713,7 @@ void setup() {
 
   const bool networkRequired = buttonWake || ntpDue || !cacheLoaded;
   const bool networkAvailable =
-      networkRequired && wifi_sta::connectStation(weather_wifi::ssid(), weather_wifi::password(), config::WIFI_TIMEOUT_MS, &liveFailureReason);
+      networkRequired && wifi_sta::connectStation(weather_wifi::ssid(), weather_wifi::password(), config::WIFI_TIMEOUT_MS, &liveFailureReason).connected;
   const bool ntpSynchronized =
       networkAvailable && ntpDue && ntp::synchronizeAndPersist(weather_config::runtime::timezone(), weather_config::runtime::ntpPrimary(), weather_config::runtime::ntpSecondary(), config::NTP_DHCP_TIMEOUT_MS, config::NTP_SYNC_TIMEOUT_MS, &lastNtpSyncEpoch);
   bool rtcRestored = false;

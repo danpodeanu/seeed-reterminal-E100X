@@ -28,6 +28,8 @@
 #include "hardware.h"
 #include "local_time.h"
 #include "ntp_sync.h"
+#include "panel_traits.h"
+#include "peripheral_power.h"
 #include "rtc_sync.h"
 #include "sd_card.h"
 #include "sd_web_portal.h"
@@ -45,9 +47,10 @@ EPaper epaper;
 
 namespace {
 
+constexpr int PANEL_WIDTH = panel_traits::WIDTH;
+constexpr int PANEL_HEIGHT = panel_traits::HEIGHT;
+
 #if RETERMINAL_MODEL == 1001
-constexpr int PANEL_WIDTH = 800;
-constexpr int PANEL_HEIGHT = 480;
 constexpr uint32_t PANEL_BLACK = TFT_GRAY_0;
 constexpr uint32_t PANEL_WHITE = TFT_GRAY_3;
 constexpr const char* PANEL_LABEL = "reTerminal E1001";
@@ -58,8 +61,6 @@ constexpr const char* PANEL_LABEL = "reTerminal E1001";
 #define PORTAL_FONT_ERR_TITLE &FreeSansBold24pt7b
 #define PORTAL_FONT_ERR_BODY  &FreeSans12pt7b
 #elif RETERMINAL_MODEL == 1002
-constexpr int PANEL_WIDTH = 800;
-constexpr int PANEL_HEIGHT = 480;
 constexpr uint32_t PANEL_BLACK = TFT_BLACK;
 constexpr uint32_t PANEL_WHITE = TFT_WHITE;
 constexpr const char* PANEL_LABEL = "reTerminal E1002";
@@ -70,8 +71,6 @@ constexpr const char* PANEL_LABEL = "reTerminal E1002";
 #define PORTAL_FONT_ERR_TITLE &FreeSansBold24pt7b
 #define PORTAL_FONT_ERR_BODY  &FreeSans12pt7b
 #elif RETERMINAL_MODEL == 1003
-constexpr int PANEL_WIDTH = 1872;
-constexpr int PANEL_HEIGHT = 1404;
 constexpr uint32_t PANEL_BLACK = TFT_GRAY_0;
 constexpr uint32_t PANEL_WHITE = TFT_GRAY_15;
 constexpr const char* PANEL_LABEL = "reTerminal E1003";
@@ -82,8 +81,6 @@ constexpr const char* PANEL_LABEL = "reTerminal E1003";
 #define PORTAL_FONT_ERR_TITLE &FreeSansBold24pt7b
 #define PORTAL_FONT_ERR_BODY  &FreeSans18pt7b
 #elif RETERMINAL_MODEL == 1004
-constexpr int PANEL_WIDTH = 1200;
-constexpr int PANEL_HEIGHT = 1600;
 constexpr uint32_t PANEL_BLACK = TFT_BLACK;
 constexpr uint32_t PANEL_WHITE = TFT_WHITE;
 constexpr const char* PANEL_LABEL = "reTerminal E1004";
@@ -133,6 +130,7 @@ void renderNoSdCardAndStop() {
       (1ULL << 3) | (1ULL << 4) | (1ULL << 5);
   esp_sleep_enable_ext1_wakeup(kWakeMask, ESP_EXT1_WAKEUP_ANY_LOW);
   delay(50);
+  peripheral_power::disable();
   esp_deep_sleep_start();
 }
 
@@ -195,7 +193,7 @@ void setup() {
   if (haveWifiCreds) {
     LOG.printf("[time] attempting NTP sync via %s\n", WIFI_SSID);
     if (wifi_sta::connectStation(WIFI_SSID, WIFI_PASSWORD,
-                                 config::WIFI_TIMEOUT_MS)) {
+                                 config::WIFI_TIMEOUT_MS).connected) {
       time_t syncedAt = 0;
       const bool ntpOk = ntp::synchronizeAndPersist(
           config::TIMEZONE, config::NTP_SERVER_PRIMARY,
@@ -215,9 +213,7 @@ void setup() {
     LOG.println("[time] no Wi-Fi credentials; using PCF8563 only");
   }
 
-  epaper_setup::prepare();
-  epaper.begin();
-  epaper_setup::finalize(epaper.getSPIinstance());
+  epaper_setup::begin(epaper);
 #if RETERMINAL_MODEL == 1001
   epaper.initGrayMode(GRAY_LEVEL4);
 #elif RETERMINAL_MODEL == 1003
@@ -262,6 +258,8 @@ void setup() {
     epaper.update();
     LOG.println("[sd-web] portal begin failed");
     delay(1000);
+    SD.end();
+    peripheral_power::disable();
     esp_deep_sleep_start();
     return;
   }

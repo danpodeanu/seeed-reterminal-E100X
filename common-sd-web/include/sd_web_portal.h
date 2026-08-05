@@ -17,7 +17,7 @@ class WebServer;
 //   3. The caller pumps `loop()` from their Arduino loop().
 //
 // Preconditions the caller must satisfy before begin():
-//   * Panel SPI has been finalised (epaper_setup::finalize).
+//   * Panel startup has completed (epaper_setup::begin).
 //   * The SD card has been mounted (sd_card::mount).
 // The portal does NOT mount the SD itself so an embedding app can share
 // its own mount, and so this file never touches epaper/SD headers -

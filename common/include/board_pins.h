@@ -16,10 +16,10 @@ constexpr int PIN_SD_CS = 14;
 constexpr int PIN_SD_DETECT = 15;
 
 #if RETERMINAL_MODEL == 1003
-constexpr int PIN_SD_ENABLE = 39;
+constexpr int PIN_PERIPHERAL_ENABLE = 39;
 constexpr int PIN_BATTERY_ENABLE = 40;
 #else
-constexpr int PIN_SD_ENABLE = 16;
+constexpr int PIN_PERIPHERAL_ENABLE = 16;
 constexpr int PIN_BATTERY_ENABLE = 21;
 #endif
 
