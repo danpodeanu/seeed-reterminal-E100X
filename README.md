@@ -103,8 +103,7 @@ from Chrome or Edge over USB. See [`docs/`](docs/) for how it is wired up.
 Firmware can be updated by dropping a single `.bin` file onto the SD card -
 no cable, no serial console, no host tooling. The device verifies the image
 before rebooting into it, so a wrong-model or corrupted file cannot brick a
-running unit. Devices running v1.4 or earlier first need the one-time
-partition-layout migration described below.
+running unit.
 
 1. Download the **`-ota.bin`** release asset for your app + board from the [Releases page](https://github.com/danpodeanu/seeed-reterminal-E100X/releases) - for example, `firmware-weather-viewer-reterminal_e1003-ota.bin`. The matching `-full.bin` is only for USB / web-flasher first-flash and will **not** work over SD (see below).
 2. Copy it to the root of the SD card as **`/update.bin`** (the filename is fixed and the same across apps and boards; the device tells them apart by an embedded tag inside the image).
@@ -130,14 +129,6 @@ serial console.
   direct `esptool` USB flash. Do **not** feed this to SD OTA.
 - `firmware-<app>-<board>-ota.bin` - app-only image consumed by
   `esp_ota_write` during SD OTA. Copy this one to `/update.bin`.
-
-**One-time migration to the OTA-capable partition layout.** Devices flashed
-with **v1.4 or earlier** use a single-slot partition layout with no room for
-a second OTA image. Upgrading to v1.5 requires a **one-time USB reflash**
-(the [web flasher](https://danpodeanu.github.io/seeed-reterminal-E100X/)
-works fine) to lay down the new partition table. Wi-Fi credentials and
-other NVS settings survive the migration; SPIFFS is wiped but the apps do
-not use it. Every update after that first hop is SD-driven.
 
 ## Testing
 
