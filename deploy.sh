@@ -28,7 +28,7 @@ if [ "$#" -lt 1 ] || [ "$1" = "-h" ] || [ "$1" = "--help" ]; then
     exit 1
 fi
 
-board="$1"
+board="$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')"
 case "${board}" in
     e1001|e1002|e1003|e1004|e1005) ;;
     *)

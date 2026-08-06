@@ -6,21 +6,22 @@ set "SCRIPT=%~nx0"
 set "BOARD=%~1"
 set "PORT=%~2"
 
-set "VALID=0"
-if /I "%BOARD%"=="e1001" set "VALID=1"
-if /I "%BOARD%"=="e1002" set "VALID=1"
-if /I "%BOARD%"=="e1003" set "VALID=1"
-if /I "%BOARD%"=="e1004" set "VALID=1"
-if /I "%BOARD%"=="e1005" set "VALID=1"
-
 if "%BOARD%"=="/?" goto usage
 if "%BOARD%"=="-h" goto usage
 if "%BOARD%"=="--help" goto usage
 if "%BOARD%"=="" goto usage
-if "%VALID%"=="0" (
+
+set "CANONICAL_BOARD="
+if /I "%BOARD%"=="e1001" set "CANONICAL_BOARD=e1001"
+if /I "%BOARD%"=="e1002" set "CANONICAL_BOARD=e1002"
+if /I "%BOARD%"=="e1003" set "CANONICAL_BOARD=e1003"
+if /I "%BOARD%"=="e1004" set "CANONICAL_BOARD=e1004"
+if /I "%BOARD%"=="e1005" set "CANONICAL_BOARD=e1005"
+if not defined CANONICAL_BOARD (
     echo [deploy] error: unknown board "%BOARD%"
     goto usage
 )
+set "BOARD=%CANONICAL_BOARD%"
 
 if not exist platformio.ini (
     echo [deploy] error: no platformio.ini in %CD%
