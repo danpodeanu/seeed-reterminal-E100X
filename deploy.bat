@@ -30,8 +30,11 @@ if not exist platformio.ini (
 )
 
 set "ENV=reterminal_%BOARD%"
-findstr /L /I /X /C:"[env:%ENV%]" platformio.ini >nul
-if errorlevel 1 (
+set "ENV_FOUND="
+for /f "usebackq delims=" %%L in ("platformio.ini") do (
+    if /I "%%L"=="[env:!ENV!]" set "ENV_FOUND=1"
+)
+if not defined ENV_FOUND (
     echo [deploy] error: %CD% does not define PlatformIO environment %ENV%.
     exit /b 1
 )
