@@ -50,6 +50,13 @@ inline constexpr bool IS_PORTRAIT =
     SIZE_CLASS == SizeClass::CompactPortrait ||
     SIZE_CLASS == SizeClass::LargePortrait;
 
+// E1005 is mounted opposite Seeed_GFX's default portrait orientation. Every
+// application must present it with USB at the bottom and the power button up.
+constexpr int displayRotationForModel(int model) {
+  return model == 1005 ? 1 : 0;
+}
+inline constexpr int DISPLAY_ROTATION = displayRotationForModel(MODEL);
+
 constexpr int scaleUi(int e1001Pixels) {
   return (e1001Pixels * UI_SCALE_NUMERATOR + UI_SCALE_DENOMINATOR / 2) /
          UI_SCALE_DENOMINATOR;

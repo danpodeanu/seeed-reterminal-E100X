@@ -5,6 +5,7 @@
 
 #include "app_logic.h"
 #include "low_battery.h"
+#include "panel_traits.h"
 #include "photo_geom.h"
 #include "photo_manifest.h"
 
@@ -262,6 +263,15 @@ void test_photo_geom_rotate_cw_and_ccw_are_inverses() {
   }
 }
 
+void test_panel_rotation_is_only_applied_to_e1005() {
+  TEST_ASSERT_EQUAL_INT(0, panel_traits::displayRotationForModel(1001));
+  TEST_ASSERT_EQUAL_INT(0, panel_traits::displayRotationForModel(1002));
+  TEST_ASSERT_EQUAL_INT(0, panel_traits::displayRotationForModel(1003));
+  TEST_ASSERT_EQUAL_INT(0, panel_traits::displayRotationForModel(1004));
+  TEST_ASSERT_EQUAL_INT(1, panel_traits::displayRotationForModel(1005));
+  TEST_ASSERT_EQUAL_INT(0, panel_traits::DISPLAY_ROTATION);
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_low_battery_warns_when_below_threshold);
@@ -289,5 +299,6 @@ int main(int, char**) {
   RUN_TEST(test_photo_geom_rotate_cw_maps_corners);
   RUN_TEST(test_photo_geom_rotate_ccw_maps_corners);
   RUN_TEST(test_photo_geom_rotate_cw_and_ccw_are_inverses);
+  RUN_TEST(test_panel_rotation_is_only_applied_to_e1005);
   return UNITY_END();
 }

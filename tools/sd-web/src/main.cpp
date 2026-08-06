@@ -239,9 +239,6 @@ void setup() {
   }
 
   epaper_setup::begin(epaper);
-#if RETERMINAL_MODEL == 1005
-  epaper.setRotation(1);
-#endif
 #if RETERMINAL_MODEL == 1001
   epaper.initGrayMode(GRAY_LEVEL4);
 #elif RETERMINAL_MODEL == 1003

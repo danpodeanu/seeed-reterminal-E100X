@@ -2,6 +2,8 @@
 
 #include <SPI.h>
 
+#include "panel_traits.h"
+
 // Bring-up glue that every consumer of the reTerminal e-paper stack uses.
 namespace epaper_setup {
 
@@ -29,12 +31,14 @@ void prepare();
 void finalize(SPIClass& panelSpi);
 
 // The mandatory panel startup sequence: power and settle the shared rail,
-// initialize the controller, then attach the shared SPI bus to its complete
-// pin set. This ordering is required after deep sleep and on every model.
+// initialize the controller, apply the model's physical orientation, then
+// attach the shared SPI bus to its complete pin set. This ordering is required
+// after deep sleep and on every model.
 template <typename EPaper>
 void begin(EPaper& epaper) {
   prepare();
   epaper.begin();
+  epaper.setRotation(panel_traits::DISPLAY_ROTATION);
   finalize(epaper.getSPIinstance());
 }
 
