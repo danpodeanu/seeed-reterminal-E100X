@@ -90,8 +90,9 @@ using namespace ::board;
 // COLOR_SUN, PIN_BUTTON_GREEN, ...) working at every callsite below.
 using namespace theme;
 
-// The ink-wash weather background can be enabled on E1001-E1004 via
-// /settings. E1005 always uses the compact layout's clean white canvas.
+// The ink-wash weather background can be enabled on every model via
+// /settings. E1005 uses a strongly faded one-bit version behind its compact
+// layout.
 // TFT_eSPI's drawString path for GFX free fonts
 // unconditionally paints a padded fillRect(..., textbgcolor) behind
 // every string whenever textcolor != textbgcolor - the _fillbg / bgfill
@@ -105,11 +106,7 @@ EPaper epaper;
 smooth_fonts::Manager smoothFontManager(epaper);
 
 inline bool weatherBackgroundActive() {
-#if RETERMINAL_MODEL == 1005
-  return false;
-#else
   return weather_config::runtime::weatherBackgroundEnabled();
-#endif
 }
 
 inline void setBodyTextColor(uint16_t fg) {

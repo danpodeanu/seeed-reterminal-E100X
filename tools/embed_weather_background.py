@@ -2,8 +2,9 @@
 
 Pipeline per theme: LANCZOS upscale, Gaussian blur to melt the source into
 continuous tone, unsharp mask to bring back edges, contrast auto-fix,
-optional rotation, LANCZOS resize to the target panel size, fade toward
-white so overlaid text stays legible, then Floyd-Steinberg dither to the
+optional rotation or aspect-preserving crop, LANCZOS resize to the target
+panel size, fade toward white so overlaid text stays legible, then
+Floyd-Steinberg dither to the
 model's target palette. Output is packed at the model's native bit depth
 and dropped in a per-model PROGMEM cpp guarded with `#if RETERMINAL_MODEL`.
 
@@ -41,6 +42,7 @@ CLOUDY_ONLY: Tuple[str, ...] = ("cloudy",)
 # Fade the ink-wash toward white so headline text stays legible. 0.55 keeps
 # ~45% of the original ink, plenty to still read as a landscape.
 FADE_STRENGTH = 0.55
+E1005_INK_DENSITY = 0.08
 
 
 @dataclass(frozen=True)
@@ -48,12 +50,15 @@ class ModelSpec:
     model: int
     panel_w: int       # panel size in pixels
     panel_h: int
-    portrait: bool     # rotate the landscape source 90 degrees before resize
+    rotate_source: bool  # rotate the landscape artwork 90 degrees before resize
     bpp: int           # bits per pixel in the packed payload
     levels: int        # number of dither levels (2, 4, ...); must match bpp mask
     scale: int         # blitter upscale factor (1 = 1:1, 2 = nearest-neighbor 2x2)
     themes: Tuple[str, ...]  # themes bundled for this model, in any order
     out_file: str
+    fade_strength: float = FADE_STRENGTH
+    crop_to_panel: bool = False
+    target_ink_density: float | None = None
 
     @property
     def payload_w(self) -> int:
@@ -86,10 +91,19 @@ MODELS: List[ModelSpec] = [
     # footprint as the previous single-theme full-res payload.
     ModelSpec(1004, 1200, 1600, True, 1, 2, 2, ALL_THEMES,
               "weather_background_data_e1004.cpp"),
+    # E1005 SSD1677 monochrome portrait. Crop an upright 3:5 composition from
+    # the landscape artwork instead of rotating the mountains on their side.
+    # Normalizing the average ink keeps light themes visible without making
+    # darker themes too busy behind the compact labels.
+    ModelSpec(1005, 480, 800, False, 1, 2, 1, ALL_THEMES,
+              "weather_background_data_e1005.cpp", crop_to_panel=True,
+              target_ink_density=E1005_INK_DENSITY),
 ]
 
 
-def refine(img: Image.Image, target_size: Tuple[int, int]) -> Image.Image:
+def refine(img: Image.Image, target_size: Tuple[int, int],
+           fade_strength: float,
+           target_ink_density: float | None = None) -> Image.Image:
     """Continuous-tone refinement + fade + resize into the target panel."""
     w, h = img.size
     sup = img.resize((w * 2, h * 2), Image.LANCZOS)
@@ -98,7 +112,16 @@ def refine(img: Image.Image, target_size: Tuple[int, int]) -> Image.Image:
     sup = ImageOps.autocontrast(sup, cutoff=0.5)
     sup = sup.resize(target_size, Image.LANCZOS)
     white = Image.new("L", sup.size, 255)
-    return Image.blend(sup, white, FADE_STRENGTH)
+    if target_ink_density is not None:
+        assert 0.0 < target_ink_density < 1.0
+        histogram = sup.histogram()
+        mean = sum(level * count for level, count in enumerate(histogram))
+        mean /= sup.width * sup.height
+        target_mean = 255 * (1.0 - target_ink_density)
+        if mean >= target_mean:
+            return sup
+        fade_strength = (target_mean - mean) / (255 - mean)
+    return Image.blend(sup, white, fade_strength)
 
 
 def dither_to_palette(refined: Image.Image, levels: int) -> Image.Image:
@@ -114,6 +137,23 @@ def dither_to_palette(refined: Image.Image, levels: int) -> Image.Image:
     return refined.convert("RGB").quantize(
         colors=levels, palette=pal_img, dither=Image.FLOYDSTEINBERG
     )
+
+
+def crop_to_aspect(img: Image.Image,
+                   target_size: Tuple[int, int]) -> Image.Image:
+    """Center-crop without rotating or distorting the source composition."""
+    target_w, target_h = target_size
+    target_ratio = target_w / target_h
+    source_ratio = img.width / img.height
+    if source_ratio > target_ratio:
+        crop_w = round(img.height * target_ratio)
+        left = (img.width - crop_w) // 2
+        return img.crop((left, 0, left + crop_w, img.height))
+    if source_ratio < target_ratio:
+        crop_h = round(img.width / target_ratio)
+        top = (img.height - crop_h) // 2
+        return img.crop((0, top, img.width, top + crop_h))
+    return img
 
 
 def pack(indexed: Image.Image, bpp: int) -> bytes:
@@ -160,7 +200,7 @@ def emit_cpp(spec: ModelSpec, payloads: Dict[str, bytes], out_path: Path) -> Non
     lines = [
         f"// AUTO-GENERATED - weather background(s) for reTerminal E{spec.model}.",
         f"// Panel {spec.panel_w}x{spec.panel_h}"
-        f" ({'portrait' if spec.portrait else 'landscape'}),"
+        f" ({'portrait' if spec.panel_h > spec.panel_w else 'landscape'}),"
         f" {len(themes_present)} theme(s), each"
         f" {spec.payload_w}x{spec.payload_h}"
         f" @ {spec.bpp}bpp x{spec.scale} nearest-neighbor upscale"
@@ -217,12 +257,15 @@ def render_theme(spec: ModelSpec, theme: str, assets_dir: Path) -> bytes:
     """Refine + dither + pack the source PNG for one theme."""
     src = assets_dir / f"{theme}_source.png"
     img = Image.open(src).convert("L")
-    if spec.portrait:
+    if spec.rotate_source:
         # Our source PNGs are landscape 3:2 ink-wash mountain scenes.
         # Rotate so the mountains occupy the bottom of the portrait frame
         # before we resize to the panel dimensions.
         img = img.rotate(90, expand=True, resample=Image.BICUBIC)
-    refined = refine(img, (spec.payload_w, spec.payload_h))
+    if spec.crop_to_panel:
+        img = crop_to_aspect(img, (spec.payload_w, spec.payload_h))
+    refined = refine(img, (spec.payload_w, spec.payload_h),
+                     spec.fade_strength, spec.target_ink_density)
     indexed = dither_to_palette(refined, spec.levels)
     return pack(indexed, spec.bpp)
 
@@ -242,7 +285,7 @@ def main() -> None:
                         help="Directory holding <theme>_source.png files.")
     parser.add_argument("--model", type=int, choices=[m.model for m in MODELS])
     parser.add_argument("--all", action="store_true",
-                        help="Regenerate all four models.")
+                        help="Regenerate all five models.")
     args = parser.parse_args()
 
     if not args.model and not args.all:

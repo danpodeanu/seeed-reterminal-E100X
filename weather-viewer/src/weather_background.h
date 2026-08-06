@@ -4,9 +4,8 @@
 //
 // Four themes (sunny, cloudy, rainy, snowy) are keyed off the current
 // WMO weather code so the picture roughly agrees with the hero icon.
-// E1001-E1004 use pre-baked payloads selected by WMO condition. E1005
-// deliberately renders a plain white background for maximum legibility
-// and a smaller firmware image.
+// Every model uses a pre-baked payload selected by WMO condition. E1005's
+// portrait payload is strongly faded and dithered to its monochrome palette.
 //
 // One data file per image-backed model lives next to this blitter; each is guarded
 // with `#if RETERMINAL_MODEL == NNNN` so the linker only picks up the
@@ -49,7 +48,6 @@ Theme themeForWmoCode(int wmoCode);
 // Blit the weather background for `theme` across the whole sprite.
 // Per-model palette mapping lives inside the .cpp so callers don't need
 // to know whether the current panel is 4-gray, 16-gray, or Spectra-6 BW.
-// E1005 ignores the theme and fills the sprite white.
 void draw(TFT_eSPI& epaper, Theme theme);
 
 }  // namespace weather_background

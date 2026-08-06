@@ -147,13 +147,6 @@ Theme themeForWmoCode(int wmoCode) {
 }
 
 void draw(TFT_eSPI& epaper, Theme theme) {
-#if RETERMINAL_MODEL == 1005
-  // The compact Sticky layout intentionally uses a clean white background.
-  // It avoids spending flash and refresh time on a 480x800 bitmap while
-  // keeping the small monochrome labels and separators crisp.
-  (void)theme;
-  epaper.fillScreen(TFT_WHITE);
-#else
   const uint16_t w = kWidth;
   const uint16_t h = kHeight;
   const uint8_t bpp = kBitsPerPixel;
@@ -197,7 +190,6 @@ void draw(TFT_eSPI& epaper, Theme theme) {
     }
     row += rowBytes;
   }
-#endif
 #endif
 }
 

@@ -22,6 +22,8 @@ screenshot feature.*
   and a plain-language weather condition.
 - Time and probability of the next expected rain in the coming 48 h.
 - Three-day low/high with precipitation probability and maximum UV.
+- Weather-matched ink-wash backgrounds, pre-dithered for each panel. E1005
+  uses a light monochrome portrait treatment behind its compact layout.
 - Severe-weather alert banner across the top when any local alert is
   active (QWeather in China; US NWS elsewhere in the US).
 - Indoor temperature, humidity, battery percentage, and a USB-power

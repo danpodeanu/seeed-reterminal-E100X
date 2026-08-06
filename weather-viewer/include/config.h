@@ -124,9 +124,8 @@ constexpr bool CLUTTER_FREE_MODE = true;
 
 // Show a bundled Chinese ink-wash landscape as the background behind
 // the main render instead of a plain white sprite. The image is dithered
-// and faded so headline text stays legible. Applies to E1001-E1004
-// (each has a pre-baked payload matching its size and palette); E1005
-// always uses a clean white background for its compact monochrome layout.
+// and faded so headline text stays legible. Each model has a pre-baked
+// payload matching its size and palette; E1005 uses a lighter one-bit image.
 constexpr bool WEATHER_BACKGROUND_ENABLED = true;
 
 // --- Debug knobs ------------------------------------------------------------
