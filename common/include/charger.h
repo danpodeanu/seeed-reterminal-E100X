@@ -3,7 +3,7 @@
 #include <stdint.h>
 
 // Shared reader for the Silergy SY6974B battery-charger IC used across
-// every reTerminal E100X board (E1001/E1002 -- V1.2 changelog "Change U2
+// reTerminal E1001-E1004 (E1001/E1002 -- V1.2 changelog "Change U2
 // ETA6003 to SY6974B" --, E1003, E1004). The chip lives on I2C0 at
 // address 0x6A alongside the PCF8563 RTC (0x51) and the SHT4x sensor
 // (0x44), so no new bus needs to be brought up.

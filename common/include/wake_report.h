@@ -4,9 +4,7 @@
 #include <esp_sleep.h>
 #include <stdint.h>
 
-// Wake-cause reporting shared by every viewer app. All three apps wire the
-// same three ext1 wake pins on GPIO 3/4/5, so this uses those literals
-// directly rather than a per-app pin mapping.
+// Wake-cause reporting shared by every viewer app.
 namespace wake_report {
 
 // Human-readable label describing why the ESP32 woke up. Used in [wake]

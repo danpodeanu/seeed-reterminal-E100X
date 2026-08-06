@@ -12,6 +12,8 @@
 #define BOARD_SCREEN_COMBO 522  // ED103TC2, 1872x1404, Gray16
 #elif RETERMINAL_MODEL == 1004
 #define BOARD_SCREEN_COMBO 523  // T133A01, 1200x1600, six-color
+#elif RETERMINAL_MODEL == 1005
+#define BOARD_SCREEN_COMBO 524  // SSD1677, 800x480, monochrome + partial
 #else
-#error "RETERMINAL_MODEL must be 1001, 1002, 1003, or 1004"
+#error "RETERMINAL_MODEL must be 1001, 1002, 1003, 1004, or 1005"
 #endif

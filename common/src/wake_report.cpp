@@ -5,18 +5,10 @@
 #include <time.h>
 
 #include "app_logger.h"
+#include "board_pins.h"
 #include "local_time.h"
 
 namespace wake_report {
-namespace {
-
-// All three viewer apps wire the same wake pins.
-constexpr int kWakePin0 = 3;
-constexpr int kWakePin1 = 4;
-constexpr int kWakePin2 = 5;
-
-}  // namespace
-
 String wakeReason(esp_sleep_wakeup_cause_t cause, uint64_t wakePins) {
   if (cause == ESP_SLEEP_WAKEUP_UNDEFINED) return "cold boot/reset";
   if (cause == ESP_SLEEP_WAKEUP_TIMER) return "scheduled timer";
@@ -25,14 +17,16 @@ String wakeReason(esp_sleep_wakeup_cause_t cause, uint64_t wakePins) {
   }
 
   String buttons;
-  if (wakePins & (1ULL << kWakePin0)) buttons += "GPIO3";
-  if (wakePins & (1ULL << kWakePin1)) {
-    if (!buttons.isEmpty()) buttons += "+";
-    buttons += "GPIO4";
+  if (wakePins & (1ULL << board::PIN_BUTTON_0)) {
+    buttons += "GPIO" + String(board::PIN_BUTTON_0);
   }
-  if (wakePins & (1ULL << kWakePin2)) {
+  if (wakePins & (1ULL << board::PIN_BUTTON_1)) {
     if (!buttons.isEmpty()) buttons += "+";
-    buttons += "GPIO5";
+    buttons += "GPIO" + String(board::PIN_BUTTON_1);
+  }
+  if (wakePins & (1ULL << board::PIN_BUTTON_2)) {
+    if (!buttons.isEmpty()) buttons += "+";
+    buttons += "GPIO" + String(board::PIN_BUTTON_2);
   }
   return buttons.isEmpty() ? "front button" : "front button " + buttons;
 }

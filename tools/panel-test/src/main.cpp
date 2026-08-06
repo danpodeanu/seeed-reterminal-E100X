@@ -1,4 +1,4 @@
-// SMPTE-inspired test pattern for the reTerminal E100X e-paper panels.
+// SMPTE-inspired test pattern for the reTerminal E-series e-paper panels.
 //
 // Renders a familiar TV colour-bar layout adapted to whatever palette
 // the selected panel actually supports:
@@ -7,6 +7,7 @@
 //   E1002 : six-colour Spectra E6.               800x480 landscape.
 //   E1003 : sixteen grey shades (Gray16).        1872x1404 landscape.
 //   E1004 : six-colour Spectra E6.               1200x1600 portrait.
+//   E1005 : monochrome + interactive GT911 test. 480x800 portrait.
 //
 // Layout (all panels):
 //
@@ -25,6 +26,7 @@
 
 #include <Arduino.h>
 #include <TFT_eSPI.h>
+#include <Wire.h>
 #include <driver/rtc_io.h>
 #include <esp_sleep.h>
 
@@ -33,8 +35,10 @@
 #include "driver.h"
 #include "epaper_setup.h"
 #include "hardware.h"
+#include "gt911_touch.h"
 #include "panel_traits.h"
 #include "peripheral_power.h"
+#include "power_latch.h"
 
 #ifndef EPAPER_ENABLE
 #error "Seeed_GFX did not select a reTerminal E-series driver; check common/include/driver.h"
@@ -102,8 +106,16 @@ constexpr uint32_t PALETTE[] = {TFT_WHITE, TFT_YELLOW, TFT_GREEN,
 constexpr const char* PALETTE_NAMES[] = {"W", "Y", "G", "B", "R", "K"};
 constexpr bool PALETTE_DARK[] = {false, false, false, true, true, true};
 constexpr uint32_t RAMP[] = {TFT_WHITE, TFT_BLACK};
+#elif RETERMINAL_MODEL == 1005
+constexpr uint32_t PANEL_BLACK = TFT_BLACK;
+constexpr uint32_t PANEL_WHITE = TFT_WHITE;
+constexpr const char* PANEL_LABEL = "reTerminal Sticky E1005 - Mono + Touch";
+constexpr uint32_t PALETTE[] = {TFT_WHITE, TFT_BLACK};
+constexpr const char* PALETTE_NAMES[] = {"W", "K"};
+constexpr bool PALETTE_DARK[] = {false, true};
+constexpr uint32_t RAMP[] = {TFT_WHITE, TFT_BLACK};
 #else
-#error "RETERMINAL_MODEL must be 1001, 1002, 1003, or 1004"
+#error "RETERMINAL_MODEL must be 1001, 1002, 1003, 1004, or 1005"
 #endif
 
 constexpr int PALETTE_COUNT = sizeof(PALETTE) / sizeof(PALETTE[0]);
@@ -248,13 +260,60 @@ void renderPattern() {
   epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, true);
 }
 
+#if RETERMINAL_MODEL == 1005
+TwoWire touchWire(0);
+Gt911Touch touch;
+bool touchReady = false;
+bool haveLastMarker = false;
+Gt911Touch::Point lastMarker = {};
+
+void drawTouchMarker(const Gt911Touch::Point& point) {
+  constexpr int kOuterRadius = 14;
+  constexpr int kRefreshPadding = 4;
+  const int x = point.x;
+  const int y = point.y;
+  epaper.fillCircle(x, y, kOuterRadius, PANEL_WHITE);
+  epaper.drawCircle(x, y, kOuterRadius, PANEL_BLACK);
+  epaper.drawFastHLine(x - 10, y, 21, PANEL_BLACK);
+  epaper.drawFastVLine(x, y - 10, 21, PANEL_BLACK);
+
+  const int left = max(0, x - kOuterRadius - kRefreshPadding);
+  const int top = max(0, y - kOuterRadius - kRefreshPadding);
+  const int right = min(PANEL_WIDTH, x + kOuterRadius + kRefreshPadding + 1);
+  const int bottom =
+      min(PANEL_HEIGHT, y + kOuterRadius + kRefreshPadding + 1);
+  epaper.updataPartial(left, top, right - left, bottom - top);
+}
+
+void pollTouch() {
+  if (!touchReady) return;
+  Gt911Touch::Point point = {};
+  if (!touch.poll(point)) return;
+
+  LOG.printf("[touch] x=%u y=%u size=%u id=%u\n", point.x, point.y,
+             point.size, point.id);
+  const int dx = haveLastMarker
+                     ? abs(static_cast<int>(point.x) -
+                           static_cast<int>(lastMarker.x))
+                     : 100;
+  const int dy = haveLastMarker
+                     ? abs(static_cast<int>(point.y) -
+                           static_cast<int>(lastMarker.y))
+                     : 100;
+  if (!haveLastMarker || dx >= 8 || dy >= 8) {
+    drawTouchMarker(point);
+    lastMarker = point;
+    haveLastMarker = true;
+  }
+}
+#endif
+
 void powerDownAndSleep() {
-  // Wire the three front buttons (GPIO 3/4/5, all wired active-low with
-  // external pull-ups on the reTerminal) as EXT1 wake sources so pressing
-  // any of them redraws the pattern. Without this the panel would stay
-  // as-is forever, since there is no physical EN-reset button on the
-  // reTerminal E100X - the labelled "reset" is itself a GPIO.
-  constexpr int kButtons[] = {3, 4, 5};
+  const int kButtons[] = {
+      board::PIN_BUTTON_0,
+      board::PIN_BUTTON_1,
+      board::PIN_BUTTON_2,
+  };
   bool rtcPinsReady = true;
   for (const int pin : kButtons) {
     const gpio_num_t gpio = static_cast<gpio_num_t>(pin);
@@ -266,8 +325,10 @@ void powerDownAndSleep() {
         rtc_gpio_pulldown_dis(gpio) == ESP_OK &&
         rtcPinsReady;
   }
-  constexpr uint64_t kWakeMask =
-      (1ULL << 3) | (1ULL << 4) | (1ULL << 5);
+  const uint64_t kWakeMask =
+      (1ULL << board::PIN_BUTTON_0) |
+      (1ULL << board::PIN_BUTTON_1) |
+      (1ULL << board::PIN_BUTTON_2);
   const esp_err_t wakeResult =
       rtcPinsReady
           ? esp_sleep_enable_ext1_wakeup(kWakeMask, ESP_EXT1_WAKEUP_ANY_LOW)
@@ -276,12 +337,14 @@ void powerDownAndSleep() {
   LOG.flush();
   delay(50);
   peripheral_power::disable();
+  power_latch::holdDuringDeepSleep();
   esp_deep_sleep_start();
 }
 
 }  // namespace
 
 void setup() {
+  power_latch::holdOn();
   LOG.begin(115200, SERIAL_8N1, board::PIN_LOG_RX, board::PIN_LOG_TX);
   delay(50);
 
@@ -295,6 +358,9 @@ void setup() {
              PANEL_HEIGHT, PALETTE_COUNT);
 
   epaper_setup::begin(epaper);
+#if RETERMINAL_MODEL == 1005
+  epaper.setRotation(3);
+#endif
 #if RETERMINAL_MODEL == 1001
   epaper.initGrayMode(GRAY_LEVEL4);
 #elif RETERMINAL_MODEL == 1003
@@ -312,10 +378,44 @@ void setup() {
   // through the (multi-second) e-paper update.
   hardware::beep();
 
+#if RETERMINAL_MODEL == 1005
+  for (const int pin : {
+           board::PIN_BUTTON_0,
+           board::PIN_BUTTON_1,
+           board::PIN_BUTTON_2,
+       }) {
+    pinMode(pin, INPUT_PULLUP);
+  }
+  touchReady = touch.begin(touchWire);
+  if (touchReady) {
+    LOG.printf("[touch] GT%s ready at 0x%02X, sensor=%ux%u\n",
+               touch.productId(), touch.address(), touch.sensorWidth(),
+               touch.sensorHeight());
+    LOG.println("[panel-test] touch the display to draw crosshair markers");
+  } else {
+    LOG.println("[touch] GT911 initialization failed");
+  }
+  LOG.println("[panel-test] press and release OK to sleep; any button wakes");
+#else
   LOG.println("[panel-test] done; sleeping - press any front button to redraw");
   powerDownAndSleep();
+#endif
 }
 
 void loop() {
+#if RETERMINAL_MODEL == 1005
+  pollTouch();
+  if (digitalRead(board::PIN_BUTTON_0) == LOW) {
+    delay(30);
+    if (digitalRead(board::PIN_BUTTON_0) == LOW) {
+      LOG.println("[panel-test] OK pressed; entering deep sleep");
+      while (digitalRead(board::PIN_BUTTON_0) == LOW) delay(10);
+      touch.end();
+      powerDownAndSleep();
+    }
+  }
+  delay(20);
+#else
   delay(1000);
+#endif
 }

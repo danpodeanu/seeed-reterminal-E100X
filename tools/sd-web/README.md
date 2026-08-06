@@ -34,7 +34,10 @@ pio run -d tools/sd-web -e reterminal_e1001 -t upload
 ```
 
 Boards: `reterminal_e1001`, `reterminal_e1002`, `reterminal_e1003`,
-`reterminal_e1004`.
+`reterminal_e1004`, `reterminal_e1005`.
+
+E1005 uses its native 480×800 portrait orientation, separate SD power rail,
+and Sticky-specific SD GPIOs.
 
 ## Embedding in another app
 

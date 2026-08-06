@@ -16,6 +16,7 @@ bool i2cReady = false;
 }  // namespace
 
 void setStatusLed(bool on) {
+  if (board::PIN_STATUS_LED < 0) return;
   pinMode(board::PIN_STATUS_LED, OUTPUT);
   digitalWrite(board::PIN_STATUS_LED, on ? LOW : HIGH);
 }

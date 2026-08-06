@@ -9,12 +9,24 @@
 // accidental side effect of mounting the SD card.
 namespace peripheral_power {
 
+inline void setPinEnabled(int pin, bool enabled) {
+  if (pin < 0) return;
+  pinMode(pin, OUTPUT);
+  digitalWrite(pin, enabled ? HIGH : LOW);
+}
+
 inline void setEnabled(bool enabled) {
-  pinMode(board::PIN_PERIPHERAL_ENABLE, OUTPUT);
-  digitalWrite(board::PIN_PERIPHERAL_ENABLE, enabled ? HIGH : LOW);
+  setPinEnabled(board::PIN_PERIPHERAL_ENABLE, enabled);
 }
 
 inline void enable() { setEnabled(true); }
 inline void disable() { setEnabled(false); }
+
+inline void setSdEnabled(bool enabled) {
+  setPinEnabled(board::PIN_SD_ENABLE, enabled);
+}
+
+inline void enableSd() { setSdEnabled(true); }
+inline void disableSd() { setSdEnabled(false); }
 
 }  // namespace peripheral_power

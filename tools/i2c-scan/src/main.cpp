@@ -1,37 +1,9 @@
-// I2C bus scanner for reTerminal E100X.
+// I2C bus and button scanner for the reTerminal E-series.
 //
-// Sweeps the standard 7-bit I2C address range on the shared I2C0 bus
-// (SDA=GPIO19, SCL=GPIO20) and prints every address that ACKs. Well-
-// known chips are annotated; anything else is flagged as UNKNOWN, and
-// devices in the charger address range (0x60..0x6F) get an additional
-// 32-register hex dump so unfamiliar charger silicon can be fingerprinted
-// from the log alone.
-//
-// Expected devices:
-//   0x44  SHT4x  (temperature/humidity)
-//   0x51  PCF8563 (RTC)
-//   0x5D  GT911 touch controller (E1003 only)
-//   0x6A  SY6974B (charger, primary I2C address variant)
-//   0x6B  SY6974B / BQ25xxx family (charger, alternate address variant)
-//
-// Anything outside this table is worth investigating.
-//
-// Safety notes:
-//   - Only READs are ever issued to charger addresses. The SY6974 and
-//     BQ25xxx families ignore reads to undefined register addresses
-//     (they return 0xFF), so poking 0x00..0x1F does not disturb chip
-//     state. Writes could disable charging or change current limits;
-//     do not add any without deliberate care.
-//   - Register dumps are limited to the 0x60..0x6F charger range so
-//     we do not send single-byte reads at devices (like GT911) that
-//     use a 16-bit register interface.
-//
-// Output routing: the reTerminal apps log via UART1 on GPIO43/44 (which
-// is where the on-board USB-serial bridge is wired), not via the S3's
-// native USB CDC. We do the same here so the output shows up on the
-// same COM/ttyUSB port used for flashing. Each sweep is also mirrored
-// to /i2c-scan.log on the SD card (when a card is inserted) so you can
-// unplug the USB, exercise the device, and inspect the log later.
+// E1001-E1004 expose one shared I2C bus on GPIO19/20. E1005
+// (reTerminal Sticky) has a sensor bus on GPIO1/0 and a separately powered
+// GT911 touch bus on GPIO3/2. Every ACK and front-button press is printed to
+// UART1 and mirrored to /i2c-scan.log when an SD card is available.
 
 #include <Arduino.h>
 #include <SD.h>
@@ -40,41 +12,78 @@
 
 #include "board_pins.h"
 #include "peripheral_power.h"
+#include "power_latch.h"
 
 namespace {
 
-constexpr int kSdaPin = board::PIN_I2C_SDA;
-constexpr int kSclPin = board::PIN_I2C_SCL;
 constexpr int kLogRxPin = board::PIN_LOG_RX;
 constexpr int kLogTxPin = board::PIN_LOG_TX;
-
 constexpr const char* kLogPath = "/i2c-scan.log";
+constexpr uint32_t kScanIntervalMs = 5000;
+constexpr uint32_t kButtonDebounceMs = 30;
 
-// Alias to keep the print calls readable and easy to retarget later.
 HardwareSerial& logSerial = Serial1;
-
 SPIClass sdSpi(HSPI);
-bool sdMounted = false;
-uint32_t sweepCounter = 0;
 
-// -------- Buffered logging --------
-//
-// Each sweep composes its lines into a single String so we can (a) print
-// them to UART1 as they happen and (b) append the whole block to
-// /i2c-scan.log in one open/write/flush/close cycle. Opening the file
-// per sweep instead of per line keeps FAT overhead low; closing the file
-// after every sweep keeps the FAT entries flushed so a sudden power loss
-// (e.g. USB unplug) cannot corrupt the filesystem.
+#if RETERMINAL_MODEL == 1005
+TwoWire sensorWire(1);
+TwoWire touchWire(0);
+#else
+TwoWire sensorWire(0);
+#endif
+
+enum class BusKind {
+  Sensor,
+  Touch,
+};
+
+struct ButtonState {
+  int pin;
+  const char* name;
+  int stableLevel;
+  int sampledLevel;
+  uint32_t changedAtMs;
+};
+
+#if RETERMINAL_MODEL == 1005
+ButtonState buttons[] = {
+    {board::PIN_BUTTON_0, "OK / power", HIGH, HIGH, 0},
+    {board::PIN_BUTTON_1, "UP", HIGH, HIGH, 0},
+    {board::PIN_BUTTON_2, "DOWN", HIGH, HIGH, 0},
+};
+#else
+ButtonState buttons[] = {
+    {board::PIN_BUTTON_0, "GPIO3", HIGH, HIGH, 0},
+    {board::PIN_BUTTON_1, "GPIO4", HIGH, HIGH, 0},
+    {board::PIN_BUTTON_2, "GPIO5", HIGH, HIGH, 0},
+};
+#endif
+
+bool sdMounted = false;
+bool scanInProgress = false;
+uint32_t sweepCounter = 0;
+uint32_t nextScanAtMs = 0;
 String sweepBuffer;
+
+void appendToSd(const String& text) {
+  if (!sdMounted || text.isEmpty()) return;
+  File file = SD.open(kLogPath, FILE_APPEND);
+  if (!file) {
+    logSerial.println("[scan] could not open log file for append");
+    return;
+  }
+  file.print(text);
+  file.flush();
+  file.close();
+}
 
 void bufAppend(const String& line) {
   logSerial.print(line);
   sweepBuffer += line;
 }
 
-// printf-style helper that both prints and appends to the sweep buffer.
 void bufPrintf(const char* fmt, ...) {
-  char buf[192];
+  char buf[224];
   va_list args;
   va_start(args, fmt);
   vsnprintf(buf, sizeof(buf), fmt, args);
@@ -82,155 +91,255 @@ void bufPrintf(const char* fmt, ...) {
   bufAppend(String(buf));
 }
 
-// -------- I2C helpers --------
-
-const char* knownName(uint8_t addr) {
-  switch (addr) {
-    case 0x44: return "SHT4x (temp/humidity)";
-    case 0x51: return "PCF8563 (RTC)";
-    case 0x5D: return "GT911 touch controller (E1003)";
-    case 0x6A: return "SY6974B (charger)";
-    case 0x6B: return "charger @ 0x6B (SY6974B alt / BQ25xxx family)";
-    default:   return nullptr;
+void logButtonPress(const ButtonState& button) {
+  char line[128];
+  snprintf(line, sizeof(line),
+           "[button] %s pressed (GPIO%d, uptime=%lus)\n", button.name,
+           button.pin, static_cast<unsigned long>(millis() / 1000UL));
+  logSerial.print(line);
+  if (scanInProgress) {
+    sweepBuffer += line;
+  } else {
+    appendToSd(String(line));
   }
 }
 
-bool readReg(uint8_t addr, uint8_t reg, uint8_t& value) {
-  Wire.beginTransmission(addr);
-  Wire.write(reg);
-  if (Wire.endTransmission(false) != 0) return false;
-  if (Wire.requestFrom(addr, static_cast<uint8_t>(1)) !=
+void pollButtons() {
+  const uint32_t now = millis();
+  for (ButtonState& button : buttons) {
+    const int level = digitalRead(button.pin);
+    if (level != button.sampledLevel) {
+      button.sampledLevel = level;
+      button.changedAtMs = now;
+    }
+    if (level != button.stableLevel &&
+        static_cast<uint32_t>(now - button.changedAtMs) >=
+            kButtonDebounceMs) {
+      button.stableLevel = level;
+      if (level == LOW) logButtonPress(button);
+    }
+  }
+}
+
+void responsiveDelay(uint32_t durationMs) {
+  const uint32_t start = millis();
+  while (static_cast<uint32_t>(millis() - start) < durationMs) {
+    pollButtons();
+    delay(1);
+  }
+}
+
+const char* knownName(uint8_t address, BusKind kind) {
+#if RETERMINAL_MODEL == 1005
+  if (kind == BusKind::Touch) {
+    if (address == 0x14 || address == 0x5D) return "GT911 touch controller";
+    return nullptr;
+  }
+  switch (address) {
+    case 0x44: return "SHT40 temperature/humidity sensor";
+    case 0x45: return "SHT40 alternate address";
+    case 0x51: return "PCF8563 RTC";
+    case 0x55: return "BQ27220 battery fuel gauge";
+    case 0x6A: return "LSM6DS3TR-C IMU";
+    default:   return nullptr;
+  }
+#else
+  (void)kind;
+  switch (address) {
+    case 0x44: return "SHT4x temperature/humidity sensor";
+    case 0x51: return "PCF8563 RTC";
+    case 0x5D: return "GT911 touch controller (E1003)";
+    case 0x6A: return "SY6974B charger";
+    case 0x6B: return "charger (SY6974B alternate / BQ25xxx family)";
+    default:   return nullptr;
+  }
+#endif
+}
+
+bool readReg(TwoWire& wire, uint8_t address, uint8_t reg, uint8_t& value) {
+  wire.beginTransmission(address);
+  wire.write(reg);
+  if (wire.endTransmission(false) != 0) return false;
+  if (wire.requestFrom(address, static_cast<uint8_t>(1)) !=
       static_cast<uint8_t>(1)) {
     return false;
   }
-  value = Wire.read();
+  value = wire.read();
   return true;
 }
 
-void dumpChargerRegisters(uint8_t addr) {
-  if (addr < 0x60 || addr > 0x6F) return;
-  bufPrintf("[scan]        register dump for 0x%02X:\n", addr);
+void dumpChargerRegisters(TwoWire& wire, uint8_t address) {
+#if RETERMINAL_MODEL == 1005
+  (void)wire;
+  (void)address;
+#else
+  if (address < 0x60 || address > 0x6F) return;
+  bufPrintf("[scan]        register dump for 0x%02X:\n", address);
   for (uint8_t base = 0x00; base < 0x20; base += 0x08) {
     String line;
     char tmp[16];
     snprintf(tmp, sizeof(tmp), "[scan]         %02X:", base);
     line += tmp;
-    for (uint8_t off = 0; off < 8; ++off) {
-      uint8_t v = 0;
-      if (readReg(addr, base + off, v)) {
-        snprintf(tmp, sizeof(tmp), " %02X", v);
+    for (uint8_t offset = 0; offset < 8; ++offset) {
+      uint8_t value = 0;
+      if (readReg(wire, address, base + offset, value)) {
+        snprintf(tmp, sizeof(tmp), " %02X", value);
       } else {
         snprintf(tmp, sizeof(tmp), " --");
       }
       line += tmp;
+      pollButtons();
     }
     line += "\n";
     bufAppend(line);
   }
+#endif
 }
 
-// -------- SD helpers --------
-
 bool mountSd() {
-  peripheral_power::enable();
+  peripheral_power::enableSd();
+  delay(board::SD_POWER_SETTLE_MS);
   pinMode(board::PIN_SD_DETECT, INPUT_PULLUP);
   pinMode(board::PIN_SD_CS, OUTPUT);
   digitalWrite(board::PIN_SD_CS, HIGH);
-  delay(50);
   sdSpi.end();
   sdSpi.begin(board::PIN_SD_SCK, board::PIN_SD_MISO, board::PIN_SD_MOSI, -1);
   if (!SD.begin(board::PIN_SD_CS, sdSpi)) {
     logSerial.println("[scan] SD mount failed -- log will be UART-only");
-    peripheral_power::disable();
+    SD.end();
+    sdSpi.end();
+    pinMode(board::PIN_SD_CS, INPUT);
+    pinMode(board::PIN_SD_SCK, INPUT);
+    pinMode(board::PIN_SD_MOSI, INPUT);
+    pinMode(board::PIN_SD_MISO, INPUT);
+    peripheral_power::disableSd();
     return false;
   }
   logSerial.printf("[scan] SD mounted, appending to %s\n", kLogPath);
   return true;
 }
 
-// Persist the buffered sweep to SD. Open, write, flush, close on every
-// call so the FAT is consistent between sweeps -- a power loss (or USB
-// unplug on a device that runs off USB power) at any time between
-// sweeps leaves a fully-formed log file rather than an uncommitted
-// extend that fsck would need to reclaim.
 void flushSweepToSd() {
-  if (!sdMounted) {
-    sweepBuffer = "";
-    return;
-  }
-  File f = SD.open(kLogPath, FILE_APPEND);
-  if (!f) {
-    logSerial.println("[scan] could not open log file for append");
-    sweepBuffer = "";
-    return;
-  }
-  f.print(sweepBuffer);
-  f.flush();
-  f.close();
+  appendToSd(sweepBuffer);
   sweepBuffer = "";
 }
 
-// -------- Sweep --------
+void scanBus(TwoWire& wire, const char* busName, int sdaPin, int sclPin,
+             BusKind kind) {
+  bufPrintf("[scan] %s: SDA=GPIO%d SCL=GPIO%d, addresses 0x03..0x77\n",
+            busName, sdaPin, sclPin);
+  int found = 0;
+  for (uint8_t address = 0x03; address <= 0x77; ++address) {
+    wire.beginTransmission(address);
+    const uint8_t error = wire.endTransmission();
+    if (error == 0) {
+      const char* name = knownName(address, kind);
+      if (name) {
+        bufPrintf("[scan]   0x%02X  ACK  <- %s\n", address, name);
+      } else {
+        bufPrintf("[scan]   0x%02X  ACK  <- UNKNOWN (worth investigating)\n",
+                  address);
+      }
+      dumpChargerRegisters(wire, address);
+      ++found;
+    } else if (error == 4) {
+      bufPrintf("[scan]   0x%02X  other error (err=4)\n", address);
+    }
+    responsiveDelay(2);
+  }
+  bufPrintf("[scan] %s done. %d device(s) responded.\n", busName, found);
+}
 
-void scanBus() {
+void scanAllBuses() {
   ++sweepCounter;
+  scanInProgress = true;
   bufPrintf("\n[scan] sweep #%lu (uptime=%lus)\n",
             static_cast<unsigned long>(sweepCounter),
             static_cast<unsigned long>(millis() / 1000UL));
-  bufAppend("[scan] sweeping addresses 0x03..0x77 ...\n");
-  int found = 0;
-  for (uint8_t addr = 0x03; addr <= 0x77; ++addr) {
-    Wire.beginTransmission(addr);
-    const uint8_t err = Wire.endTransmission();
-    if (err == 0) {
-      const char* name = knownName(addr);
-      if (name) {
-        bufPrintf("[scan]   0x%02X  ACK  <- %s\n", addr, name);
-      } else {
-        bufPrintf("[scan]   0x%02X  ACK  <- UNKNOWN (worth investigating)\n",
-                  addr);
-      }
-      dumpChargerRegisters(addr);
-      ++found;
-    } else if (err == 4) {
-      bufPrintf("[scan]   0x%02X  other error (err=4)\n", addr);
-    }
-    // err == 2 (NACK on address) is the boring "nothing there" case.
-    delay(2);
-  }
-  bufPrintf("[scan] done. %d device(s) responded.\n", found);
+  scanBus(sensorWire, "sensor I2C", board::PIN_I2C_SDA,
+          board::PIN_I2C_SCL, BusKind::Sensor);
+#if RETERMINAL_MODEL == 1005
+  scanBus(touchWire, "touch I2C", board::PIN_TOUCH_SDA,
+          board::PIN_TOUCH_SCL, BusKind::Touch);
+#endif
+  scanInProgress = false;
   flushSweepToSd();
+}
+
+#if RETERMINAL_MODEL == 1005
+void resetGt911ToAddress(uint8_t address) {
+  const int interruptLevel = address == 0x14 ? HIGH : LOW;
+  pinMode(board::PIN_TOUCH_RESET, OUTPUT);
+  pinMode(board::PIN_TOUCH_INTERRUPT, OUTPUT);
+  digitalWrite(board::PIN_TOUCH_RESET, LOW);
+  digitalWrite(board::PIN_TOUCH_INTERRUPT, interruptLevel);
+  delay(20);
+  digitalWrite(board::PIN_TOUCH_RESET, HIGH);
+  delay(20);
+  pinMode(board::PIN_TOUCH_INTERRUPT, INPUT);
+  delay(80);
+}
+#endif
+
+void configureButtons() {
+  logSerial.print("[button] monitoring active-low buttons:");
+  for (ButtonState& button : buttons) {
+    pinMode(button.pin, INPUT_PULLUP);
+    button.stableLevel = digitalRead(button.pin);
+    button.sampledLevel = button.stableLevel;
+    button.changedAtMs = millis();
+    logSerial.printf(" %s=GPIO%d", button.name, button.pin);
+  }
+  logSerial.println();
 }
 
 }  // namespace
 
 void setup() {
+  power_latch::holdOn();
   logSerial.begin(115200, SERIAL_8N1, kLogRxPin, kLogTxPin);
-  // Give the host serial monitor a moment to attach after the flash reset
-  // before we print the header, otherwise the first sweep can scroll off.
   delay(1500);
   logSerial.println();
-  logSerial.println("=== reTerminal E100X I2C bus scan ===");
-  logSerial.printf("SDA=GPIO%d  SCL=GPIO%d  clock=100kHz\n", kSdaPin, kSclPin);
+  logSerial.printf("=== reTerminal %s I2C + button scan ===\n",
+                   board::MODEL_NAME);
   logSerial.printf("log on UART1 RX=GPIO%d TX=GPIO%d @115200\n", kLogRxPin,
                    kLogTxPin);
+  configureButtons();
 
-  if (!Wire.begin(kSdaPin, kSclPin)) {
-    logSerial.println("[scan] Wire.begin() FAILED -- check pins");
+  if (!sensorWire.begin(board::PIN_I2C_SDA, board::PIN_I2C_SCL, 100000)) {
+    logSerial.println("[scan] sensor I2C Wire.begin() FAILED -- check pins");
     return;
   }
-  Wire.setClock(100000);
+
+#if RETERMINAL_MODEL == 1005
+  pinMode(board::PIN_TOUCH_ENABLE, OUTPUT);
+  digitalWrite(board::PIN_TOUCH_ENABLE, HIGH);
+  delay(board::TOUCH_POWER_SETTLE_MS);
+  if (!touchWire.begin(board::PIN_TOUCH_SDA, board::PIN_TOUCH_SCL, 100000)) {
+    logSerial.println("[scan] touch I2C Wire.begin() FAILED -- check pins");
+    return;
+  }
+  resetGt911ToAddress(0x5D);
+#endif
 
   sdMounted = mountSd();
+  scanAllBuses();
 
-  scanBus();
-
-  logSerial.println("[scan] will rescan every 5 s. Plug/unplug USB to see if");
-  logSerial.println("[scan] any address appears or disappears with charger state.");
-  logSerial.println("[scan] Sweeps are also mirrored to /i2c-scan.log on SD.");
+  logSerial.printf("[scan] will rescan every %lus; button presses are logged immediately.\n",
+                   static_cast<unsigned long>(kScanIntervalMs / 1000UL));
+  if (sdMounted) {
+    logSerial.printf("[scan] scans and button presses are mirrored to %s.\n",
+                     kLogPath);
+  }
+  nextScanAtMs = millis() + kScanIntervalMs;
 }
 
 void loop() {
-  delay(5000);
-  scanBus();
+  pollButtons();
+  const uint32_t now = millis();
+  if (static_cast<int32_t>(now - nextScanAtMs) >= 0) {
+    scanAllBuses();
+    nextScanAtMs = millis() + kScanIntervalMs;
+  }
+  delay(5);
 }

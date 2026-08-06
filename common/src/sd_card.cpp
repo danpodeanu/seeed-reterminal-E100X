@@ -7,6 +7,7 @@
 #include "app_logger.h"
 #include "board_pins.h"
 #include "epaper_setup.h"
+#include "peripheral_power.h"
 
 namespace sd_card {
 
@@ -74,6 +75,7 @@ bool attemptRemount() {
   }
   g_lastRemountMs = now;
   SD.end();
+  peripheral_power::enableSd();
   // Re-run the shared peripheral rail + SPI init the initial mount did.
   // wifi_sta::disable() and big HTTPS transfers can leave the rail in a
   // state where a plain SD.begin() sees the card as absent; finalize()
@@ -217,6 +219,7 @@ bool mount(SPIClass& spi, const char* cacheDir) {
   // SD; that coupling now lives in epaper_setup so tools without SD can
   // opt in explicitly. Safe to call twice.
   epaper_setup::finalize(spi);
+  peripheral_power::enableSd();
 
   pinMode(board::PIN_SD_DETECT, INPUT_PULLUP);
   pinMode(board::PIN_SD_CS, OUTPUT);
@@ -229,6 +232,7 @@ bool mount(SPIClass& spi, const char* cacheDir) {
   // modern cards typically respond on the first attempt within a few
   // milliseconds; the retry only pays for itself on a slow or beat-up
   // card that would previously have failed.
+  delay(board::SD_POWER_SETTLE_MS);
   constexpr uint32_t kSdInitBudgetMs = 250;
   constexpr uint32_t kSdInitPollMs = 5;
   const uint32_t startMs = millis();
@@ -274,6 +278,8 @@ bool formatCard(SPIClass& spi, const char* cacheDir, String& error) {
     return true;
   };
   epaper_setup::finalize(spi);
+  peripheral_power::enableSd();
+  delay(board::SD_POWER_SETTLE_MS);
   pinMode(board::PIN_SD_CS, OUTPUT);
   digitalWrite(board::PIN_SD_CS, HIGH);
   if (!pumpMount(false)) {

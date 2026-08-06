@@ -66,7 +66,7 @@ different framework or architecture where that better suits their use case.
 ├── xkcd-viewer/          # Standalone XKCD display firmware
 ├── weather-viewer/       # Standalone weather display firmware
 ├── photo-viewer/         # SD-card photo-frame firmware and preparation tool
-├── tools/                # Diagnostic sketches (i2c-scan, panel-test)
+├── tools/                # Hardware utilities (i2c-scan, panel-test, sd-web)
 └── README.md             # This project index
 ```
 

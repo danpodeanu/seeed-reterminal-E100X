@@ -1,6 +1,6 @@
 # panel-test
 
-Full-screen e-paper test pattern, one build per reTerminal E100X panel model.
+Full-screen e-paper and touch test, one build per reTerminal E-series model.
 
 ## Purpose
 
@@ -15,10 +15,10 @@ for:
 - Handing to someone else so they can flash a known-good sketch and take
   a photo of the panel for support.
 
-The sketch draws once in `setup()` and then enters deep sleep, so the
-pattern stays on the display indefinitely. Press any of the three front
-buttons (GPIO 3/4/5) to redraw it - they're wired as EXT1 wake sources.
-Unplugging/replugging USB also redraws.
+On E1001-E1004, the sketch draws once and enters deep sleep; any front
+button redraws it. On E1005, it remains interactive: each GT911 touch is
+logged and a crosshair is added with a partial refresh. Press and release
+**OK** to sleep; OK, UP, or DOWN wakes and redraws the test.
 
 ## Per-panel adaptations
 
@@ -28,6 +28,7 @@ Unplugging/replugging USB also redraws.
 | E1002  | ED2208 800x480  | Spectra E6 (6 col) | W/Y/G/B/R/K SMPTE bars    |
 | E1003  | ED103TC2 1872x1404 | Gray16 (16 shades) | 16 grey bars + smooth ramp |
 | E1004  | T133A01 1200x1600 | Spectra E6 (6 col) | W/Y/G/B/R/K SMPTE bars    |
+| E1005  | SSD1677 800x480, rotated portrait | Monochrome | W/K bars + interactive GT911 crosshairs |
 
 All patterns use the standard SMPTE layout:
 
@@ -49,8 +50,8 @@ pio run -d tools/panel-test -e reterminal_e1001 -t upload
 pio device monitor -b 115200
 ```
 
-Swap `reterminal_e1001` for `_e1002`, `_e1003`, or `_e1004` to match your
-board. All four environments compile and can be built together with
+Swap `reterminal_e1001` for `_e1002`, `_e1003`, `_e1004`, or `_e1005` to
+match your board. All five environments compile and can be built together with
 `pio run -d tools/panel-test`.
 
 Serial output on UART1 (`GPIO43/44`, same as the viewer apps):
@@ -60,6 +61,13 @@ Serial output on UART1 (`GPIO43/44`, same as the viewer apps):
 [panel-test] 1872 x 1404, 16 palette entries
 [panel-test] refreshing panel
 [panel-test] done; sleeping - press any front button to redraw
+```
+
+E1005 additionally reports GT911 startup and touch coordinates:
+
+```
+[touch] GT911 ready at 0x5D, sensor=480x800
+[touch] x=241 y=397 size=18 id=0
 ```
 
 ## Reference

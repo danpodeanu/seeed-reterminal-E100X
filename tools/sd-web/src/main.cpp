@@ -1,4 +1,4 @@
-// SD-card Wi-Fi portal for the reTerminal E100X.
+// SD-card Wi-Fi portal for the reTerminal E-series.
 //
 // Boot flow:
 //   1. Bring up epaper + SPI, check for SD card, mount it.
@@ -30,6 +30,7 @@
 #include "ntp_sync.h"
 #include "panel_traits.h"
 #include "peripheral_power.h"
+#include "power_latch.h"
 #include "rtc_sync.h"
 #include "sd_card.h"
 #include "sd_web_portal.h"
@@ -93,8 +94,18 @@ constexpr const char* PANEL_LABEL = "reTerminal E1004";
 #define PORTAL_FONT_DETAIL    &FreeSans12pt7b
 #define PORTAL_FONT_ERR_TITLE &FreeSansBold24pt7b
 #define PORTAL_FONT_ERR_BODY  &FreeSans18pt7b
+#elif RETERMINAL_MODEL == 1005
+constexpr uint32_t PANEL_BLACK = TFT_BLACK;
+constexpr uint32_t PANEL_WHITE = TFT_WHITE;
+constexpr const char* PANEL_LABEL = "reTerminal Sticky E1005";
+#define PORTAL_FONT_TITLE     &FreeSansBold18pt7b
+#define PORTAL_FONT_SUBTITLE  &FreeSans12pt7b
+#define PORTAL_FONT_CAPTION   &FreeSansBold9pt7b
+#define PORTAL_FONT_DETAIL    &FreeSans9pt7b
+#define PORTAL_FONT_ERR_TITLE &FreeSansBold24pt7b
+#define PORTAL_FONT_ERR_BODY  &FreeSans12pt7b
 #else
-#error "RETERMINAL_MODEL must be 1001, 1002, 1003, or 1004"
+#error "RETERMINAL_MODEL must be 1001, 1002, 1003, 1004, or 1005"
 #endif
 
 constexpr const char* kCacheDir = "/portal";
@@ -120,17 +131,24 @@ void renderNoSdCardAndStop() {
   epaper.update();
   LOG.println("[sd-web] no SD card detected; halting");
   LOG.flush();
-  // Deep sleep with the reset button (GPIO 3) as wake source, matching
-  // panel-test's convention. The reTerminal has no dedicated EN button.
-  constexpr int kButtons[] = {3, 4, 5};
+  // Deep sleep with all three active-low buttons as wake sources.
+  const int kButtons[] = {
+      board::PIN_BUTTON_0,
+      board::PIN_BUTTON_1,
+      board::PIN_BUTTON_2,
+  };
   for (const int pin : kButtons) {
     hardware::configureWakePin(pin);
   }
-  constexpr uint64_t kWakeMask =
-      (1ULL << 3) | (1ULL << 4) | (1ULL << 5);
+  const uint64_t kWakeMask =
+      (1ULL << board::PIN_BUTTON_0) |
+      (1ULL << board::PIN_BUTTON_1) |
+      (1ULL << board::PIN_BUTTON_2);
   esp_sleep_enable_ext1_wakeup(kWakeMask, ESP_EXT1_WAKEUP_ANY_LOW);
   delay(50);
+  peripheral_power::disableSd();
   peripheral_power::disable();
+  power_latch::holdDuringDeepSleep();
   esp_deep_sleep_start();
 }
 
@@ -152,6 +170,12 @@ void renderPortalScreen() {
   info.urlPayload = url;
   info.helpPayload = config::HELP_URL;
   info.helpCaption = config::HELP_CAPTION;
+#if RETERMINAL_MODEL == 1005
+  // The compact portrait display has room for the two operational QR codes,
+  // but not the optional third help QR beside them.
+  info.helpPayload = "";
+  info.helpCaption = "";
+#endif
   info.fonts.titleFont = PORTAL_FONT_TITLE;
   info.fonts.subtitleFont = PORTAL_FONT_SUBTITLE;
   info.fonts.captionFont = PORTAL_FONT_CAPTION;
@@ -165,6 +189,7 @@ void renderPortalScreen() {
 }  // namespace
 
 void setup() {
+  power_latch::holdOn();
   LOG.begin(115200, SERIAL_8N1, board::PIN_LOG_RX, board::PIN_LOG_TX);
   delay(50);
   LOG.println();
@@ -214,12 +239,16 @@ void setup() {
   }
 
   epaper_setup::begin(epaper);
+#if RETERMINAL_MODEL == 1005
+  epaper.setRotation(3);
+#endif
 #if RETERMINAL_MODEL == 1001
   epaper.initGrayMode(GRAY_LEVEL4);
 #elif RETERMINAL_MODEL == 1003
   epaper.initGrayMode(GRAY_LEVEL16);
 #endif
-  // E1002 / E1004 six-colour panels expose their palette directly and
+  // E1002 / E1004 six-colour panels and E1005's monochrome panel expose
+  // their palette directly and
   // don't have an initGrayMode method - fall through with default mode.
 
   // Cheap physical check before we hit SPI: no card in the socket ->
@@ -259,7 +288,9 @@ void setup() {
     LOG.println("[sd-web] portal begin failed");
     delay(1000);
     SD.end();
+    peripheral_power::disableSd();
     peripheral_power::disable();
+    power_latch::holdDuringDeepSleep();
     esp_deep_sleep_start();
     return;
   }
