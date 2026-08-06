@@ -21,6 +21,7 @@ void test_random_easy_password_returns_requested_length();
 void test_random_easy_password_uses_only_alphabet_chars();
 void test_random_easy_password_is_deterministic_with_fixed_rng();
 void test_random_easy_password_rejects_bad_input();
+void test_mac_suffix_uses_last_two_bytes();
 
 void setUp() {}
 void tearDown() {}
@@ -48,5 +49,6 @@ int main(int, char**) {
   RUN_TEST(test_random_easy_password_uses_only_alphabet_chars);
   RUN_TEST(test_random_easy_password_is_deterministic_with_fixed_rng);
   RUN_TEST(test_random_easy_password_rejects_bad_input);
+  RUN_TEST(test_mac_suffix_uses_last_two_bytes);
   return UNITY_END();
 }

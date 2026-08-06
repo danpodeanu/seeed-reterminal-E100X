@@ -3,8 +3,9 @@
 #include <set>
 
 #include "portal_ap_password.h"
+#include "portal_identity.h"
 
-using namespace config_portal;
+using namespace portal_ap_password;
 
 namespace {
 
@@ -65,4 +66,11 @@ void test_random_easy_password_rejects_bad_input() {
   TEST_ASSERT_EQUAL(0u, randomEasyPassword(0, counterRng).length());
   TEST_ASSERT_EQUAL(0u, randomEasyPassword(64, counterRng).length());
   TEST_ASSERT_EQUAL(0u, randomEasyPassword(8, nullptr).length());
+}
+
+void test_mac_suffix_uses_last_two_bytes() {
+  const uint8_t mac[6] = {0xAA, 0xBB, 0xCC, 0xDD, 0xEE, 0xFF};
+  char suffix[5] = {};
+  portal_identity::formatSsidSuffix(mac, suffix);
+  TEST_ASSERT_EQUAL_STRING("EEFF", suffix);
 }

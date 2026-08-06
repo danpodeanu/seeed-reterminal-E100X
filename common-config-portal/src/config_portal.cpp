@@ -15,6 +15,7 @@
 #include "config_json.h"
 #include "config_storage.h"
 #include "portal_ap_password.h"
+#include "portal_identity.h"
 #include "wifi_schema.h"
 
 namespace config_portal {
@@ -31,15 +32,6 @@ storage::PrefsStorage g_wifiStorage;
 storage::PrefsStorage g_appStorage;
 uint32_t g_scanMs = 0;
 String g_scanJson = "[]";
-
-String macToHexSuffix(const uint8_t mac[6]) {
-  // Use the last 2 bytes so the SSID varies per device -- the first 3
-  // bytes are the vendor OUI (identical across all ESP32-S3 boards
-  // from the same silicon batch).
-  char buf[5];
-  snprintf(buf, sizeof(buf), "%02X%02X", mac[4], mac[5]);
-  return String(buf);
-}
 
 String jsonEscape(const String& in) {
   String out;
@@ -266,7 +258,9 @@ String buildSsid(const Config& cfg) {
   // OR'ing the locally-administered bit, which shifts the first byte).
   esp_read_mac(mac, ESP_MAC_WIFI_STA);
   String s = cfg.apSsidPrefix ? String(cfg.apSsidPrefix) : String();
-  s += macToHexSuffix(mac);
+  char suffix[5];
+  portal_identity::formatSsidSuffix(mac, suffix);
+  s += suffix;
   return s;
 }
 
@@ -321,7 +315,7 @@ bool begin(const Config& cfg) {
   if (cfg.apPassword && cfg.apPassword[0]) {
     g_apPassword = cfg.apPassword;
   } else if (cfg.useAutoApPassword) {
-    g_apPassword = ensureApPassword(8);
+    g_apPassword = portal_ap_password::ensureApPassword(8);
   }
   const char* pass = g_apPassword.length() ? g_apPassword.c_str() : nullptr;
   if (!WiFi.softAP(g_ssid.c_str(), pass, 1, 0, cfg.maxConnections)) {

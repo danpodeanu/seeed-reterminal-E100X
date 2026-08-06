@@ -9,6 +9,8 @@
 #include <esp_mac.h>
 
 #include "app_logger.h"
+#include "portal_ap_password.h"
+#include "portal_identity.h"
 #include "sd_card.h"
 
 // SD Wi-Fi portal implementation.
@@ -50,6 +52,7 @@ bool g_embedded = false;    // true when installed via attachRoutes()
 
 Config g_config;
 String g_ssid;
+String g_apPassword;
 String g_url;
 bool g_running = false;
 bool g_exitRequested = false;
@@ -66,12 +69,6 @@ bool g_uploadOk = false;
 uint32_t g_uploadStallsRecovered = 0;
 
 // ----- helpers -----
-
-String macToHexSuffix(const uint8_t mac[6]) {
-  char buf[13];
-  snprintf(buf, sizeof(buf), "%02X%02X%02X", mac[0], mac[1], mac[2]);
-  return String(buf);
-}
 
 String formatMac(const uint8_t mac[6]) {
   char buf[18];
@@ -1235,9 +1232,11 @@ void handleNotFound() {
 
 String buildSsid(const Config& cfg) {
   uint8_t mac[6] = {};
-  esp_read_mac(mac, ESP_MAC_WIFI_SOFTAP);
+  esp_read_mac(mac, ESP_MAC_WIFI_STA);
   String s = cfg.apSsidPrefix ? String(cfg.apSsidPrefix) : String();
-  s += macToHexSuffix(mac);
+  char suffix[5];
+  portal_identity::formatSsidSuffix(mac, suffix);
+  s += suffix;
   return s;
 }
 
@@ -1365,15 +1364,27 @@ bool begin(const Config& cfg) {
     return false;
   }
   g_ssid = buildSsid(cfg);
-  const char* pass = (cfg.apPassword && cfg.apPassword[0]) ? cfg.apPassword : nullptr;
+  g_apPassword = String();
+  if (cfg.apPassword && cfg.apPassword[0]) {
+    g_apPassword = cfg.apPassword;
+  } else if (cfg.useAutoApPassword) {
+    g_apPassword = portal_ap_password::ensureApPassword(8);
+  }
+  const char* pass =
+      g_apPassword.length() ? g_apPassword.c_str() : nullptr;
   // channel 1, not hidden, max_connection = cfg.maxConnections.
   if (!WiFi.softAP(g_ssid.c_str(), pass, 1, 0, cfg.maxConnections)) {
     LOG.println("[sd-web] softAP failed");
     return false;
   }
   g_url = urlQrPayload(cfg.apIp, cfg.httpPort, cfg.urlQrPath);
-  LOG.printf("[sd-web] AP up: ssid=\"%s\" ip=%s\n", g_ssid.c_str(),
-             cfg.apIp.toString().c_str());
+  if (pass) {
+    LOG.printf("[sd-web] AP up: ssid=\"%s\" pass=\"%s\" ip=%s\n",
+              g_ssid.c_str(), pass, cfg.apIp.toString().c_str());
+  } else {
+    LOG.printf("[sd-web] AP up: ssid=\"%s\" ip=%s\n", g_ssid.c_str(),
+              cfg.apIp.toString().c_str());
+  }
 
   if (g_server) {
     g_server->stop();
@@ -1422,6 +1433,7 @@ void loop() {
 }
 
 const String& currentSsid() { return g_ssid; }
+const String& currentApPassword() { return g_apPassword; }
 IPAddress currentIp() { return g_running ? g_config.apIp : IPAddress(); }
 uint16_t currentPort() { return g_config.httpPort; }
 bool exitRequested() { return g_exitRequested; }

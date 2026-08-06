@@ -11,11 +11,12 @@ pulling it out.
    error screen and deep-sleeps.
 2. Mounts the card.
 3. Brings up a soft-AP on `192.168.1.1/24`, SSID
-   `ReTerminal <first 6 hex chars of the AP MAC>`, **open** (no
-   password).
+   `ReTerminal <last 4 hex chars of the station MAC>`, protected by a
+   persistent, per-device 8-character password.
 4. Starts an HTTP server on port 80.
 5. Renders two QR codes on the panel: one joins the Wi-Fi, one opens
-   `http://192.168.1.1/`.
+   `http://192.168.1.1/`. The Wi-Fi name and password are printed below
+   the first QR code.
 
 ## Web portal
 
@@ -58,9 +59,9 @@ their own `EPaper` instance.
 
 ## Notes
 
-- The AP is **open** on purpose, matching the "scan the QR to join"
-  UX. Do not run this on a network you care about; anyone in range
-  can browse and mutate the SD card while it is up.
+- The AP password is generated on first boot, stored in NVS, and reused by
+  both this tool and the viewer-app configuration portals. Scanning the
+  Wi-Fi QR supplies it automatically.
 - SD "creation time" is not exposed by the Arduino SD API on FAT/exFAT;
   the portal shows the last-modified timestamp instead.
 - The DHCP pool is whatever `WiFi.softAPConfig(192.168.1.1, ...)`

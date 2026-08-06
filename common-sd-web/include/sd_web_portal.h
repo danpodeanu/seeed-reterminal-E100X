@@ -26,16 +26,18 @@ namespace sd_web_portal {
 
 struct Config {
   // Prefix for the auto-generated AP SSID. The full SSID is
-  // "<prefix><first 6 hex digits of the AP MAC, no colons>" which for
+  // "<prefix><last 4 hex digits of the station MAC, no colons>" which for
   // MAC AA:BB:CC:DD:EE:FF and prefix "ReTerminal " yields
-  // "ReTerminal AABBCC". Six digits identify one reTerminal well enough
-  // within a room of them while still fitting on a small QR code.
+  // "ReTerminal EEFF".
   const char* apSsidPrefix = "ReTerminal ";
 
-  // Password for the AP. When null/empty the AP is open (WPA-none),
-  // which is what the standalone tool ships with because the QR codes
-  // assume no credential.
+  // Explicit password for the AP. When null/empty and useAutoApPassword is
+  // false, the AP is open (WPA-none).
   const char* apPassword = nullptr;
+  // Generate and persist an easy-to-type 8-character password when no
+  // explicit password is supplied. The same NVS value is shared with the
+  // configuration portal used by the viewer apps.
+  bool useAutoApPassword = false;
 
   // Static IP configuration for the AP. Kept as literals so the QR code
   // payload can be composed from these fields with no round-trip
@@ -153,6 +155,7 @@ void loop();
 
 // Cheap accessors valid after begin(). Empty string / 0.0.0.0 before.
 const String& currentSsid();
+const String& currentApPassword();  // empty when the AP is open
 IPAddress currentIp();
 uint16_t currentPort();
 

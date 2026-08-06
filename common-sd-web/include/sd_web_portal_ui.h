@@ -80,7 +80,7 @@ inline int qrSidePixels(const String& payload, int moduleSize) {
 //   titleFont     - big header ("SD Card Portal")
 //   subtitleFont  - short tagline immediately below the title
 //   captionFont   - "1. Scan to join Wi-Fi" / "2. Scan to open portal"
-//   detailFont    - SSID / URL / MAC lines
+//   detailFont    - MAC and firmware lines
 struct Fonts {
   const GFXfont* titleFont;
   const GFXfont* subtitleFont;
@@ -93,6 +93,7 @@ struct RenderInfo {
   const char* title = nullptr;  // overrides "SD Card Portal" header when set
   const char* tagline;      // 2-3 word description printed under the title
   String ssid;
+  String wifiPassword;      // optional; rendered under the SSID when non-empty
   String url;
   String macAddress;
   // Optional firmware version string (e.g. "1.4.0"). Rendered on its
@@ -116,10 +117,11 @@ struct RenderInfo {
 //   * Two QR codes side by side (landscape) or stacked (portrait):
 //       - "1. Scan to join Wi-Fi" caption ABOVE       (info.fonts.captionFont)
 //       - Wi-Fi QR
-//       - SSID text BELOW                             (info.fonts.detailFont)
+//       - "Wi-Fi Name: <ssid>" BELOW                  (info.fonts.captionFont)
+//       - "Wi-Fi Password: <pw>" BELOW                (info.fonts.captionFont)
 //       - "2. Scan to open portal" caption ABOVE
 //       - URL QR
-//       - URL text BELOW
+//       - URL text BELOW                              (info.fonts.captionFont)
 template <typename EPaper>
 inline void renderPortalScreen(EPaper& epaper, int panelW, int panelH,
                                uint32_t black, uint32_t white,
@@ -158,9 +160,8 @@ inline void renderPortalScreen(EPaper& epaper, int panelW, int panelH,
   }
 
   // ---- QR sizing. ----
-  // Reserve room for two captions + two QR + two SSID/URL lines. In
-  // landscape the two blocks sit side by side, so we only need the
-  // vertical space of one block; in portrait we need both stacked.
+  // Reserve room for both QR blocks and their credential/detail lines.
+  // In landscape they sit side by side; in portrait they are stacked.
   epaper.setFreeFont(info.fonts.captionFont);
   const int captionH = epaper.fontHeight(1);
 
@@ -181,13 +182,13 @@ inline void renderPortalScreen(EPaper& epaper, int panelW, int panelH,
     if (helpModule > 4) helpModule = 4;
     helpSide = qrSidePixels(info.helpPayload, helpModule);
   }
+  const bool wifiHasPass = info.wifiPassword.length() > 0;
+  const int wifiDetailLines = wifiHasPass ? 2 : 1;
+  const int bigDetailH = captionH;
   if (portrait) {
-    // Two stacked blocks: each block = caption + qr + detail + gap.
-    // The QR square is the biggest component; give it the remaining
-    // vertical space after captions/details. The help QR is placed
-    // alongside the URL QR (bottom-aligned) so it doesn't need its own
-    // vertical reservation.
-    const int blockNonQr = captionH + detailFontH + panelH / 60;
+    // Reserve for the worst-case block so the optional password fits.
+    const int blockNonQr =
+        captionH + wifiDetailLines * bigDetailH + panelH / 60;
     const int perBlockH = (qrRegionBottom - qrRegionTop) / 2;
     const int qrTargetH = perBlockH - blockNonQr;
     const int qrTargetW = panelW - panelW / 6;
@@ -201,10 +202,9 @@ inline void renderPortalScreen(EPaper& epaper, int panelW, int panelH,
     moduleSize = qrTarget / maxModules;
   } else {
     // Landscape: side-by-side blocks. QR height limited by region height
-    // minus caption+detail; QR width limited by half panel width minus
-    // side gaps.
+    // minus caption + detail lines; QR width limited by half panel width.
     const int qrTargetH = (qrRegionBottom - qrRegionTop) - captionH -
-                          detailFontH - panelH / 60;
+                          wifiDetailLines * bigDetailH - panelH / 60;
     const int qrTargetW = (panelW - panelW / 4) / 2;
     const int qrTarget = qrTargetH < qrTargetW ? qrTargetH : qrTargetW;
     const int wifiModulesSide =
@@ -222,22 +222,32 @@ inline void renderPortalScreen(EPaper& epaper, int panelW, int panelH,
   // ---- QR layout. ----
   auto drawBlock = [&](int blockX, int blockTop, int qrSide,
                        const String& payload, const char* caption,
-                       const String& detailLine) {
+                       const String& detailLine,
+                       const String& detailLine2 = String()) {
     // Caption above.
     epaper.setFreeFont(info.fonts.captionFont);
     epaper.setTextDatum(TC_DATUM);
     epaper.drawString(caption, blockX + qrSide / 2, blockTop, 1);
     const int qrTop = blockTop + captionH + panelH / 200;
     drawQr(epaper, payload, blockX, qrTop, moduleSize, black, white);
-    // Detail below.
-    epaper.setFreeFont(info.fonts.detailFont);
-    epaper.drawString(detailLine, blockX + qrSide / 2,
-                      qrTop + qrSide + panelH / 200, 1);
+    epaper.setFreeFont(info.fonts.captionFont);
+    int detailY = qrTop + qrSide + panelH / 200;
+    epaper.drawString(detailLine, blockX + qrSide / 2, detailY, 1);
+    if (detailLine2.length() > 0) {
+      detailY += bigDetailH;
+      epaper.drawString(detailLine2, blockX + qrSide / 2, detailY, 1);
+    }
   };
 
+  const String wifiNameLine = String("Wi-Fi Name: ") + info.ssid;
+  const String wifiPassLine =
+      wifiHasPass ? String("Wi-Fi Password: ") + info.wifiPassword : String();
+
   if (portrait) {
-    const int wifiBlockH = captionH + wifiSide + detailFontH + panelH / 60;
-    const int urlBlockH = captionH + urlSide + detailFontH + panelH / 60;
+    const int wifiExtra = wifiHasPass ? bigDetailH : 0;
+    const int wifiBlockH =
+        captionH + wifiSide + bigDetailH + wifiExtra + panelH / 60;
+    const int urlBlockH = captionH + urlSide + bigDetailH + panelH / 60;
     const int totalH = wifiBlockH + urlBlockH;
     const int available = qrRegionBottom - qrRegionTop;
     const int extra = available > totalH ? (available - totalH) : 0;
@@ -246,7 +256,7 @@ inline void renderPortalScreen(EPaper& epaper, int panelW, int panelH,
     const int wifiX = (panelW - wifiSide) / 2;
     const int urlX = (panelW - urlSide) / 2;
     drawBlock(wifiX, wifiTop, wifiSide, info.wifiPayload,
-              "1. Scan to join Wi-Fi", info.ssid);
+              "1. Scan to join Wi-Fi", wifiNameLine, wifiPassLine);
     drawBlock(urlX, urlTop, urlSide, info.urlPayload,
               "2. Scan to open portal", info.url);
 
@@ -270,12 +280,13 @@ inline void renderPortalScreen(EPaper& epaper, int panelW, int panelH,
     const int gap = (panelW - wifiSide - urlSide) / 3;
     const int wifiX = gap;
     const int urlX = wifiX + wifiSide + gap;
-    const int blockH = captionH + wifiSide + detailFontH + panelH / 60;
+    const int blockH =
+        captionH + wifiSide + wifiDetailLines * bigDetailH + panelH / 60;
     const int available = qrRegionBottom - qrRegionTop;
     const int blockTop =
         qrRegionTop + (available > blockH ? (available - blockH) / 2 : 0);
     drawBlock(wifiX, blockTop, wifiSide, info.wifiPayload,
-              "1. Scan to join Wi-Fi", info.ssid);
+              "1. Scan to join Wi-Fi", wifiNameLine, wifiPassLine);
     drawBlock(urlX, blockTop, urlSide, info.urlPayload,
               "2. Scan to open portal", info.url);
 

@@ -154,15 +154,18 @@ void renderNoSdCardAndStop() {
 
 void renderPortalScreen() {
   const String ssid = sd_web_portal::currentSsid();
+  const String password = sd_web_portal::currentApPassword();
   const IPAddress ip = sd_web_portal::currentIp();
   const uint16_t port = sd_web_portal::currentPort();
   const String url = sd_web_portal::urlQrPayload(ip, port);
-  const String wifiPayload = sd_web_portal::wifiQrPayload(ssid, nullptr);
+  const String wifiPayload =
+      sd_web_portal::wifiQrPayload(ssid, password.c_str());
 
   sd_web_portal::ui::RenderInfo info;
   info.modelLabel = PANEL_LABEL;
   info.tagline = "Files over Wi-Fi";
   info.ssid = ssid;
+  info.wifiPassword = password;
   info.url = url;
   info.macAddress = wifi_sta::stationMacAddress();
   info.firmwareVersion = board::FIRMWARE_VERSION;
@@ -266,7 +269,7 @@ void setup() {
 
   sd_web_portal::Config cfg;
   cfg.apSsidPrefix = "ReTerminal ";
-  cfg.apPassword = nullptr;  // open network - QR spec is nopass
+  cfg.useAutoApPassword = true;
   cfg.apIp = IPAddress(192, 168, 1, 1);
   cfg.apGateway = IPAddress(192, 168, 1, 1);
   cfg.apNetmask = IPAddress(255, 255, 255, 0);
