@@ -15,11 +15,11 @@ for:
 - Handing to someone else so they can flash a known-good sketch and take
   a photo of the panel for support.
 
-On E1001-E1004, the sketch draws once and enters deep sleep; any front
-button redraws it. On E1005, it remains interactive: each GT911 touch is
-logged, beeps, and temporarily inverts the complete pattern block containing
-the contact using two partial refreshes. Press and release **OK** to sleep;
-OK, UP, or DOWN wakes and redraws the test.
+After drawing, every front-button press beeps. Press and release the primary
+**GREEN** button on E1001-E1004, or **OK** on E1005, to enter deep sleep; any
+front button wakes with a beep and redraws the test. On E1005, each GT911
+touch is also logged, beeps, and temporarily inverts the complete pattern
+block containing the contact using two partial refreshes.
 An inserted E1005 SD card can remain in place: the sketch powers and
 deselects it so it cannot interfere with the display's shared SPI bus.
 E1005 portrait output keeps the USB connector at the bottom.
@@ -64,7 +64,7 @@ Serial output on UART1 (`GPIO43/44`, same as the viewer apps):
 [panel-test] reTerminal E1003 - Gray16
 [panel-test] 1872 x 1404, 16 palette entries
 [panel-test] refreshing panel
-[panel-test] done; sleeping - press any front button to redraw
+[panel-test] press any button to beep; press and release GREEN to sleep
 ```
 
 E1005 additionally reports GT911 startup and touch coordinates:

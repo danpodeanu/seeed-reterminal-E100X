@@ -21,8 +21,8 @@
 //                 grayscale ramp using intermediate codes if the panel
 //                 has more than two greys.
 //
-// After the first refresh the sketch drops into deep sleep. Hit the
-// reset button (or unplug/replug USB) to redraw.
+// After the first refresh, every front button beeps. The primary green/OK
+// button enters deep sleep; any front button wakes, beeps, and redraws.
 
 #include <Arduino.h>
 #include <TFT_eSPI.h>
@@ -125,6 +125,58 @@ constexpr int CAST_TOP = BARS_HEIGHT;
 constexpr int CAST_HEIGHT = PANEL_HEIGHT / 12;
 constexpr int FOOTER_TOP = CAST_TOP + CAST_HEIGHT;
 constexpr int FOOTER_HEIGHT = PANEL_HEIGHT - FOOTER_TOP;
+constexpr uint32_t kButtonDebounceMs = 30;
+
+struct ButtonState {
+  int pin;
+  const char* name;
+  int stableLevel;
+  int sampledLevel;
+  uint32_t changedAtMs;
+};
+
+#if RETERMINAL_MODEL == 1005
+ButtonState buttons[] = {
+    {board::PIN_BUTTON_0, "OK / power", HIGH, HIGH, 0},
+    {board::PIN_BUTTON_1, "UP", HIGH, HIGH, 0},
+    {board::PIN_BUTTON_2, "DOWN", HIGH, HIGH, 0},
+};
+constexpr const char* PRIMARY_BUTTON_NAME = "OK";
+#else
+ButtonState buttons[] = {
+    {board::PIN_BUTTON_0, "GREEN", HIGH, HIGH, 0},
+    {board::PIN_BUTTON_1, "RIGHT", HIGH, HIGH, 0},
+    {board::PIN_BUTTON_2, "LEFT", HIGH, HIGH, 0},
+};
+constexpr const char* PRIMARY_BUTTON_NAME = "GREEN";
+#endif
+
+void configureButtons() {
+  for (ButtonState& button : buttons) {
+    pinMode(button.pin, INPUT_PULLUP);
+    button.stableLevel = digitalRead(button.pin);
+    button.sampledLevel = button.stableLevel;
+    button.changedAtMs = millis();
+  }
+}
+
+ButtonState* pollButtonPress() {
+  const uint32_t now = millis();
+  for (ButtonState& button : buttons) {
+    const int level = digitalRead(button.pin);
+    if (level != button.sampledLevel) {
+      button.sampledLevel = level;
+      button.changedAtMs = now;
+    }
+    if (level != button.stableLevel &&
+        static_cast<uint32_t>(now - button.changedAtMs) >=
+            kButtonDebounceMs) {
+      button.stableLevel = level;
+      if (level == LOW) return &button;
+    }
+  }
+  return nullptr;
+}
 
 // SMPTE castellation colours cycle white/palette/black/palette/... to
 // make a stripe that alternates whichever colour is above it against
@@ -552,15 +604,9 @@ void setup() {
   // the pair makes it obvious over serial-less USB whether we made it
   // through the (multi-second) e-paper update.
   hardware::beep();
+  configureButtons();
 
 #if RETERMINAL_MODEL == 1005
-  for (const int pin : {
-           board::PIN_BUTTON_0,
-           board::PIN_BUTTON_1,
-           board::PIN_BUTTON_2,
-       }) {
-    pinMode(pin, INPUT_PULLUP);
-  }
   touchReady = touch.begin(touchWire);
   if (touchReady) {
     LOG.printf("[touch] GT%s ready at 0x%02X, sensor=%ux%u\n",
@@ -571,27 +617,28 @@ void setup() {
   } else {
     LOG.println("[touch] GT911 initialization failed");
   }
-  LOG.println("[panel-test] press and release OK to sleep; any button wakes");
-#else
-  LOG.println("[panel-test] done; sleeping - press any front button to redraw");
-  powerDownAndSleep();
 #endif
+  LOG.printf(
+      "[panel-test] press any button to beep; press and release %s to sleep\n",
+      PRIMARY_BUTTON_NAME);
 }
 
 void loop() {
 #if RETERMINAL_MODEL == 1005
   pollTouch();
-  if (digitalRead(board::PIN_BUTTON_0) == LOW) {
-    delay(30);
-    if (digitalRead(board::PIN_BUTTON_0) == LOW) {
-      LOG.println("[panel-test] OK pressed; entering deep sleep");
-      while (digitalRead(board::PIN_BUTTON_0) == LOW) delay(10);
+#endif
+  if (ButtonState* button = pollButtonPress()) {
+    LOG.printf("[button] %s pressed\n", button->name);
+    hardware::beep();
+    if (button->pin == board::PIN_BUTTON_0) {
+      LOG.printf("[panel-test] entering deep sleep after %s release\n",
+                 PRIMARY_BUTTON_NAME);
+      while (digitalRead(button->pin) == LOW) delay(10);
+#if RETERMINAL_MODEL == 1005
       touch.end();
+#endif
       powerDownAndSleep();
     }
   }
-  delay(20);
-#else
-  delay(1000);
-#endif
+  delay(5);
 }
