@@ -28,6 +28,10 @@ void test_e1005_compact_layout_stays_inside_panel() {
   TEST_ASSERT_FALSE(fitsPanel(800, 480));
   TEST_ASSERT_GREATER_OR_EQUAL(ALERT_TOP + ALERT_HEIGHT,
                                heroTop(true));
+  TEST_ASSERT_EQUAL_INT(240, HEADER_LOCATION_WIDTH);
+  TEST_ASSERT_EQUAL_INT(PANEL_WIDTH,
+                        HEADER_LOCATION_WIDTH +
+                            2 * HEADER_SIDE_BADGE_WIDTH);
   TEST_ASSERT_EQUAL_INT(FORECAST_TOP, forecastRowTop(0));
   TEST_ASSERT_EQUAL_INT(FOOTER_TOP, forecastRowsBottom() + 1);
 }

@@ -7,6 +7,9 @@ inline constexpr int PANEL_HEIGHT = 800;
 inline constexpr int HEADER_HEIGHT = 62;
 inline constexpr int ALERT_TOP = HEADER_HEIGHT;
 inline constexpr int ALERT_HEIGHT = 30;
+inline constexpr int HEADER_SIDE_BADGE_WIDTH = 120;
+inline constexpr int HEADER_LOCATION_WIDTH =
+    PANEL_WIDTH - 2 * HEADER_SIDE_BADGE_WIDTH;
 inline constexpr int HERO_TOP = 74;
 inline constexpr int HERO_TOP_WITH_ALERT = 100;
 inline constexpr int HERO_ICON_X = 125;
@@ -33,6 +36,9 @@ constexpr int forecastRowsBottom() {
 constexpr bool fitsPanel(int width, int height) {
   return width == PANEL_WIDTH && height == PANEL_HEIGHT &&
          ALERT_TOP + ALERT_HEIGHT <= HERO_TOP_WITH_ALERT &&
+         HEADER_LOCATION_WIDTH > 0 &&
+         HEADER_LOCATION_WIDTH <=
+             PANEL_WIDTH - 2 * HEADER_SIDE_BADGE_WIDTH &&
          HERO_ICON_X - HERO_ICON_SIZE / 2 >= 0 &&
          HERO_ICON_X + HERO_ICON_SIZE / 2 < PANEL_WIDTH &&
          forecastRowsBottom() <= FOOTER_TOP &&

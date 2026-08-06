@@ -6,10 +6,9 @@ short forecast, refreshes the e-paper panel, then switches Wi-Fi off
 and returns to deep sleep. Between refreshes it draws essentially no
 power while the panel stays visible.
 
-The E1001-E1004 header includes local temperature and humidity from the
-built-in SHT4x sensor plus battery status. E1005 uses a simplified
-monochrome portrait layout focused on outdoor conditions and a three-day
-outlook.
+The header includes local temperature and humidity from the built-in
+SHT4x sensor plus battery status. E1005 fits compact versions around the
+centered location in its simplified monochrome portrait layout.
 
 ![Weather Viewer showing current conditions and a three-day forecast on a reTerminal E1001](assets/e1001-weather-screenshot.png)
 
@@ -26,8 +25,7 @@ screenshot feature.*
 - Severe-weather alert banner across the top when any local alert is
   active (QWeather in China; US NWS elsewhere in the US).
 - Indoor temperature, humidity, battery percentage, and a USB-power
-  indicator in the header on E1001-E1004. E1005 still reads its BQ27220
-  fuel gauge for low-battery protection but omits these badges.
+  indicator in the header. E1005 reads these from SHT4x and BQ27220.
 - Overnight quiet hours (default 01:00–07:00) so the panel doesn't
   refresh while you're asleep.
 - Optional SD-card cache so the last good forecast is redrawn even if
@@ -164,8 +162,7 @@ bundle from
   - Battery percentage plus a lightning bolt when USB power is
     connected (SY6974B-equipped boards only; older revisions with
     ETA6003 silently omit the icon).
-  - E1005 omits both header badges to preserve space for its 480-pixel
-    portrait layout.
+  - E1005 uses compact badges beside the centered location name.
 - **Severe-weather alerts** appear as a shaded
   `! Alert: <title> (+N more)` bar above the current-temperature
   area whenever the configured provider reports an active alert for

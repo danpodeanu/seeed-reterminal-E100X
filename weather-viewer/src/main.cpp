@@ -376,14 +376,12 @@ void measureScaled150(const GFXfont* font, const char* s,
 
 void drawBadges(uint32_t background = PANEL_WHITE,
                 bool fillTextBackground = true,
-                time_t weatherUpdateTime = 0) {
+                time_t weatherUpdateTime = 0,
+                bool showOnCompactPortrait = false) {
 #if RETERMINAL_MODEL == 1005
-  // The compact dashboard and status screens reserve the full width for
-  // their primary message; BQ27220 data still drives low-battery safety.
-  (void)background;
-  (void)fillTextBackground;
-  (void)weatherUpdateTime;
-  return;
+  if (!showOnCompactPortrait) return;
+#else
+  (void)showOnCompactPortrait;
 #endif
   epaper.setTextColor(PANEL_BLACK, background, fillTextBackground);
   selectSmallFont();
@@ -834,13 +832,14 @@ void drawHeader(const WeatherData& weather) {
 #if RETERMINAL_MODEL == 1005
   using namespace compact_portrait_layout;
   epaper.fillRect(0, 0, config::PANEL_WIDTH, HEADER_HEIGHT, PANEL_WHITE);
+  drawBadges(PANEL_WHITE, true, 0, true);
   setStripTextColor(PANEL_BLACK, PANEL_WHITE);
   epaper.setTextDatum(MC_DATUM);
   selectSmallSmoothFont();
   const String location =
       text_render::displayText(String(weather_config::runtime::locationName()));
   epaper.drawString(
-      text_render::ellipsize(epaper, location, config::PANEL_WIDTH - 28),
+      text_render::ellipsize(epaper, location, HEADER_LOCATION_WIDTH),
       config::PANEL_WIDTH / 2, 20 + smoothCenterYAdjust(), 1);
   smoothFontManager.unload();
 
