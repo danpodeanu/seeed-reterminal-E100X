@@ -41,6 +41,11 @@ const char*  ntpSecondary();
 
 // Presentation
 ::config::WeatherProvider   weatherProvider();
+weather_orientation::Orientation orientation();
+bool                        isLandscape();
+int                         panelRotation();
+int                         panelWidth();
+int                         panelHeight();
 ::config::TemperatureUnit   temperatureUnit();
 ::config::WindSpeedUnit     windSpeedUnit();
 bool                        clutterFreeMode();

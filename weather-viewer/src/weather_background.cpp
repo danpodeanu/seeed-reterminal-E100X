@@ -147,14 +147,21 @@ Theme themeForWmoCode(int wmoCode) {
 }
 
 void draw(TFT_eSPI& epaper, Theme theme) {
-  const uint16_t w = kWidth;
-  const uint16_t h = kHeight;
+  uint16_t w = kWidth;
+  uint16_t h = kHeight;
   const uint8_t bpp = kBitsPerPixel;
   const uint8_t scale = kScale;
   // Every slot in kThemeData is populated (single-theme models redirect
   // unsupported themes to the cloudy payload), so we can index by theme
   // without a null check.
   const uint8_t* row = kThemeData[static_cast<uint8_t>(theme)];
+#if RETERMINAL_MODEL == 1005
+  if (epaper.width() > epaper.height()) {
+    w = kLandscapeWidth;
+    h = kLandscapeHeight;
+    row = kLandscapeThemeData[static_cast<uint8_t>(theme)];
+  }
+#endif
 #if RETERMINAL_MODEL == 1003
   // On the 16-gray panel, upgrade the stored 4-level payload to a
   // smooth 16-level render via bilinear interpolation. The stored

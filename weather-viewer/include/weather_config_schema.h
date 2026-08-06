@@ -37,6 +37,7 @@ constexpr const char* kKeyNtpSecondary      = "ntp2";
 
 // Presentation
 constexpr const char* kKeyProvider          = "provider";
+constexpr const char* kKeyOrientation       = "orientation";
 constexpr const char* kKeyTempUnit          = "temp_unit";
 constexpr const char* kKeyWindUnit          = "wind_unit";
 constexpr const char* kKeyClutterFree       = "clutter_free";

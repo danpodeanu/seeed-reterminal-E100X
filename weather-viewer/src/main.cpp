@@ -105,6 +105,14 @@ using namespace theme;
 EPaper epaper;
 smooth_fonts::Manager smoothFontManager(epaper);
 
+inline int panelWidth() {
+  return weather_config::runtime::panelWidth();
+}
+
+inline int panelHeight() {
+  return weather_config::runtime::panelHeight();
+}
+
 inline bool weatherBackgroundActive() {
   return weather_config::runtime::weatherBackgroundEnabled();
 }
@@ -144,6 +152,18 @@ void beginPanel() {
   delay(board::SD_POWER_SETTLE_MS);
 #endif
   epaper_setup::begin(epaper);
+#if RETERMINAL_MODEL == 1005
+  epaper.setRotation(weather_config::runtime::panelRotation());
+  LOG.printf("[panel] orientation=%s rotation=%d geometry=%dx%d\n",
+             weather_config::runtime::isLandscape()
+                 ? (weather_config::runtime::orientation() ==
+                            weather_orientation::Orientation::RotateCW
+                        ? "rotate-cw"
+                        : "rotate-ccw")
+                 : "portrait",
+             weather_config::runtime::panelRotation(), panelWidth(),
+             panelHeight());
+#endif
 }
 
 // WeatherData / DailyForecast now live in weather_data.h so both the
@@ -155,8 +175,7 @@ void beginPanel() {
 
 void updatePanel() {
   if (screenshotRequested && sdReady) {
-    screenshot::saveScreenshotBmp(epaper, config::PANEL_WIDTH,
-                                  config::PANEL_HEIGHT);
+    screenshot::saveScreenshotBmp(epaper, panelWidth(), panelHeight());
     screenshotRequested = false;
   }
   panel_watchdog::guard([]() { epaper.update(); });
@@ -397,7 +416,7 @@ void drawBadges(uint32_t background = PANEL_WHITE,
   const int w = config::ui(22);
   const int h = config::ui(12);
   const int terminalWidth = max(3, config::ui(5));
-  const int x = config::PANEL_WIDTH - edgeInset - terminalWidth - w;
+  const int x = panelWidth() - edgeInset - terminalWidth - w;
   const int gaugeCenterY = statusCenterY + 2;
   const int y = gaugeCenterY - h / 2;
   const int outline = max(1, config::ui(1));
@@ -450,9 +469,9 @@ void renderStatus(const String& message, const String& detail = "",
     // bake so non-ASCII names ("Muenchen", "Sao Paulo") stay readable.
     selectLargeSmoothFont();
     epaper.drawString(
-        text_render::ellipsize(epaper, lineAbove, config::PANEL_WIDTH - config::ui(60)),
-        config::PANEL_WIDTH / 2,
-        config::PANEL_HEIGHT / 2 - config::ui(70) + smoothCenterYAdjust(), 1);
+        text_render::ellipsize(epaper, lineAbove, panelWidth() - config::ui(60)),
+        panelWidth() / 2,
+        panelHeight() / 2 - config::ui(70) + smoothCenterYAdjust(), 1);
     // TFT_eSPI treats loadFont as sticky: setFreeFont alone won't switch
     // back. Unload so the subsequent selectMediumFont() actually applies.
     smoothFontManager.unload();
@@ -463,21 +482,21 @@ void renderStatus(const String& message, const String& detail = "",
     // shrinking the main title.
     selectSmallFont();
     epaper.drawString(
-        text_render::ellipsize(epaper, subLineAbove, config::PANEL_WIDTH - config::ui(60)),
-        config::PANEL_WIDTH / 2,
-        config::PANEL_HEIGHT / 2 - config::ui(40), 1);
+        text_render::ellipsize(epaper, subLineAbove, panelWidth() - config::ui(60)),
+        panelWidth() / 2,
+        panelHeight() / 2 - config::ui(40), 1);
   }
   selectMediumFont();
   epaper.drawString(
-      text_render::ellipsize(epaper, message, config::PANEL_WIDTH - config::ui(60)),
-      config::PANEL_WIDTH / 2,
-      config::PANEL_HEIGHT / 2 - config::ui(15), 1);
+      text_render::ellipsize(epaper, message, panelWidth() - config::ui(60)),
+      panelWidth() / 2,
+      panelHeight() / 2 - config::ui(15), 1);
   if (!detail.isEmpty()) {
     selectSmallFont();
     epaper.drawString(
-        text_render::ellipsize(epaper, detail, config::PANEL_WIDTH - config::ui(60)),
-        config::PANEL_WIDTH / 2,
-        config::PANEL_HEIGHT / 2 + config::ui(25), 1);
+        text_render::ellipsize(epaper, detail, panelWidth() - config::ui(60)),
+        panelWidth() / 2,
+        panelHeight() / 2 + config::ui(25), 1);
   }
   if (!subHelpBelow.isEmpty()) {
     // Small ASCII sub-line (MAC + firmware) drawn just above the bottom
@@ -485,16 +504,16 @@ void renderStatus(const String& message, const String& detail = "",
     // "Connecting to..." message.
     selectSmallFont();
     epaper.drawString(
-        text_render::ellipsize(epaper, subHelpBelow, config::PANEL_WIDTH - config::ui(60)),
-        config::PANEL_WIDTH / 2,
-        config::PANEL_HEIGHT - config::ui(46), 1);
+        text_render::ellipsize(epaper, subHelpBelow, panelWidth() - config::ui(60)),
+        panelWidth() / 2,
+        panelHeight() - config::ui(46), 1);
   }
   if (!helpBelow.isEmpty()) {
     selectSmallFont();
     epaper.drawString(
-        text_render::ellipsize(epaper, helpBelow, config::PANEL_WIDTH - config::ui(60)),
-        config::PANEL_WIDTH / 2,
-        config::PANEL_HEIGHT - config::ui(24), 1);
+        text_render::ellipsize(epaper, helpBelow, panelWidth() - config::ui(60)),
+        panelWidth() / 2,
+        panelHeight() - config::ui(24), 1);
   }
   epaper.setTextSize(1);
   epaper.setFreeFont(nullptr);
@@ -827,6 +846,24 @@ void drawLargeTemperature(float celsius, int cx, int cy) {
 
 void drawHeader(const WeatherData& weather) {
 #if RETERMINAL_MODEL == 1005
+  if (weather_config::runtime::isLandscape()) {
+    const int height = config::ui(45);
+    epaper.fillRect(0, 0, panelWidth(), height, PANEL_WHITE);
+    drawBadges(PANEL_WHITE, true, weather.updateTime, true);
+    setStripTextColor(PANEL_BLACK, PANEL_WHITE);
+    epaper.setTextDatum(MC_DATUM);
+    selectSmallSmoothFont();
+    const String location = text_render::displayText(
+        String(weather_config::runtime::locationName()));
+    epaper.drawString(
+        text_render::ellipsize(epaper, location,
+                               panelWidth() - config::ui(380)),
+        panelWidth() / 2, config::ui(25) + smoothCenterYAdjust(), 1);
+    smoothFontManager.unload();
+    epaper.drawFastHLine(config::ui(10), config::ui(44),
+                         panelWidth() - config::ui(20), PANEL_BLACK);
+    return;
+  }
   using namespace compact_portrait_layout;
   epaper.fillRect(0, 0, config::PANEL_WIDTH, HEADER_HEIGHT, PANEL_WHITE);
   drawBadges(PANEL_WHITE, true, 0, true);
@@ -932,17 +969,17 @@ void drawForecastCard(const DailyForecast& day, uint8_t index,
 
 void renderLandscape(const WeatherData& weather) {
   const int mainTop = config::ui(48);
-  const int mainBottom = config::PANEL_HEIGHT * 62 / 100;
+  const int mainBottom = panelHeight() * 62 / 100;
   const int mainCenterY = (mainTop + mainBottom) / 2;
-  const int leftDividerX = config::PANEL_WIDTH * 34 / 100;
+  const int leftDividerX = panelWidth() * 34 / 100;
   // Center the hero icon inside the left pane (0 .. leftDividerX)
   // instead of at a hard-coded 19% offset that was slightly off.
   const int iconX = leftDividerX / 2;
-  const int temperatureX = config::PANEL_WIDTH * 49 / 100;
-  const int detailX = config::PANEL_WIDTH * 83 / 100;
+  const int temperatureX = panelWidth() * 49 / 100;
+  const int detailX = panelWidth() * 83 / 100;
 
   drawWeatherIcon(iconX, mainCenterY,
-                  min(config::PANEL_WIDTH * 27 / 100,
+                  min(panelWidth() * 27 / 100,
                       (mainBottom - mainTop) * 72 / 100),
                   weather.weatherCode, weather.isDay);
   epaper.drawFastVLine(leftDividerX,
@@ -960,7 +997,7 @@ void renderLandscape(const WeatherData& weather) {
   epaper.drawString(app_logic::conditionName(weather.weatherCode), temperatureX,
                     mainCenterY + config::ui(53), 1);
 
-  epaper.drawFastVLine(config::PANEL_WIDTH * 66 / 100,
+  epaper.drawFastVLine(panelWidth() * 66 / 100,
                        mainTop + config::ui(12),
                        mainBottom - mainTop - config::ui(24), PANEL_MUTED);
   epaper.setTextDatum(MC_DATUM);
@@ -985,7 +1022,7 @@ void renderLandscape(const WeatherData& weather) {
   epaper.drawString("Outdoor humidity", detailX,
                     mainCenterY + config::ui(31), 1);
 
-  const int detailWidth = config::PANEL_WIDTH * 31 / 100;
+  const int detailWidth = panelWidth() * 31 / 100;
   const String windLine = "Wind " + weather_format::windSpeed(weather.windKmh);
   String rainLine = rainSummary(weather);
   const bool rainLineIsWind = rainLine.length() == 0;
@@ -1007,11 +1044,11 @@ void renderLandscape(const WeatherData& weather) {
   setBodyTextColor(PANEL_BLACK);
 
   epaper.drawFastHLine(config::ui(10), mainBottom,
-                       config::PANEL_WIDTH - config::ui(20), PANEL_MUTED);
+                       panelWidth() - config::ui(20), PANEL_MUTED);
   const int forecastTop = mainBottom + config::ui(4);
-  const int footerTop = config::PANEL_HEIGHT - config::ui(30);
+  const int footerTop = panelHeight() - config::ui(30);
   const int cardWidth =
-      (config::PANEL_WIDTH - config::ui(20)) / config::FORECAST_DAYS;
+      (panelWidth() - config::ui(20)) / config::FORECAST_DAYS;
   for (uint8_t i = 0; i < config::FORECAST_DAYS; ++i) {
     const int left = config::ui(10) + i * cardWidth;
     if (i > 0) {
@@ -1185,27 +1222,34 @@ void renderCompactPortrait(const WeatherData& weather) {
 
 void renderFooter(const WeatherData& weather) {
 #if RETERMINAL_MODEL == 1005
-  using namespace compact_portrait_layout;
-  epaper.fillRect(0, FOOTER_TOP, config::PANEL_WIDTH,
-                  config::PANEL_HEIGHT - FOOTER_TOP, PANEL_WHITE);
-  epaper.drawFastHLine(14, FOOTER_TOP,
-                       config::PANEL_WIDTH - 28, PANEL_BLACK);
-  setStripTextColor(PANEL_BLACK, PANEL_WHITE);
-  epaper.setTextDatum(MC_DATUM);
-  selectSmallFont();
-  epaper.drawString(weather_provider::name(), config::PANEL_WIDTH / 2,
-                    (FOOTER_TOP + config::PANEL_HEIGHT) / 2, 1);
-  return;
-#else
-  const int top = config::PANEL_HEIGHT - config::ui(30);
+  if (!weather_config::runtime::isLandscape()) {
+    using namespace compact_portrait_layout;
+    epaper.fillRect(0, FOOTER_TOP, config::PANEL_WIDTH,
+                    config::PANEL_HEIGHT - FOOTER_TOP, PANEL_WHITE);
+    epaper.drawFastHLine(14, FOOTER_TOP,
+                         config::PANEL_WIDTH - 28, PANEL_BLACK);
+    setStripTextColor(PANEL_BLACK, PANEL_WHITE);
+    epaper.setTextDatum(MC_DATUM);
+    selectSmallFont();
+    epaper.drawString(weather_provider::name(), config::PANEL_WIDTH / 2,
+                      (FOOTER_TOP + config::PANEL_HEIGHT) / 2, 1);
+    return;
+  }
+#endif
+  const int top = panelHeight() - config::ui(30);
   // Anchor the label baseline to the actual band vertical center so the
   // text visually sits in the middle of the strip (previously the label
   // was 2 px above centre for a 30 px band, which was noticeable on
   // solid backgrounds).
-  const int labelY = (top + config::PANEL_HEIGHT) / 2;
-  text_render::fillStatusBackground(epaper, top, config::PANEL_HEIGHT - top, config::PANEL_WIDTH, config::PANEL_HEIGHT, PANEL_STATUS_BACKGROUND, PANEL_STATUS_DITHERED, PANEL_STATUS_DITHER_COLOR, PANEL_STATUS_DITHER_THRESHOLD);
+  const int labelY = (top + panelHeight()) / 2;
+  text_render::fillStatusBackground(epaper, top, panelHeight() - top,
+                                    panelWidth(), panelHeight(),
+                                    PANEL_STATUS_BACKGROUND,
+                                    PANEL_STATUS_DITHERED,
+                                    PANEL_STATUS_DITHER_COLOR,
+                                    PANEL_STATUS_DITHER_THRESHOLD);
   epaper.drawFastHLine(config::ui(10), top,
-                       config::PANEL_WIDTH - config::ui(20), PANEL_MUTED);
+                       panelWidth() - config::ui(20), PANEL_MUTED);
   const smooth_fonts::Selection footerFont = selectSmallSmoothFont();
   if (PANEL_STATUS_DITHERED &&
       footerFont == smooth_fonts::Selection::GfxFallback) {
@@ -1235,10 +1279,10 @@ void renderFooter(const WeatherData& weather) {
   const String locationText =
       text_render::displayText(String(weather_config::runtime::locationName()));
   const int rightPad = config::ui(12);
-  const int locationLeft = config::PANEL_WIDTH - rightPad
+  const int locationLeft = panelWidth() - rightPad
                            - epaper.textWidth(locationText);
   epaper.setTextDatum(MR_DATUM);
-  epaper.drawString(locationText, config::PANEL_WIDTH - rightPad,
+  epaper.drawString(locationText, panelWidth() - rightPad,
                     labelY + footerYAdjust, 1);
 
   // Centre: weather-themed proverb whose bucket matches the current
@@ -1264,31 +1308,33 @@ void renderFooter(const WeatherData& weather) {
   // repaint doesn't hold onto them.
   smoothFontManager.unload();
   selectSmallFont();
-#endif
 }
 
 void drawAlertBar(const WeatherData& weather) {
   if (weather.alertTitle.isEmpty()) return;
 #if RETERMINAL_MODEL == 1005
-  using namespace compact_portrait_layout;
-  epaper.fillRect(0, ALERT_TOP, config::PANEL_WIDTH, ALERT_HEIGHT,
-                  PANEL_BLACK);
-  setStripTextColor(PANEL_WHITE, PANEL_BLACK);
-  epaper.setTextDatum(MC_DATUM);
-  selectSmallFont();
-  String line = "! " + weather.alertTitle;
-  if (weather.alertOtherCount > 0) {
-    line += " (+" + String(weather.alertOtherCount) + ")";
+  if (!weather_config::runtime::isLandscape()) {
+    using namespace compact_portrait_layout;
+    epaper.fillRect(0, ALERT_TOP, config::PANEL_WIDTH, ALERT_HEIGHT,
+                    PANEL_BLACK);
+    setStripTextColor(PANEL_WHITE, PANEL_BLACK);
+    epaper.setTextDatum(MC_DATUM);
+    selectSmallFont();
+    String line = "! " + weather.alertTitle;
+    if (weather.alertOtherCount > 0) {
+      line += " (+" + String(weather.alertOtherCount) + ")";
+    }
+    epaper.drawString(
+        text_render::ellipsize(epaper, line, config::PANEL_WIDTH - 24),
+        config::PANEL_WIDTH / 2, ALERT_TOP + ALERT_HEIGHT / 2, 1);
+    return;
   }
-  epaper.drawString(
-      text_render::ellipsize(epaper, line, config::PANEL_WIDTH - 24),
-      config::PANEL_WIDTH / 2, ALERT_TOP + ALERT_HEIGHT / 2, 1);
-#else
+#endif
   const int top = config::ui(46);
   const int height = config::ui(22);
-  epaper.fillRect(0, top, config::PANEL_WIDTH, height, PANEL_LIGHT);
+  epaper.fillRect(0, top, panelWidth(), height, PANEL_LIGHT);
   epaper.drawFastHLine(config::ui(10), top + height,
-                       config::PANEL_WIDTH - config::ui(20), PANEL_MUTED);
+                       panelWidth() - config::ui(20), PANEL_MUTED);
   setStripTextColor(PANEL_BLACK, PANEL_LIGHT);
   epaper.setTextDatum(MC_DATUM);
   selectSmallFont();
@@ -1298,9 +1344,8 @@ void drawAlertBar(const WeatherData& weather) {
   }
   epaper.drawString(
       text_render::ellipsize(epaper, line,
-                             config::PANEL_WIDTH - config::ui(24)),
-      config::PANEL_WIDTH / 2, top + height / 2, 1);
-#endif
+                             panelWidth() - config::ui(24)),
+      panelWidth() / 2, top + height / 2, 1);
 }
 
 void renderWeather(const WeatherData& weather) {
@@ -1319,7 +1364,11 @@ void renderWeather(const WeatherData& weather) {
   drawHeader(weather);
   drawAlertBar(weather);
 #if RETERMINAL_MODEL == 1005
-  renderCompactPortrait(weather);
+  if (weather_config::runtime::isLandscape()) {
+    renderLandscape(weather);
+  } else {
+    renderCompactPortrait(weather);
+  }
 #elif RETERMINAL_MODEL == 1004
   renderPortrait(weather);
 #else
@@ -1656,7 +1705,7 @@ void setup() {
       LOG.println("[portal] rendering QR splash");
       const uint32_t drawStart = millis();
       config_portal::ui::renderPortalScreen<EPaper>(
-          epaper, config::PANEL_WIDTH, config::PANEL_HEIGHT, PANEL_BLACK,
+          epaper, panelWidth(), panelHeight(), PANEL_BLACK,
           PANEL_WHITE, info);
       LOG.printf("[portal] splash drawn in %u ms; committing to panel\n",
                  static_cast<unsigned>(millis() - drawStart));

@@ -12,6 +12,7 @@
 #include "local_time.h"
 #include "text_render_pure.h"
 #include "weather_quotes_bucket.h"
+#include "weather_orientation.h"
 
 #ifdef _WIN32
 static inline struct tm* gmtime_r(const time_t* t, struct tm* out) {
@@ -34,6 +35,25 @@ void test_e1005_compact_layout_stays_inside_panel() {
                             2 * HEADER_SIDE_BADGE_WIDTH);
   TEST_ASSERT_EQUAL_INT(FORECAST_TOP, forecastRowTop(0));
   TEST_ASSERT_EQUAL_INT(FOOTER_TOP, forecastRowsBottom() + 1);
+}
+
+void test_e1005_orientation_geometry_and_rotation() {
+  using weather_orientation::Orientation;
+  TEST_ASSERT_FALSE(weather_orientation::isLandscape(Orientation::Portrait));
+  TEST_ASSERT_TRUE(weather_orientation::isLandscape(Orientation::RotateCW));
+  TEST_ASSERT_TRUE(weather_orientation::isLandscape(Orientation::RotateCCW));
+  TEST_ASSERT_EQUAL_INT(1, weather_orientation::panelRotation(
+                               Orientation::Portrait));
+  TEST_ASSERT_EQUAL_INT(0, weather_orientation::panelRotation(
+                               Orientation::RotateCW));
+  TEST_ASSERT_EQUAL_INT(2, weather_orientation::panelRotation(
+                               Orientation::RotateCCW));
+  TEST_ASSERT_EQUAL_INT(480, weather_orientation::panelWidth(
+                                 Orientation::Portrait));
+  TEST_ASSERT_EQUAL_INT(800, weather_orientation::panelWidth(
+                                 Orientation::RotateCW));
+  TEST_ASSERT_EQUAL_INT(480, weather_orientation::panelHeight(
+                                 Orientation::RotateCCW));
 }
 
 void test_battery_gauge_decodes_e1005_words_and_rejects_missing_adc() {
@@ -835,6 +855,7 @@ void test_sd_ota_tag_stays_matched_across_more_data() {
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_e1005_compact_layout_stays_inside_panel);
+  RUN_TEST(test_e1005_orientation_geometry_and_rotation);
   RUN_TEST(test_battery_gauge_decodes_e1005_words_and_rejects_missing_adc);
   RUN_TEST(test_startup_beep_only_for_cold_boot_and_button_wake);
   RUN_TEST(test_quiet_hours_boundaries);

@@ -11,6 +11,8 @@
 
 #include <Arduino.h>
 
+#include "weather_orientation.h"
+
 namespace config {
 
 // --- Location ---------------------------------------------------------------
@@ -100,6 +102,11 @@ constexpr bool QWEATHER_ALERTS_ENABLED = true;
 constexpr bool NWS_ALERTS_ENABLED = false;
 
 // --- Presentation -----------------------------------------------------------
+// E1005 can be mounted in portrait or either landscape direction. Other
+// models ignore this setting and keep their native orientation.
+constexpr weather_orientation::Orientation ORIENTATION_DEFAULT =
+    weather_orientation::Orientation::Portrait;
+
 // Display units. Weather providers always report in metric (Celsius, km/h);
 // these knobs choose how numbers are formatted for the panel. Each unit is
 // selected independently so metric-with-Fahrenheit or similar mixes are

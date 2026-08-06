@@ -5,7 +5,7 @@
 // Four themes (sunny, cloudy, rainy, snowy) are keyed off the current
 // WMO weather code so the picture roughly agrees with the hero icon.
 // Every model uses a pre-baked payload selected by WMO condition. E1005's
-// portrait payload is strongly faded and dithered to its monochrome palette.
+// portrait and landscape payloads are faded and dithered to monochrome.
 //
 // One data file per image-backed model lives next to this blitter; each is guarded
 // with `#if RETERMINAL_MODEL == NNNN` so the linker only picks up the
@@ -38,6 +38,12 @@ extern const uint8_t  kScale;          // blitter upscale factor (1 = 1:1)
 extern const uint8_t  kThemeCount;     // number of distinct payloads bundled
 extern const size_t   kThemeDataLen;   // bytes per payload
 extern const uint8_t* const kThemeData[kThemeEnumCount];
+#if RETERMINAL_MODEL == 1005
+extern const uint16_t kLandscapeWidth;
+extern const uint16_t kLandscapeHeight;
+extern const size_t kLandscapeThemeDataLen;
+extern const uint8_t* const kLandscapeThemeData[kThemeEnumCount];
+#endif
 
 // Collapse a WMO weather code to the broad theme bucket the background
 // should reflect. Mirrors weather_quotes::wmoToBucketIndex so the

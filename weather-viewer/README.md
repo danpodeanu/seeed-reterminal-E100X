@@ -165,6 +165,9 @@ bundle from
     connected (SY6974B-equipped boards only; older revisions with
     ETA6003 silently omit the icon).
   - E1005 uses compact badges beside the centered location name.
+- **E1005 orientation** is selectable under **Settings → Presentation**:
+  `Portrait`, `RotateCW`, or `RotateCCW`. Both landscape choices use the
+  800×480 dashboard and a native landscape background.
 - **Severe-weather alerts** appear as a shaded
   `! Alert: <title> (+N more)` bar above the current-temperature
   area whenever the configured provider reports an active alert for

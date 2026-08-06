@@ -8,6 +8,8 @@ using config_portal::FieldType;
 using config_portal::Section;
 
 const char* const kProviderValues[]   = {"OpenMeteo", "QWeather", nullptr};
+const char* const kOrientationValues[] = {"Portrait", "RotateCW", "RotateCCW",
+                                          nullptr};
 const char* const kTempUnitValues[]   = {"Celsius", "Fahrenheit", nullptr};
 const char* const kWindUnitValues[]   = {"KilometresPerHour", "MilesPerHour", nullptr};
 
@@ -76,6 +78,10 @@ const Field kPresentationFields[] = {
      "Weather provider",
      "OpenMeteo needs no API key; QWeather requires credentials below.",
      FieldType::Enum, "OpenMeteo", kProviderValues, 0, 0, nullptr},
+    {kKeyOrientation,
+     "Panel orientation",
+     "E1005 only. Portrait keeps USB at the bottom. RotateCW and RotateCCW support both physical landscape directions.",
+     FieldType::Enum, "Portrait", kOrientationValues, 0, 0, nullptr},
     {kKeyTempUnit,
      "Temperature unit",
      "How temperatures are formatted for the panel.",

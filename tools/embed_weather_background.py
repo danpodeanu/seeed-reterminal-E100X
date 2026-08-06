@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import argparse
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Callable, Dict, List, Tuple
 
@@ -178,7 +178,9 @@ def pack(indexed: Image.Image, bpp: int) -> bytes:
     return bytes(out)
 
 
-def emit_cpp(spec: ModelSpec, payloads: Dict[str, bytes], out_path: Path) -> None:
+def emit_cpp(spec: ModelSpec, payloads: Dict[str, bytes], out_path: Path,
+             landscape_spec: ModelSpec | None = None,
+             landscape_payloads: Dict[str, bytes] | None = None) -> None:
     """Emit one .cpp per model containing every bundled theme + a pointer
     table indexed by the Theme enum.
 
@@ -205,6 +207,12 @@ def emit_cpp(spec: ModelSpec, payloads: Dict[str, bytes], out_path: Path) -> Non
         f" {spec.payload_w}x{spec.payload_h}"
         f" @ {spec.bpp}bpp x{spec.scale} nearest-neighbor upscale"
         f" ({spec.levels} gray levels).",
+    ]
+    if landscape_spec is not None and landscape_payloads is not None:
+        lines.append(
+            f"// Also bundles {landscape_spec.payload_w}x"
+            f"{landscape_spec.payload_h} native landscape variants.")
+    lines.extend([
         "// See tools/embed_weather_background.py to regenerate.",
         "",
         f"#if defined(RETERMINAL_MODEL) && RETERMINAL_MODEL == {spec.model}",
@@ -223,7 +231,17 @@ def emit_cpp(spec: ModelSpec, payloads: Dict[str, bytes], out_path: Path) -> Non
         f"extern const uint8_t  kThemeCount = {len(themes_present)};",
         f"extern const size_t   kThemeDataLen = {payload_len};",
         "",
-    ]
+    ])
+    if landscape_spec is not None and landscape_payloads is not None:
+        lines.extend([
+            f"extern const uint16_t kLandscapeWidth = "
+            f"{landscape_spec.payload_w};",
+            f"extern const uint16_t kLandscapeHeight = "
+            f"{landscape_spec.payload_h};",
+            f"extern const size_t kLandscapeThemeDataLen = "
+            f"{len(next(iter(landscape_payloads.values())))};",
+            "",
+        ])
     # One PROGMEM array per bundled theme. Emitted with file-scope linkage
     # so callers only reach the payloads via the kThemeData[] table below.
     for theme, payload in payloads.items():
@@ -246,6 +264,27 @@ def emit_cpp(spec: ModelSpec, payloads: Dict[str, bytes], out_path: Path) -> Non
         f"{{ {', '.join(entries)} }};"
     )
     lines.append("")
+    if landscape_spec is not None and landscape_payloads is not None:
+        for theme, payload in landscape_payloads.items():
+            cap = theme.capitalize()
+            lines.append(
+                f"static const uint8_t kLandscape{cap}[] PROGMEM = {{")
+            for i in range(0, len(payload), 16):
+                chunk = payload[i:i + 16]
+                lines.append(
+                    "  " + ", ".join(f"0x{b:02x}" for b in chunk) + ",")
+            lines.append("};")
+            lines.append("")
+        landscape_entries = [
+            f"kLandscape{(t if t in landscape_payloads else fallback_theme).capitalize()}"
+            for t in ALL_THEMES
+        ]
+        lines.append(
+            "extern const uint8_t* const "
+            f"kLandscapeThemeData[{len(ALL_THEMES)}] = "
+            f"{{ {', '.join(landscape_entries)} }};"
+        )
+        lines.append("")
     lines.append("}  // namespace weather_background")
     lines.append("")
     lines.append(f"#endif  // RETERMINAL_MODEL == {spec.model}")
@@ -275,7 +314,16 @@ def render_for(spec: ModelSpec, assets_dir: Path) -> Path:
     for theme in spec.themes:
         payloads[theme] = render_theme(spec, theme, assets_dir)
     out_path = OUT_DIR / spec.out_file
-    emit_cpp(spec, payloads, out_path)
+    landscape_spec = None
+    landscape_payloads = None
+    if spec.model == 1005:
+        landscape_spec = replace(spec, panel_w=800, panel_h=480,
+                                 crop_to_panel=False)
+        landscape_payloads = {
+            theme: render_theme(landscape_spec, theme, assets_dir)
+            for theme in landscape_spec.themes
+        }
+    emit_cpp(spec, payloads, out_path, landscape_spec, landscape_payloads)
     return out_path
 
 
@@ -295,10 +343,11 @@ def main() -> None:
     for spec in specs:
         out_path = render_for(spec, args.assets_dir)
         size = os.path.getsize(out_path)
+        orientation_count = 2 if spec.model == 1005 else 1
         print(
             f"E{spec.model}: wrote {out_path.name} "
-            f"({size:>8d} B source, {len(spec.themes)} theme(s) x "
-            f"{spec.payload_bytes:>7d} B payload)"
+            f"({size:>8d} B source, {orientation_count} orientation(s) x "
+            f"{len(spec.themes)} theme(s) x {spec.payload_bytes:>7d} B payload)"
         )
 
 

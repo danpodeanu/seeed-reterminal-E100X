@@ -39,6 +39,7 @@ struct Cache {
   String   ntpSecondary = ::config::NTP_SERVER_SECONDARY;
 
   ::config::WeatherProvider provider   = ::config::WEATHER_PROVIDER;
+  weather_orientation::Orientation orientation = ::config::ORIENTATION_DEFAULT;
   ::config::TemperatureUnit tempUnit   = ::config::TEMPERATURE_UNIT;
   ::config::WindSpeedUnit   windUnit   = ::config::WIND_SPEED_UNIT;
   bool     clutterFreeMode   = ::config::CLUTTER_FREE_MODE;
@@ -69,6 +70,12 @@ bool  g_loaded = false;
   if (s == "OpenMeteo") return ::config::WeatherProvider::OpenMeteo;
   if (s == "QWeather")  return ::config::WeatherProvider::QWeather;
   return ::config::WEATHER_PROVIDER;
+}
+
+weather_orientation::Orientation parseOrientation(const String& s) {
+  if (s == "RotateCW") return weather_orientation::Orientation::RotateCW;
+  if (s == "RotateCCW") return weather_orientation::Orientation::RotateCCW;
+  return weather_orientation::Orientation::Portrait;
 }
 
 ::config::TemperatureUnit parseTempUnit(const String& s) {
@@ -138,6 +145,8 @@ void load() {
 
   g_cache.provider =
       parseProvider(config_portal::storage::getString(prefs, kSchema, kKeyProvider));
+  g_cache.orientation = parseOrientation(
+      config_portal::storage::getString(prefs, kSchema, kKeyOrientation));
   g_cache.tempUnit =
       parseTempUnit(config_portal::storage::getString(prefs, kSchema, kKeyTempUnit));
   g_cache.windUnit =
@@ -188,6 +197,30 @@ const char*  ntpPrimary()            { return g_cache.ntpPrimary.c_str(); }
 const char*  ntpSecondary()          { return g_cache.ntpSecondary.c_str(); }
 
 ::config::WeatherProvider   weatherProvider() { return g_cache.provider; }
+weather_orientation::Orientation orientation() {
+  if (::config::MODEL != 1005) {
+    return weather_orientation::Orientation::Portrait;
+  }
+  return g_cache.orientation;
+}
+bool isLandscape() {
+  return weather_orientation::isLandscape(orientation());
+}
+int panelRotation() {
+  return ::config::MODEL == 1005
+             ? weather_orientation::panelRotation(orientation())
+             : 0;
+}
+int panelWidth() {
+  return ::config::MODEL == 1005
+             ? weather_orientation::panelWidth(orientation())
+             : ::config::PANEL_WIDTH;
+}
+int panelHeight() {
+  return ::config::MODEL == 1005
+             ? weather_orientation::panelHeight(orientation())
+             : ::config::PANEL_HEIGHT;
+}
 ::config::TemperatureUnit   temperatureUnit() { return g_cache.tempUnit; }
 ::config::WindSpeedUnit     windSpeedUnit()   { return g_cache.windUnit; }
 bool                        clutterFreeMode() { return g_cache.clutterFreeMode; }
