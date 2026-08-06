@@ -27,6 +27,7 @@
 #include <Arduino.h>
 #include <TFT_eSPI.h>
 #include <Wire.h>
+#include <cstring>
 #include <driver/rtc_io.h>
 #include <esp_sleep.h>
 
@@ -120,6 +121,11 @@ constexpr uint32_t RAMP[] = {TFT_WHITE, TFT_BLACK};
 
 constexpr int PALETTE_COUNT = sizeof(PALETTE) / sizeof(PALETTE[0]);
 constexpr int RAMP_COUNT = sizeof(RAMP) / sizeof(RAMP[0]);
+constexpr int BARS_HEIGHT = (PANEL_HEIGHT * 2) / 3;
+constexpr int CAST_TOP = BARS_HEIGHT;
+constexpr int CAST_HEIGHT = PANEL_HEIGHT / 12;
+constexpr int FOOTER_TOP = CAST_TOP + CAST_HEIGHT;
+constexpr int FOOTER_HEIGHT = PANEL_HEIGHT - FOOTER_TOP;
 
 // SMPTE castellation colours cycle white/palette/black/palette/... to
 // make a stripe that alternates whichever colour is above it against
@@ -242,17 +248,9 @@ void drawFooter(int top, int height) {
 void renderPattern() {
   epaper.fillSprite(PANEL_WHITE);
 
-  // Classic SMPTE proportions: bars 2/3, castellations 1/12, footer 1/4.
-  const int barsTop = 0;
-  const int barsHeight = (PANEL_HEIGHT * 2) / 3;
-  const int castTop = barsHeight;
-  const int castHeight = PANEL_HEIGHT / 12;
-  const int footerTop = castTop + castHeight;
-  const int footerHeight = PANEL_HEIGHT - footerTop;
-
-  drawColorBars(barsTop, barsHeight);
-  drawCastellations(castTop, castHeight);
-  drawFooter(footerTop, footerHeight);
+  drawColorBars(0, BARS_HEIGHT);
+  drawCastellations(CAST_TOP, CAST_HEIGHT);
+  drawFooter(FOOTER_TOP, FOOTER_HEIGHT);
 
   // Restore default text state so anything printed later renders sanely.
   epaper.setFreeFont(nullptr);
@@ -265,6 +263,58 @@ TwoWire touchWire(0);
 Gt911Touch touch;
 bool touchReady = false;
 bool touchActive = false;
+
+struct PatternRegion {
+  int left;
+  int top;
+  int width;
+  int height;
+};
+
+struct NativeRegion {
+  int left;
+  int top;
+  int width;
+  int height;
+};
+
+PatternRegion columnRegion(int x, int top, int height, int columnCount) {
+  const int baseWidth = PANEL_WIDTH / columnCount;
+  const int remainder = PANEL_WIDTH - baseWidth * columnCount;
+  int left = 0;
+  for (int column = 0; column < columnCount; ++column) {
+    const int width = baseWidth + (column < remainder ? 1 : 0);
+    if (x < left + width || column == columnCount - 1) {
+      return {left, top, width, height};
+    }
+    left += width;
+  }
+  return {0, top, PANEL_WIDTH, height};
+}
+
+PatternRegion touchedPatternRegion(const Gt911Touch::Point& point) {
+  if (point.y < BARS_HEIGHT) {
+    return columnRegion(point.x, 0, BARS_HEIGHT, PALETTE_COUNT);
+  }
+  if (point.y < FOOTER_TOP) {
+    return columnRegion(point.x, CAST_TOP, CAST_HEIGHT, PALETTE_COUNT);
+  }
+
+  const int bannerHeight = (FOOTER_HEIGHT * 2) / 3;
+  const int rampTop = FOOTER_TOP + bannerHeight;
+  if (point.y < rampTop) {
+    return {0, FOOTER_TOP, PANEL_WIDTH, bannerHeight};
+  }
+  return columnRegion(point.x, rampTop, PANEL_HEIGHT - rampTop, RAMP_COUNT);
+}
+
+NativeRegion nativeRegion(const PatternRegion& region) {
+  const int unalignedLeft = PANEL_HEIGHT - region.top - region.height;
+  const int unalignedRight = unalignedLeft + region.height;
+  const int left = unalignedLeft & ~7;
+  const int right = (unalignedRight + 7) & ~7;
+  return {left, region.left, right - left, region.width};
+}
 
 bool invertTouchRegion(int left, int top, int width, int height) {
   auto* framebuffer = static_cast<uint8_t*>(epaper.getPointer());
@@ -282,29 +332,112 @@ bool invertTouchRegion(int left, int top, int width, int height) {
   return true;
 }
 
-void showTouchFeedback(const Gt911Touch::Point& point) {
-  constexpr int kFeedbackSize = 72;
-  constexpr int kFeedbackHalfSize = kFeedbackSize / 2;
-  constexpr uint32_t kFeedbackHoldMs = 400;
+uint8_t reverseBits(uint8_t value) {
+  value = static_cast<uint8_t>((value >> 4) | (value << 4));
+  value = static_cast<uint8_t>(((value & 0xCCU) >> 2) |
+                               ((value & 0x33U) << 2));
+  return static_cast<uint8_t>(((value & 0xAAU) >> 1) |
+                              ((value & 0x55U) << 1));
+}
 
-  const int left = max(0, static_cast<int>(point.x) - kFeedbackHalfSize);
-  const int top = max(0, static_cast<int>(point.y) - kFeedbackHalfSize);
-  const int right =
-      min(PANEL_WIDTH, static_cast<int>(point.x) + kFeedbackHalfSize);
-  const int bottom =
-      min(PANEL_HEIGHT, static_cast<int>(point.y) + kFeedbackHalfSize);
-  const int width = right - left;
-  const int height = bottom - top;
-  if (width < 1 || height < 1 ||
-      !invertTouchRegion(left, top, width, height)) {
+void writeFullDisplayPlane(uint8_t command, const uint8_t* framebuffer) {
+  constexpr int kNativeStrideBytes = PANEL_HEIGHT / 8;
+  epaper.writecommand(command);
+  for (int row = 0; row < PANEL_WIDTH; ++row) {
+    const uint8_t* source = framebuffer + row * kNativeStrideBytes;
+    for (int column = kNativeStrideBytes - 1; column >= 0; --column) {
+      epaper.writedata(reverseBits(source[column]));
+    }
+  }
+}
+
+void writeDisplayCoordinate(uint16_t value) {
+  epaper.writedata(static_cast<uint8_t>(value & 0xFFU));
+  epaper.writedata(static_cast<uint8_t>(value >> 8));
+}
+
+void setPartialWindow(const NativeRegion& region) {
+  const uint16_t left = static_cast<uint16_t>(
+      PANEL_HEIGHT - region.left - region.width);
+  const uint16_t right =
+      static_cast<uint16_t>(PANEL_HEIGHT - region.left - 1);
+  const uint16_t top = static_cast<uint16_t>(region.top);
+  const uint16_t bottom =
+      static_cast<uint16_t>(region.top + region.height - 1);
+
+  epaper.writecommand(0x44);
+  writeDisplayCoordinate(left);
+  writeDisplayCoordinate(right);
+  epaper.writecommand(0x45);
+  writeDisplayCoordinate(top);
+  writeDisplayCoordinate(bottom);
+  epaper.writecommand(0x4E);
+  writeDisplayCoordinate(left);
+  epaper.writecommand(0x4F);
+  writeDisplayCoordinate(top);
+}
+
+bool refreshPartialRegion(const NativeRegion& region,
+                          const uint8_t* oldFramebuffer,
+                          const uint8_t* newFramebuffer) {
+  epaper.wake();
+  epaper.writecommand(0x18);
+  epaper.writedata(0x80);
+  epaper.writecommand(0x3C);
+  epaper.writedata(0x80);
+  setPartialWindow({0, 0, PANEL_HEIGHT, PANEL_WIDTH});
+  writeFullDisplayPlane(0x26, oldFramebuffer);
+  writeFullDisplayPlane(0x24, newFramebuffer);
+  setPartialWindow(region);
+  epaper.writecommand(0x22);
+  epaper.writedata(0xFF);
+  epaper.writecommand(0x20);
+
+  constexpr uint32_t kRefreshTimeoutMs = 10000;
+  const uint32_t startedAt = millis();
+  while (digitalRead(TFT_BUSY) == HIGH) {
+    if (millis() - startedAt >= kRefreshTimeoutMs) {
+      LOG.println("[panel-test] partial refresh timed out");
+      return false;
+    }
+    delay(1);
+  }
+  // Keep controller RAM alive between touches. Resetting the SSD1677 before
+  // every partial update discards untouched RAM and corrupts the next window.
+  return true;
+}
+
+void showTouchFeedback(const Gt911Touch::Point& point) {
+  constexpr uint32_t kFeedbackHoldMs = 1000;
+
+  const PatternRegion region = touchedPatternRegion(point);
+  const NativeRegion native = nativeRegion(region);
+  auto* framebuffer = static_cast<uint8_t*>(epaper.getPointer());
+  constexpr size_t kFramebufferSize =
+      static_cast<size_t>(PANEL_HEIGHT / 8) * PANEL_WIDTH;
+  auto* original = static_cast<uint8_t*>(malloc(kFramebufferSize));
+  if (!framebuffer || !original) {
+    free(original);
+    LOG.printf("[panel-test] cannot allocate %u-byte partial buffer\n",
+               static_cast<unsigned>(kFramebufferSize));
     return;
   }
 
+  memcpy(original, framebuffer, kFramebufferSize);
+  invertTouchRegion(region.left, region.top, region.width, region.height);
   hardware::beep();
-  epaper.updataPartial(left, top, width, height);
-  delay(kFeedbackHoldMs);
-  invertTouchRegion(left, top, width, height);
-  epaper.updataPartial(left, top, width, height);
+  const bool invertedOk =
+      refreshPartialRegion(native, original, framebuffer);
+  if (invertedOk) delay(kFeedbackHoldMs);
+  const bool restoredOk =
+      invertedOk &&
+      refreshPartialRegion(native, framebuffer, original);
+  invertTouchRegion(region.left, region.top, region.width, region.height);
+  free(original);
+  if (!restoredOk) {
+    LOG.println("[panel-test] restoring pattern with a full refresh");
+    epaper.update();
+  }
 }
 
 void pollTouch() {
