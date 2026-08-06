@@ -16,14 +16,15 @@
 // only ever included by main.cpp, which pulls TFT_eSPI in earlier.
 #include <TFT_eSPI.h>
 
+#include "board_pins.h"
+
 namespace theme {
 
-// Hardware buttons -- identical across all supported reTerminal E-series
-// models today. Kept next to the visual palette so all hardware-specific
-// constants live in one place.
-inline constexpr int PIN_BUTTON_GREEN = 3;
-inline constexpr int PIN_BUTTON_RIGHT = 4;
-inline constexpr int PIN_BUTTON_LEFT = 5;
+// Historical aliases retained for existing weather call sites. On E1005
+// these refer to OK / UP / DOWN on GPIO4 / GPIO5 / GPIO6.
+inline constexpr int PIN_BUTTON_GREEN = board::PIN_BUTTON_0;
+inline constexpr int PIN_BUTTON_RIGHT = board::PIN_BUTTON_1;
+inline constexpr int PIN_BUTTON_LEFT = board::PIN_BUTTON_2;
 
 #if RETERMINAL_MODEL == 1001
 // UC8179 / Gray4
@@ -77,8 +78,36 @@ inline constexpr uint8_t  PANEL_STATUS_DITHER_THRESHOLD = 4;
 inline constexpr uint32_t COLOR_SUN = TFT_YELLOW;
 inline constexpr uint32_t COLOR_RAIN = TFT_BLUE;
 inline constexpr uint32_t COLOR_ALERT = TFT_RED;
+#elif RETERMINAL_MODEL == 1005
+// SSD1677 / monochrome
+inline constexpr uint32_t PANEL_WHITE = TFT_WHITE;
+inline constexpr uint32_t PANEL_BLACK = TFT_BLACK;
+inline constexpr uint32_t PANEL_LIGHT = TFT_WHITE;
+inline constexpr uint32_t PANEL_MUTED = TFT_BLACK;
+inline constexpr uint32_t PANEL_STATUS_BACKGROUND = TFT_WHITE;
+inline constexpr bool     PANEL_STATUS_DITHERED = false;
+inline constexpr uint32_t PANEL_STATUS_DITHER_COLOR = TFT_BLACK;
+inline constexpr uint8_t  PANEL_STATUS_DITHER_THRESHOLD = 0;
+inline constexpr uint32_t COLOR_SUN = TFT_BLACK;
+inline constexpr uint32_t COLOR_RAIN = TFT_BLACK;
+inline constexpr uint32_t COLOR_ALERT = TFT_BLACK;
 #else
-#error "RETERMINAL_MODEL must be 1001, 1002, 1003, or 1004"
+#error "RETERMINAL_MODEL must be 1001, 1002, 1003, 1004, or 1005"
+#endif
+
+#if RETERMINAL_MODEL == 1005
+inline constexpr char PRIMARY_BUTTON_LABEL[] = "OK";
+inline constexpr char BUTTON_0_NAME[] = "OK";
+inline constexpr char BUTTON_1_NAME[] = "UP";
+inline constexpr char BUTTON_2_NAME[] = "DOWN";
+inline constexpr char PORTAL_EXIT_HINT[] = "Press OK to return to weather";
+#else
+inline constexpr char PRIMARY_BUTTON_LABEL[] = "green";
+inline constexpr char BUTTON_0_NAME[] = "GREEN";
+inline constexpr char BUTTON_1_NAME[] = "RIGHT";
+inline constexpr char BUTTON_2_NAME[] = "LEFT";
+inline constexpr char PORTAL_EXIT_HINT[] =
+    "Press green button to return to viewer";
 #endif
 
 }  // namespace theme

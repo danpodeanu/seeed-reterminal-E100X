@@ -7,6 +7,8 @@
 #include <time.h>
 
 #include "app_logic.h"
+#include "battery_gauge_pure.h"
+#include "compact_portrait_layout.h"
 #include "local_time.h"
 #include "text_render_pure.h"
 #include "weather_quotes_bucket.h"
@@ -19,6 +21,29 @@ static inline struct tm* gmtime_r(const time_t* t, struct tm* out) {
 
 void setUp() {}
 void tearDown() {}
+
+void test_e1005_compact_layout_stays_inside_panel() {
+  using namespace compact_portrait_layout;
+  TEST_ASSERT_TRUE(fitsPanel(480, 800));
+  TEST_ASSERT_FALSE(fitsPanel(800, 480));
+  TEST_ASSERT_GREATER_OR_EQUAL(ALERT_TOP + ALERT_HEIGHT,
+                               heroTop(true));
+  TEST_ASSERT_EQUAL_INT(FORECAST_TOP, forecastRowTop(0));
+  TEST_ASSERT_EQUAL_INT(FOOTER_TOP, forecastRowsBottom() + 1);
+}
+
+void test_battery_gauge_decodes_e1005_words_and_rejects_missing_adc() {
+  using namespace battery::pure;
+  TEST_ASSERT_FALSE(adcPinsUsable(-1, -1));
+  TEST_ASSERT_TRUE(adcPinsUsable(40, 1));
+  TEST_ASSERT_EQUAL_HEX8(0x08, BQ27220_VOLTAGE_REGISTER);
+  TEST_ASSERT_EQUAL_HEX8(0x14, BQ27220_AVERAGE_CURRENT_REGISTER);
+  TEST_ASSERT_EQUAL_HEX8(0x2C, BQ27220_STATE_OF_CHARGE_REGISTER);
+  TEST_ASSERT_EQUAL_HEX16(0x1234, littleEndianWord(0x34, 0x12));
+  TEST_ASSERT_EQUAL_INT16(-100, littleEndianSignedWord(0x9C, 0xFF));
+  TEST_ASSERT_TRUE(stateOfChargeValid(100));
+  TEST_ASSERT_FALSE(stateOfChargeValid(101));
+}
 
 void test_startup_beep_only_for_cold_boot_and_button_wake() {
   TEST_ASSERT_TRUE(app_logic::startupBeepRequired(true, false));
@@ -805,6 +830,8 @@ void test_sd_ota_tag_stays_matched_across_more_data() {
 
 int main(int, char**) {
   UNITY_BEGIN();
+  RUN_TEST(test_e1005_compact_layout_stays_inside_panel);
+  RUN_TEST(test_battery_gauge_decodes_e1005_words_and_rejects_missing_adc);
   RUN_TEST(test_startup_beep_only_for_cold_boot_and_button_wake);
   RUN_TEST(test_quiet_hours_boundaries);
   RUN_TEST(test_next_wake_detects_quiet_boundary);

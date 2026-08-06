@@ -23,7 +23,7 @@ void test_low_battery_skips_when_disabled() {
 }
 
 void test_low_battery_skips_when_charger_missing() {
-  // Older E1001/E1002 without SY6974B: chargerValid=false -> skip
+  // Older E1001/E1002 without SY6974B: batteryValid=false -> skip
   TEST_ASSERT_FALSE(low_battery::shouldWarn(true, false, false, 0));
 }
 

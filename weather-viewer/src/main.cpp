@@ -46,8 +46,10 @@
 #include "smooth_font_manager.h"
 #include "panel_watchdog.h"
 #include "peripheral_power.h"
+#include "power_latch.h"
 #include "timestamped_logger.h"
 #include "theme.h"
+#include "compact_portrait_layout.h"
 #include "weather_data.h"
 #include "weather_provider.h"
 #include "canonical_weather.h"
@@ -88,8 +90,9 @@ using namespace ::board;
 // COLOR_SUN, PIN_BUTTON_GREEN, ...) working at every callsite below.
 using namespace theme;
 
-// The ink-wash weather background can now be enabled on any of the four
-// panels via /settings. TFT_eSPI's drawString path for GFX free fonts
+// The ink-wash weather background can be enabled on E1001-E1004 via
+// /settings. E1005 always uses the compact layout's clean white canvas.
+// TFT_eSPI's drawString path for GFX free fonts
 // unconditionally paints a padded fillRect(..., textbgcolor) behind
 // every string whenever textcolor != textbgcolor - the _fillbg / bgfill
 // flag is only checked on the smooth-font path. So the only way to stop
@@ -101,8 +104,16 @@ using namespace theme;
 EPaper epaper;
 smooth_fonts::Manager smoothFontManager(epaper);
 
+inline bool weatherBackgroundActive() {
+#if RETERMINAL_MODEL == 1005
+  return false;
+#else
+  return weather_config::runtime::weatherBackgroundEnabled();
+#endif
+}
+
 inline void setBodyTextColor(uint16_t fg) {
-  if (weather_config::runtime::weatherBackgroundEnabled()) {
+  if (weatherBackgroundActive()) {
     epaper.setTextColor(fg, fg);
   } else {
     epaper.setTextColor(fg, PANEL_WHITE, true);
@@ -124,6 +135,19 @@ sensors::Readings sensorReadings;
 
 RTC_DATA_ATTR time_t lastNtpSyncEpoch = 0;
 bool quietSleepNotice = false;
+
+void beginPanel() {
+#if RETERMINAL_MODEL == 1005
+  // Sticky's SD card shares SCK/MOSI with the panel but has a separate
+  // power rail. Power and deselect an inserted card before panel traffic
+  // so it cannot clamp or back-power the shared bus.
+  pinMode(board::PIN_SD_CS, OUTPUT);
+  digitalWrite(board::PIN_SD_CS, HIGH);
+  peripheral_power::enableSd();
+  delay(board::SD_POWER_SETTLE_MS);
+#endif
+  epaper_setup::begin(epaper);
+}
 
 // WeatherData / DailyForecast now live in weather_data.h so both the
 // provider translation units and main.cpp share one definition.
@@ -353,6 +377,14 @@ void measureScaled150(const GFXfont* font, const char* s,
 void drawBadges(uint32_t background = PANEL_WHITE,
                 bool fillTextBackground = true,
                 time_t weatherUpdateTime = 0) {
+#if RETERMINAL_MODEL == 1005
+  // The compact dashboard and status screens reserve the full width for
+  // their primary message; BQ27220 data still drives low-battery safety.
+  (void)background;
+  (void)fillTextBackground;
+  (void)weatherUpdateTime;
+  return;
+#endif
   epaper.setTextColor(PANEL_BLACK, background, fillTextBackground);
   selectSmallFont();
 
@@ -404,7 +436,7 @@ void drawBadges(uint32_t background = PANEL_WHITE,
   }
   text_render::drawBatteryGauge(epaper, x, y, w, h, sensorReadings.batteryPct, outline,
                                 terminalWidth, terminalHeight, PANEL_BLACK, PANEL_WHITE,
-                                sensorReadings.chargerValid && sensorReadings.externalPower);
+                                sensorReadings.externalPowerValid && sensorReadings.externalPower);
   epaper.setTextSize(1);
   epaper.setFreeFont(nullptr);
   epaper.setTextFont(2);
@@ -799,6 +831,35 @@ void drawLargeTemperature(float celsius, int cx, int cy) {
 }
 
 void drawHeader(const WeatherData& weather) {
+#if RETERMINAL_MODEL == 1005
+  using namespace compact_portrait_layout;
+  epaper.fillRect(0, 0, config::PANEL_WIDTH, HEADER_HEIGHT, PANEL_WHITE);
+  setStripTextColor(PANEL_BLACK, PANEL_WHITE);
+  epaper.setTextDatum(MC_DATUM);
+  selectSmallSmoothFont();
+  const String location =
+      text_render::displayText(String(weather_config::runtime::locationName()));
+  epaper.drawString(
+      text_render::ellipsize(epaper, location, config::PANEL_WIDTH - 28),
+      config::PANEL_WIDTH / 2, 20 + smoothCenterYAdjust(), 1);
+  smoothFontManager.unload();
+
+  selectSmallFont();
+  String status;
+  if (quietSleepNotice) {
+    status = "Sleeping until " + quiet_hours::endLabel();
+  } else {
+    const String age = weatherAgeText(weather.updateTime);
+    status = age.isEmpty() ? String("Weather")
+                           : String("Updated ") + age;
+  }
+  epaper.drawString(
+      text_render::ellipsize(epaper, status, config::PANEL_WIDTH - 28),
+      config::PANEL_WIDTH / 2, 47, 1);
+  epaper.drawFastHLine(14, HEADER_HEIGHT - 1,
+                       config::PANEL_WIDTH - 28, PANEL_BLACK);
+  return;
+#else
   const int height = config::ui(45);
   epaper.fillRect(0, 0, config::PANEL_WIDTH, height, PANEL_WHITE);
   drawBadges(PANEL_WHITE, true, weather.updateTime);
@@ -827,6 +888,7 @@ void drawHeader(const WeatherData& weather) {
   smoothFontManager.unload();
   epaper.drawFastHLine(config::ui(10), config::ui(44),
                        config::PANEL_WIDTH - config::ui(20), PANEL_BLACK);
+#endif
 }
 
 void drawForecastCard(const DailyForecast& day, uint8_t index,
@@ -855,8 +917,7 @@ void drawForecastCard(const DailyForecast& day, uint8_t index,
     // top of the ink-wash background, so match the rest of the card's
     // text weight when the background is on.
     const uint32_t extraColor =
-        weather_config::runtime::weatherBackgroundEnabled() ? PANEL_BLACK
-                                                            : PANEL_MUTED;
+        weatherBackgroundActive() ? PANEL_BLACK : PANEL_MUTED;
     setBodyTextColor(extraColor);
     String extra;
     if (day.precipitationProbability >= 0) {
@@ -1055,7 +1116,91 @@ void renderPortrait(const WeatherData& weather) {
   }
 }
 
+#if RETERMINAL_MODEL == 1005
+void drawCompactForecastRow(const DailyForecast& day, uint8_t index,
+                            int top, int height) {
+  const int centerY = top + height / 2;
+  epaper.drawFastHLine(14, top, config::PANEL_WIDTH - 28, PANEL_BLACK);
+
+  setBodyTextColor(PANEL_BLACK);
+  epaper.setTextDatum(ML_DATUM);
+  selectMediumFont();
+  epaper.drawString(dayLabel(index, day.date), 20, centerY - 24, 1);
+  selectSmallLightFont();
+  epaper.drawString(
+      text_render::ellipsize(
+          epaper, app_logic::conditionName(day.weatherCode), 150),
+      20, centerY + 18, 1);
+
+  drawWeatherIcon(220, centerY, 64, day.weatherCode, true);
+
+  epaper.setTextDatum(MC_DATUM);
+  selectMediumFont();
+  epaper.drawString(
+      weather_format::temperature(day.minimumC) + " / " +
+          weather_format::temperature(day.maximumC),
+      372, centerY - 14, 1);
+  selectSmallFont();
+  epaper.drawString("Low / High", 372, centerY + 23, 1);
+}
+
+void renderCompactPortrait(const WeatherData& weather) {
+  using namespace compact_portrait_layout;
+  static_assert(fitsPanel(config::PANEL_WIDTH, config::PANEL_HEIGHT),
+                "compact E1005 layout must fit the logical panel");
+
+  const int top = heroTop(!weather.alertTitle.isEmpty());
+  drawWeatherIcon(HERO_ICON_X, top + 78, HERO_ICON_SIZE,
+                  weather.weatherCode, weather.isDay);
+  drawLargeTemperature(weather.temperatureC, HERO_TEMPERATURE_X, top + 78);
+
+  setBodyTextColor(PANEL_BLACK);
+  epaper.setTextDatum(MC_DATUM);
+  selectMediumFont();
+  epaper.drawString(app_logic::conditionName(weather.weatherCode),
+                    config::PANEL_WIDTH / 2, top + 174, 1);
+
+  selectSmallFont();
+  const String humidity =
+      isfinite(weather.humidityPct)
+          ? String(static_cast<int>(roundf(weather.humidityPct))) + "%"
+          : String(weather_format::kMissing);
+  const String details =
+      "Feels " + weather_format::temperature(weather.apparentC) +
+      "   Humidity " + humidity;
+  epaper.drawString(
+      text_render::ellipsize(epaper, details, config::PANEL_WIDTH - 32),
+      config::PANEL_WIDTH / 2, top + 207, 1);
+
+  String secondary = rainSummary(weather);
+  if (secondary.isEmpty()) {
+    secondary = "Wind " + weather_format::windSpeed(weather.windKmh);
+  }
+  epaper.drawString(
+      text_render::ellipsize(epaper, secondary, config::PANEL_WIDTH - 32),
+      config::PANEL_WIDTH / 2, top + 236, 1);
+
+  for (uint8_t i = 0; i < FORECAST_DAYS; ++i) {
+    drawCompactForecastRow(weather.days[i], i, forecastRowTop(i),
+                           FORECAST_ROW_HEIGHT);
+  }
+}
+#endif
+
 void renderFooter(const WeatherData& weather) {
+#if RETERMINAL_MODEL == 1005
+  using namespace compact_portrait_layout;
+  epaper.fillRect(0, FOOTER_TOP, config::PANEL_WIDTH,
+                  config::PANEL_HEIGHT - FOOTER_TOP, PANEL_WHITE);
+  epaper.drawFastHLine(14, FOOTER_TOP,
+                       config::PANEL_WIDTH - 28, PANEL_BLACK);
+  setStripTextColor(PANEL_BLACK, PANEL_WHITE);
+  epaper.setTextDatum(MC_DATUM);
+  selectSmallFont();
+  epaper.drawString(weather_provider::name(), config::PANEL_WIDTH / 2,
+                    (FOOTER_TOP + config::PANEL_HEIGHT) / 2, 1);
+  return;
+#else
   const int top = config::PANEL_HEIGHT - config::ui(30);
   // Anchor the label baseline to the actual band vertical center so the
   // text visually sits in the middle of the strip (previously the label
@@ -1123,10 +1268,26 @@ void renderFooter(const WeatherData& weather) {
   // repaint doesn't hold onto them.
   smoothFontManager.unload();
   selectSmallFont();
+#endif
 }
 
 void drawAlertBar(const WeatherData& weather) {
   if (weather.alertTitle.isEmpty()) return;
+#if RETERMINAL_MODEL == 1005
+  using namespace compact_portrait_layout;
+  epaper.fillRect(0, ALERT_TOP, config::PANEL_WIDTH, ALERT_HEIGHT,
+                  PANEL_BLACK);
+  setStripTextColor(PANEL_WHITE, PANEL_BLACK);
+  epaper.setTextDatum(MC_DATUM);
+  selectSmallFont();
+  String line = "! " + weather.alertTitle;
+  if (weather.alertOtherCount > 0) {
+    line += " (+" + String(weather.alertOtherCount) + ")";
+  }
+  epaper.drawString(
+      text_render::ellipsize(epaper, line, config::PANEL_WIDTH - 24),
+      config::PANEL_WIDTH / 2, ALERT_TOP + ALERT_HEIGHT / 2, 1);
+#else
   const int top = config::ui(46);
   const int height = config::ui(22);
   epaper.fillRect(0, top, config::PANEL_WIDTH, height, PANEL_LIGHT);
@@ -1143,6 +1304,7 @@ void drawAlertBar(const WeatherData& weather) {
       text_render::ellipsize(epaper, line,
                              config::PANEL_WIDTH - config::ui(24)),
       config::PANEL_WIDTH / 2, top + height / 2, 1);
+#endif
 }
 
 void renderWeather(const WeatherData& weather) {
@@ -1152,7 +1314,7 @@ void renderWeather(const WeatherData& weather) {
   // blit covers every pixel and we skip the fillSprite step. When the
   // user has toggled the background off in /settings, fall back to a
   // plain white sprite instead.
-  if (weather_config::runtime::weatherBackgroundEnabled()) {
+  if (weatherBackgroundActive()) {
     weather_background::draw(
         epaper, weather_background::themeForWmoCode(weather.weatherCode));
   } else {
@@ -1160,7 +1322,9 @@ void renderWeather(const WeatherData& weather) {
   }
   drawHeader(weather);
   drawAlertBar(weather);
-#if RETERMINAL_MODEL == 1004
+#if RETERMINAL_MODEL == 1005
+  renderCompactPortrait(weather);
+#elif RETERMINAL_MODEL == 1004
   renderPortrait(weather);
 #else
   renderLandscape(weather);
@@ -1192,9 +1356,19 @@ void powerDownAndSleep(uint64_t sleepSeconds = config::SLEEP_SECONDS,
   // sink is attached.
   appLog.detachSdSink();
   if (sdReady) SD.end();
+#if RETERMINAL_MODEL == 1005
+  epaper.getSPIinstance().end();
+  pinMode(board::PIN_SD_CS, INPUT);
+  pinMode(board::PIN_SD_SCK, INPUT);
+  pinMode(board::PIN_SD_MOSI, INPUT);
+  pinMode(board::PIN_SD_MISO, INPUT);
+  peripheral_power::disableSd();
+#endif
   peripheral_power::disable();
-  pinMode(PIN_BATTERY_ENABLE, OUTPUT);
-  digitalWrite(PIN_BATTERY_ENABLE, LOW);
+  if (PIN_BATTERY_ENABLE >= 0) {
+    pinMode(PIN_BATTERY_ENABLE, OUTPUT);
+    digitalWrite(PIN_BATTERY_ENABLE, LOW);
+  }
 
   pinMode(PIN_BUTTON_GREEN, INPUT_PULLUP);
   pinMode(PIN_BUTTON_RIGHT, INPUT_PULLUP);
@@ -1238,8 +1412,9 @@ void powerDownAndSleep(uint64_t sleepSeconds = config::SLEEP_SECONDS,
              digitalRead(PIN_BUTTON_RIGHT),
              digitalRead(PIN_BUTTON_LEFT));
   if (timerWakeEnabled) {
-    LOG.printf("[sleep] %llu seconds; GPIO3/GPIO4/GPIO5 wake enabled\n",
-               static_cast<unsigned long long>(sleepSeconds));
+    LOG.printf("[sleep] %llu seconds; GPIO%d/%d/%d wake enabled\n",
+               static_cast<unsigned long long>(sleepSeconds),
+               PIN_BUTTON_GREEN, PIN_BUTTON_RIGHT, PIN_BUTTON_LEFT);
   } else {
     LOG.println("[sleep] waiting for a front button or hardware reset");
   }
@@ -1253,12 +1428,14 @@ void powerDownAndSleep(uint64_t sleepSeconds = config::SLEEP_SECONDS,
   LOG.flush();
   delay(50);
   hardware::setStatusLed(false);
+  power_latch::holdDuringDeepSleep();
   esp_deep_sleep_start();
 }
 
 }  // namespace
 
 void setup() {
+  power_latch::holdOn();
   hardware::setStatusLed(true);
   const esp_sleep_wakeup_cause_t wakeCause =
       esp_sleep_get_wakeup_cause();
@@ -1317,8 +1494,8 @@ void setup() {
                           weather_config::runtime::quietEndHour(),
                           weather_config::runtime::quietEndMinute()});
 
-  // Unified green-button boot gesture. Applies on both cold boot and
-  // deep-sleep green wakes. A first beep marks the press being registered;
+  // Unified primary-button boot gesture. Applies on both cold boot and
+  // deep-sleep primary-button wakes. A first beep marks the press;
   // a second beep 5 s later marks the switch to screenshot:
   //   * Released before 1 s          -> accidental tap, ignored.
   //   * Released between 1 s and 5 s -> enter config portal.
@@ -1347,17 +1524,20 @@ void setup() {
     }
     if (releasedBeforeDecision) {
       if (releasedAtMs < kPortalMinMs) {
-        LOG.printf("[gesture] green released after %u ms (< %u ms min) -> ignored\n",
+        LOG.printf("[gesture] %s released after %u ms (< %u ms min) -> ignored\n",
+                   PRIMARY_BUTTON_LABEL,
                    static_cast<unsigned>(releasedAtMs),
                    static_cast<unsigned>(kPortalMinMs));
         gesture = GreenGesture::None;
       } else {
-        LOG.printf("[gesture] green released after %u ms -> portal\n",
+        LOG.printf("[gesture] %s released after %u ms -> portal\n",
+                   PRIMARY_BUTTON_LABEL,
                    static_cast<unsigned>(releasedAtMs));
         gesture = GreenGesture::PortalRequest;
       }
     } else {
-      LOG.printf("[gesture] green still held at %u ms -> screenshot\n",
+      LOG.printf("[gesture] %s still held at %u ms -> screenshot\n",
+                 PRIMARY_BUTTON_LABEL,
                  static_cast<unsigned>(kPortalDecisionMs));
       hardware::beep();  // second beep: past portal window, screenshot armed.
       gesture = GreenGesture::ScreenshotRequest;
@@ -1385,7 +1565,7 @@ void setup() {
   if (portalRequested) {
     LOG.printf("[portal] entering config portal (no_wifi=%d gesture=%s)\n",
                wifiUnconfigured,
-               gesture == GreenGesture::PortalRequest ? "green-tap" : "auto");
+               gesture == GreenGesture::PortalRequest ? "primary-button" : "auto");
     // Restore the wall clock from the battery-backed PCF8563 before we
     // start the portal. NTP isn't available here (Wi-Fi is almost
     // certainly unconfigured - that's why we're in the portal), and
@@ -1396,7 +1576,7 @@ void setup() {
     // Bring the panel up FIRST so the QR splash renders before we start
     // the Wi-Fi AP + web server.
     LOG.println("[portal] panel: begin");
-    epaper_setup::begin(epaper);
+    beginPanel();
 #if RETERMINAL_MODEL == 1001
     epaper.initGrayMode(GRAY_LEVEL4);
     const GFXfont* titleFont    = &FreeSansBold18pt7b;
@@ -1472,6 +1652,7 @@ void setup() {
           info.wifiPassword.length() ? info.wifiPassword.c_str() : nullptr);
       info.urlPayload = config_portal::urlQrPayload(
           config_portal::currentIp(), config_portal::currentPort(), "/wifi");
+      info.footerHint = PORTAL_EXIT_HINT;
       info.fonts.titleFont = titleFont;
       info.fonts.subtitleFont = subtitleFont;
       info.fonts.captionFont = captionFont;
@@ -1511,14 +1692,15 @@ void setup() {
              !sd_web_portal::exitRequested()) {
         config_portal::loop();
         const uint32_t nowMs = millis();
-        // Green button in the portal = reboot the device. Convenient exit
+        // Primary button in the portal = reboot the device. Convenient exit
         // once you've saved settings on your phone, matching the "Reboot"
         // button on /reset. Debounced at 50 ms.
         if (!digitalRead(PIN_BUTTON_GREEN)) {
           if (greenLowSinceMs == 0) {
             greenLowSinceMs = nowMs;
           } else if (nowMs - greenLowSinceMs >= 50) {
-            LOG.println("[portal] green button pressed -> reboot");
+            LOG.printf("[portal] %s button pressed -> reboot\n",
+                       PRIMARY_BUTTON_LABEL);
             hardware::beep();
             break;
           }
@@ -1564,7 +1746,7 @@ void setup() {
 
   if (app_logic::startupBeepRequired(coldBoot, buttonWake)) {
     // Acknowledge cold boots and button wakes immediately. The unified
-    // green-button gesture handler above has already decided whether
+    // primary-button gesture handler above has already decided whether
     // this boot is a portal request or a screenshot request.
     hardware::beep();
   }
@@ -1576,16 +1758,20 @@ void setup() {
   LOG.printf(" Firmware v%s\n", board::FIRMWARE_VERSION);
   LOG.println("============================================");
   LOG.printf("[boot] wake cause=%d pins=0x%llx, PSRAM=%luK, "
-             "GPIO3=%s GPIO4=%s GPIO5=%s\n",
+             "GPIO%d(%s)=%s GPIO%d(%s)=%s GPIO%d(%s)=%s\n",
              wakeCause, static_cast<unsigned long long>(wakePins),
              static_cast<unsigned long>(ESP.getPsramSize() / 1024),
+             PIN_BUTTON_GREEN, BUTTON_0_NAME,
              greenWokeDevice
                  ? (screenshotRequested ? "long-press" : "short-press")
                  : "idle",
+             PIN_BUTTON_RIGHT, BUTTON_1_NAME,
              rightWokeDevice ? "wake" : "idle",
+             PIN_BUTTON_LEFT, BUTTON_2_NAME,
              leftWokeDevice ? "wake" : "idle");
   if (screenshotRequested) {
-    LOG.println("[screenshot] green-button long press requested export");
+    LOG.printf("[screenshot] %s-button long press requested export\n",
+               PRIMARY_BUTTON_LABEL);
   }
 
   const time_t startupTime = time(nullptr);
@@ -1625,16 +1811,17 @@ void setup() {
     pcf8563::Reading storedRtc;
     rtc_sync::readAndLog(storedRtc);
   }
-  epaper_setup::begin(epaper);
+  beginPanel();
   if (low_battery::shouldWarn(weather_config::runtime::lowBatteryWarn(),
-                              sensorReadings.chargerValid,
+                              sensorReadings.batteryValid,
                               sensorReadings.externalPower,
                               sensorReadings.batteryPct)) {
     LOG.printf("[battery] %d%% (%.3fV) below %d%% -- rendering recharge screen\n",
                sensorReadings.batteryPct, sensorReadings.batteryVoltage,
                low_battery::kThresholdPct);
     renderStatus("Please recharge",
-                 "Plug in a USB-C cable then press the green button to continue.",
+                 "Plug in USB-C then press " +
+                     String(PRIMARY_BUTTON_LABEL) + " to continue.",
                  "Battery low");
     powerDownAndSleep(config::SLEEP_SECONDS);
     return;
@@ -1703,7 +1890,8 @@ void setup() {
     LOG.println("[display] showing Wi-Fi connection status");
     renderStatus("Connecting to " + String(weather_wifi::ssid()), connectionDetail,
                  locationLabel,
-                 "To configure device - from sleep, hold green for 2 seconds",
+                 "To configure device - from sleep, hold " +
+                     String(PRIMARY_BUTTON_LABEL) + " for 2 seconds",
                  "", macAndVersion);
   }
 #if RETERMINAL_MODEL == 1001
@@ -1833,9 +2021,11 @@ void setup() {
     const uint64_t retryMinutes = config::FAILURE_RETRY_SECONDS / 60ULL;
     const String detail =
         "Retrying in " + String(static_cast<unsigned long>(retryMinutes)) +
-        " minutes. Press the green button to retry now.";
+        " minutes. Press " + String(PRIMARY_BUTTON_LABEL) +
+        " to retry now.";
     const String help =
-        "Keep the green button pressed for 2 seconds to reconfigure.";
+        "Keep " + String(PRIMARY_BUTTON_LABEL) +
+        " pressed for 2 seconds to reconfigure.";
     renderStatus("Weather unavailable", detail, "", help, failureSummary);
     powerDownAndSleep(config::FAILURE_RETRY_SECONDS);
     return;

@@ -9,7 +9,7 @@
 
 A collection of applications for the
 [Seeed Studio reTerminal E Series](https://wiki.seeedstudio.com/reterminal_e10xx_main_page/)
-E1001, E1002, E1003, and E1004 e-paper displays.
+E1001, E1002, E1003, E1004, and E1005 e-paper displays.
 
 These projects explore the E100X family as low-power, always-visible displays
 for information that changes occasionally. Each application lives in its own
@@ -82,9 +82,9 @@ family. Panel resolution, color capabilities, peripherals, and pin mappings
 differ between models, so consult each application's README before building or
 uploading firmware.
 
-All three applications support E1001, E1002, E1003, and E1004, with
-model-specific firmware included in every release. All four models have been
-tested on real hardware.
+All three viewer applications support E1001-E1004. Weather Viewer also
+supports the monochrome E1005; the E1005 hardware tools live under `tools/`.
+Model-specific firmware for supported combinations is included in releases.
 
 ## Getting started
 
@@ -94,8 +94,10 @@ another; select the exact device target during compilation.
 
 For pre-built firmware, the
 [web flasher](https://danpodeanu.github.io/seeed-reterminal-E100X/) writes
-the latest GitHub Release for any application × board combination directly
-from Chrome or Edge over USB. See [`docs/`](docs/) for how it is wired up.
+the latest GitHub Release for supported E1001-E1004 application/board
+combinations directly from Chrome or Edge over USB. E1005 Weather Viewer
+firmware is available as a release binary or source build. See
+[`docs/`](docs/) for how the flasher is wired up.
 
 ## Updating firmware (SD card)
 
@@ -141,7 +143,8 @@ pio test -c platformio-test.ini -e native_test
 Use the same command inside `weather-viewer` or `photo-viewer`. Their GitHub
 Actions workflows run these tests on every relevant push and pull request.
 
-Release qualification builds all 12 application × board combinations.
+Release qualification builds the 12 E1001-E1004 application/board
+combinations plus Weather Viewer for E1005.
 
 ## Contributing
 

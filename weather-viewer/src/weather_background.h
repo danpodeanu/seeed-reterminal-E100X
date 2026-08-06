@@ -4,13 +4,11 @@
 //
 // Four themes (sunny, cloudy, rainy, snowy) are keyed off the current
 // WMO weather code so the picture roughly agrees with the hero icon.
-// E1001 and E1002 bundle all four; E1003 and E1004 bundle cloudy only
-// (their payloads are large enough that all four would blow the flash
-// budget). The kThemeData[] pointer table always has four slots, so
-// callers can index by Theme unconditionally - on the single-theme
-// panels every slot points to the cloudy payload.
+// E1001-E1004 use pre-baked payloads selected by WMO condition. E1005
+// deliberately renders a plain white background for maximum legibility
+// and a smaller firmware image.
 //
-// One data file per model lives next to this blitter; each is guarded
+// One data file per image-backed model lives next to this blitter; each is guarded
 // with `#if RETERMINAL_MODEL == NNNN` so the linker only picks up the
 // payload matching the active build. Regenerate everything via
 // `python tools/embed_weather_background.py --all` after updating the
@@ -51,8 +49,7 @@ Theme themeForWmoCode(int wmoCode);
 // Blit the weather background for `theme` across the whole sprite.
 // Per-model palette mapping lives inside the .cpp so callers don't need
 // to know whether the current panel is 4-gray, 16-gray, or Spectra-6 BW.
-// On single-theme models every Theme argument resolves to the same
-// (cloudy) payload.
+// E1005 ignores the theme and fills the sprite white.
 void draw(TFT_eSPI& epaper, Theme theme);
 
 }  // namespace weather_background

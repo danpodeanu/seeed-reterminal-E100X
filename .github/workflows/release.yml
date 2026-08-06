@@ -36,6 +36,12 @@ jobs:
           - reterminal_e1002
           - reterminal_e1003
           - reterminal_e1004
+          - reterminal_e1005
+        exclude:
+          - app: xkcd-viewer
+            board: reterminal_e1005
+          - app: photo-viewer
+            board: reterminal_e1005
 
     steps:
       - name: Check out repository
@@ -73,17 +79,21 @@ jobs:
           # flashed at 0x0 via USB / web flasher and includes bootloader,
           # partitions, OTA selector, and application. The -ota image is
           # the app-only firmware.bin fed to esp_ota_write (SD OTA path).
+          FLASH_SIZE=8MB
+          if [ "${{ matrix.board }}" = "reterminal_e1005" ]; then
+            FLASH_SIZE=32MB
+          fi
           python -m esptool --chip esp32s3 merge_bin \
             --output "$FULL" \
-            --flash_mode dio --flash_freq 80m --flash_size 8MB \
+            --flash_mode dio --flash_freq 80m --flash_size "$FLASH_SIZE" \
             0x0000   "$BUILD_DIR/bootloader.bin" \
             0x8000   "$BUILD_DIR/partitions.bin" \
             0xe000   "$BOOT_APP0" \
             0x10000  "$BUILD_DIR/firmware.bin"
           cp "$BUILD_DIR/firmware.bin" "$OTA"
           # boot_app0.bin, bootloader.bin, and partitions.bin are byte-
-          # identical across all 12 envs (same ESP32-S3 config, same
-          # partition table). The web flasher's single-button manifest
+          # identical across the E1001-E1004 envs (same ESP32-S3 config,
+          # flash size, and partition table). The web flasher's manifest
           # writes them alongside the -ota image so a "keep settings"
           # flash lays down a complete boot chain at 0x0 / 0x8000 /
           # 0xe000 / 0x10000, skipping only NVS (0x9000) and SPIFFS.

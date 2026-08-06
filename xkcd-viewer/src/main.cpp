@@ -474,7 +474,7 @@ void drawBadges(uint32_t background = PANEL_WHITE,
   }
   text_render::drawBatteryGauge(epaper, x, y, w, h, sensorReadings.batteryPct, outline,
                                 terminalWidth, terminalHeight, PANEL_BLACK, PANEL_WHITE,
-                                sensorReadings.chargerValid && sensorReadings.externalPower);
+                                sensorReadings.externalPowerValid && sensorReadings.externalPower);
 
   smoothFontManager.selectGfx(nullptr);
   epaper.setTextFont(2);
@@ -1568,7 +1568,7 @@ void setup() {
 
   epaper_setup::begin(epaper);
   if (low_battery::shouldWarn(xkcd_config::runtime::lowBatteryWarn(),
-                              sensorReadings.chargerValid,
+                              sensorReadings.batteryValid,
                               sensorReadings.externalPower,
                               sensorReadings.batteryPct)) {
     LOG.printf("[battery] %d%% (%.3fV) below %d%% -- rendering recharge screen\n",

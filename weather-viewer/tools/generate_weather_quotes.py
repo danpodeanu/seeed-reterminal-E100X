@@ -10,7 +10,7 @@ by the runtime picker.
 Usage:
     python generate_weather_quotes.py <input.txt> <output-header>
 
-Model-agnostic: the same header is used across all four boards. The
+Model-agnostic: the same header is used across all supported boards. The
 per-env output dir is still separate so parallel `pio run` doesn't
 race, but the contents don't change with RETERMINAL_MODEL.
 """

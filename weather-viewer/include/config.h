@@ -44,8 +44,8 @@ constexpr float RAIN_START_THRESHOLD_MM = 0.1f;
 constexpr uint8_t RAIN_PROBABILITY_THRESHOLD = 30;
 
 // --- Quiet hours ------------------------------------------------------------
-// Suppress automatic and right-button refreshes overnight. A green-button
-// wake still refreshes immediately, then sleeps until the configured end.
+// Suppress automatic and secondary-button refreshes overnight. A primary
+// green/OK wake still refreshes immediately, then sleeps until the end.
 constexpr bool QUIET_HOURS_ENABLED = true;
 constexpr uint8_t QUIET_START_HOUR = 1;
 constexpr uint8_t QUIET_START_MINUTE = 0;
@@ -124,9 +124,9 @@ constexpr bool CLUTTER_FREE_MODE = true;
 
 // Show a bundled Chinese ink-wash landscape as the background behind
 // the main render instead of a plain white sprite. The image is dithered
-// and faded so headline text stays legible. Applies to all four panels
-// (each has a pre-baked payload matching its size and palette); toggle
-// off in /settings for a plain white background.
+// and faded so headline text stays legible. Applies to E1001-E1004
+// (each has a pre-baked payload matching its size and palette); E1005
+// always uses a clean white background for its compact monochrome layout.
 constexpr bool WEATHER_BACKGROUND_ENABLED = true;
 
 // --- Debug knobs ------------------------------------------------------------

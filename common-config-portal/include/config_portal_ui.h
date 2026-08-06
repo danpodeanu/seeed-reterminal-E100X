@@ -115,6 +115,7 @@ struct RenderInfo {
   // renderer omits this block entirely.
   String helpPayload;
   String helpCaption;       // e.g. "Help"
+  const char* footerHint = "Press green button to return to viewer";
   Fonts fonts;
 };
 
@@ -345,7 +346,7 @@ inline void renderPortalScreen(EPaper& epaper, int panelW, int panelH,
   // feet away. Drawn last so it can't be overwritten by QR blocks.
   epaper.setFreeFont(info.fonts.captionFont);
   epaper.setTextDatum(BC_DATUM);
-  epaper.drawString("Press green button to return to viewer", panelW / 2,
+  epaper.drawString(info.footerHint, panelW / 2,
                     panelH - panelH / 200, 1);
 
   // Restore default text state so anything printed later renders sanely.

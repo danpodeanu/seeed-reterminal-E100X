@@ -1,4 +1,4 @@
-# Weather Viewer for reTerminal E1001–E1004
+# Weather Viewer for reTerminal E1001–E1005
 
 A low-power weather display for the Seeed Studio reTerminal E-series.
 The device wakes on a schedule, downloads current conditions and a
@@ -6,9 +6,10 @@ short forecast, refreshes the e-paper panel, then switches Wi-Fi off
 and returns to deep sleep. Between refreshes it draws essentially no
 power while the panel stays visible.
 
-The header includes local temperature and humidity from the built-in
-SHT4x sensor plus battery status. The main dashboard shows outdoor
-conditions, the next likely rain, and a three-day outlook.
+The E1001-E1004 header includes local temperature and humidity from the
+built-in SHT4x sensor plus battery status. E1005 uses a simplified
+monochrome portrait layout focused on outdoor conditions and a three-day
+outlook.
 
 ![Weather Viewer showing current conditions and a three-day forecast on a reTerminal E1001](assets/e1001-weather-screenshot.png)
 
@@ -25,7 +26,8 @@ screenshot feature.*
 - Severe-weather alert banner across the top when any local alert is
   active (QWeather in China; US NWS elsewhere in the US).
 - Indoor temperature, humidity, battery percentage, and a USB-power
-  indicator in the header.
+  indicator in the header on E1001-E1004. E1005 still reads its BQ27220
+  fuel gauge for low-battery protection but omits these badges.
 - Overnight quiet hours (default 01:00–07:00) so the panel doesn't
   refresh while you're asleep.
 - Optional SD-card cache so the last good forecast is redrawn even if
@@ -35,7 +37,7 @@ screenshot feature.*
 - **SD-card firmware updates** - drop the app-only
   `firmware-*-ota.bin` from the [Releases page](https://github.com/danpodeanu/seeed-reterminal-E100X/releases)
   onto the SD card as `/update.bin` and the device applies it on the
-  next wake, or reconnect USB and re-run the
+  next wake, or on E1001-E1004 reconnect USB and re-run the
   [web flasher](https://danpodeanu.github.io/seeed-reterminal-E100X/)
   with the *Erase device* checkbox left unchecked to keep Wi-Fi
   credentials, portal config, and the cached forecast. See the top-level
@@ -49,6 +51,7 @@ screenshot feature.*
 | `reterminal_e1002` | 800×480 ED2208 | six-color |
 | `reterminal_e1003` | 1872×1404 ED103TC2 | 16-level gray |
 | `reterminal_e1004` | 1200×1600 T133A01 | six-color |
+| `reterminal_e1005` | 480×800 SSD1677 | monochrome |
 
 Use the firmware environment matching your device; panel drivers and
 dimensions differ between models.
@@ -66,13 +69,15 @@ You will also need:
 
 ### 1. Flash the firmware
 
-The fastest path is the web flasher — no installer, no `esptool.py`:
+For E1001-E1004, the fastest path is the web flasher - no installer,
+no `esptool.py`:
 
 > [Flash your reTerminal from the browser →](https://danpodeanu.github.io/seeed-reterminal-E100X/)
 
 Pick the reTerminal model, select **Weather Viewer**, connect over
-USB-C, and Chrome or Edge writes the latest release directly. To
-build from source instead, see [Building from source](#building-from-source).
+USB-C, and Chrome or Edge writes the latest release directly. E1005 is
+currently installed from a release binary or a source build; see
+[Building from source](#building-from-source).
 
 ### 2. Connect the device to Wi-Fi and pick a location
 
@@ -94,7 +99,8 @@ and app namespaces so the device reverts to the compile-time
 defaults.
 
 You can re-enter the portal at any time: **while the device is
-sleeping, hold the green button for 1–5 seconds**. Wait for the first
+sleeping, hold the green button (E1001-E1004) or OK (E1005) for
+1–5 seconds**. Wait for the first
 beep and keep holding — when the panel switches to the QR-code portal
 you're in.
 
@@ -118,7 +124,7 @@ Weather Viewer works without a card. Adding one enables:
 - A last-good forecast cache under `/weather/forecast.json`. On a
   normal wake, a saved forecast is redrawn without a network request
   as long as it is no older than the sleep interval.
-- Screenshots captured via a long green-button hold, written to
+- Screenshots captured via a long primary-button hold, written to
   `/screenshot.bmp`.
 - Unicode location names (`Muenchen`, `São Paulo`) rendered via
   `.vlw` smooth fonts in `/fonts/`. Without the fonts, non-ASCII
@@ -149,15 +155,17 @@ bundle from
 - **Buttons on the front** all wake the device:
   - Any front button → force an immediate live refresh (bypasses
     HTTP caches).
-  - **Green button + 1–5 s hold from sleep** → open the Wi-Fi
+  - **Green/OK button + 1–5 s hold from sleep** → open the Wi-Fi
     configuration portal (QR codes on the panel).
-  - **Green button + longer hold (>5 s) from sleep** → save a
+  - **Green/OK button + longer hold (>5 s) from sleep** → save a
     screenshot of the current frame to `/screenshot.bmp`.
 - **Header readouts** update on every refresh:
   - Indoor temperature and humidity (SHT4x).
   - Battery percentage plus a lightning bolt when USB power is
     connected (SY6974B-equipped boards only; older revisions with
     ETA6003 silently omit the icon).
+  - E1005 omits both header badges to preserve space for its 480-pixel
+    portrait layout.
 - **Severe-weather alerts** appear as a shaded
   `! Alert: <title> (+N more)` bar above the current-temperature
   area whenever the configured provider reports an active alert for
@@ -170,14 +178,14 @@ bundle from
   reasonably fresh SD-cached forecast if one exists. If neither is
   available, an error screen explains what failed and the device
   enters button-only sleep until you press any front button.
-- **Between refreshes** Wi-Fi is off, the battery-measurement
-  circuit is off, and the e-paper image stays visible for free.
+- **Between refreshes** Wi-Fi is off, the ADC battery-measurement
+  circuit on E1001-E1004 is off, and the e-paper image stays visible.
 
 ## Troubleshooting
 
 - **Panel is stuck on "Connecting to <SSID>"** — the stored Wi-Fi
   credentials probably don't match your network. Re-enter the portal
-  (hold green 1–5 s while sleeping) and update them.
+  (hold green/OK 1–5 s while sleeping) and update them.
 - **Panel shows "Weather unavailable"** — either the internet is
   down, the API credentials are wrong (QWeather), or the location
   coordinates are invalid. The detail line names which step failed;
@@ -229,6 +237,14 @@ For E1003 on Linux:
 ```bash
 pio run -e reterminal_e1003
 pio run -e reterminal_e1003 --target upload --upload-port /dev/ttyUSB0
+```
+
+For E1005 on Windows, the repository deploy helper builds the 32 MB
+target, auto-detects the serial port when possible, uploads, and opens
+the monitor:
+
+```bat
+..\deploy.bat e1005
 ```
 
 Monitor logs:
@@ -481,7 +497,7 @@ Build all targets before submitting changes:
 
 ```bash
 pio run -e reterminal_e1001 -e reterminal_e1002 \
-  -e reterminal_e1003 -e reterminal_e1004
+  -e reterminal_e1003 -e reterminal_e1004 -e reterminal_e1005
 ```
 
 Run the native unit tests:
@@ -490,9 +506,9 @@ Run the native unit tests:
 pio test -c platformio-test.ini -e native_test
 ```
 
-The tests cover quiet-hour boundaries, wake overrides, and daily
-refresh timing. GitHub Actions runs them alongside all four firmware
-builds.
+The tests cover quiet-hour boundaries, wake overrides, BQ27220 decoding,
+compact portrait geometry, and daily refresh timing. GitHub Actions runs
+them alongside all five firmware builds.
 
 ### References
 

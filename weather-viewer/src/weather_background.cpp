@@ -41,10 +41,9 @@ inline uint32_t paletteColor(uint8_t idx) {
   };
   return kMap[idx & 0x3];
 #else
-  // Spectra-6 panels (E1002, E1004). We store the picture as pure black
-  // vs. white because the six-color palette has no usable intermediate
-  // grays - anything else would render as a solid color instead of a
-  // gradient. The 1bpp payload maps 0 -> black ink, 1 -> paper white.
+  // One-bit payloads use pure black vs. white. E1002/E1004 need this
+  // because Spectra-6 has no usable intermediate grays; E1005 uses the
+  // same mapping for its native monochrome palette.
   return idx ? TFT_WHITE : TFT_BLACK;
 #endif
 }
@@ -148,6 +147,13 @@ Theme themeForWmoCode(int wmoCode) {
 }
 
 void draw(TFT_eSPI& epaper, Theme theme) {
+#if RETERMINAL_MODEL == 1005
+  // The compact Sticky layout intentionally uses a clean white background.
+  // It avoids spending flash and refresh time on a 480x800 bitmap while
+  // keeping the small monochrome labels and separators crisp.
+  (void)theme;
+  epaper.fillScreen(TFT_WHITE);
+#else
   const uint16_t w = kWidth;
   const uint16_t h = kHeight;
   const uint8_t bpp = kBitsPerPixel;
@@ -191,6 +197,7 @@ void draw(TFT_eSPI& epaper, Theme theme) {
     }
     row += rowBytes;
   }
+#endif
 #endif
 }
 

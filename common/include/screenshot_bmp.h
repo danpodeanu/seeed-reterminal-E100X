@@ -44,6 +44,10 @@ inline void paletteColor(uint8_t index, uint8_t& red, uint8_t& green,
 #elif RETERMINAL_MODEL == 1003
   const uint8_t gray = index <= 15 ? static_cast<uint8_t>(index * 17) : 255;
   red = green = blue = gray;
+#elif RETERMINAL_MODEL == 1005
+  // A 1-bit TFT_eSprite stores black as 0 and white as 1.
+  const uint8_t gray = index == 0 ? 0 : 255;
+  red = green = blue = gray;
 #else
   red = green = blue = 255;
   switch (index) {

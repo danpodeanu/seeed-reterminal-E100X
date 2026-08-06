@@ -1,8 +1,31 @@
 #include "battery_gauge.h"
 
 #include <Arduino.h>
+#include <Wire.h>
+#include <math.h>
+
+#include "battery_gauge_pure.h"
+#include "hardware.h"
 
 namespace battery {
+namespace {
+
+constexpr uint8_t BQ27220_ADDRESS = 0x55;
+
+bool readBq27220Word(uint8_t reg, uint16_t& value) {
+  Wire.beginTransmission(BQ27220_ADDRESS);
+  Wire.write(reg);
+  if (Wire.endTransmission(false) != 0) return false;
+  if (Wire.requestFrom(BQ27220_ADDRESS, static_cast<uint8_t>(2)) != 2) {
+    return false;
+  }
+  const uint8_t low = Wire.read();
+  const uint8_t high = Wire.read();
+  value = pure::littleEndianWord(low, high);
+  return true;
+}
+
+}  // namespace
 
 float percentForVoltage(float voltage) {
   static constexpr float volts[] = {
@@ -24,8 +47,12 @@ float percentForVoltage(float voltage) {
   return 0.0f;
 }
 
-void measureBatteryFromAdc(int enablePin, int adcPin, float& voltage,
+bool measureBatteryFromAdc(int enablePin, int adcPin, float& voltage,
                            int& percent) {
+  voltage = NAN;
+  percent = -1;
+  if (!pure::adcPinsUsable(enablePin, adcPin)) return false;
+
   pinMode(enablePin, OUTPUT);
   digitalWrite(enablePin, HIGH);
   analogReadResolution(12);
@@ -63,6 +90,33 @@ void measureBatteryFromAdc(int enablePin, int adcPin, float& voltage,
   voltage = (totalMv / 16.0f) * 2.0f / 1000.0f;
   percent = constrain(
       static_cast<int>(percentForVoltage(voltage) + 0.5f), 0, 100);
+  return true;
+}
+
+FuelGaugeReading readBq27220() {
+  FuelGaugeReading reading;
+  if (!hardware::ensureI2cBus()) return reading;
+
+  uint16_t voltageMv = 0;
+  uint16_t stateOfCharge = 0;
+  if (!readBq27220Word(pure::BQ27220_VOLTAGE_REGISTER, voltageMv) ||
+      !readBq27220Word(pure::BQ27220_STATE_OF_CHARGE_REGISTER,
+                       stateOfCharge) ||
+      !pure::stateOfChargeValid(stateOfCharge)) {
+    return reading;
+  }
+
+  reading.valid = true;
+  reading.voltage = voltageMv / 1000.0f;
+  reading.percent = static_cast<int>(stateOfCharge);
+
+  uint16_t averageCurrent = 0;
+  if (readBq27220Word(pure::BQ27220_AVERAGE_CURRENT_REGISTER,
+                      averageCurrent)) {
+    reading.currentValid = true;
+    reading.averageCurrentMa = pure::signedWord(averageCurrent);
+  }
+  return reading;
 }
 
 }  // namespace battery

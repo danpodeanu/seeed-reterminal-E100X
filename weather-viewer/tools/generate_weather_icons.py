@@ -10,7 +10,7 @@ whole bytes.
 Usage:
     python generate_weather_icons.py <MODEL> <output-header>
 
-Where MODEL is 1001 / 1002 / 1003 / 1004.
+Where MODEL is 1001 / 1002 / 1003 / 1004 / 1005.
 """
 
 from __future__ import annotations
@@ -53,6 +53,7 @@ SIZES_BY_MODEL = {
     1002: (32, 48, 216),   # same panel dimensions as 1001
     1003: (72, 96, 512),   # 1872x1404 Gray16, 9/4 scale
     1004: (48, 168, 420),  # 1200x1600 portrait, 3/2 scale
+    1005: (48, 64, 150),   # 480x800 monochrome portrait, 1:1 scale
 }
 
 
@@ -179,7 +180,7 @@ def generate(model: int, out_path: Path) -> None:
 
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("model", type=int, help="RETERMINAL_MODEL (1001..1004)")
+    p.add_argument("model", type=int, help="RETERMINAL_MODEL (1001..1005)")
     p.add_argument("output", type=Path, help="Destination header path")
     args = p.parse_args()
     generate(args.model, args.output)

@@ -21,10 +21,11 @@ namespace sensors {
 struct Readings {
   float batteryVoltage = NAN;
   int batteryPct = -1;
+  bool batteryValid = false;
   bool climateValid = false;
   float temperatureC = NAN;
   float humidityPct = NAN;
-  bool chargerValid = false;
+  bool externalPowerValid = false;
   bool externalPower = false;
 };
 

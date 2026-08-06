@@ -4,10 +4,14 @@ on:
   push:
     paths:
       - "weather-viewer/**"
+      - "common/**"
+      - "common-config-portal/**"
       - ".github/workflows/weather-viewer-build.yml"
   pull_request:
     paths:
       - "weather-viewer/**"
+      - "common/**"
+      - "common-config-portal/**"
       - ".github/workflows/weather-viewer-build.yml"
   workflow_dispatch:
 
@@ -55,6 +59,7 @@ jobs:
           - reterminal_e1002
           - reterminal_e1003
           - reterminal_e1004
+          - reterminal_e1005
 
     steps:
       - name: Check out repository
