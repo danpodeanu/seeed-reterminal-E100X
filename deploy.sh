@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build, upload and monitor the current viewer app on the reTerminal.
+# Build, upload and monitor the current PlatformIO project on the reTerminal.
 set -euo pipefail
 
 script="$(basename "$0")"
@@ -8,7 +8,7 @@ usage() {
     cat <<EOF
 Usage: ${script} <board> [port]
 
-  board    e1001 | e1002 | e1003 | e1004  (required)
+  board    e1001 | e1002 | e1003 | e1004 | e1005  (required)
   port     serial port for upload + monitor (default: auto-detect)
 
 Examples:
@@ -19,7 +19,7 @@ Examples:
 Auto-detect uses \`pio device list --json-output\` and picks the port when
 exactly one USB serial device is present. If zero or more than one candidate
 is found and no port was passed, the script errors out rather than guess.
-Run from inside weather-viewer/, xkcd-viewer/ or photo-viewer/.
+Run from a project directory that defines the selected board environment.
 EOF
 }
 
@@ -30,7 +30,7 @@ fi
 
 board="$1"
 case "${board}" in
-    e1001|e1002|e1003|e1004) ;;
+    e1001|e1002|e1003|e1004|e1005) ;;
     *)
         echo "[deploy] error: unknown board \"${board}\"" >&2
         usage
@@ -41,7 +41,13 @@ port="${2:-}"
 
 if [ ! -f platformio.ini ]; then
     echo "[deploy] error: no platformio.ini in $(pwd)" >&2
-    echo "[deploy] cd into weather-viewer, xkcd-viewer or photo-viewer first." >&2
+    echo "[deploy] cd into a viewer or hardware tool directory first." >&2
+    exit 1
+fi
+
+env="reterminal_${board}"
+if ! grep -Fqx "[env:${env}]" platformio.ini; then
+    echo "[deploy] error: $(pwd) does not define PlatformIO environment ${env}." >&2
     exit 1
 fi
 
@@ -90,7 +96,6 @@ else:
     fi
 fi
 
-env="reterminal_${board}"
 echo "[deploy] app=$(pwd)  env=${env}  port=${port}"
 exec pio run -e "${env}" -t upload -t monitor \
     --upload-port "${port}" --monitor-port "${port}"

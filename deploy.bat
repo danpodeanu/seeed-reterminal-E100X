@@ -1,5 +1,5 @@
 @echo off
-REM Build, upload and monitor the current viewer app on the reTerminal.
+REM Build, upload and monitor the current PlatformIO project on the reTerminal.
 setlocal EnableDelayedExpansion
 
 set "SCRIPT=%~nx0"
@@ -11,6 +11,7 @@ if /I "%BOARD%"=="e1001" set "VALID=1"
 if /I "%BOARD%"=="e1002" set "VALID=1"
 if /I "%BOARD%"=="e1003" set "VALID=1"
 if /I "%BOARD%"=="e1004" set "VALID=1"
+if /I "%BOARD%"=="e1005" set "VALID=1"
 
 if "%BOARD%"=="/?" goto usage
 if "%BOARD%"=="-h" goto usage
@@ -23,7 +24,14 @@ if "%VALID%"=="0" (
 
 if not exist platformio.ini (
     echo [deploy] error: no platformio.ini in %CD%
-    echo [deploy] cd into weather-viewer, xkcd-viewer or photo-viewer first.
+    echo [deploy] cd into a viewer or hardware tool directory first.
+    exit /b 1
+)
+
+set "ENV=reterminal_%BOARD%"
+findstr /L /I /X /C:"[env:%ENV%]" platformio.ini >nul
+if errorlevel 1 (
+    echo [deploy] error: %CD% does not define PlatformIO environment %ENV%.
     exit /b 1
 )
 
@@ -55,7 +63,6 @@ if "%PORT%"=="" (
     )
 )
 
-set "ENV=reterminal_%BOARD%"
 echo [deploy] app=%CD%  env=%ENV%  port=%PORT%
 pio run -e %ENV% -t upload -t monitor --upload-port %PORT% --monitor-port %PORT%
 exit /b %errorlevel%
@@ -63,7 +70,7 @@ exit /b %errorlevel%
 :usage
 echo Usage: %SCRIPT% ^<board^> [port]
 echo.
-echo   board    e1001 ^| e1002 ^| e1003 ^| e1004  (required)
+echo   board    e1001 ^| e1002 ^| e1003 ^| e1004 ^| e1005  (required)
 echo   port     serial port for upload + monitor (default: auto-detect)
 echo.
 echo Examples:
@@ -75,5 +82,5 @@ echo exactly one USB serial device is present. If zero or more than one
 echo candidate is found and no port was passed, the script errors out rather
 echo than guess.
 echo.
-echo Run from inside weather-viewer\, xkcd-viewer\ or photo-viewer\.
+echo Run from a project directory that defines the selected board environment.
 exit /b 1
