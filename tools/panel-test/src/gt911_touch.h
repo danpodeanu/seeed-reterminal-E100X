@@ -12,8 +12,14 @@ class Gt911Touch {
     uint8_t id;
   };
 
+  enum class PollResult {
+    None,
+    Touch,
+    Release,
+  };
+
   bool begin(TwoWire& wire);
-  bool poll(Point& point);
+  PollResult poll(Point& point);
   void end();
 
   uint8_t address() const { return address_; }
@@ -24,8 +30,10 @@ class Gt911Touch {
  private:
   bool resetForAddress(uint8_t address);
   bool probe(uint8_t address);
+  bool applyConfiguration();
   bool readRegisters(uint16_t reg, uint8_t* data, size_t length);
   bool writeRegister(uint16_t reg, uint8_t value);
+  bool writeRegisters(uint16_t reg, const uint8_t* data, size_t length);
   void clearStatus();
   static uint16_t scale(uint16_t value, uint16_t sourceMax,
                         uint16_t targetMax);
@@ -35,4 +43,5 @@ class Gt911Touch {
   char productId_[5] = {};
   uint16_t sensorWidth_ = 480;
   uint16_t sensorHeight_ = 800;
+  bool touching_ = false;
 };

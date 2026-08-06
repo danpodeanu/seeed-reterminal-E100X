@@ -17,10 +17,12 @@ for:
 
 On E1001-E1004, the sketch draws once and enters deep sleep; any front
 button redraws it. On E1005, it remains interactive: each GT911 touch is
-logged and a crosshair is added with a partial refresh. Press and release
-**OK** to sleep; OK, UP, or DOWN wakes and redraws the test.
+logged, beeps, and temporarily inverts a square around the contact using
+two partial refreshes. Press and release **OK** to sleep; OK, UP, or DOWN
+wakes and redraws the test.
 An inserted E1005 SD card can remain in place: the sketch powers and
 deselects it so it cannot interfere with the display's shared SPI bus.
+E1005 portrait output keeps the USB connector at the bottom.
 
 ## Per-panel adaptations
 
@@ -30,7 +32,7 @@ deselects it so it cannot interfere with the display's shared SPI bus.
 | E1002  | ED2208 800x480  | Spectra E6 (6 col) | W/Y/G/B/R/K SMPTE bars    |
 | E1003  | ED103TC2 1872x1404 | Gray16 (16 shades) | 16 grey bars + smooth ramp |
 | E1004  | T133A01 1200x1600 | Spectra E6 (6 col) | W/Y/G/B/R/K SMPTE bars    |
-| E1005  | SSD1677 800x480, rotated portrait | Monochrome | W/K bars + interactive GT911 crosshairs |
+| E1005  | SSD1677 800x480, rotated portrait | Monochrome | W/K bars + interactive GT911 inversion |
 
 All patterns use the standard SMPTE layout:
 

@@ -264,47 +264,63 @@ void renderPattern() {
 TwoWire touchWire(0);
 Gt911Touch touch;
 bool touchReady = false;
-bool haveLastMarker = false;
-Gt911Touch::Point lastMarker = {};
+bool touchActive = false;
 
-void drawTouchMarker(const Gt911Touch::Point& point) {
-  constexpr int kOuterRadius = 14;
-  constexpr int kRefreshPadding = 4;
-  const int x = point.x;
-  const int y = point.y;
-  epaper.fillCircle(x, y, kOuterRadius, PANEL_WHITE);
-  epaper.drawCircle(x, y, kOuterRadius, PANEL_BLACK);
-  epaper.drawFastHLine(x - 10, y, 21, PANEL_BLACK);
-  epaper.drawFastVLine(x, y - 10, 21, PANEL_BLACK);
+bool invertTouchRegion(int left, int top, int width, int height) {
+  auto* framebuffer = static_cast<uint8_t*>(epaper.getPointer());
+  if (!framebuffer) return false;
 
-  const int left = max(0, x - kOuterRadius - kRefreshPadding);
-  const int top = max(0, y - kOuterRadius - kRefreshPadding);
-  const int right = min(PANEL_WIDTH, x + kOuterRadius + kRefreshPadding + 1);
+  constexpr int kNativeStrideBytes = PANEL_HEIGHT / 8;
+  for (int y = top; y < top + height; ++y) {
+    const int nativeX = PANEL_HEIGHT - y - 1;
+    const uint8_t mask = static_cast<uint8_t>(0x80U >> (nativeX & 7));
+    for (int x = left; x < left + width; ++x) {
+      const int nativeY = x;
+      framebuffer[nativeY * kNativeStrideBytes + nativeX / 8] ^= mask;
+    }
+  }
+  return true;
+}
+
+void showTouchFeedback(const Gt911Touch::Point& point) {
+  constexpr int kFeedbackSize = 72;
+  constexpr int kFeedbackHalfSize = kFeedbackSize / 2;
+  constexpr uint32_t kFeedbackHoldMs = 400;
+
+  const int left = max(0, static_cast<int>(point.x) - kFeedbackHalfSize);
+  const int top = max(0, static_cast<int>(point.y) - kFeedbackHalfSize);
+  const int right =
+      min(PANEL_WIDTH, static_cast<int>(point.x) + kFeedbackHalfSize);
   const int bottom =
-      min(PANEL_HEIGHT, y + kOuterRadius + kRefreshPadding + 1);
-  epaper.updataPartial(left, top, right - left, bottom - top);
+      min(PANEL_HEIGHT, static_cast<int>(point.y) + kFeedbackHalfSize);
+  const int width = right - left;
+  const int height = bottom - top;
+  if (width < 1 || height < 1 ||
+      !invertTouchRegion(left, top, width, height)) {
+    return;
+  }
+
+  hardware::beep();
+  epaper.updataPartial(left, top, width, height);
+  delay(kFeedbackHoldMs);
+  invertTouchRegion(left, top, width, height);
+  epaper.updataPartial(left, top, width, height);
 }
 
 void pollTouch() {
   if (!touchReady) return;
   Gt911Touch::Point point = {};
-  if (!touch.poll(point)) return;
+  const Gt911Touch::PollResult result = touch.poll(point);
+  if (result == Gt911Touch::PollResult::Release) {
+    touchActive = false;
+    return;
+  }
+  if (result != Gt911Touch::PollResult::Touch || touchActive) return;
 
+  touchActive = true;
   LOG.printf("[touch] x=%u y=%u size=%u id=%u\n", point.x, point.y,
              point.size, point.id);
-  const int dx = haveLastMarker
-                     ? abs(static_cast<int>(point.x) -
-                           static_cast<int>(lastMarker.x))
-                     : 100;
-  const int dy = haveLastMarker
-                     ? abs(static_cast<int>(point.y) -
-                           static_cast<int>(lastMarker.y))
-                     : 100;
-  if (!haveLastMarker || dx >= 8 || dy >= 8) {
-    drawTouchMarker(point);
-    lastMarker = point;
-    haveLastMarker = true;
-  }
+  showTouchFeedback(point);
 }
 #endif
 
@@ -376,7 +392,7 @@ void setup() {
 #endif
   epaper_setup::begin(epaper);
 #if RETERMINAL_MODEL == 1005
-  epaper.setRotation(3);
+  epaper.setRotation(1);
 #endif
 #if RETERMINAL_MODEL == 1001
   epaper.initGrayMode(GRAY_LEVEL4);
@@ -408,7 +424,8 @@ void setup() {
     LOG.printf("[touch] GT%s ready at 0x%02X, sensor=%ux%u\n",
                touch.productId(), touch.address(), touch.sensorWidth(),
                touch.sensorHeight());
-    LOG.println("[panel-test] touch the display to draw crosshair markers");
+    LOG.println(
+        "[panel-test] touch the display to beep and invert that area");
   } else {
     LOG.println("[touch] GT911 initialization failed");
   }
