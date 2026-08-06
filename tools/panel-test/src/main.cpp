@@ -27,7 +27,6 @@
 #include <Arduino.h>
 #include <TFT_eSPI.h>
 #include <Wire.h>
-#include <cstring>
 #include <driver/rtc_io.h>
 #include <esp_sleep.h>
 
@@ -340,15 +339,22 @@ uint8_t reverseBits(uint8_t value) {
                               ((value & 0x55U) << 1));
 }
 
-void writeFullDisplayPlane(uint8_t command, const uint8_t* framebuffer) {
+constexpr size_t FRAMEBUFFER_SIZE =
+    static_cast<size_t>(PANEL_HEIGHT / 8) * PANEL_WIDTH;
+
+void buildDisplayPlane(const uint8_t* framebuffer, uint8_t* destination) {
   constexpr int kNativeStrideBytes = PANEL_HEIGHT / 8;
-  epaper.writecommand(command);
   for (int row = 0; row < PANEL_WIDTH; ++row) {
     const uint8_t* source = framebuffer + row * kNativeStrideBytes;
     for (int column = kNativeStrideBytes - 1; column >= 0; --column) {
-      epaper.writedata(reverseBits(source[column]));
+      *destination++ = reverseBits(source[column]);
     }
   }
+}
+
+void writeDisplayPlane(uint8_t command, uint8_t* data) {
+  epaper.writecommand(command);
+  epaper.writendata(data, static_cast<uint16_t>(FRAMEBUFFER_SIZE));
 }
 
 void writeDisplayCoordinate(uint16_t value) {
@@ -377,18 +383,21 @@ void setPartialWindow(const NativeRegion& region) {
   writeDisplayCoordinate(top);
 }
 
-bool refreshPartialRegion(const NativeRegion& region,
-                          const uint8_t* oldFramebuffer,
-                          const uint8_t* newFramebuffer) {
+bool refreshPartialRegion(const NativeRegion& region, uint8_t* oldPlane,
+                          uint8_t* newPlane) {
   epaper.wake();
   epaper.writecommand(0x18);
   epaper.writedata(0x80);
   epaper.writecommand(0x3C);
   epaper.writedata(0x80);
-  setPartialWindow({0, 0, PANEL_HEIGHT, PANEL_WIDTH});
-  writeFullDisplayPlane(0x26, oldFramebuffer);
-  writeFullDisplayPlane(0x24, newFramebuffer);
+  const NativeRegion fullPanel = {0, 0, PANEL_HEIGHT, PANEL_WIDTH};
+  setPartialWindow(fullPanel);
+  writeDisplayPlane(0x26, oldPlane);
+  setPartialWindow(fullPanel);
+  writeDisplayPlane(0x24, newPlane);
   setPartialWindow(region);
+  epaper.writecommand(0x21);
+  epaper.writedata(0x00);
   epaper.writecommand(0x22);
   epaper.writedata(0xFF);
   epaper.writecommand(0x20);
@@ -413,29 +422,32 @@ void showTouchFeedback(const Gt911Touch::Point& point) {
   const PatternRegion region = touchedPatternRegion(point);
   const NativeRegion native = nativeRegion(region);
   auto* framebuffer = static_cast<uint8_t*>(epaper.getPointer());
-  constexpr size_t kFramebufferSize =
-      static_cast<size_t>(PANEL_HEIGHT / 8) * PANEL_WIDTH;
-  auto* original = static_cast<uint8_t*>(malloc(kFramebufferSize));
-  if (!framebuffer || !original) {
-    free(original);
-    LOG.printf("[panel-test] cannot allocate %u-byte partial buffer\n",
-               static_cast<unsigned>(kFramebufferSize));
+  auto* originalPlane = static_cast<uint8_t*>(malloc(FRAMEBUFFER_SIZE));
+  auto* invertedPlane = static_cast<uint8_t*>(malloc(FRAMEBUFFER_SIZE));
+  if (!framebuffer || !originalPlane || !invertedPlane) {
+    free(originalPlane);
+    free(invertedPlane);
+    LOG.printf("[panel-test] cannot allocate two %u-byte partial buffers\n",
+               static_cast<unsigned>(FRAMEBUFFER_SIZE));
     return;
   }
 
-  memcpy(original, framebuffer, kFramebufferSize);
+  buildDisplayPlane(framebuffer, originalPlane);
   invertTouchRegion(region.left, region.top, region.width, region.height);
+  buildDisplayPlane(framebuffer, invertedPlane);
   hardware::beep();
   const bool invertedOk =
-      refreshPartialRegion(native, original, framebuffer);
+      refreshPartialRegion(native, originalPlane, invertedPlane);
   if (invertedOk) delay(kFeedbackHoldMs);
   const bool restoredOk =
       invertedOk &&
-      refreshPartialRegion(native, framebuffer, original);
+      refreshPartialRegion(native, invertedPlane, originalPlane);
   invertTouchRegion(region.left, region.top, region.width, region.height);
-  free(original);
+  free(originalPlane);
+  free(invertedPlane);
   if (!restoredOk) {
     LOG.println("[panel-test] restoring pattern with a full refresh");
+    epaper.sleep();
     epaper.update();
   }
 }
