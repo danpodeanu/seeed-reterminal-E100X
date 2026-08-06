@@ -19,6 +19,8 @@ On E1001-E1004, the sketch draws once and enters deep sleep; any front
 button redraws it. On E1005, it remains interactive: each GT911 touch is
 logged and a crosshair is added with a partial refresh. Press and release
 **OK** to sleep; OK, UP, or DOWN wakes and redraws the test.
+An inserted E1005 SD card can remain in place: the sketch powers and
+deselects it so it cannot interfere with the display's shared SPI bus.
 
 ## Per-panel adaptations
 

@@ -336,6 +336,14 @@ void powerDownAndSleep() {
   LOG.printf("[panel-test] wake config: %s\n", esp_err_to_name(wakeResult));
   LOG.flush();
   delay(50);
+#if RETERMINAL_MODEL == 1005
+  epaper.getSPIinstance().end();
+  pinMode(board::PIN_SD_CS, INPUT);
+  pinMode(board::PIN_SD_SCK, INPUT);
+  pinMode(board::PIN_SD_MOSI, INPUT);
+  pinMode(board::PIN_SD_MISO, INPUT);
+  peripheral_power::disableSd();
+#endif
   peripheral_power::disable();
   power_latch::holdDuringDeepSleep();
   esp_deep_sleep_start();
@@ -357,6 +365,15 @@ void setup() {
   LOG.printf("[panel-test] %d x %d, %d palette entries\n", PANEL_WIDTH,
              PANEL_HEIGHT, PALETTE_COUNT);
 
+#if RETERMINAL_MODEL == 1005
+  // The SD socket shares SCK/MOSI with the panel but has a separate power
+  // rail. Keep an inserted card powered and deselected so panel traffic
+  // cannot back-power it through the SPI pins and clamp the shared bus.
+  pinMode(board::PIN_SD_CS, OUTPUT);
+  digitalWrite(board::PIN_SD_CS, HIGH);
+  peripheral_power::enableSd();
+  delay(board::SD_POWER_SETTLE_MS);
+#endif
   epaper_setup::begin(epaper);
 #if RETERMINAL_MODEL == 1005
   epaper.setRotation(3);
