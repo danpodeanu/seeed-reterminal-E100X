@@ -9,7 +9,7 @@
 
 A collection of applications for the
 [Seeed Studio reTerminal E Series](https://wiki.seeedstudio.com/reterminal_e10xx_main_page/)
-E1001, E1002, E1003, E1004, and E1005 e-paper displays.
+E1001, E1002, E1003, E1004, and E1005 ("Seeed Sticky") e-paper displays.
 
 These projects explore the E100X family as low-power, always-visible displays
 for information that changes occasionally. Each application lives in its own
@@ -83,8 +83,8 @@ differ between models, so consult each application's README before building or
 uploading firmware.
 
 All three viewer applications support E1001-E1005, including the monochrome
-E1005 in portrait and both landscape directions. E1005 hardware tools live
-under `tools/`.
+Seeed reTerminal E1005 ("Seeed Sticky") in portrait and both landscape
+directions. E1005 hardware tools live under `tools/`.
 Model-specific firmware for supported combinations is included in releases.
 
 ## Getting started
