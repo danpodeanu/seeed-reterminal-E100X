@@ -1859,7 +1859,7 @@ void setup() {
                cacheOnly ? "local only" : "live until cache reaches threshold");
   }
   const bool compactConnectionStatus =
-      config::MODEL == 1005 && xkcd_config::runtime::isLandscape();
+      config::MODEL == 1005 && !xkcd_config::runtime::isLandscape();
   String connectionDetail;
   if (sdReady) {
     connectionDetail = String(cachedComicCount) +
