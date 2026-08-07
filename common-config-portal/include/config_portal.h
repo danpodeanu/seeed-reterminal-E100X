@@ -115,6 +115,11 @@ WebServer* webServer();
 // with begin() and the activeKey to highlight (or nullptr).
 String renderNavStripHtml(const Config& cfg, const char* activeKey);
 
+// Render the complete portal header used by /wifi, /settings, and /reset:
+// navigation, app name, AP identity, and firmware version. Extra pages can
+// inject this fragment to share exactly the same page chrome.
+String renderHeaderHtml(const Config& cfg, const char* activeKey);
+
 const String& currentSsid();
 const String& currentApPassword();  // empty when the AP is open
 IPAddress currentIp();

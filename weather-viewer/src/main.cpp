@@ -1753,10 +1753,9 @@ void setup() {
       // and before the portal loop starts so the first request lands on
       // registered handlers. Browser-only config: no photo uploader.
       sd_web_portal::Config sdCfg;
-      sdCfg.navHtml = nullptr;  // filled in after we compute nav strip
-      static String s_navHtml;
-      s_navHtml = config_portal::renderNavStripHtml(portalCfg, nullptr);
-      sdCfg.navHtml = s_navHtml.c_str();
+      static String s_headerHtml;
+      s_headerHtml = config_portal::renderHeaderHtml(portalCfg, "sd");
+      sdCfg.headerHtml = s_headerHtml.c_str();
       if (WebServer* server = config_portal::webServer()) {
         sd_web_portal::attachRoutes(*server, sdCfg);
       } else {

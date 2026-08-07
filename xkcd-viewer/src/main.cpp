@@ -1379,9 +1379,9 @@ void setup() {
       // Wire the SD browser routes onto config_portal's WebServer.
       // Browser-only config: no photo uploader.
       sd_web_portal::Config sdCfg;
-      static String s_navHtml;
-      s_navHtml = config_portal::renderNavStripHtml(portalCfg, nullptr);
-      sdCfg.navHtml = s_navHtml.c_str();
+      static String s_headerHtml;
+      s_headerHtml = config_portal::renderHeaderHtml(portalCfg, "sd");
+      sdCfg.headerHtml = s_headerHtml.c_str();
       if (WebServer* server = config_portal::webServer()) {
         sd_web_portal::attachRoutes(*server, sdCfg);
       } else {

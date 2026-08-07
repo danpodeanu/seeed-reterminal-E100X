@@ -526,13 +526,20 @@ void sendPageHeader(const String& title, const String& breadcrumbHtml) {
       "</title>"
       "<style>"
       "*,*::before,*::after{box-sizing:border-box}"
-      "body{font-family:system-ui,-apple-system,sans-serif;margin:0;padding:0;background:#eef1f5;color:#1f2933;font-size:16px;line-height:1.4;-webkit-text-size-adjust:100%}"
-      "header{background:linear-gradient(180deg,#12233a 0%,#0e1a2b 100%);color:#fff;padding:1rem 1.25rem;position:sticky;top:0;z-index:10;border-bottom:1px solid #0a1220;box-shadow:0 2px 6px rgba(0,0,0,.18)}"
-      "header h1{margin:0;font-size:1.2rem;letter-spacing:.01em}"
-      "header .crumb{font-size:.95rem;color:#c7d3e2;margin-top:.5rem;word-break:break-all;line-height:1.5}"
-      "header .crumb a{color:#8cc4ff;text-decoration:none;padding:.15rem .1rem}"
-      "header .crumb a:hover{text-decoration:underline}"
-      "main{padding:1rem;max-width:900px;margin:auto}"
+      "body{font-family:system-ui,-apple-system,sans-serif;margin:0;background:#f6f7f9;color:#172033;font-size:16px;line-height:1.45;-webkit-text-size-adjust:100%}"
+      "header.portal-header{padding:1rem;background:#14213d;color:#fff}"
+      "header.portal-header nav a{color:#bfdbfe;margin-right:1rem;text-decoration:none}"
+      "header.portal-header nav a.active{color:#fff;font-weight:700}"
+      "header.sd-header{background:#14213d;color:#fff;padding:1rem}"
+      "header.sd-header h1{margin:0;font-size:1.2rem;letter-spacing:.01em}"
+      "main{padding:1rem;max-width:760px;margin:auto}"
+      ".crumb{font-size:.95rem;word-break:break-all;line-height:1.5}"
+      "header.sd-header .crumb{color:#c7d3e2;margin-top:.5rem}"
+      "header.sd-header .crumb a{color:#8cc4ff}"
+      "main>.crumb{background:#fff;border:1px solid #d7dce5;border-radius:10px;padding:.7rem 1rem;margin-bottom:1rem;color:#64748b}"
+      "main>.crumb a{color:#1d4ed8}"
+      ".crumb a{text-decoration:none;padding:.15rem .1rem}"
+      ".crumb a:hover{text-decoration:underline}"
       "section{background:#fff;border:1px solid #d5dbe4;border-radius:10px;padding:1rem 1.15rem;margin-bottom:1rem;box-shadow:0 1px 2px rgba(15,25,40,.05)}"
       "section h2{margin:0 0 .85rem 0;padding-bottom:.55rem;border-bottom:1px solid #eef1f5;font-size:1.05rem;color:#334155;font-weight:600;letter-spacing:.01em}"
       "table{width:100%;border-collapse:collapse;font-size:1rem}"
@@ -571,20 +578,41 @@ void sendPageHeader(const String& title, const String& breadcrumbHtml) {
       "td.actions button{width:auto}"
       "}"
       "@media (min-width:601px){"
-      "header{padding:1rem 1.25rem}"
+      "header.sd-header{padding:1rem 1.25rem}"
+      "}"
+      "@media(prefers-color-scheme:dark){"
+      "body{background:#0f172a;color:#e5e7eb}"
+      "header.portal-header{background:#020617}"
+      "section,main>.crumb{background:#111827;border-color:#334155}"
+      "section h2{color:#e5e7eb;border-bottom-color:#334155}"
+      "th,td{border-bottom-color:#334155}"
+      "tbody tr:hover{background:#1e293b}"
+      "th,td.size,td.mtime{color:#94a3b8}"
+      "a.name,main>.crumb a{color:#93c5fd}"
+      "form.row input[type=text],form.row input[type=file]{background:#0f172a;color:#e5e7eb;border-color:#475569}"
+      ".empty,.note{color:#94a3b8}"
+      "main>.crumb{color:#94a3b8}"
       "}"
       "</style>"
       "</head><body>");
-  if (g_config.navHtml && g_config.navHtml[0]) {
-    html += F("<header style=\"background:#14213d;padding:.75rem 1.25rem;box-shadow:none;border-bottom:1px solid #0a1220\"><nav style=\"font-family:system-ui,-apple-system,sans-serif\">");
-    html += g_config.navHtml;
-    html += F("</nav></header>");
-    html += F("<style>header nav a{color:#bfdbfe;margin-right:1rem;text-decoration:none;font-weight:500}header nav a.active{color:#fff;font-weight:700}</style>");
+  const bool hasSharedHeader =
+      g_config.headerHtml != nullptr && g_config.headerHtml[0] != '\0';
+  if (hasSharedHeader) {
+    html += g_config.headerHtml;
+    html += F("<main><div class=\"crumb\">");
+    html += breadcrumbHtml;
+    html += F("</div>");
+  } else {
+    if (g_config.navHtml && g_config.navHtml[0]) {
+      html += F("<header class=\"portal-header\">");
+      html += g_config.navHtml;
+      html += F("</header>");
+    }
+    html += F("<header class=\"sd-header\"><h1>SD Card Portal</h1>"
+              "<div class=\"crumb\">");
+    html += breadcrumbHtml;
+    html += F("</div></header><main>");
   }
-  html += F("<header><h1>SD Card Portal</h1>"
-      "<div class=\"crumb\">");
-  html += breadcrumbHtml;
-  html += F("</div></header><main>");
   g_server->sendContent(html);
 }
 
@@ -808,10 +836,13 @@ void handleBrowse() {
   actions += F("</section>");
 
   // Reboot back into the viewer (photo-viewer / weather-viewer / etc.).
-  // Only shown when the SD portal is embedded inside an app that owns a
-  // navHtml top strip -- standalone tools/sd-web has nothing to reboot
+  // Only shown when the SD portal is embedded inside an app that supplies
+  // shared portal chrome. Standalone tools/sd-web has nothing to reboot
   // "back to", so we suppress the button there.
-  if (g_config.navHtml != nullptr && g_config.navHtml[0] != '\0') {
+  const bool embeddedPortal =
+      (g_config.headerHtml != nullptr && g_config.headerHtml[0] != '\0') ||
+      (g_config.navHtml != nullptr && g_config.navHtml[0] != '\0');
+  if (embeddedPortal) {
     actions += F(
         "<section><h2>Reboot to viewer</h2>"
         "<p class=\"note\">Restart the panel back into the viewer. "
@@ -1566,11 +1597,13 @@ void installHandlers(WebServer& server, const Config& cfg, bool embedded) {
   }
 
   // The /browse page renders a "Reboot to viewer" button whenever the
-  // embedding app supplied a navHtml strip (see handleBrowse). Register
-  // /exit-portal in that case too, so browser-only embedders (weather /
-  // xkcd) can wire up the same button without needing the full photo
-  // uploader.
-  if (cfg.navHtml && cfg.navHtml[0]) {
+  // embedding app supplied shared portal chrome. Register /exit-portal in
+  // that case too, so browser-only embedders (weather / xkcd) can wire up
+  // the same button without needing the full photo uploader.
+  const bool embeddedPortal =
+      (cfg.headerHtml && cfg.headerHtml[0]) ||
+      (cfg.navHtml && cfg.navHtml[0]);
+  if (embeddedPortal) {
     server.on("/exit-portal", HTTP_POST, handleExitPortal);
   }
 

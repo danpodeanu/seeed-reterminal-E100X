@@ -89,10 +89,14 @@ struct Config {
   // want the QR to land directly on the photo-upload page.
   const char* urlQrPath = nullptr;
 
+  // Optional full portal header fragment (navigation, app name, AP identity,
+  // and firmware version). Embedded /browse pages inject this verbatim so
+  // their header matches /wifi, /settings, and /reset.
+  const char* headerHtml = nullptr;
+
   // Optional cross-portal nav strip HTML fragment injected at the top of
-  // every SD portal page (above the "SD Card Portal" header). When the
-  // portal is embedded next to the shared Wi-Fi config portal, pass a
-  // matching nav bar so the user sees the same tabs on every page.
+  // photo-upload pages. Retained separately because Photo Viewer highlights
+  // a different tab there than it does on /browse.
   const char* navHtml = nullptr;
 
   // --- Optional thumbnail cache -----------------------------------------

@@ -1136,12 +1136,14 @@ void renderPortalOnPanel(const String& ssid, const String& password,
   sdCfg.thumbnailGenerator = &generatePhotoThumbnail;
   sdCfg.thumbnailMaxDim = 160;
   sdCfg.urlQrPath = "/upload-photo";
-  // Render the shared nav strip once so sd-web pages display the same
-  // tab bar. Cross-portal nav highlight is intentionally left off:
-  // sd-web pages already advertise which page they are via their own
-  // header ("SD Card Portal" + breadcrumb).
+  // /browse uses the full portal header so it exactly matches the built-in
+  // configuration pages. The photo uploader still injects the nav strip
+  // because its page owns a separate photo-specific header.
+  static String s_headerHtml;
+  s_headerHtml = config_portal::renderHeaderHtml(portalCfg, "sd");
+  sdCfg.headerHtml = s_headerHtml.c_str();
   static String s_navHtml;
-  s_navHtml = config_portal::renderNavStripHtml(portalCfg, nullptr);
+  s_navHtml = config_portal::renderNavStripHtml(portalCfg, "photos");
   sdCfg.navHtml = s_navHtml.c_str();
   WebServer* server = config_portal::webServer();
   if (server) {
