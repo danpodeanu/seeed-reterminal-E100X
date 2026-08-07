@@ -63,7 +63,8 @@ struct Config {
   // matching the panel's native palette, then POSTs it to /upload with
   // `parent=<photosDir>` so it lands next to any other photos.
   //
-  // Palette names: "gray4" (E1001), "gray16" (E1003), "e6" (E1002/E1004).
+  // Palette names: "bw" (E1005), "gray4" (E1001), "gray16" (E1003),
+  // "e6" (E1002/E1004).
   int panelWidth = 0;
   int panelHeight = 0;
   const char* panelPalette = nullptr;
@@ -82,6 +83,10 @@ struct Config {
   // (or leaving the field null) falls back to `panelOrientation`.
   using PanelOrientationFn = const char* (*)();
   PanelOrientationFn panelOrientationFn = nullptr;
+  // When true, uploaded BMP dimensions are the current logical orientation
+  // and the panel driver applies rotation. E1004 leaves this false because
+  // its uploads are pre-rotated into a native-dimension framebuffer.
+  bool uploadUsesLogicalGeometry = false;
   const char* photosDir = nullptr;     // e.g. "/photos"
 
   // Path the on-panel URL QR code should point to. Empty/nullptr means

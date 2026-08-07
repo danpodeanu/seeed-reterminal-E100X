@@ -30,8 +30,10 @@
 #include "wifi_sta.h"
 #include "climate_sensor.h"
 #include "sd_card.h"
+#include "dither.h"
 #include "epaper_setup.h"
 #include "peripheral_power.h"
+#include "power_latch.h"
 #include "sd_ota.h"
 #include "sd_web_portal.h"
 #include "sd_web_portal_ui.h"
@@ -65,9 +67,9 @@ TimestampedLogger appLog(Serial1);
 namespace {
 
 using namespace ::board;
-constexpr int PIN_KEY0 = 3;
-constexpr int PIN_KEY1 = 4;
-constexpr int PIN_KEY2 = 5;
+constexpr int PIN_KEY0 = board::PIN_BUTTON_0;
+constexpr int PIN_KEY1 = board::PIN_BUTTON_1;
+constexpr int PIN_KEY2 = board::PIN_BUTTON_2;
 
 // Which physical key is the "green / portal" button, and which is the
 // "previous" arrow. The button layout changed between the older three
@@ -88,9 +90,18 @@ constexpr int PIN_KEY2 = 5;
 #if RETERMINAL_MODEL == 1004
 constexpr int PIN_PORTAL_KEY = PIN_KEY2;   // GPIO5 - green
 constexpr int PIN_PREV_KEY   = PIN_KEY1;   // GPIO4 - left arrow
+#elif RETERMINAL_MODEL == 1005
+constexpr int PIN_PORTAL_KEY = PIN_KEY0;   // GPIO4 - OK
+constexpr int PIN_PREV_KEY   = PIN_KEY1;   // GPIO5 - up
 #else
 constexpr int PIN_PORTAL_KEY = PIN_KEY0;   // GPIO3 - green
 constexpr int PIN_PREV_KEY   = PIN_KEY2;   // GPIO5 - left arrow
+#endif
+
+#if RETERMINAL_MODEL == 1005
+constexpr char PRIMARY_BUTTON_LABEL[] = "OK";
+#else
+constexpr char PRIMARY_BUTTON_LABEL[] = "green";
 #endif
 
 #if RETERMINAL_MODEL == 1001
@@ -109,6 +120,12 @@ constexpr uint8_t PANEL_WHITE_CODE = 0xF;
 constexpr uint32_t PANEL_WHITE = TFT_WHITE;
 constexpr uint32_t PANEL_BLACK = TFT_BLACK;
 constexpr uint8_t PANEL_WHITE_CODE = 0x0;
+#elif RETERMINAL_MODEL == 1005
+constexpr uint32_t PANEL_WHITE = TFT_WHITE;
+constexpr uint32_t PANEL_BLACK = TFT_BLACK;
+constexpr uint8_t PANEL_WHITE_CODE = 0x1;
+#else
+#error "RETERMINAL_MODEL must be 1001, 1002, 1003, 1004, or 1005"
 #endif
 
 constexpr uint8_t BAYER8[64] = {
@@ -163,6 +180,44 @@ RTC_DATA_ATTR uint32_t photoShuffleSeed = 0;
 // -1 means "no known photo on the panel yet".
 RTC_DATA_ATTR int32_t lastRenderedIndex = -1;
 
+inline int panelWidth() {
+  return photo_config::runtime::panelWidth();
+}
+
+inline int panelHeight() {
+  return photo_config::runtime::panelHeight();
+}
+
+inline bool compactPortraitLayout() {
+  return config::MODEL == 1005 && !photo_config::runtime::isLandscape();
+}
+
+void beginPanel() {
+#if RETERMINAL_MODEL == 1005
+  if (sdReady) {
+    SD.end();
+    sdReady = false;
+  }
+  pinMode(board::PIN_SD_CS, OUTPUT);
+  digitalWrite(board::PIN_SD_CS, HIGH);
+  peripheral_power::enableSd();
+  delay(board::SD_POWER_SETTLE_MS);
+#endif
+  epaper_setup::begin(epaper);
+#if RETERMINAL_MODEL == 1005
+  epaper.setRotation(photo_config::runtime::panelRotation());
+  LOG.printf("[panel] orientation=%s rotation=%d geometry=%dx%d\n",
+             photo_config::runtime::isLandscape()
+                 ? (photo_config::runtime::orientation() ==
+                            ::config::Orientation::RotateCW
+                        ? "rotate-cw"
+                        : "rotate-ccw")
+                 : "portrait",
+             photo_config::runtime::panelRotation(), panelWidth(),
+             panelHeight());
+#endif
+}
+
 uint16_t readLe16(const uint8_t* bytes) {
   return static_cast<uint16_t>(bytes[0]) |
          (static_cast<uint16_t>(bytes[1]) << 8);
@@ -201,6 +256,8 @@ uint8_t panelCodeForRgb(uint8_t red, uint8_t green, uint8_t blue) {
 #elif RETERMINAL_MODEL == 1003
   return static_cast<uint8_t>(
       constrain((luminance(red, green, blue) + 8) / 17, 0, 15));
+#elif RETERMINAL_MODEL == 1005
+  return luminance(red, green, blue) >= 128 ? 1 : 0;
 #else
   const Rgb input = {red, green, blue};
   int best = 0;
@@ -276,7 +333,7 @@ void drawStatusBadges() {
   const int w = config::ui(22);
   const int h = config::ui(12);
   const int terminalWidth = max(3, config::ui(5));
-  const int x = config::PANEL_WIDTH - edgeInset - terminalWidth - w;
+  const int x = panelWidth() - edgeInset - terminalWidth - w;
   const int gaugeCenterY = centerY + 2;
   const int y = gaugeCenterY - h / 2;
   const int outline = max(1, config::ui(1));
@@ -307,21 +364,21 @@ void renderStatus(const String& message, const String& detail = "",
   if (!lineAbove.isEmpty()) {
     selectStatusFont();
     epaper.drawString(
-        text_render::ellipsize(epaper, lineAbove, config::PANEL_WIDTH - config::ui(60)),
-        config::PANEL_WIDTH / 2,
-        config::PANEL_HEIGHT / 2 - config::ui(55), 1);
+        text_render::ellipsize(epaper, lineAbove, panelWidth() - config::ui(60)),
+        panelWidth() / 2,
+        panelHeight() / 2 - config::ui(55), 1);
   }
   selectTitleFont();
   epaper.drawString(
-      text_render::ellipsize(epaper, message, config::PANEL_WIDTH - config::ui(60)),
-      config::PANEL_WIDTH / 2,
-      config::PANEL_HEIGHT / 2 - config::ui(15), 1);
+      text_render::ellipsize(epaper, message, panelWidth() - config::ui(60)),
+      panelWidth() / 2,
+      panelHeight() / 2 - config::ui(15), 1);
   if (!detail.isEmpty()) {
     selectStatusFont();
     epaper.drawString(
-        text_render::ellipsize(epaper, detail, config::PANEL_WIDTH - config::ui(60)),
-        config::PANEL_WIDTH / 2,
-        config::PANEL_HEIGHT / 2 + config::ui(22), 1);
+        text_render::ellipsize(epaper, detail, panelWidth() - config::ui(60)),
+        panelWidth() / 2,
+        panelHeight() / 2 + config::ui(22), 1);
   }
   if (!subHelpBelow.isEmpty()) {
     // Small ASCII sub-line (e.g. MAC + firmware) drawn just above the
@@ -329,16 +386,16 @@ void renderStatus(const String& message, const String& detail = "",
     // the main "Connecting to..." message.
     selectStatusFont();
     epaper.drawString(
-        text_render::ellipsize(epaper, subHelpBelow, config::PANEL_WIDTH - config::ui(60)),
-        config::PANEL_WIDTH / 2,
-        config::PANEL_HEIGHT - config::ui(46), 1);
+        text_render::ellipsize(epaper, subHelpBelow, panelWidth() - config::ui(60)),
+        panelWidth() / 2,
+        panelHeight() - config::ui(46), 1);
   }
   if (!helpBelow.isEmpty()) {
     selectStatusFont();
     epaper.drawString(
-        text_render::ellipsize(epaper, helpBelow, config::PANEL_WIDTH - config::ui(60)),
-        config::PANEL_WIDTH / 2,
-        config::PANEL_HEIGHT - config::ui(24), 1);
+        text_render::ellipsize(epaper, helpBelow, panelWidth() - config::ui(60)),
+        panelWidth() / 2,
+        panelHeight() - config::ui(24), 1);
   }
   epaper.setFreeFont(nullptr);
   epaper.setTextFont(2);
@@ -486,6 +543,8 @@ bool renderPreparedBmp(const String& path) {
   const uint16_t bitsPerPixel = readLe16(dib + 14);
   const uint32_t compression = readLe32(dib + 16);
   const uint32_t pixelOffset = readLe32(fileHeader + 10);
+  const int frameWidth = panelWidth();
+  const int frameHeight = panelHeight();
   // Negating INT32_MIN is undefined behaviour; reject it up front along with
   // any other value that couldn't plausibly be a panel-sized BMP.
   if (signedHeight == INT32_MIN) {
@@ -495,8 +554,8 @@ bool renderPreparedBmp(const String& path) {
   }
   const int32_t height = signedHeight < 0 ? -signedHeight : signedHeight;
 
-  if (dibSize < 40 || width != config::PANEL_WIDTH ||
-      height != config::PANEL_HEIGHT || planes != 1 ||
+  if (dibSize < 40 || width != frameWidth ||
+      height != frameHeight || planes != 1 ||
       bitsPerPixel != 4 || compression != 0 ||
       pixelOffset < 14 + dibSize + 64) {
     LOG.printf(
@@ -504,8 +563,7 @@ bool renderPreparedBmp(const String& path) {
         "planes=%u bpp=%u compression=%lu pixelOffset=%lu min=%lu\n",
         path.c_str(), static_cast<unsigned long>(dibSize),
         static_cast<long>(width), static_cast<long>(height),
-        static_cast<int>(config::PANEL_WIDTH),
-        static_cast<int>(config::PANEL_HEIGHT),
+        frameWidth, frameHeight,
         static_cast<unsigned>(planes), static_cast<unsigned>(bitsPerPixel),
         static_cast<unsigned long>(compression),
         static_cast<unsigned long>(pixelOffset),
@@ -533,8 +591,13 @@ bool renderPreparedBmp(const String& path) {
     paletteCodes[index] = panelCodeForRgb(bgra[2], bgra[1], bgra[0]);
   }
 
+#if RETERMINAL_MODEL == 1005
+  const size_t packedStride = static_cast<size_t>((frameWidth + 7) / 8);
+  const size_t packedSize = packedStride * frameHeight;
+#else
   const size_t packedSize =
-      static_cast<size_t>(config::PANEL_WIDTH) * config::PANEL_HEIGHT / 2;
+      static_cast<size_t>(frameWidth) * frameHeight / 2;
+#endif
   uint8_t* packed = static_cast<uint8_t*>(ps_malloc(packedSize));
   if (!packed) packed = static_cast<uint8_t*>(malloc(packedSize));
   if (!packed) {
@@ -542,11 +605,15 @@ bool renderPreparedBmp(const String& path) {
     file.close();
     return false;
   }
+  #if RETERMINAL_MODEL == 1005
+  memset(packed, 0, packedSize);
+  #else
   memset(packed,
          static_cast<uint8_t>((PANEL_WHITE_CODE << 4) | PANEL_WHITE_CODE),
          packedSize);
+  #endif
 
-  const size_t sourceBytes = (config::PANEL_WIDTH + 1) / 2;
+  const size_t sourceBytes = (frameWidth + 1) / 2;
   const size_t paddedBytes = (sourceBytes + 3) & ~static_cast<size_t>(3);
   uint8_t* row = static_cast<uint8_t*>(malloc(paddedBytes));
   if (!row) {
@@ -566,20 +633,33 @@ bool renderPreparedBmp(const String& path) {
   }
 
   bool okay = true;
-  for (int fileRow = 0; fileRow < config::PANEL_HEIGHT && okay; ++fileRow) {
+  for (int fileRow = 0; fileRow < frameHeight && okay; ++fileRow) {
     okay = file.read(row, paddedBytes) == paddedBytes;
     if (!okay) break;
     const int targetY =
-        signedHeight < 0 ? fileRow : config::PANEL_HEIGHT - 1 - fileRow;
+        signedHeight < 0 ? fileRow : frameHeight - 1 - fileRow;
+#if RETERMINAL_MODEL == 1005
     uint8_t* destination =
-        packed + static_cast<size_t>(targetY) * config::PANEL_WIDTH / 2;
-    for (int x = 0; x < config::PANEL_WIDTH; x += 2) {
+        packed + static_cast<size_t>(targetY) * packedStride;
+    for (int x = 0; x < frameWidth; ++x) {
+      const uint8_t source = row[x / 2];
+      const uint8_t paletteIndex =
+          (x & 1) == 0 ? source >> 4 : source & 0x0F;
+      if (paletteCodes[paletteIndex] == 0) {
+        destination[x / 8] |= static_cast<uint8_t>(1U << (7 - (x & 7)));
+      }
+    }
+#else
+    uint8_t* destination =
+        packed + static_cast<size_t>(targetY) * frameWidth / 2;
+    for (int x = 0; x < frameWidth; x += 2) {
       const uint8_t source = row[x / 2];
       const uint8_t left = paletteCodes[source >> 4];
       const uint8_t right = paletteCodes[source & 0x0F];
       destination[x / 2] =
           static_cast<uint8_t>((left << 4) | (right & 0x0F));
     }
+#endif
     if ((fileRow & 31) == 0) delay(1);
   }
   free(row);
@@ -592,8 +672,13 @@ bool renderPreparedBmp(const String& path) {
   }
 
   epaper.fillSprite(PANEL_WHITE);
-  epaper.pushImage(0, 0, config::PANEL_WIDTH, config::PANEL_HEIGHT,
+#if RETERMINAL_MODEL == 1005
+  epaper.drawBitmap(0, 0, packed, frameWidth, frameHeight,
+                    PANEL_BLACK, PANEL_WHITE);
+#else
+  epaper.pushImage(0, 0, frameWidth, frameHeight,
                    reinterpret_cast<uint16_t*>(packed));
+#endif
   free(packed);
   LOG.printf("[photo] prepared frame %s\n", path.c_str());
   LOG.println("[render] refreshing panel");
@@ -633,6 +718,40 @@ bool renderGenericPhoto(const String& path) {
   if (targetX & 1) --targetX;
   const int targetY = (effH - targetHeight) / 2;
 
+#if RETERMINAL_MODEL == 1005
+  const size_t pixelCount =
+      static_cast<size_t>(targetWidth) * targetHeight;
+  uint8_t* indices = static_cast<uint8_t*>(ps_malloc(pixelCount));
+  if (!indices) indices = static_cast<uint8_t*>(malloc(pixelCount));
+  if (!indices) {
+    image_free(&image);
+    LOG.println("[photo] monochrome index buffer allocation failed");
+    return false;
+  }
+  const bool rendered = dither_resized_image(
+      image.pixels, image.width, image.height, targetWidth, targetHeight,
+      PAL_BW, config::FALLBACK_DITHER_GAMMA, false, indices);
+  image_free(&image);
+  if (!rendered) {
+    free(indices);
+    return false;
+  }
+  const size_t packedSize =
+      static_cast<size_t>((targetWidth + 7) / 8) * targetHeight;
+  uint8_t* packed = static_cast<uint8_t*>(ps_malloc(packedSize));
+  if (!packed) packed = static_cast<uint8_t*>(malloc(packedSize));
+  if (!packed) {
+    free(indices);
+    LOG.println("[photo] monochrome bitmap allocation failed");
+    return false;
+  }
+  pack_1bpp_msb(indices, packed, targetWidth, targetHeight, true);
+  free(indices);
+  epaper.fillSprite(PANEL_WHITE);
+  epaper.drawBitmap(targetX, targetY, packed, targetWidth, targetHeight,
+                    PANEL_BLACK, PANEL_WHITE);
+  free(packed);
+#else
   if (orient == ::config::Orientation::Native) {
     // Historical fast path: pack row-by-row and blit as a sub-rect.
     const size_t packedSize =
@@ -740,6 +859,7 @@ bool renderGenericPhoto(const String& path) {
                      reinterpret_cast<uint16_t*>(packed));
     free(packed);
   }
+#endif
 
   LOG.printf("[photo] compatibility render %s at %dx%d (%s)\n",
              path.c_str(), targetWidth, targetHeight,
@@ -904,9 +1024,19 @@ void powerDownAndSleep(uint64_t sleepSeconds = 0) {
   // sink is attached.
   appLog.detachSdSink();
   if (sdReady) SD.end();
+#if RETERMINAL_MODEL == 1005
+  epaper.getSPIinstance().end();
+  pinMode(board::PIN_SD_CS, INPUT);
+  pinMode(board::PIN_SD_SCK, INPUT);
+  pinMode(board::PIN_SD_MOSI, INPUT);
+  pinMode(board::PIN_SD_MISO, INPUT);
+  peripheral_power::disableSd();
+#endif
   peripheral_power::disable();
-  pinMode(PIN_BATTERY_ENABLE, OUTPUT);
-  digitalWrite(PIN_BATTERY_ENABLE, LOW);
+  if (PIN_BATTERY_ENABLE >= 0) {
+    pinMode(PIN_BATTERY_ENABLE, OUTPUT);
+    digitalWrite(PIN_BATTERY_ENABLE, LOW);
+  }
 
   pinMode(PIN_KEY0, INPUT_PULLUP);
   pinMode(PIN_KEY1, INPUT_PULLUP);
@@ -936,8 +1066,9 @@ void powerDownAndSleep(uint64_t sleepSeconds = 0) {
              digitalRead(PIN_KEY0),
              digitalRead(PIN_KEY1),
              digitalRead(PIN_KEY2));
-  LOG.printf("[sleep] %llu seconds; GPIO3/GPIO4/GPIO5 wake enabled\n",
-             static_cast<unsigned long long>(sleepSeconds));
+  LOG.printf("[sleep] %llu seconds; GPIO%d/%d/%d wake enabled\n",
+             static_cast<unsigned long long>(sleepSeconds),
+             PIN_KEY0, PIN_KEY1, PIN_KEY2);
   if (buttonWakeResult != ESP_OK && timerWakeResult != ESP_OK) {
     LOG.println("[sleep] no wake source could be configured; restarting");
     LOG.flush();
@@ -947,6 +1078,7 @@ void powerDownAndSleep(uint64_t sleepSeconds = 0) {
   LOG.flush();
   delay(50);
   hardware::setStatusLed(false);
+  power_latch::holdDuringDeepSleep();
   esp_deep_sleep_start();
 }
 
@@ -994,6 +1126,11 @@ void renderPortalOnPanel(const String& ssid, const String& password,
   const GFXfont* subtitleFont = &FreeSans18pt7b;
   const GFXfont* captionFont = &FreeSansBold12pt7b;
   const GFXfont* detailFont = &FreeSans12pt7b;
+#elif RETERMINAL_MODEL == 1005
+  const GFXfont* titleFont = &FreeSansBold18pt7b;
+  const GFXfont* subtitleFont = &FreeSans12pt7b;
+  const GFXfont* captionFont = &FreeSansBold9pt7b;
+  const GFXfont* detailFont = &FreeSans9pt7b;
 #endif
 
   config_portal::ui::RenderInfo info;
@@ -1008,13 +1145,17 @@ void renderPortalOnPanel(const String& ssid, const String& password,
   info.wifiPayload = config_portal::wifiQrPayload(
       ssid, password.length() ? password.c_str() : nullptr);
   info.urlPayload = config_portal::urlQrPayload(ip, port, "/wifi");
+  info.footerHint =
+      RETERMINAL_MODEL == 1005
+          ? "Press OK to return to Photo Viewer"
+          : "Press any front button to return to Photo Viewer";
   info.fonts.titleFont = titleFont;
   info.fonts.subtitleFont = subtitleFont;
   info.fonts.captionFont = captionFont;
   info.fonts.detailFont = detailFont;
 
   config_portal::ui::renderPortalScreen<EPaper>(
-      epaper, config::PANEL_WIDTH, config::PANEL_HEIGHT, PANEL_BLACK,
+      epaper, panelWidth(), panelHeight(), PANEL_BLACK,
       PANEL_WHITE, info);
   panel_watchdog::guard([]() { epaper.update(); });
 }
@@ -1042,7 +1183,7 @@ void renderPortalOnPanel(const String& ssid, const String& password,
   // the portal. Release it before the panel takes ownership of the bus.
   if (sdReady) SD.end();
   sdReady = false;
-  epaper_setup::begin(epaper);
+  beginPanel();
 #if RETERMINAL_MODEL == 1001
   epaper.initGrayMode(GRAY_LEVEL4);
 #elif RETERMINAL_MODEL == 1003
@@ -1113,6 +1254,9 @@ void renderPortalOnPanel(const String& ssid, const String& password,
   sdCfg.panelPalette = "gray4";
 #elif RETERMINAL_MODEL == 1003
   sdCfg.panelPalette = "gray16";
+#elif RETERMINAL_MODEL == 1005
+  sdCfg.panelPalette = "bw";
+  sdCfg.uploadUsesLogicalGeometry = true;
 #else
   sdCfg.panelPalette = "e6";
 #endif
@@ -1125,7 +1269,8 @@ void renderPortalOnPanel(const String& ssid, const String& password,
     switch (photo_config::runtime::orientation()) {
       case ::config::Orientation::RotateCW:  return "rotate_cw";
       case ::config::Orientation::RotateCCW: return "rotate_ccw";
-      default:                               return "native";
+      default:
+        return RETERMINAL_MODEL == 1005 ? "portrait" : "native";
     }
   };
   // Retain the static field as a safe fallback (e.g. if the runtime
@@ -1224,6 +1369,7 @@ void renderPortalOnPanel(const String& ssid, const String& password,
 }  // namespace
 
 void setup() {
+  power_latch::holdOn();
   hardware::setStatusLed(true);
   photo_wifi::load();
   photo_config::runtime::load();
@@ -1289,8 +1435,8 @@ void setup() {
       sdPortalMode = false;
       photoRefreshOnly = true;
     } else if (portalKeyWake) {
-      // Green: enter the upload portal.
-      LOG.println("[boot] green pressed; entering upload portal");
+      LOG.printf("[boot] %s pressed; entering upload portal\n",
+                 PRIMARY_BUTTON_LABEL);
       sdPortalMode = true;
     }
     // Arrow wakes fall through unmodified; app_logic::photoDirection()
@@ -1354,7 +1500,7 @@ void setup() {
       rtc_sync::readAndLog(storedRtc);
     }
   }
-  epaper_setup::begin(epaper);
+  beginPanel();
   if (low_battery::shouldWarn(photo_config::runtime::lowBatteryWarn(),
                               sensorReadings.batteryValid,
                               sensorReadings.externalPower,
@@ -1363,7 +1509,8 @@ void setup() {
                sensorReadings.batteryPct, sensorReadings.batteryVoltage,
                low_battery::kThresholdPct);
     renderStatus("Please recharge",
-                 "Plug in a USB-C cable then press the green button to continue.",
+                 String("Plug in USB-C, then press ") +
+                     PRIMARY_BUTTON_LABEL + " to continue.",
                  "Battery low");
     powerDownAndSleep(config::SLEEP_SECONDS);
     return;
@@ -1441,7 +1588,10 @@ void setup() {
   // shows both its MAC (for identification on the network) and the
   // running build (for confirming an SD-driven update landed).
   const String macAndVersion =
-      String("MAC: ") + stationMac + "  Firmware: " + board::FIRMWARE_VERSION;
+      compactPortraitLayout()
+          ? String("MAC ") + stationMac + "  FW " + board::FIRMWARE_VERSION
+          : String("MAC: ") + stationMac + "  Firmware: " +
+                board::FIRMWARE_VERSION;
   String statusDetail;
   if (!sdReady) {
     statusDetail = "No SD card - insert a FAT32 card";
@@ -1456,7 +1606,8 @@ void setup() {
     LOG.println("[display] showing Wi-Fi connection status");
     renderStatus("Connecting to " + String(photo_wifi::ssid()), statusDetail,
                  "",
-                 "To upload photos - from sleep, press green",
+                 String("From sleep, press ") + PRIMARY_BUTTON_LABEL +
+                     " to upload",
                  macAndVersion);
   }
   epaper.initGrayMode(GRAY_LEVEL4);
@@ -1470,7 +1621,8 @@ void setup() {
     LOG.println("[display] showing Wi-Fi connection status");
     renderStatus("Connecting to " + String(photo_wifi::ssid()), statusDetail,
                  "",
-                 "To upload photos - from sleep, press green",
+                 String("From sleep, press ") + PRIMARY_BUTTON_LABEL +
+                     " to upload",
                  macAndVersion);
   }
 #endif
@@ -1563,7 +1715,7 @@ void setup() {
           LOG.printf("[photo] photoPathAt(%ld) failed\n",
                      static_cast<long>(normalized));
         }
-        currentPhotoIndex += direction;
+        currentPhotoIndex += app_logic::failedPhotoAdvance(direction);
       }
     }
   }
@@ -1579,7 +1731,8 @@ void setup() {
 
   if (!displayed) {
     renderStatus("Photo unavailable",
-                 sdReady ? "To upload photos - from sleep, press green"
+                 sdReady ? String("From sleep, press ") +
+                               PRIMARY_BUTTON_LABEL + " to upload"
                          : "Insert a FAT32 SD card");
   }
 

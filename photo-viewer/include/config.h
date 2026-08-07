@@ -10,6 +10,8 @@
 
 #include <Arduino.h>
 
+#include "photo_orientation.h"
+
 namespace config {
 
 // --- Refresh cadence --------------------------------------------------------
@@ -41,19 +43,10 @@ constexpr char PHOTO_THUMB_DIR[] = "/thumb_cache";
 constexpr bool PHOTO_ORDER_RANDOM = true;
 
 // --- Panel orientation ------------------------------------------------------
-// E1004 is a 1200x1600 portrait panel that some users install rotated 90
-// degrees so it reads as 1600x1200 landscape. RotateCW means the device
-// is rotated clockwise from its native mounting (the panel's native top
-// edge ends up on the user's right); RotateCCW is the opposite. `Native`
-// means no rotation and is the correct choice on every board except a
-// physically-rotated E1004: E1001/E1002/E1003 are landscape-native, so
-// their "native" orientation is already landscape and this setting is
-// hard-locked to `Native` on those boards (see photo_config_runtime).
-enum class Orientation : uint8_t {
-  Native      = 0,
-  RotateCW    = 1,
-  RotateCCW   = 2,
-};
+// E1004 keeps its native-frame rotation behavior. E1005 rotates the display
+// driver and supports portrait plus both physical landscape directions.
+// E1001-E1003 remain fixed in their native landscape orientation.
+using Orientation = photo_orientation::Orientation;
 constexpr Orientation ORIENTATION_DEFAULT = Orientation::Native;
 
 // --- Quiet hours ------------------------------------------------------------

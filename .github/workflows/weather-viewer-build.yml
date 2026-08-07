@@ -6,12 +6,14 @@ on:
       - "weather-viewer/**"
       - "common/**"
       - "common-config-portal/**"
+      - "common-sd-web/**"
       - ".github/workflows/weather-viewer-build.yml"
   pull_request:
     paths:
       - "weather-viewer/**"
       - "common/**"
       - "common-config-portal/**"
+      - "common-sd-web/**"
       - ".github/workflows/weather-viewer-build.yml"
   workflow_dispatch:
 

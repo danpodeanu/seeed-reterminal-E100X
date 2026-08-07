@@ -8,6 +8,7 @@
 #include "panel_traits.h"
 #include "photo_geom.h"
 #include "photo_manifest.h"
+#include "photo_orientation.h"
 
 void setUp() {}
 void tearDown() {}
@@ -83,6 +84,12 @@ void test_daily_ntp_refresh_boundaries() {
 void test_photo_direction_matches_buttons() {
   TEST_ASSERT_EQUAL_INT(1, app_logic::photoDirection(false));
   TEST_ASSERT_EQUAL_INT(-1, app_logic::photoDirection(true));
+}
+
+void test_failed_photo_advances_after_refresh_only_redraw() {
+  TEST_ASSERT_EQUAL_INT(1, app_logic::failedPhotoAdvance(0));
+  TEST_ASSERT_EQUAL_INT(1, app_logic::failedPhotoAdvance(1));
+  TEST_ASSERT_EQUAL_INT(-1, app_logic::failedPhotoAdvance(-1));
 }
 
 void test_photo_index_wraps_in_both_directions() {
@@ -272,6 +279,27 @@ void test_panel_rotation_is_only_applied_to_e1005() {
   TEST_ASSERT_EQUAL_INT(0, panel_traits::DISPLAY_ROTATION);
 }
 
+void test_e1005_orientation_geometry_and_rotation() {
+  using photo_orientation::Orientation;
+  TEST_ASSERT_FALSE(photo_orientation::isLandscape(Orientation::Portrait));
+  TEST_ASSERT_TRUE(photo_orientation::isLandscape(Orientation::RotateCW));
+  TEST_ASSERT_TRUE(photo_orientation::isLandscape(Orientation::RotateCCW));
+  TEST_ASSERT_EQUAL_INT(1,
+                        photo_orientation::panelRotation(Orientation::Portrait));
+  TEST_ASSERT_EQUAL_INT(0,
+                        photo_orientation::panelRotation(Orientation::RotateCW));
+  TEST_ASSERT_EQUAL_INT(
+      2, photo_orientation::panelRotation(Orientation::RotateCCW));
+  TEST_ASSERT_EQUAL_INT(480,
+                        photo_orientation::panelWidth(Orientation::Portrait));
+  TEST_ASSERT_EQUAL_INT(800,
+                        photo_orientation::panelHeight(Orientation::Portrait));
+  TEST_ASSERT_EQUAL_INT(800,
+                        photo_orientation::panelWidth(Orientation::RotateCW));
+  TEST_ASSERT_EQUAL_INT(480,
+                        photo_orientation::panelHeight(Orientation::RotateCCW));
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_low_battery_warns_when_below_threshold);
@@ -286,6 +314,7 @@ int main(int, char**) {
   RUN_TEST(test_sleep_until_same_time_means_next_day);
   RUN_TEST(test_daily_ntp_refresh_boundaries);
   RUN_TEST(test_photo_direction_matches_buttons);
+  RUN_TEST(test_failed_photo_advances_after_refresh_only_redraw);
   RUN_TEST(test_photo_index_wraps_in_both_directions);
   RUN_TEST(test_shuffle_is_a_permutation_and_uses_only_valid_indices);
   RUN_TEST(test_shuffle_identity_when_rng_picks_last_index);
@@ -300,5 +329,6 @@ int main(int, char**) {
   RUN_TEST(test_photo_geom_rotate_ccw_maps_corners);
   RUN_TEST(test_photo_geom_rotate_cw_and_ccw_are_inverses);
   RUN_TEST(test_panel_rotation_is_only_applied_to_e1005);
+  RUN_TEST(test_e1005_orientation_geometry_and_rotation);
   return UNITY_END();
 }

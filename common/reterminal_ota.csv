@@ -1,5 +1,5 @@
-# Shared 8 MB partition layout for reTerminal E1001-E1004 apps. The E1005
-# diagnostic-tool environments use the same first 8 MB of their 32 MB flash.
+# Shared 8 MB partition layout for reTerminal E1001-E1004 apps. E1005 viewer
+# and diagnostic-tool environments use the same first 8 MB of their 32 MB flash.
 #
 # app0/app1 give us OTA - the SD-driven flash path writes into whichever
 # is NOT the currently-booted slot, then flips otadata and reboots.

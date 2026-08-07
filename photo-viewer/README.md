@@ -1,4 +1,4 @@
-# Photo Viewer for reTerminal E1001–E1004
+# Photo Viewer for reTerminal E1001–E1005
 
 A private, standalone SD-card photo frame for the Seeed Studio
 reTerminal E-series. Photos fill the e-paper panel with no permanent
@@ -14,18 +14,21 @@ them from a phone through the built-in Wi-Fi upload portal.
 
 - Rotates through photos on `/photos/` at a configurable cadence
   (default: one photo per hour).
-- Renders each photo with the panel's full native palette (Gray4,
-  Gray16, or six-color).
+- Renders each photo with the panel's full native palette (black and white,
+  Gray4, Gray16, or six-color).
 - Overnight quiet hours (default 01:00–07:00) so the panel doesn't
   refresh while you're asleep.
-- Three front buttons: previous / next photo and a green button that
-  opens the Wi-Fi upload portal.
+- Three front buttons: previous / next photo and a green or OK button
+  that opens the Wi-Fi upload portal.
 - On-device Wi-Fi setup and photo upload from a phone through a
   captive-portal web page.
 - **Portrait / landscape mode on E1004** (native 1200x1600 portrait).
   Pick *Native*, *RotateCW*, or *RotateCCW* in the portal; the browser
   crops and rotates uploads to match. Changes take effect on the very
   next upload - no reboot required.
+- **Portrait / landscape mode on E1005**. Pick *Portrait*, *RotateCW*,
+  or *RotateCCW* in the portal. The 480x800 or 800x480 crop, monochrome
+  dithering, controls, portal, and status screens all follow the setting.
 - Low-battery *please recharge* screen instead of silently refusing to
   refresh, so you can see at a glance that the frame needs charging.
 - **SD-card firmware updates** - drop the app-only
@@ -47,6 +50,7 @@ them from a phone through the built-in Wi-Fi upload portal.
 | `reterminal_e1002` | 800×480 | six-color |
 | `reterminal_e1003` | 1872×1404 | 16-level gray |
 | `reterminal_e1004` | 1200×1600 | six-color |
+| `reterminal_e1005` | 480×800 portrait or 800×480 landscape | monochrome |
 
 Use the matching firmware target and photo-preparation model. Files
 prepared for one model are intentionally rejected by another when
@@ -65,13 +69,15 @@ You will also need:
 
 ### 1. Flash the firmware
 
-The fastest path is the web flasher — no installer, no `esptool.py`:
+For E1001-E1004, the fastest path is the web flasher:
 
 > [Flash your reTerminal from the browser →](https://danpodeanu.github.io/seeed-reterminal-E100X/)
 
 Pick the reTerminal model, select **Photo Viewer**, connect over
 USB-C, and Chrome or Edge writes the latest release directly. To
 build from source instead, see [Building from source](#building-from-source).
+E1005 uses a different 32 MB boot chain, so install its release binary with
+USB tooling or build/deploy it from source rather than using the web flasher.
 
 ### 2. Connect the device to Wi-Fi
 
@@ -93,6 +99,7 @@ You can re-enter the portal at any time: **while the device is
 sleeping, press the green button**. The panel switches to the portal
 welcome screen with three QR codes (Wi-Fi, portal URL, online help)
 and the AP comes back up. Press either arrow to exit.
+On E1005, press **OK** to enter; any front button exits.
 
 ### 3. Put photos on the SD card
 
@@ -125,6 +132,8 @@ Filenames sorted alphabetically define the display order (unless
   - **Green (GPIO5)** → enter the Wi-Fi upload portal. Any button
     exits the portal and returns to the photo.
   - A short beep confirms every button wake.
+  - **E1005:** OK opens the portal, UP selects the previous photo, and
+    DOWN selects the next photo.
 - **Header/overlay** — none. The photo fills the whole panel.
 - **Quiet hours** (default 01:00–07:00) suppress automatic photo
   changes overnight. Buttons still work; the panel simply doesn't
@@ -153,6 +162,20 @@ python tools/prepare_photos.py \
   --output /Volumes/MY_SD_CARD/photos \
   ~/Pictures/Frame
 ```
+
+For E1005, select the same orientation configured in the web UI:
+
+```bash
+python tools/prepare_photos.py \
+  --model e1005 \
+  --orientation rotate-cw \
+  --output /media/user/SD/photos \
+  photo.jpg
+```
+
+`portrait` produces 480x800 output. `rotate-cw` and `rotate-ccw` both
+produce 800x480 logical rasters; the E1005 driver applies the physical
+direction at display time.
 
 The final argument can be one or more files or directories;
 directories are searched recursively. Change both `--model` and the
@@ -184,7 +207,7 @@ unrestricted palette dithering when exact color mixing matters more.
 
 ## The Wi-Fi upload portal
 
-Pressing the green button while the device is asleep opens a
+Pressing the green button (OK on E1005) while the device is asleep opens a
 one-shot Wi-Fi upload path, so a new photo can be prepared and
 stored on the SD card without removing it from the frame:
 
@@ -207,7 +230,9 @@ stored on the SD card without removing it from the frame:
    card. On E1004 the crop aspect follows the *Panel orientation*
    setting in the portal (Native / RotateCW / RotateCCW), so an
    E1004 mounted portrait gets a portrait crop and a wall-mounted
-   landscape unit gets a landscape crop with no re-flashing. A
+   landscape unit gets a landscape crop with no re-flashing. E1005
+   similarly emits a logical 480x800 portrait or 800x480 landscape
+   monochrome BMP and lets the display driver apply the selected rotation. A
    success banner ("Uploaded. Next panel refresh will show
    this photo.") persists so the next upload can be prepared without
    page reload. On the Spectra 6 panels (E1002 and E1004) the browser
@@ -217,13 +242,13 @@ stored on the SD card without removing it from the frame:
    tones and gradients than the built-in dithering path. The library
    is bundled with the firmware; no network round-trip to a CDN is
    required.
-5. Pressing either arrow button exits the portal, tears down the AP,
+5. Pressing any front button exits the portal, tears down the AP,
    and returns to the normal photo view. A *Reboot to viewer* button
    on every portal page (Wi-Fi, Settings, SD, Photos, Reset) does
    the same over the network so the exit can be triggered from the
    phone after the upload completes.
 
-The portal only starts on the green button; the device never brings
+The portal only starts on the green button (OK on E1005); the device never brings
 up an AP during ordinary photo changes or timer wakes. The AP is
 deliberately open — its scope is one file transfer to `/photos/` on
 the local SD card, no credentials are ever transmitted, and Wi-Fi is
@@ -283,6 +308,9 @@ pio run -e reterminal_e1003 \
 pio device monitor --port /dev/ttyUSB0 --baud 115200
 ```
 
+For E1005, replace the environment with `reterminal_e1005`; the repository
+deployment helpers also accept `e1005`.
+
 Use `/dev/cu.usbserial-*` on macOS when that is the device's serial
 port. Every application log line starts with local time in
 `[YYYY-MM-DD HH:MM:SS.mmm]` format. Before the clock is
@@ -295,8 +323,8 @@ pio test -c platformio-test.ini -e native_test
 ```
 
 The tests cover quiet-hour timing, NTP scheduling, button direction,
-and photo-index wrapping. GitHub Actions runs them alongside all
-four firmware builds.
+photo-index wrapping, E1005 orientation geometry, and the preparation tool.
+GitHub Actions runs them alongside all five firmware builds.
 
 ### Settings reference
 
@@ -347,11 +375,11 @@ Reference of the most common `config.h` fields:
 - `PHOTO_ORDER_RANDOM`: `true` shuffles the photo enumeration at
   each boot so successive frames feel random; `false` sorts
   alphabetically for a deterministic order across boots.
-- `orientation` (E1004 only, portal-only, no compile-time default):
-  `Native`, `RotateCW`, or `RotateCCW`. Controls the crop aspect the
-  browser uploader offers so photos taken in portrait or landscape
-  fill the physical panel correctly. E1001-E1003 are landscape-native
-  and ignore this setting. Changing it in the portal takes effect
+- `orientation`: E1004 offers `Native`, `RotateCW`, and `RotateCCW`.
+  E1005 offers `Portrait`, `RotateCW`, and `RotateCCW`. It controls the crop
+  aspect the browser uploader offers so photos taken in portrait or landscape
+  fill the physical panel correctly. E1001-E1003 are landscape-native and
+  ignore this setting. Changing it in the portal takes effect
   immediately - the `/upload-photo` page's crop rectangle re-orients
   itself on the next tab focus without a reboot.
 
@@ -365,6 +393,9 @@ All three front buttons are deep-sleep wake sources:
 
 On E1001–E1003 the green/right button is GPIO3. E1004 uses the three
 physical front buttons; no touch input is required.
+
+E1005 uses OK on GPIO4 for the portal, UP on GPIO5 for the previous photo,
+and DOWN on GPIO6 for the next photo.
 
 ### Wake, timing, and RTC
 

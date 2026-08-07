@@ -1178,7 +1178,9 @@ void handlePanelInfo() {
     if (!live || !live[0]) live = g_config.panelOrientation ? g_config.panelOrientation : "native";
     json += live;
   }
-  json += "\"}";
+  json += "\",\"logicalRaster\":";
+  json += g_config.uploadUsesLogicalGeometry ? "true" : "false";
+  json += "}";
   g_server->sendHeader("Cache-Control", "no-store");
   g_server->send(200, "application/json", json);
 }

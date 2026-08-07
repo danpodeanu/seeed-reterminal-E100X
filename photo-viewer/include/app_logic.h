@@ -12,6 +12,10 @@ constexpr int photoDirection(bool previousButtonWake) {
   return previousButtonWake ? -1 : 1;
 }
 
+constexpr int failedPhotoAdvance(int requestedDirection) {
+  return requestedDirection == 0 ? 1 : requestedDirection;
+}
+
 constexpr int32_t normalizePhotoIndex(int32_t index, uint32_t count) {
   if (count == 0) return -1;
   const int32_t signedCount = static_cast<int32_t>(count);

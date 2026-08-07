@@ -37,9 +37,6 @@ jobs:
           - reterminal_e1003
           - reterminal_e1004
           - reterminal_e1005
-        exclude:
-          - app: photo-viewer
-            board: reterminal_e1005
 
     steps:
       - name: Check out repository

@@ -58,6 +58,12 @@ PROFILES = {
         "1872x1404, 16-level grayscale",
     ),
     "e1004": DisplayProfile(1200, 1600, E6_COLORS, "1200x1600, six color"),
+    "e1005": DisplayProfile(
+        480,
+        800,
+        ((0, 0, 0), (255, 255, 255)),
+        "480x800 portrait, black and white",
+    ),
 }
 
 SUPPORTED_SUFFIXES = {
@@ -80,6 +86,22 @@ def parse_color(value: str) -> tuple[int, int, int]:
         return tuple(int(text[index : index + 2], 16) for index in (0, 2, 4))
     except ValueError as error:
         raise argparse.ArgumentTypeError("background contains non-hex digits") from error
+
+
+def profile_for(model: str, orientation: str) -> DisplayProfile:
+    profile = PROFILES[model]
+    if model != "e1005":
+        if orientation != "native":
+            raise ValueError("--orientation is currently supported only for E1005")
+        return profile
+    if orientation in ("native", "portrait"):
+        return profile
+    return DisplayProfile(
+        profile.height,
+        profile.width,
+        profile.colors,
+        "800x480 landscape, black and white",
+    )
 
 
 def input_files(paths: Iterable[Path]) -> list[Path]:
@@ -346,6 +368,15 @@ def build_parser() -> argparse.ArgumentParser:
                         help="image files and/or directories (recursive)")
     parser.add_argument("--model", required=True, choices=sorted(PROFILES),
                         help="target display model")
+    parser.add_argument(
+        "--orientation",
+        choices=("native", "portrait", "rotate-cw", "rotate-ccw"),
+        default="native",
+        help=(
+            "E1005 output orientation: portrait, rotate-cw, or rotate-ccw "
+            "(default: native, which means portrait on E1005)"
+        ),
+    )
     parser.add_argument("--output", required=True, type=Path,
                         help="output directory, normally the SD card's /photos")
     parser.add_argument(
@@ -397,9 +428,20 @@ def main() -> int:
     if not files:
         raise SystemExit("no supported input photos found")
 
-    profile = PROFILES[args.model]
+    try:
+        profile = profile_for(args.model, args.orientation)
+    except ValueError as error:
+        raise SystemExit(str(error)) from error
+    orientation = (
+        "portrait"
+        if args.model == "e1005" and args.orientation == "native"
+        else args.orientation
+    )
+    target_label = (
+        f"{args.model}-{orientation}" if args.model == "e1005" else args.model
+    )
     args.output.mkdir(parents=True, exist_ok=True)
-    print(f"Target {args.model.upper()}: {profile.description}")
+    print(f"Target {target_label.upper()}: {profile.description}")
     print(
         f"Fit: {args.fit}; dither: "
         f"{'off' if args.no_dither else 'Floyd-Steinberg'}"
@@ -414,9 +456,9 @@ def main() -> int:
     failed = 0
     for source in files:
         try:
-            destination = args.output / f"{source.stem}-{args.model}.bmp"
+            destination = args.output / f"{source.stem}-{target_label}.bmp"
             if destination.exists() and not args.overwrite:
-                destination = unique_output_path(args.output, source, args.model)
+                destination = unique_output_path(args.output, source, target_label)
             photo = load_photo(source, args.background)
             photo = resize_photo(photo, profile, args.fit, args.background)
             photo = apply_gamma(photo, args.gamma)
@@ -442,12 +484,22 @@ def main() -> int:
 
     print(f"Prepared {converted} photo(s); {failed} failed.")
     if converted:
-        write_manifest(args.output, args.model, args.fit, args.gamma,
-                       not args.no_dither, not args.no_warm_tone_protection)
+        write_manifest(
+            args.output,
+            args.model,
+            orientation,
+            profile.width,
+            profile.height,
+            args.fit,
+            args.gamma,
+            not args.no_dither,
+            not args.no_warm_tone_protection,
+        )
     return 1 if failed else 0
 
 
-def write_manifest(output_dir: Path, model: str, fit: str, gamma: float,
+def write_manifest(output_dir: Path, model: str, orientation: str,
+                   width: int, height: int, fit: str, gamma: float,
                    dither: bool, warm_tone_protection: bool) -> None:
     """Emit a schema-tagged manifest that lists every prepared BMP alongside
     the dither settings that produced it. Merges with any existing manifest
@@ -463,6 +515,9 @@ def write_manifest(output_dir: Path, model: str, fit: str, gamma: float,
         "_schema": MANIFEST_SCHEMA,
         "dither_version": DITHER_VERSION,
         "model": model,
+        "orientation": orientation,
+        "width": width,
+        "height": height,
         "fit": fit,
         "gamma": gamma,
         "dither": dither,

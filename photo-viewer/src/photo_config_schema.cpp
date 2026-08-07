@@ -7,8 +7,19 @@ using config_portal::Field;
 using config_portal::FieldType;
 using config_portal::Section;
 
-const char* const kOrientationValues[] = {"Native", "RotateCW", "RotateCCW",
-                                          nullptr};
+#if RETERMINAL_MODEL == 1005
+const char* const kOrientationValues[] = {
+    "Portrait", "RotateCW", "RotateCCW", nullptr};
+constexpr const char* kOrientationDefault = "Portrait";
+constexpr const char* kOrientationHelp =
+    "E1005 supports portrait and both physical landscape directions. Browser uploads follow this setting.";
+#else
+const char* const kOrientationValues[] = {
+    "Native", "RotateCW", "RotateCCW", nullptr};
+constexpr const char* kOrientationDefault = "Native";
+constexpr const char* kOrientationHelp =
+    "E1004 supports native portrait and both landscape directions. Other models ignore this setting.";
+#endif
 
 const Field kRefreshFields[] = {
     {kKeySleepSeconds,
@@ -62,8 +73,8 @@ const Field kPhotoFields[] = {
      FieldType::Bool, "true", nullptr, 0, 0, nullptr},
     {kKeyOrientation,
      "Panel orientation",
-     "Only meaningful on E1004 (the other boards are landscape-native and ignore this). RotateCW = device physically rotated 90 degrees clockwise from its default mounting; RotateCCW is the mirror. Photos are rotated in the browser during upload; drop-in prepared BMPs on the SD card are not re-rotated.",
-     FieldType::Enum, "Native", kOrientationValues, 0, 0, nullptr},
+     kOrientationHelp,
+     FieldType::Enum, kOrientationDefault, kOrientationValues, 0, 0, nullptr},
 };
 
 const Field kBatteryFields[] = {

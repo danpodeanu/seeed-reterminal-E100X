@@ -12,6 +12,7 @@
 //      drawImage with high-quality resampling.
 //   4. Runs Floyd-Steinberg dithering (or optional None) in JS,
 //      quantising to the panel's palette:
+//        - bw    : E1005, black and white
 //        - gray4 : E1001, 4 gray levels
 //        - gray16: E1003, 16 gray levels
 //        - e6    : E1002 / E1004, 6-colour Spectra
@@ -218,7 +219,7 @@ extern const char kPhotoUploadPageTail[] PROGMEM = R"HTML(<header>
 
   <div class="card">
     <p class="hint" style="margin:0">Uploaded photos appear on the panel on the next refresh.
-      Use the panel's arrow buttons to leave this page.</p>
+      Use a front-panel button to leave this page.</p>
   </div>
 </main>
 <footer>reTerminal photo portal</footer>
@@ -227,6 +228,9 @@ extern const char kPhotoUploadPageTail[] PROGMEM = R"HTML(<header>
 "use strict";
 
 const PALETTES = {
+  bw: [
+    [0, 0, 0], [255, 255, 255],
+  ],
   gray4: [
     [0, 0, 0], [85, 85, 85], [170, 170, 170], [255, 255, 255],
   ],
@@ -281,8 +285,8 @@ async function fetchPanel() {
     p.effWidth = p.width;
     p.effHeight = p.height;
   }
-  const paletteLabel = ({ gray4: "4 gray levels", gray16: "16 gray levels",
-    e6: "6 colors" })[p.palette] || p.palette;
+  const paletteLabel = ({ bw: "black and white", gray4: "4 gray levels",
+    gray16: "16 gray levels", e6: "6 colors" })[p.palette] || p.palette;
   const orientLabel = orient === "rotate_cw"  ? " (rotated CW)"
                     : orient === "rotate_ccw" ? " (rotated CCW)"
                     : "";
@@ -910,11 +914,15 @@ async function onUpload() {
   if (!state.currentIndices) return;
   $("upload").disabled = true;
   setStatus("Encoding BMP...");
+  const logicalRaster = !!state.panel.logicalRaster;
+  const bmpWidth = logicalRaster ? state.panel.effWidth : state.panel.width;
+  const bmpHeight = logicalRaster ? state.panel.effHeight : state.panel.height;
+  const bmpOrientation =
+      logicalRaster ? "native" : (state.panel.orientation || "native");
   const bmp = encode4bitBmp(state.currentIndices,
                             state.panel.effWidth, state.panel.effHeight,
                             state.currentPalette,
-                            state.panel.width, state.panel.height,
-                            state.panel.orientation || "native");
+                            bmpWidth, bmpHeight, bmpOrientation);
   // Build the thumbnail from the original picture up front so we still
   // have state.bitmap around (resetForNextUpload closes it). We POST it
   // AFTER the photo upload succeeds - the photo upload's

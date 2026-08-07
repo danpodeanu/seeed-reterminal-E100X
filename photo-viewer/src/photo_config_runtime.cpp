@@ -32,6 +32,7 @@ bool  g_loaded = false;
 ::config::Orientation parseOrientation(const String& s) {
   if (s == "RotateCW") return ::config::Orientation::RotateCW;
   if (s == "RotateCCW") return ::config::Orientation::RotateCCW;
+  if (s == "Portrait") return ::config::Orientation::Portrait;
   return ::config::Orientation::Native;
 }
 
@@ -93,21 +94,36 @@ const char* ntpSecondary()      { return g_cache.ntpSecondary.c_str(); }
 
 bool        randomOrder()       { return g_cache.randomOrder; }
 ::config::Orientation orientation() {
-  // Only E1004 is a portrait-native panel that can be physically rotated.
-  // On the other boards the panel is landscape at the driver level, so
-  // "no rotation" (Native) is already what the user wants and the setting
-  // is hard-locked here to keep call sites simple.
-  if (::config::MODEL != 1004) return ::config::Orientation::Native;
+  if (::config::MODEL != 1004 && ::config::MODEL != 1005) {
+    return ::config::Orientation::Native;
+  }
   return g_cache.orientation;
 }
 bool        isLandscape() {
-  return orientation() != ::config::Orientation::Native;
+  return photo_orientation::isLandscape(orientation());
 }
 int         effectivePanelWidth() {
+  if (::config::MODEL == 1005) return photo_orientation::panelWidth(orientation());
   return isLandscape() ? ::config::PANEL_HEIGHT : ::config::PANEL_WIDTH;
 }
 int         effectivePanelHeight() {
+  if (::config::MODEL == 1005) return photo_orientation::panelHeight(orientation());
   return isLandscape() ? ::config::PANEL_WIDTH : ::config::PANEL_HEIGHT;
+}
+int         panelRotation() {
+  return ::config::MODEL == 1005
+             ? photo_orientation::panelRotation(orientation())
+             : 0;
+}
+int         panelWidth() {
+  return ::config::MODEL == 1005
+             ? photo_orientation::panelWidth(orientation())
+             : ::config::PANEL_WIDTH;
+}
+int         panelHeight() {
+  return ::config::MODEL == 1005
+             ? photo_orientation::panelHeight(orientation())
+             : ::config::PANEL_HEIGHT;
 }
 bool        logToSd()           { return g_cache.logToSd; }
 const char* pinnedPhoto()       { return g_cache.pinnedPhoto.c_str(); }
