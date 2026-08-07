@@ -18,8 +18,11 @@ for:
 After drawing, every front-button press beeps. Press and release the primary
 **GREEN** button on E1001-E1004, or **OK** on E1005, to enter deep sleep; any
 front button wakes with a beep and redraws the test. On E1005, each GT911
-touch is also logged, beeps, and temporarily inverts the complete pattern
-block containing the contact using two partial refreshes.
+touch is also logged and temporarily inverts the complete pattern
+block containing the contact using two back-to-back partial refreshes. There
+is no intentional hold between inversion and restoration, and serial output
+reports touch-to-inversion, transfer, panel-busy, restoration, and total-cycle
+latencies in microseconds.
 An inserted E1005 SD card can remain in place: the sketch powers and
 deselects it so it cannot interfere with the display's shared SPI bus.
 E1005 portrait output keeps the USB connector at the bottom.
@@ -71,6 +74,8 @@ E1005 additionally reports GT911 startup and touch coordinates:
 
 ```
 [touch] GT911 ready at 0x5D, sensor=480x800
+[touch] invert latency=456789 us (prepare=3210 transfer=18500 panel=435079)
+[touch] restore latency=449876 us (transfer=18420 panel=431456), touch cycle=906665 us
 [touch] x=241 y=397 size=18 id=0
 ```
 

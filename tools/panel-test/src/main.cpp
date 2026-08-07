@@ -329,6 +329,12 @@ struct NativeRegion {
   int height;
 };
 
+struct RefreshTiming {
+  uint32_t transferUs = 0;
+  uint32_t panelUs = 0;
+  uint32_t totalUs = 0;
+};
+
 PatternRegion columnRegion(int x, int top, int height, int columnCount) {
   const int baseWidth = PANEL_WIDTH / columnCount;
   const int remainder = PANEL_WIDTH - baseWidth * columnCount;
@@ -436,7 +442,8 @@ void setPartialWindow(const NativeRegion& region) {
 }
 
 bool refreshPartialRegion(const NativeRegion& region, uint8_t* oldPlane,
-                          uint8_t* newPlane) {
+                          uint8_t* newPlane, RefreshTiming& timing) {
+  const uint32_t refreshStartedUs = micros();
   epaper.wake();
   epaper.writecommand(0x18);
   epaper.writedata(0x80);
@@ -455,22 +462,28 @@ bool refreshPartialRegion(const NativeRegion& region, uint8_t* oldPlane,
   epaper.writecommand(0x20);
 
   constexpr uint32_t kRefreshTimeoutMs = 10000;
-  const uint32_t startedAt = millis();
+  const uint32_t panelStartedUs = micros();
+  timing.transferUs = panelStartedUs - refreshStartedUs;
   while (digitalRead(TFT_BUSY) == HIGH) {
-    if (millis() - startedAt >= kRefreshTimeoutMs) {
+    const uint32_t nowUs = micros();
+    if (nowUs - panelStartedUs >= kRefreshTimeoutMs * 1000U) {
+      timing.panelUs = nowUs - panelStartedUs;
+      timing.totalUs = nowUs - refreshStartedUs;
       LOG.println("[panel-test] partial refresh timed out");
       return false;
     }
     delay(1);
   }
+  const uint32_t completedUs = micros();
+  timing.panelUs = completedUs - panelStartedUs;
+  timing.totalUs = completedUs - refreshStartedUs;
   // Keep controller RAM alive between touches. Resetting the SSD1677 before
   // every partial update discards untouched RAM and corrupts the next window.
   return true;
 }
 
-void showTouchFeedback(const Gt911Touch::Point& point) {
-  constexpr uint32_t kFeedbackHoldMs = 1000;
-
+void showTouchFeedback(const Gt911Touch::Point& point,
+                       uint32_t touchDetectedUs) {
   const PatternRegion region = touchedPatternRegion(point);
   const NativeRegion native = nativeRegion(region);
   auto* framebuffer = static_cast<uint8_t*>(epaper.getPointer());
@@ -487,13 +500,33 @@ void showTouchFeedback(const Gt911Touch::Point& point) {
   buildDisplayPlane(framebuffer, originalPlane);
   invertTouchRegion(region.left, region.top, region.width, region.height);
   buildDisplayPlane(framebuffer, invertedPlane);
-  hardware::beep();
-  const bool invertedOk =
-      refreshPartialRegion(native, originalPlane, invertedPlane);
-  if (invertedOk) delay(kFeedbackHoldMs);
-  const bool restoredOk =
-      invertedOk &&
-      refreshPartialRegion(native, invertedPlane, originalPlane);
+  const uint32_t preparedUs = micros();
+  RefreshTiming invertedTiming;
+  const bool invertedOk = refreshPartialRegion(
+      native, originalPlane, invertedPlane, invertedTiming);
+  const uint32_t invertedCompleteUs = micros();
+
+  RefreshTiming restoredTiming;
+  const uint32_t restoreStartedUs = micros();
+  const bool restoredOk = invertedOk && refreshPartialRegion(
+                                           native, invertedPlane,
+                                           originalPlane, restoredTiming);
+  const uint32_t restoredCompleteUs = micros();
+  LOG.printf(
+      "[touch] invert latency=%lu us (prepare=%lu transfer=%lu panel=%lu)\n",
+      static_cast<unsigned long>(invertedCompleteUs - touchDetectedUs),
+      static_cast<unsigned long>(preparedUs - touchDetectedUs),
+      static_cast<unsigned long>(invertedTiming.transferUs),
+      static_cast<unsigned long>(invertedTiming.panelUs));
+  if (invertedOk) {
+    LOG.printf(
+        "[touch] restore latency=%lu us (transfer=%lu panel=%lu), "
+        "touch cycle=%lu us\n",
+        static_cast<unsigned long>(restoredCompleteUs - restoreStartedUs),
+        static_cast<unsigned long>(restoredTiming.transferUs),
+        static_cast<unsigned long>(restoredTiming.panelUs),
+        static_cast<unsigned long>(restoredCompleteUs - touchDetectedUs));
+  }
   invertTouchRegion(region.left, region.top, region.width, region.height);
   free(originalPlane);
   free(invertedPlane);
@@ -514,10 +547,11 @@ void pollTouch() {
   }
   if (result != Gt911Touch::PollResult::Touch || touchActive) return;
 
+  const uint32_t touchDetectedUs = micros();
   touchActive = true;
+  showTouchFeedback(point, touchDetectedUs);
   LOG.printf("[touch] x=%u y=%u size=%u id=%u\n", point.x, point.y,
              point.size, point.id);
-  showTouchFeedback(point);
 }
 #endif
 
@@ -612,8 +646,7 @@ void setup() {
     LOG.printf("[touch] GT%s ready at 0x%02X, sensor=%ux%u\n",
                touch.productId(), touch.address(), touch.sensorWidth(),
                touch.sensorHeight());
-    LOG.println(
-        "[panel-test] touch the display to beep and invert that area");
+    LOG.println("[panel-test] touch the display to invert that area");
   } else {
     LOG.println("[touch] GT911 initialization failed");
   }
@@ -640,5 +673,7 @@ void loop() {
       powerDownAndSleep();
     }
   }
+#if RETERMINAL_MODEL != 1005
   delay(5);
+#endif
 }
