@@ -113,6 +113,20 @@ inline int panelHeight() {
   return weather_config::runtime::panelHeight();
 }
 
+String configurationGestureHint(bool reconfigure) {
+#if RETERMINAL_MODEL == 1005
+  return "Hold " + String(PRIMARY_BUTTON_LABEL) +
+         " 2s from sleep to " + (reconfigure ? "reconfigure" : "configure");
+#else
+  if (reconfigure) {
+    return "Keep " + String(PRIMARY_BUTTON_LABEL) +
+           " pressed for 2 seconds to reconfigure.";
+  }
+  return "To configure device - from sleep, hold " +
+         String(PRIMARY_BUTTON_LABEL) + " for 2 seconds";
+#endif
+}
+
 inline bool weatherBackgroundActive() {
   return weather_config::runtime::weatherBackgroundEnabled();
 }
@@ -226,6 +240,12 @@ constexpr int SMOOTH_FONT_SMALL_PX = 20;
 constexpr int SMOOTH_FONT_LARGE_PX = 48;
 constexpr const GFXfont* SMALL_SMOOTH_FALLBACK_FONT = &FreeSansBold12pt7b;
 constexpr const GFXfont* LARGE_SMOOTH_FALLBACK_FONT = &FreeSansBold18pt7b;
+#elif RETERMINAL_MODEL == 1005
+// The 16 px smooth font loses too much stroke weight on the one-bit panel.
+constexpr int SMOOTH_FONT_SMALL_PX = 20;
+constexpr int SMOOTH_FONT_LARGE_PX = 48;
+constexpr const GFXfont* SMALL_SMOOTH_FALLBACK_FONT = &FreeSansBold12pt7b;
+constexpr const GFXfont* LARGE_SMOOTH_FALLBACK_FONT = &FreeSansBold12pt7b;
 #else
 constexpr int SMOOTH_FONT_SMALL_PX = 16;
 constexpr int SMOOTH_FONT_LARGE_PX = 48;
@@ -267,6 +287,66 @@ static int smoothCenterYAdjust() {
   // Approximate cap-height as ascent * 0.78 (DejaVu Sans Bold).
   return (yA / 2) - mA + (a * 78 / 200);
 }
+
+#if RETERMINAL_MODEL == 1005
+bool drawLoadedSmoothTextMonochrome(const String& text,
+                                    int centerX, int centerY) {
+  if (!smoothFontManager.smoothLoaded() || !epaper.fontLoaded ||
+      !epaper.fs_font || !epaper.fontFile) {
+    return false;
+  }
+
+  constexpr uint8_t kSolidAlphaThreshold = 64;
+  uint8_t row[256];
+  int cursorX = centerX - epaper.textWidth(text, 1) / 2;
+  const int cursorY = centerY - epaper.gFont.yAdvance / 2;
+  uint16_t offset = 0;
+  const uint16_t length = static_cast<uint16_t>(text.length());
+  auto* utf8 = reinterpret_cast<uint8_t*>(
+      const_cast<char*>(text.c_str()));
+
+  while (offset < length) {
+    const uint16_t code = epaper.decodeUTF8(utf8, &offset, length - offset);
+    if (code == 0x20) {
+      cursorX += epaper.gFont.spaceWidth;
+      continue;
+    }
+
+    uint16_t glyph = 0;
+    if (!epaper.getUnicodeIndex(code, &glyph)) {
+      cursorX += epaper.gFont.spaceWidth;
+      continue;
+    }
+
+    const uint8_t width = epaper.gWidth[glyph];
+    const uint8_t height = epaper.gHeight[glyph];
+    const int left = cursorX + epaper.gdX[glyph];
+    const int top =
+        cursorY + epaper.gFont.maxAscent - epaper.gdY[glyph];
+    if (!epaper.fontFile.seek(epaper.gBitmap[glyph], fs::SeekSet)) {
+      return false;
+    }
+    for (uint8_t y = 0; y < height; ++y) {
+      if (epaper.fontFile.read(row, width) != width) return false;
+      for (uint8_t x = 0; x < width; ++x) {
+        if (row[x] >= kSolidAlphaThreshold) {
+          epaper.drawPixel(left + x, top + y, PANEL_BLACK);
+        }
+      }
+    }
+    cursorX += epaper.gxAdvance[glyph];
+  }
+  return true;
+}
+
+void drawE1005HeaderLocation(const String& location, int maxWidth,
+                             int centerX, int centerY) {
+  const String label = text_render::ellipsize(epaper, location, maxWidth - 2);
+  if (!drawLoadedSmoothTextMonochrome(label, centerX, centerY)) {
+    epaper.drawString(label, centerX, centerY, 1);
+  }
+}
+#endif
 
 void selectUpdateTimeFont() {
 #if RETERMINAL_MODEL == 1003 || RETERMINAL_MODEL == 1004
@@ -855,10 +935,9 @@ void drawHeader(const WeatherData& weather) {
     selectSmallSmoothFont();
     const String location = text_render::displayText(
         String(weather_config::runtime::locationName()));
-    epaper.drawString(
-        text_render::ellipsize(epaper, location,
-                               panelWidth() - config::ui(380)),
-        panelWidth() / 2, config::ui(25) + smoothCenterYAdjust(), 1);
+    drawE1005HeaderLocation(
+        location, panelWidth() - config::ui(380), panelWidth() / 2,
+        config::ui(25) + smoothCenterYAdjust());
     smoothFontManager.unload();
     epaper.drawFastHLine(config::ui(10), config::ui(44),
                          panelWidth() - config::ui(20), PANEL_BLACK);
@@ -872,9 +951,9 @@ void drawHeader(const WeatherData& weather) {
   selectSmallSmoothFont();
   const String location =
       text_render::displayText(String(weather_config::runtime::locationName()));
-  epaper.drawString(
-      text_render::ellipsize(epaper, location, HEADER_LOCATION_WIDTH),
-      config::PANEL_WIDTH / 2, 20 + smoothCenterYAdjust(), 1);
+  drawE1005HeaderLocation(location, HEADER_LOCATION_WIDTH,
+                          config::PANEL_WIDTH / 2,
+                          20 + smoothCenterYAdjust());
   smoothFontManager.unload();
 
   selectSmallFont();
@@ -1935,8 +2014,7 @@ void setup() {
     LOG.println("[display] showing Wi-Fi connection status");
     renderStatus("Connecting to " + String(weather_wifi::ssid()), connectionDetail,
                  locationLabel,
-                 "To configure device - from sleep, hold " +
-                     String(PRIMARY_BUTTON_LABEL) + " for 2 seconds",
+                 configurationGestureHint(false),
                  "", macAndVersion);
   }
 #if RETERMINAL_MODEL == 1001
@@ -2068,9 +2146,7 @@ void setup() {
         "Retrying in " + String(static_cast<unsigned long>(retryMinutes)) +
         " minutes. Press " + String(PRIMARY_BUTTON_LABEL) +
         " to retry now.";
-    const String help =
-        "Keep " + String(PRIMARY_BUTTON_LABEL) +
-        " pressed for 2 seconds to reconfigure.";
+    const String help = configurationGestureHint(true);
     renderStatus("Weather unavailable", detail, "", help, failureSummary);
     powerDownAndSleep(config::FAILURE_RETRY_SECONDS);
     return;

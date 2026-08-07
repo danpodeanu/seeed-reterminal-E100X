@@ -26,7 +26,7 @@ import argparse
 import os
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Callable, Dict, List, Tuple
+from typing import Dict, List, Mapping, Tuple
 
 from PIL import Image, ImageFilter, ImageOps
 
@@ -43,6 +43,11 @@ CLOUDY_ONLY: Tuple[str, ...] = ("cloudy",)
 # ~45% of the original ink, plenty to still read as a landscape.
 FADE_STRENGTH = 0.55
 E1005_INK_DENSITY = 0.08
+E1005_THEME_INK_DENSITY = {
+    # Sunny has one concentrated dark mountain mass, so matching the other
+    # themes' average ink makes it look much heavier on a one-bit panel.
+    "sunny": 0.045,
+}
 
 
 @dataclass(frozen=True)
@@ -59,6 +64,7 @@ class ModelSpec:
     fade_strength: float = FADE_STRENGTH
     crop_to_panel: bool = False
     target_ink_density: float | None = None
+    theme_ink_density: Mapping[str, float] | None = None
 
     @property
     def payload_w(self) -> int:
@@ -93,11 +99,12 @@ MODELS: List[ModelSpec] = [
               "weather_background_data_e1004.cpp"),
     # E1005 SSD1677 monochrome portrait. Crop an upright 3:5 composition from
     # the landscape artwork instead of rotating the mountains on their side.
-    # Normalizing the average ink keeps light themes visible without making
-    # darker themes too busy behind the compact labels.
+    # Normalize most themes to 8% average ink. Sunny uses less because its ink
+    # is concentrated into a much darker-looking mountain mass.
     ModelSpec(1005, 480, 800, False, 1, 2, 1, ALL_THEMES,
               "weather_background_data_e1005.cpp", crop_to_panel=True,
-              target_ink_density=E1005_INK_DENSITY),
+              target_ink_density=E1005_INK_DENSITY,
+              theme_ink_density=E1005_THEME_INK_DENSITY),
 ]
 
 
@@ -303,8 +310,12 @@ def render_theme(spec: ModelSpec, theme: str, assets_dir: Path) -> bytes:
         img = img.rotate(90, expand=True, resample=Image.BICUBIC)
     if spec.crop_to_panel:
         img = crop_to_aspect(img, (spec.payload_w, spec.payload_h))
+    target_ink_density = spec.target_ink_density
+    if spec.theme_ink_density is not None:
+        target_ink_density = spec.theme_ink_density.get(
+            theme, target_ink_density)
     refined = refine(img, (spec.payload_w, spec.payload_h),
-                     spec.fade_strength, spec.target_ink_density)
+                     spec.fade_strength, target_ink_density)
     indexed = dither_to_palette(refined, spec.levels)
     return pack(indexed, spec.bpp)
 
