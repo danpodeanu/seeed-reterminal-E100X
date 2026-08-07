@@ -25,6 +25,7 @@
 // button enters deep sleep; any front button wakes, beeps, and redraws.
 
 #include <Arduino.h>
+#include <SPI.h>
 #include <TFT_eSPI.h>
 #include <Wire.h>
 #include <driver/rtc_io.h>
@@ -332,6 +333,7 @@ struct NativeRegion {
 struct RefreshTiming {
   uint32_t transferUs = 0;
   uint32_t panelUs = 0;
+  uint32_t reseedUs = 0;
   uint32_t totalUs = 0;
 };
 
@@ -399,6 +401,7 @@ uint8_t reverseBits(uint8_t value) {
 
 constexpr size_t FRAMEBUFFER_SIZE =
     static_cast<size_t>(PANEL_HEIGHT / 8) * PANEL_WIDTH;
+constexpr uint32_t PARTIAL_REFRESH_SPI_HZ = 40000000;
 
 void buildDisplayPlane(const uint8_t* framebuffer, uint8_t* destination) {
   constexpr int kNativeStrideBytes = PANEL_HEIGHT / 8;
@@ -410,14 +413,46 @@ void buildDisplayPlane(const uint8_t* framebuffer, uint8_t* destination) {
   }
 }
 
-void writeDisplayPlane(uint8_t command, uint8_t* data) {
-  epaper.writecommand(command);
-  epaper.writendata(data, static_cast<uint16_t>(FRAMEBUFFER_SIZE));
+void writePanelCommand(uint8_t command, const uint8_t* data = nullptr,
+                       size_t length = 0) {
+  SPIClass& panelSpi = epaper.getSPIinstance();
+  panelSpi.beginTransaction(
+      SPISettings(PARTIAL_REFRESH_SPI_HZ, MSBFIRST, SPI_MODE0));
+  digitalWrite(board::PIN_SD_CS, HIGH);
+  digitalWrite(TFT_CS, LOW);
+  digitalWrite(TFT_DC, LOW);
+  panelSpi.transfer(command);
+  if (data && length > 0) {
+    digitalWrite(TFT_DC, HIGH);
+    panelSpi.writeBytes(data, length);
+  }
+  digitalWrite(TFT_CS, HIGH);
+  digitalWrite(TFT_DC, HIGH);
+  panelSpi.endTransaction();
 }
 
-void writeDisplayCoordinate(uint16_t value) {
-  epaper.writedata(static_cast<uint8_t>(value & 0xFFU));
-  epaper.writedata(static_cast<uint8_t>(value >> 8));
+void writeDisplayPlaneWindow(uint8_t command, const uint8_t* data,
+                             const NativeRegion& region) {
+  constexpr int kDisplayStrideBytes = PANEL_HEIGHT / 8;
+  const int left = PANEL_HEIGHT - region.left - region.width;
+  const int leftByte = left / 8;
+  const size_t rowBytes = static_cast<size_t>(region.width / 8);
+
+  SPIClass& panelSpi = epaper.getSPIinstance();
+  panelSpi.beginTransaction(
+      SPISettings(PARTIAL_REFRESH_SPI_HZ, MSBFIRST, SPI_MODE0));
+  digitalWrite(board::PIN_SD_CS, HIGH);
+  digitalWrite(TFT_CS, LOW);
+  digitalWrite(TFT_DC, LOW);
+  panelSpi.transfer(command);
+  digitalWrite(TFT_DC, HIGH);
+  for (int row = region.top; row < region.top + region.height; ++row) {
+    panelSpi.writeBytes(data + row * kDisplayStrideBytes + leftByte,
+                        rowBytes);
+  }
+  digitalWrite(TFT_CS, HIGH);
+  digitalWrite(TFT_DC, HIGH);
+  panelSpi.endTransaction();
 }
 
 void setPartialWindow(const NativeRegion& region) {
@@ -429,41 +464,85 @@ void setPartialWindow(const NativeRegion& region) {
   const uint16_t bottom =
       static_cast<uint16_t>(region.top + region.height - 1);
 
-  epaper.writecommand(0x44);
-  writeDisplayCoordinate(left);
-  writeDisplayCoordinate(right);
-  epaper.writecommand(0x45);
-  writeDisplayCoordinate(top);
-  writeDisplayCoordinate(bottom);
-  epaper.writecommand(0x4E);
-  writeDisplayCoordinate(left);
-  epaper.writecommand(0x4F);
-  writeDisplayCoordinate(top);
+  const uint8_t xRange[] = {
+      static_cast<uint8_t>(left & 0xFFU),
+      static_cast<uint8_t>(left >> 8),
+      static_cast<uint8_t>(right & 0xFFU),
+      static_cast<uint8_t>(right >> 8),
+  };
+  const uint8_t yRange[] = {
+      static_cast<uint8_t>(top & 0xFFU),
+      static_cast<uint8_t>(top >> 8),
+      static_cast<uint8_t>(bottom & 0xFFU),
+      static_cast<uint8_t>(bottom >> 8),
+  };
+  const uint8_t xCounter[] = {
+      static_cast<uint8_t>(left & 0xFFU),
+      static_cast<uint8_t>(left >> 8),
+  };
+  const uint8_t yCounter[] = {
+      static_cast<uint8_t>(top & 0xFFU),
+      static_cast<uint8_t>(top >> 8),
+  };
+
+  writePanelCommand(0x44, xRange, sizeof(xRange));
+  writePanelCommand(0x45, yRange, sizeof(yRange));
+  writePanelCommand(0x4E, xCounter, sizeof(xCounter));
+  writePanelCommand(0x4F, yCounter, sizeof(yCounter));
 }
 
-bool refreshPartialRegion(const NativeRegion& region, uint8_t* oldPlane,
-                          uint8_t* newPlane, RefreshTiming& timing) {
-  const uint32_t refreshStartedUs = micros();
-  epaper.wake();
-  epaper.writecommand(0x18);
-  epaper.writedata(0x80);
-  epaper.writecommand(0x3C);
-  epaper.writedata(0x80);
+bool seedPartialRefreshBaseline() {
+  const auto* framebuffer = static_cast<const uint8_t*>(epaper.getPointer());
+  auto* displayPlane = static_cast<uint8_t*>(malloc(FRAMEBUFFER_SIZE));
+  if (!framebuffer || !displayPlane) {
+    free(displayPlane);
+    return false;
+  }
+
+  buildDisplayPlane(framebuffer, displayPlane);
   const NativeRegion fullPanel = {0, 0, PANEL_HEIGHT, PANEL_WIDTH};
   setPartialWindow(fullPanel);
-  writeDisplayPlane(0x26, oldPlane);
+  writeDisplayPlaneWindow(0x24, displayPlane, fullPanel);
   setPartialWindow(fullPanel);
-  writeDisplayPlane(0x24, newPlane);
+  writeDisplayPlaneWindow(0x26, displayPlane, fullPanel);
+  free(displayPlane);
+  return true;
+}
+
+bool refreshPartialRegion(const NativeRegion& region, const uint8_t* oldPlane,
+                          const uint8_t* newPlane, RefreshTiming& timing) {
+  const uint32_t refreshStartedUs = micros();
+  epaper.wake();
+  const uint8_t internalTemperature = 0x80;
+  const uint8_t fastBorderWaveform = 0x80;
+  const uint8_t normalRamComparison = 0x00;
+  const uint8_t fastUpdateSequence = 0xFF;
+  writePanelCommand(0x18, &internalTemperature, 1);
+  writePanelCommand(0x3C, &fastBorderWaveform, 1);
   setPartialWindow(region);
-  epaper.writecommand(0x21);
-  epaper.writedata(0x00);
-  epaper.writecommand(0x22);
-  epaper.writedata(0xFF);
-  epaper.writecommand(0x20);
+  writeDisplayPlaneWindow(0x26, oldPlane, region);
+  setPartialWindow(region);
+  writeDisplayPlaneWindow(0x24, newPlane, region);
+  setPartialWindow(region);
+  writePanelCommand(0x21, &normalRamComparison, 1);
+  writePanelCommand(0x22, &fastUpdateSequence, 1);
+  const uint32_t panelStartedUs = micros();
+  writePanelCommand(0x20);
 
   constexpr uint32_t kRefreshTimeoutMs = 10000;
-  const uint32_t panelStartedUs = micros();
-  timing.transferUs = panelStartedUs - refreshStartedUs;
+  constexpr uint32_t kBusyAssertTimeoutUs = 20000;
+  timing.transferUs = micros() - refreshStartedUs;
+  while (digitalRead(TFT_BUSY) == LOW &&
+         micros() - panelStartedUs < kBusyAssertTimeoutUs) {
+    delayMicroseconds(50);
+  }
+  if (digitalRead(TFT_BUSY) == LOW) {
+    const uint32_t nowUs = micros();
+    timing.panelUs = nowUs - panelStartedUs;
+    timing.totalUs = nowUs - refreshStartedUs;
+    LOG.println("[panel-test] partial refresh did not assert BUSY");
+    return false;
+  }
   while (digitalRead(TFT_BUSY) == HIGH) {
     const uint32_t nowUs = micros();
     if (nowUs - panelStartedUs >= kRefreshTimeoutMs * 1000U) {
@@ -476,9 +555,13 @@ bool refreshPartialRegion(const NativeRegion& region, uint8_t* oldPlane,
   }
   const uint32_t completedUs = micros();
   timing.panelUs = completedUs - panelStartedUs;
-  timing.totalUs = completedUs - refreshStartedUs;
-  // Keep controller RAM alive between touches. Resetting the SSD1677 before
-  // every partial update discards untouched RAM and corrupts the next window.
+  setPartialWindow(region);
+  writeDisplayPlaneWindow(0x24, newPlane, region);
+  setPartialWindow(region);
+  writeDisplayPlaneWindow(0x26, newPlane, region);
+  const uint32_t reseededUs = micros();
+  timing.reseedUs = reseededUs - completedUs;
+  timing.totalUs = reseededUs - refreshStartedUs;
   return true;
 }
 
@@ -513,18 +596,22 @@ void showTouchFeedback(const Gt911Touch::Point& point,
                                            originalPlane, restoredTiming);
   const uint32_t restoredCompleteUs = micros();
   LOG.printf(
-      "[touch] invert latency=%lu us (prepare=%lu transfer=%lu panel=%lu)\n",
+      "[touch] invert latency=%lu us "
+      "(prepare=%lu transfer=%lu panel=%lu reseed=%lu)\n",
       static_cast<unsigned long>(invertedCompleteUs - touchDetectedUs),
       static_cast<unsigned long>(preparedUs - touchDetectedUs),
       static_cast<unsigned long>(invertedTiming.transferUs),
-      static_cast<unsigned long>(invertedTiming.panelUs));
+      static_cast<unsigned long>(invertedTiming.panelUs),
+      static_cast<unsigned long>(invertedTiming.reseedUs));
   if (invertedOk) {
     LOG.printf(
-        "[touch] restore latency=%lu us (transfer=%lu panel=%lu), "
+        "[touch] restore latency=%lu us "
+        "(transfer=%lu panel=%lu reseed=%lu), "
         "touch cycle=%lu us\n",
         static_cast<unsigned long>(restoredCompleteUs - restoreStartedUs),
         static_cast<unsigned long>(restoredTiming.transferUs),
         static_cast<unsigned long>(restoredTiming.panelUs),
+        static_cast<unsigned long>(restoredTiming.reseedUs),
         static_cast<unsigned long>(restoredCompleteUs - touchDetectedUs));
   }
   invertTouchRegion(region.left, region.top, region.width, region.height);
@@ -534,6 +621,11 @@ void showTouchFeedback(const Gt911Touch::Point& point,
     LOG.println("[panel-test] restoring pattern with a full refresh");
     epaper.sleep();
     epaper.update();
+    epaper.wake();
+    if (!seedPartialRefreshBaseline()) {
+      touchReady = false;
+      LOG.println("[panel-test] cannot restore partial refresh baseline");
+    }
   }
 }
 
@@ -641,8 +733,16 @@ void setup() {
   configureButtons();
 
 #if RETERMINAL_MODEL == 1005
-  touchReady = touch.begin(touchWire);
-  if (touchReady) {
+  // The initial full refresh sleeps the controller. Wake it now so touch
+  // latency excludes reset, then seed both RAM planes for differential updates.
+  epaper.wake();
+  LOG.printf("[panel-test] E1005 partial refresh SPI=%lu MHz\n",
+             static_cast<unsigned long>(PARTIAL_REFRESH_SPI_HZ / 1000000U));
+  const bool baselineReady = seedPartialRefreshBaseline();
+  touchReady = baselineReady && touch.begin(touchWire);
+  if (!baselineReady) {
+    LOG.println("[panel-test] cannot allocate partial refresh baseline");
+  } else if (touchReady) {
     LOG.printf("[touch] GT%s ready at 0x%02X, sensor=%ux%u\n",
                touch.productId(), touch.address(), touch.sensorWidth(),
                touch.sensorHeight());

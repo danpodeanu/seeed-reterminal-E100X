@@ -22,7 +22,10 @@ touch is also logged and temporarily inverts the complete pattern
 block containing the contact using two back-to-back partial refreshes. There
 is no intentional hold between inversion and restoration, and serial output
 reports touch-to-inversion, transfer, panel-busy, restoration, and total-cycle
-latencies in microseconds.
+latencies in microseconds. The SSD1677 touch path transfers only the
+byte-aligned touched window, uses bulk 40 MHz SPI writes, and keeps the
+controller awake after the initial full refresh. It reseeds both differential
+RAM planes after every waveform so repeated touches remain isolated.
 An inserted E1005 SD card can remain in place: the sketch powers and
 deselects it so it cannot interfere with the display's shared SPI bus.
 E1005 portrait output keeps the USB connector at the bottom.
@@ -74,8 +77,8 @@ E1005 additionally reports GT911 startup and touch coordinates:
 
 ```
 [touch] GT911 ready at 0x5D, sensor=480x800
-[touch] invert latency=456789 us (prepare=3210 transfer=18500 panel=435079)
-[touch] restore latency=449876 us (transfer=18420 panel=431456), touch cycle=906665 us
+[touch] invert latency=643690 us (prepare=15967 transfer=8914 panel=610709 reseed=8109)
+[touch] restore latency=626999 us (transfer=8498 panel=610403 reseed=8109), touch cycle=1270691 us
 [touch] x=241 y=397 size=18 id=0
 ```
 
