@@ -25,6 +25,11 @@ namespace sd_card {
 // power rail is turned back off and a log line is emitted.
 bool mount(SPIClass& spi, const char* cacheDir);
 
+// Force an in-place SD.end()/SD.begin() recovery using the SPI bus and CS
+// captured by mount(). Streaming callers must close their File handle first,
+// then reopen it after this returns true.
+bool recover();
+
 // Read a whole file into `out`, refusing to allocate more than
 // `maxBytes` so a corrupted or hostile cache entry can't exhaust heap.
 // Returns false on missing files, oversized files, or empty content.

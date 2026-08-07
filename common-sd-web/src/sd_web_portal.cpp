@@ -6,12 +6,15 @@
 #include <SD.h>
 #include <WebServer.h>
 #include <WiFi.h>
+#include <esp_heap_caps.h>
 #include <esp_mac.h>
+#include <string.h>
 
 #include "app_logger.h"
 #include "portal_ap_password.h"
 #include "portal_identity.h"
 #include "sd_card.h"
+#include "sd_web_upload_pure.h"
 
 // SD Wi-Fi portal implementation.
 //
@@ -62,13 +65,267 @@ bool g_exitRequested = false;
 // upload callback) can share a File handle.
 File g_uploadFile;
 String g_uploadTargetPath;
+String g_uploadTemporaryPath;
 bool g_uploadOk = false;
+bool g_uploadIsThumbnail = false;
+uint8_t* g_uploadBuffer = nullptr;
+size_t g_uploadBufferCapacity = 0;
+size_t g_uploadBufferedBytes = 0;
+uint64_t g_uploadReceivedBytes = 0;
+uint64_t g_uploadPersistedBytes = 0;
+uint32_t g_uploadIncomingCrc = sd_web_upload::kCrc32Initial;
 // Count of write() short-writes recovered during the current upload.
 // Reset on UPLOAD_FILE_START and reported at UPLOAD_FILE_END so a fully
 // healthy upload stays quiet while flaky ones surface a summary line.
 uint32_t g_uploadStallsRecovered = 0;
+uint32_t g_uploadReadStallsRecovered = 0;
+uint32_t g_uploadBusResets = 0;
 
 // ----- helpers -----
+
+void releaseUploadBuffer() {
+  if (g_uploadBuffer) free(g_uploadBuffer);
+  g_uploadBuffer = nullptr;
+  g_uploadBufferCapacity = 0;
+  g_uploadBufferedBytes = 0;
+}
+
+void resetUploadState(bool removeTemporary) {
+  if (g_uploadFile) g_uploadFile.close();
+  if (removeTemporary && g_uploadTemporaryPath.length()) {
+    sd_card::removeFile(g_uploadTemporaryPath);
+  }
+  releaseUploadBuffer();
+  g_uploadTargetPath = String();
+  g_uploadTemporaryPath = String();
+  g_uploadOk = false;
+  g_uploadIsThumbnail = false;
+  g_uploadReceivedBytes = 0;
+  g_uploadPersistedBytes = 0;
+  g_uploadIncomingCrc = sd_web_upload::kCrc32Initial;
+  g_uploadStallsRecovered = 0;
+  g_uploadReadStallsRecovered = 0;
+  g_uploadBusResets = 0;
+}
+
+bool allocateUploadBuffer() {
+  constexpr size_t kPreferredBytes = 32U * 1024U;
+  constexpr size_t kFallbackBytes = 8U * 1024U;
+  g_uploadBuffer = static_cast<uint8_t*>(
+      heap_caps_malloc(kPreferredBytes, MALLOC_CAP_DMA | MALLOC_CAP_8BIT));
+  if (g_uploadBuffer) {
+    g_uploadBufferCapacity = kPreferredBytes;
+    return true;
+  }
+  g_uploadBuffer = static_cast<uint8_t*>(
+      heap_caps_malloc(kFallbackBytes, MALLOC_CAP_DMA | MALLOC_CAP_8BIT));
+  if (g_uploadBuffer) {
+    g_uploadBufferCapacity = kFallbackBytes;
+    return true;
+  }
+  return false;
+}
+
+bool recoverUploadWrite(uint64_t batchStart, size_t batchLength) {
+  if (g_uploadFile) {
+    g_uploadFile.flush();
+    g_uploadFile.close();
+  }
+  if (!sd_card::recover()) return false;
+  ++g_uploadBusResets;
+
+  File probe = sd_card::openForRead(g_uploadTemporaryPath);
+  if (!probe) return false;
+  const uint64_t storedSize = static_cast<uint64_t>(probe.size());
+  probe.close();
+  const uint64_t batchEnd = batchStart + batchLength;
+  if (storedSize < batchStart || storedSize > batchEnd) {
+    LOG.printf(
+        "[sd-web] upload recovery size invalid on %s "
+        "(batch=%llu..%llu stored=%llu)\n",
+        g_uploadTargetPath.c_str(),
+        static_cast<unsigned long long>(batchStart),
+        static_cast<unsigned long long>(batchEnd),
+        static_cast<unsigned long long>(storedSize));
+    return false;
+  }
+  g_uploadPersistedBytes = storedSize;
+  g_uploadFile = sd_card::openForAppend(g_uploadTemporaryPath);
+  if (!g_uploadFile) return false;
+  LOG.printf("[sd-web] upload bus recovered on %s at byte %llu\n",
+             g_uploadTargetPath.c_str(),
+             static_cast<unsigned long long>(storedSize));
+  return true;
+}
+
+bool writeUploadBytes(const uint8_t* data, size_t length) {
+  constexpr int kMaxRetries = 5;
+  constexpr int kMaxBusResets = 3;
+  constexpr uint32_t kInitialDelayMs = 25;
+  const uint64_t batchStart = g_uploadPersistedBytes;
+  size_t offset = 0;
+  int attempt = 0;
+  int busResets = 0;
+  while (offset < length) {
+    const size_t remaining = length - offset;
+    const size_t written = g_uploadFile.write(data + offset, remaining);
+    if (written > remaining) return false;
+    offset += written;
+    g_uploadPersistedBytes += written;
+    if (offset == length) {
+      if (attempt > 0) ++g_uploadStallsRecovered;
+      return true;
+    }
+    if (attempt >= kMaxRetries) {
+      if (busResets >= kMaxBusResets ||
+          !recoverUploadWrite(batchStart, length)) {
+        LOG.printf(
+            "[sd-web] upload short write on %s "
+            "(%u bytes stuck after %d retries, %d resets)\n",
+            g_uploadTargetPath.c_str(),
+            static_cast<unsigned>(length - offset), attempt, busResets);
+        return false;
+      }
+      offset = static_cast<size_t>(g_uploadPersistedBytes - batchStart);
+      attempt = 0;
+      ++busResets;
+      continue;
+    }
+    const uint32_t backoffMs = kInitialDelayMs << attempt;
+    if (attempt >= 1) {
+      LOG.printf(
+          "[sd-web] upload write stall on %s (%u bytes left, retry %d)\n",
+          g_uploadTargetPath.c_str(),
+          static_cast<unsigned>(length - offset),
+          attempt + 1);
+    }
+    g_uploadFile.flush();
+    delay(backoffMs);
+    ++attempt;
+  }
+  return true;
+}
+
+bool flushUploadBuffer() {
+  if (g_uploadBufferedBytes == 0) return true;
+  if (!writeUploadBytes(g_uploadBuffer, g_uploadBufferedBytes)) return false;
+  g_uploadBufferedBytes = 0;
+  return true;
+}
+
+bool bufferUploadBytes(const uint8_t* data, size_t length) {
+  while (length > 0) {
+    const size_t available =
+        g_uploadBufferCapacity - g_uploadBufferedBytes;
+    const size_t take = min(length, available);
+    memcpy(g_uploadBuffer + g_uploadBufferedBytes, data, take);
+    g_uploadBufferedBytes += take;
+    data += take;
+    length -= take;
+    if (g_uploadBufferedBytes == g_uploadBufferCapacity &&
+        !flushUploadBuffer()) {
+      return false;
+    }
+  }
+  return true;
+}
+
+bool verifyTemporaryUploadOnce(uint32_t expectedCrc) {
+  File file = sd_card::openForRead(g_uploadTemporaryPath);
+  if (!file) return false;
+  const uint64_t storedSize = static_cast<uint64_t>(file.size());
+  if (storedSize != g_uploadReceivedBytes) {
+    LOG.printf(
+        "[sd-web] upload verify size mismatch on %s (received=%llu stored=%llu)\n",
+        g_uploadTargetPath.c_str(),
+        static_cast<unsigned long long>(g_uploadReceivedBytes),
+        static_cast<unsigned long long>(storedSize));
+    file.close();
+    return false;
+  }
+
+  uint64_t readBytes = 0;
+  uint32_t crc = sd_web_upload::kCrc32Initial;
+  int stalledReads = 0;
+  while (readBytes < storedSize) {
+    const uint64_t remaining = storedSize - readBytes;
+    const size_t wanted =
+        remaining < g_uploadBufferCapacity
+            ? static_cast<size_t>(remaining)
+            : g_uploadBufferCapacity;
+    const int got = file.read(g_uploadBuffer, wanted);
+    if (got > 0) {
+      crc = sd_web_upload::crc32Update(
+          crc, g_uploadBuffer, static_cast<size_t>(got));
+      readBytes += static_cast<size_t>(got);
+      stalledReads = 0;
+      continue;
+    }
+    if (stalledReads >= 5) {
+      file.close();
+      return false;
+    }
+    delay(25U << stalledReads);
+    ++stalledReads;
+    ++g_uploadReadStallsRecovered;
+  }
+  file.close();
+  const uint32_t storedCrc = sd_web_upload::crc32Finish(crc);
+  if (storedCrc != expectedCrc) {
+    LOG.printf(
+        "[sd-web] upload verify CRC mismatch on %s (received=%08lx stored=%08lx)\n",
+        g_uploadTargetPath.c_str(),
+        static_cast<unsigned long>(expectedCrc),
+        static_cast<unsigned long>(storedCrc));
+    return false;
+  }
+  return true;
+}
+
+bool verifyTemporaryUpload(uint32_t expectedCrc) {
+  if (verifyTemporaryUploadOnce(expectedCrc)) return true;
+  delay(500);
+  if (sd_card::recover()) ++g_uploadBusResets;
+  return verifyTemporaryUploadOnce(expectedCrc);
+}
+
+String uploadBackupPath(const String& target) {
+  return target + ".upload-bak";
+}
+
+void recoverUploadBackup(const String& target) {
+  const String backup = uploadBackupPath(target);
+  if (!sd_card::fileExists(backup)) return;
+  if (sd_card::fileExists(target)) {
+    sd_card::removeFile(backup);
+  } else if (!sd_card::renameFile(backup, target)) {
+    LOG.printf("[sd-web] could not restore upload backup %s\n",
+               backup.c_str());
+  }
+}
+
+bool installVerifiedUpload() {
+  const String backup = uploadBackupPath(g_uploadTargetPath);
+  recoverUploadBackup(g_uploadTargetPath);
+  const bool hadTarget = sd_card::fileExists(g_uploadTargetPath);
+  if (hadTarget) {
+    sd_card::removeFile(backup);
+    if (!sd_card::renameFile(g_uploadTargetPath, backup)) {
+      LOG.printf("[sd-web] could not stage existing %s for replacement\n",
+                 g_uploadTargetPath.c_str());
+      return false;
+    }
+  }
+  if (sd_card::renameFile(g_uploadTemporaryPath, g_uploadTargetPath)) {
+    if (hadTarget) sd_card::removeFile(backup);
+    return true;
+  }
+  if (hadTarget && !sd_card::renameFile(backup, g_uploadTargetPath)) {
+    LOG.printf("[sd-web] could not restore %s after install failure\n",
+               g_uploadTargetPath.c_str());
+  }
+  return false;
+}
 
 String formatMac(const uint8_t mac[6]) {
   char buf[18];
@@ -547,7 +804,7 @@ void handleBrowse() {
   actions += F("\" enctype=\"multipart/form-data\">");
   actions += F("<input type=\"file\" name=\"file\" required>");
   actions += F("<button>Upload</button></form>");
-  actions += F("<div class=\"note\">Uploads are streamed directly to the card. Existing files will be overwritten.</div>");
+  actions += F("<div class=\"note\">Uploads are buffered, read back, and verified before replacing an existing file.</div>");
   actions += F("</section>");
 
   // Reboot back into the viewer (photo-viewer / weather-viewer / etc.).
@@ -705,14 +962,15 @@ void handleDelete() {
 }
 
 // Upload lifecycle handler. Called multiple times per upload:
-//   UPLOAD_FILE_START  -> open destination file
-//   UPLOAD_FILE_WRITE  -> append chunk
-//   UPLOAD_FILE_END    -> close file, mark success
-//   UPLOAD_FILE_ABORTED-> discard partial file
+//   UPLOAD_FILE_START  -> open a temporary file and allocate a staging buffer
+//   UPLOAD_FILE_WRITE  -> checksum and buffer each HTTP chunk
+//   UPLOAD_FILE_END    -> flush, read back, verify, then install atomically
+//   UPLOAD_FILE_ABORTED-> discard the temporary file
 void handleUploadStream() {
   HTTPUpload& upload = g_server->upload();
   switch (upload.status) {
     case UPLOAD_FILE_START: {
+      resetUploadState(/*removeTemporary=*/true);
       const String parent = g_server->hasArg("parent")
                                 ? normalisePath(g_server->arg("parent"))
                                 : String("/");
@@ -737,6 +995,7 @@ void handleUploadStream() {
       // the photos dir; thumbnailCachePathFor enforces that.
       const bool destThumb = g_server->hasArg("dest") &&
                              g_server->arg("dest") == "thumb";
+      g_uploadIsThumbnail = destThumb;
       if (destThumb) {
         const String sourcePath = joinPath(parent, name);
         const String cachePath = thumbnailCachePathFor(sourcePath);
@@ -753,101 +1012,81 @@ void handleUploadStream() {
           sd_card::makeDir(g_config.thumbnailDir);
         }
         g_uploadTargetPath = cachePath;
-        sd_card::removeFile(g_uploadTargetPath);
       } else {
         g_uploadTargetPath = joinPath(parent, name);
-        // Overwrite by removing first; SD FILE_WRITE opens truncating,
-        // but be explicit so a failed open doesn't leave a stale file.
-        sd_card::removeFile(g_uploadTargetPath);
-        // Drop the old thumbnail so a re-upload of the same filename
-        // re-renders on next view. Cheap no-op if no thumbnail cache is
-        // configured or the target isn't inside the photos dir.
-        invalidateThumbnailFor(g_uploadTargetPath);
       }
-      g_uploadFile = sd_card::openForWrite(g_uploadTargetPath);
+      recoverUploadBackup(g_uploadTargetPath);
+      g_uploadTemporaryPath = g_uploadTargetPath + ".upload-part";
+      sd_card::removeFile(g_uploadTemporaryPath);
+      if (!allocateUploadBuffer()) {
+        LOG.printf("[sd-web] upload start %s -> buffer-fail\n",
+                   g_uploadTargetPath.c_str());
+        break;
+      }
+      g_uploadFile = sd_card::openForWrite(g_uploadTemporaryPath);
       g_uploadOk = static_cast<bool>(g_uploadFile);
-      g_uploadStallsRecovered = 0;
-      LOG.printf("[sd-web] upload start %s -> %s\n",
-                 g_uploadTargetPath.c_str(), g_uploadOk ? "ok" : "open-fail");
+      LOG.printf("[sd-web] upload start %s (buffer=%u) -> %s\n",
+                 g_uploadTargetPath.c_str(),
+                 static_cast<unsigned>(g_uploadBufferCapacity),
+                 g_uploadOk ? "ok" : "open-fail");
       break;
     }
     case UPLOAD_FILE_WRITE: {
+      g_uploadIncomingCrc = sd_web_upload::crc32Update(
+          g_uploadIncomingCrc, upload.buf, upload.currentSize);
+      g_uploadReceivedBytes += upload.currentSize;
       if (g_uploadOk && g_uploadFile) {
-        // Retry short writes with a short backoff + flush(). The
-        // reTerminal shares one SPI bus between the SD card and the
-        // e-paper controller, so a mid-upload SPI stall can cause a
-        // single File::write() to return fewer bytes than requested
-        // even when the card itself is healthy. Retrying the residual
-        // bytes at the current file position drains those stalls
-        // without losing the upload; the sd_card::* wrappers cover
-        // open/rename/remove but the raw File::write path is
-        // per-caller. Silent recoveries are counted and reported once
-        // at UPLOAD_FILE_END; only log per-attempt if a stall doesn't
-        // clear after the first retry (which is where a real problem
-        // starts to look different from ordinary SPI backpressure).
-        const uint8_t* buf = upload.buf;
-        size_t remaining = upload.currentSize;
-        constexpr int kMaxRetries = 5;
-        constexpr uint32_t kInitialDelayMs = 25;
-        int attempt = 0;
-        while (remaining > 0) {
-          const size_t written = g_uploadFile.write(buf, remaining);
-          if (written == remaining) {
-            if (attempt > 0) ++g_uploadStallsRecovered;
-            break;
-          }
-          buf += written;
-          remaining -= written;
-          if (attempt >= kMaxRetries) {
-            g_uploadOk = false;
-            LOG.printf(
-                "[sd-web] upload short write on %s (%u bytes stuck after %d retries)\n",
-                g_uploadTargetPath.c_str(), static_cast<unsigned>(remaining),
-                attempt);
-            break;
-          }
-          // Backoff 25/50/100/200/400 ms + flush() to let the driver
-          // drain any buffered state before we ask it to accept more.
-          const uint32_t backoffMs = kInitialDelayMs << attempt;
-          if (attempt >= 1) {
-            LOG.printf(
-                "[sd-web] upload write stall on %s (%u bytes left, retry %d)\n",
-                g_uploadTargetPath.c_str(), static_cast<unsigned>(remaining),
-                attempt + 1);
-          }
-          g_uploadFile.flush();
-          delay(backoffMs);
-          ++attempt;
-        }
+        g_uploadOk = bufferUploadBytes(upload.buf, upload.currentSize);
       }
       break;
     }
     case UPLOAD_FILE_END: {
+      if (g_uploadOk) g_uploadOk = flushUploadBuffer();
       if (g_uploadFile) {
-        // Force any buffered writes to hit the card before we close so
-        // a driver-level failure surfaces as a close-time error rather
-        // than a silent truncated file the user only notices later.
         g_uploadFile.flush();
         g_uploadFile.close();
       }
-      if (g_uploadStallsRecovered > 0) {
+      if (g_uploadReceivedBytes != upload.totalSize) {
         LOG.printf(
-            "[sd-web] upload end %s (%u bytes, %lu SPI stalls recovered) -> %s\n",
+            "[sd-web] upload receive size mismatch on %s (stream=%llu total=%u)\n",
             g_uploadTargetPath.c_str(),
-            static_cast<unsigned>(upload.totalSize),
-            static_cast<unsigned long>(g_uploadStallsRecovered),
-            g_uploadOk ? "ok" : "fail");
-      } else {
-        LOG.printf("[sd-web] upload end %s (%u bytes) -> %s\n",
-                   g_uploadTargetPath.c_str(),
-                   static_cast<unsigned>(upload.totalSize),
-                   g_uploadOk ? "ok" : "fail");
+            static_cast<unsigned long long>(g_uploadReceivedBytes),
+            static_cast<unsigned>(upload.totalSize));
+        g_uploadOk = false;
       }
+      const uint32_t expectedCrc =
+          sd_web_upload::crc32Finish(g_uploadIncomingCrc);
+      if (g_uploadOk) {
+        g_uploadOk = verifyTemporaryUpload(expectedCrc);
+      }
+      if (g_uploadOk) {
+        g_uploadOk = installVerifiedUpload();
+      }
+      if (g_uploadOk && !g_uploadIsThumbnail) {
+        invalidateThumbnailFor(g_uploadTargetPath);
+      }
+      if (!g_uploadOk && g_uploadTemporaryPath.length()) {
+        sd_card::removeFile(g_uploadTemporaryPath);
+      }
+      LOG.printf(
+          "[sd-web] upload end %s (%llu bytes, crc=%08lx, "
+          "write-stalls=%lu read-stalls=%lu bus-resets=%lu) -> %s\n",
+          g_uploadTargetPath.c_str(),
+          static_cast<unsigned long long>(g_uploadReceivedBytes),
+          static_cast<unsigned long>(expectedCrc),
+          static_cast<unsigned long>(g_uploadStallsRecovered),
+          static_cast<unsigned long>(g_uploadReadStallsRecovered),
+          static_cast<unsigned long>(g_uploadBusResets),
+          g_uploadOk ? "verified" : "fail");
+      releaseUploadBuffer();
       break;
     }
     case UPLOAD_FILE_ABORTED: {
       if (g_uploadFile) g_uploadFile.close();
-      if (g_uploadTargetPath.length()) sd_card::removeFile(g_uploadTargetPath);
+      if (g_uploadTemporaryPath.length()) {
+        sd_card::removeFile(g_uploadTemporaryPath);
+      }
+      releaseUploadBuffer();
       g_uploadOk = false;
       LOG.printf("[sd-web] upload aborted %s\n", g_uploadTargetPath.c_str());
       break;

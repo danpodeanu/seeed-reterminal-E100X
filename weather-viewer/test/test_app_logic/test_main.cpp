@@ -11,6 +11,7 @@
 #include "compact_portrait_layout.h"
 #include "local_time.h"
 #include "text_render_pure.h"
+#include "sd_web_upload_pure.h"
 #include "weather_quotes_bucket.h"
 #include "weather_orientation.h"
 
@@ -54,6 +55,19 @@ void test_e1005_orientation_geometry_and_rotation() {
                                  Orientation::RotateCW));
   TEST_ASSERT_EQUAL_INT(480, weather_orientation::panelHeight(
                                  Orientation::RotateCCW));
+}
+
+void test_sd_web_upload_crc32_is_incremental() {
+  const uint8_t data[] = {'1', '2', '3', '4', '5', '6', '7', '8', '9'};
+  uint32_t whole = sd_web_upload::crc32Update(
+      sd_web_upload::kCrc32Initial, data, sizeof(data));
+  whole = sd_web_upload::crc32Finish(whole);
+  TEST_ASSERT_EQUAL_HEX32(0xCBF43926U, whole);
+
+  uint32_t split = sd_web_upload::crc32Update(
+      sd_web_upload::kCrc32Initial, data, 4);
+  split = sd_web_upload::crc32Update(split, data + 4, sizeof(data) - 4);
+  TEST_ASSERT_EQUAL_HEX32(whole, sd_web_upload::crc32Finish(split));
 }
 
 void test_battery_gauge_decodes_e1005_words_and_rejects_missing_adc() {
@@ -856,6 +870,7 @@ int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_e1005_compact_layout_stays_inside_panel);
   RUN_TEST(test_e1005_orientation_geometry_and_rotation);
+  RUN_TEST(test_sd_web_upload_crc32_is_incremental);
   RUN_TEST(test_battery_gauge_decodes_e1005_words_and_rejects_missing_adc);
   RUN_TEST(test_startup_beep_only_for_cold_boot_and_button_wake);
   RUN_TEST(test_quiet_hours_boundaries);

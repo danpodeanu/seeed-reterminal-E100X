@@ -184,6 +184,10 @@ bool retryingRmdir(const String& path) {
 
 }  // namespace
 
+bool recover() {
+  return attemptRemount();
+}
+
 File openForRead(const String& path) {
   return retryingOpen(path, FILE_READ);
 }
