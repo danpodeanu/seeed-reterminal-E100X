@@ -95,9 +95,8 @@ another; select the exact device target during compilation.
 
 For pre-built firmware, the
 [web flasher](https://danpodeanu.github.io/seeed-reterminal-E100X/) writes
-the latest GitHub Release for supported E1001-E1004 application/board
-combinations directly from Chrome or Edge over USB. E1005 viewer firmware is
-available as a release binary or source build. See
+the latest GitHub Release for all E1001-E1005 application/board combinations
+directly from Chrome or Edge over USB. See
 [`docs/`](docs/) for how the flasher is wired up.
 
 ## Updating firmware (SD card)

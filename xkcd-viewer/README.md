@@ -64,18 +64,15 @@ You will also need:
 
 ### 1. Flash the firmware
 
-For E1001–E1004, the fastest path is the web flasher — no installer,
+For E1001–E1005, the fastest path is the web flasher — no installer,
 no `esptool.py`:
 
 > [Flash your reTerminal from the browser →](https://danpodeanu.github.io/seeed-reterminal-E100X/)
 
 Pick the reTerminal model, select **XKCD Viewer**, connect over USB-C,
 and Chrome or Edge writes the latest release directly. To build from
-source instead, see [Building from source](#building-from-source).
-
-For E1005, use the `reterminal_e1005` release binary or build from
-source. The web flasher does not yet publish the E1005-specific 32 MB
-boot chain.
+source instead, see [Building from source](#building-from-source). E1005 uses
+its model-specific 32 MB boot chain automatically.
 
 ### 2. Connect to Wi-Fi
 

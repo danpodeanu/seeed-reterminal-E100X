@@ -124,8 +124,8 @@
       <h1>reTerminal E100X web flasher</h1>
       <p>
         Flash the latest published firmware to a Seeed Studio reTerminal
-        E1001&nbsp;/&nbsp;E1002&nbsp;/&nbsp;E1003&nbsp;/&nbsp;E1004 directly
-        from the browser over USB. No installer, no
+        E1001&nbsp;/&nbsp;E1002&nbsp;/&nbsp;E1003&nbsp;/&nbsp;E1004&nbsp;/&nbsp;E1005
+        (&ldquo;Seeed Sticky&rdquo;) directly from the browser over USB. No installer, no
         <code>esptool.py</code>.
       </p>
 
@@ -146,6 +146,9 @@
                 reTerminal E1003
               </option>
               <option value="reterminal_e1004">reTerminal E1004</option>
+              <option value="reterminal_e1005">
+                reTerminal E1005 (Seeed Sticky)
+              </option>
             </select>
           </label>
           <label>
@@ -219,9 +222,10 @@
 
       <h2>What gets flashed</h2>
       <p>
-        Each build is a single merged image containing the bootloader, the
-        partition table, the OTA selector, and the application. It is
-        produced by CI from the tagged source in
+        The flasher writes the bootloader, partition table, OTA selector, and
+        selected application at their standard offsets. E1001-E1004 use their
+        shared boot chain; E1005 uses its model-specific 32 MB boot chain.
+        Every image is produced by CI from the tagged source in
         <a href="https://github.com/danpodeanu/seeed-reterminal-E100X"
           >danpodeanu/seeed-reterminal-E100X</a
         >

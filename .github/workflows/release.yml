@@ -97,6 +97,11 @@ jobs:
           cp "$BOOT_APP0" boot_app0.bin
           cp "$BUILD_DIR/bootloader.bin" bootloader.bin
           cp "$BUILD_DIR/partitions.bin" partitions.bin
+          if [ "${{ matrix.board }}" = "reterminal_e1005" ]; then
+            cp "$BOOT_APP0" "boot_app0-${{ matrix.board }}.bin"
+            cp "$BUILD_DIR/bootloader.bin" "bootloader-${{ matrix.board }}.bin"
+            cp "$BUILD_DIR/partitions.bin" "partitions-${{ matrix.board }}.bin"
+          fi
           ls -la "$FULL" "$OTA" boot_app0.bin bootloader.bin partitions.bin
 
       - name: Upload build artifact
@@ -118,6 +123,18 @@ jobs:
             ${{ matrix.app }}/boot_app0.bin
             ${{ matrix.app }}/bootloader.bin
             ${{ matrix.app }}/partitions.bin
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload E1005 boot chain (once)
+        if: matrix.app == 'photo-viewer' && matrix.board == 'reterminal_e1005'
+        uses: actions/upload-artifact@v7
+        with:
+          name: e1005-boot-chain
+          path: |
+            ${{ matrix.app }}/boot_app0-reterminal_e1005.bin
+            ${{ matrix.app }}/bootloader-reterminal_e1005.bin
+            ${{ matrix.app }}/partitions-reterminal_e1005.bin
           if-no-files-found: error
           retention-days: 30
 

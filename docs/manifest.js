@@ -13,14 +13,9 @@
 const REPO = "danpodeanu/seeed-reterminal-E100X";
 const LATEST_URL = `https://api.github.com/repos/${REPO}/releases/latest`;
 const FIRMWARE_BASE = "./firmware/latest";
-// Shared boot chain -- byte-identical across every env, published once
-// per release. Written alongside the per-env -ota.bin at the four
-// arduino-esp32 partition offsets so a "keep settings" flash lays down
-// bootloader / partitions / otadata / app while leaving NVS (0x9000)
-// and SPIFFS (0x610000) untouched.
-const BOOTLOADER_URL = `${FIRMWARE_BASE}/bootloader.bin`;
-const PARTITIONS_URL = `${FIRMWARE_BASE}/partitions.bin`;
-const BOOT_APP0_URL = `${FIRMWARE_BASE}/boot_app0.bin`;
+// E1001-E1004 share one boot chain. E1005 has a model-specific 32 MB
+// bootloader and partition table, published with the board suffix.
+const E1005_BOARD = "reterminal_e1005";
 
 const boardSel = document.getElementById("board");
 const appSel = document.getElementById("app");
@@ -42,6 +37,11 @@ function otaFirmwareUrl(app, board) {
   return `${FIRMWARE_BASE}/${otaAssetName(app, board)}`;
 }
 
+function bootAssetUrl(stem, board) {
+  const suffix = board === E1005_BOARD ? `-${board}` : "";
+  return `${FIRMWARE_BASE}/${stem}${suffix}.bin`;
+}
+
 // Single-button manifest. Writes bootloader / partitions / otadata / app
 // as four separate parts so the two ASK_ERASE outcomes have clean
 // semantics:
@@ -58,6 +58,9 @@ function otaFirmwareUrl(app, board) {
 // Serial) auto-calls _startInstall(true) -> esploader.eraseFlash(),
 // removing the user's ability to keep NVS at all.
 function buildManifest(otaUrl, version, app, board) {
+  const bootloaderUrl = bootAssetUrl("bootloader", board);
+  const partitionsUrl = bootAssetUrl("partitions", board);
+  const bootApp0Url = bootAssetUrl("boot_app0", board);
   return {
     name: `${app} for ${board}`,
     version: version || "latest",
@@ -67,9 +70,9 @@ function buildManifest(otaUrl, version, app, board) {
       {
         chipFamily: "ESP32-S3",
         parts: [
-          { path: BOOTLOADER_URL, offset: 0x0000 },
-          { path: PARTITIONS_URL, offset: 0x8000 },
-          { path: BOOT_APP0_URL, offset: 0xe000 },
+          { path: bootloaderUrl, offset: 0x0000 },
+          { path: partitionsUrl, offset: 0x8000 },
+          { path: bootApp0Url, offset: 0xe000 },
           { path: otaUrl, offset: 0x10000 },
         ],
       },
@@ -108,10 +111,16 @@ async function refresh() {
   const app = appSel.value;
   const board = boardSel.value;
   const otaUrl = otaFirmwareUrl(app, board);
+  const requiredUrls = [
+    otaUrl,
+    bootAssetUrl("bootloader", board),
+    bootAssetUrl("partitions", board),
+    bootAssetUrl("boot_app0", board),
+  ];
   installer.hidden = true;
   setStatus("Checking firmware…");
-  const otaOk = await firmwarePresent(otaUrl);
-  if (!otaOk) {
+  const available = await Promise.all(requiredUrls.map(firmwarePresent));
+  if (available.some((present) => !present)) {
     setStatus(
       `No firmware for ${app} on ${board} at ${releaseTag || "the latest release"}.`,
       true

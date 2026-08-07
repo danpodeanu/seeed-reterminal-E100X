@@ -62,16 +62,17 @@ jobs:
               --pattern 'firmware-*.bin' \
               --dir site/firmware/latest \
               || echo "No matching firmware-*.bin assets on latest release yet."
-            # The three shared blobs (boot_app0.bin, bootloader.bin,
-            # partitions.bin) are byte-identical across every env; the
-            # web flasher's single-button manifest writes them alongside
-            # the app-only -ota.bin so a "keep settings" flash lays down
-            # a complete boot chain (bootloader / partitions / otadata /
-            # app) at 0x0 / 0x8000 / 0xE000 / 0x10000 while leaving NVS
-            # (0x9000) and SPIFFS (0x610000) untouched. Downloaded
-            # separately because the firmware-*.bin pattern above skips
-            # them.
-            for asset in boot_app0.bin bootloader.bin partitions.bin; do
+            # E1001-E1004 share the generic three-part boot chain. E1005
+            # uses the suffixed 32 MB boot chain. The flasher writes the
+            # selected chain alongside the app-only -ota.bin so a "keep
+            # settings" flash leaves NVS and cached data untouched.
+            # Downloaded separately because the firmware-*.bin pattern
+            # above skips them.
+            for asset in \
+              boot_app0.bin bootloader.bin partitions.bin \
+              boot_app0-reterminal_e1005.bin \
+              bootloader-reterminal_e1005.bin \
+              partitions-reterminal_e1005.bin; do
               gh release download \
                 --repo "${{ github.repository }}" \
                 --pattern "$asset" \

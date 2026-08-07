@@ -69,15 +69,14 @@ You will also need:
 
 ### 1. Flash the firmware
 
-For E1001-E1004, the fastest path is the web flasher:
+For E1001-E1005, the fastest path is the web flasher:
 
 > [Flash your reTerminal from the browser →](https://danpodeanu.github.io/seeed-reterminal-E100X/)
 
 Pick the reTerminal model, select **Photo Viewer**, connect over
-USB-C, and Chrome or Edge writes the latest release directly. To
-build from source instead, see [Building from source](#building-from-source).
-E1005 uses a different 32 MB boot chain, so install its release binary with
-USB tooling or build/deploy it from source rather than using the web flasher.
+USB-C, and Chrome or Edge writes the latest release directly. E1005 uses its
+model-specific 32 MB boot chain automatically. To build from source instead,
+see [Building from source](#building-from-source).
 
 ### 2. Connect the device to Wi-Fi
 
