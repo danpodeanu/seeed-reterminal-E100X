@@ -353,9 +353,9 @@ bool drawLoadedSmoothTextMonochrome(const String& text,
   return true;
 }
 
-void drawE1005HeaderLocation(const String& location, int maxWidth,
-                             int centerX, int centerY) {
-  const String label = text_render::ellipsize(epaper, location, maxWidth - 2);
+void drawE1005HeaderText(const String& text, int maxWidth,
+                         int centerX, int centerY) {
+  const String label = text_render::ellipsize(epaper, text, maxWidth - 2);
   if (!drawLoadedSmoothTextMonochrome(label, centerX, centerY)) {
     epaper.drawString(label, centerX, centerY, 1);
   }
@@ -947,10 +947,8 @@ void drawHeader(const WeatherData& weather) {
     setStripTextColor(PANEL_BLACK, PANEL_WHITE);
     epaper.setTextDatum(MC_DATUM);
     selectSmallSmoothFont();
-    const String location = text_render::displayText(
-        String(weather_config::runtime::locationName()));
-    drawE1005HeaderLocation(
-        location, panelWidth() - config::ui(380), panelWidth() / 2,
+    drawE1005HeaderText(
+        "Weather", panelWidth() - config::ui(380), panelWidth() / 2,
         config::ui(25) + smoothCenterYAdjust());
     smoothFontManager.unload();
     epaper.drawFastHLine(config::ui(10), config::ui(44),
@@ -965,9 +963,9 @@ void drawHeader(const WeatherData& weather) {
   selectSmallSmoothFont();
   const String location =
       text_render::displayText(String(weather_config::runtime::locationName()));
-  drawE1005HeaderLocation(location, HEADER_LOCATION_WIDTH,
-                          config::PANEL_WIDTH / 2,
-                          20 + smoothCenterYAdjust());
+  drawE1005HeaderText(location, HEADER_LOCATION_WIDTH,
+                      config::PANEL_WIDTH / 2,
+                      20 + smoothCenterYAdjust());
   smoothFontManager.unload();
 
   selectSmallFont();
