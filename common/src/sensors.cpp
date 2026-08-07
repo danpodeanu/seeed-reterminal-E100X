@@ -2,6 +2,7 @@
 
 #include "app_logger.h"
 #include "battery_gauge.h"
+#include "battery_gauge_pure.h"
 #include "charger.h"
 #include "climate_sensor.h"
 
@@ -16,7 +17,9 @@ void readAll(int batteryEnablePin, int batteryAdcPin,
   out.batteryPct = gauge.percent;
   out.batteryValid = gauge.valid;
   out.externalPowerValid = gauge.currentValid;
-  out.externalPower = gauge.currentValid && gauge.averageCurrentMa > 0;
+  out.externalPower =
+      gauge.currentValid &&
+      battery::pure::chargingFromAverageCurrent(gauge.averageCurrentMa);
   if (gauge.valid) {
     LOG.printf("[sensor] BQ27220 battery %.3fV -> %d%%, current=%dmA\n",
                out.batteryVoltage, out.batteryPct,
