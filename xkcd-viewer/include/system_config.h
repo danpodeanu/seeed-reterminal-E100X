@@ -70,12 +70,10 @@ constexpr uint32_t ARCHIVE_CANCEL_POLL_TIMEOUT_MS = 2000;
 // canonical offender on E1003. Requiring the rendered image to take at least
 // a third of the panel width rejects those without excluding normal comics,
 // which comfortably fill or overflow the width budget.
-constexpr int MIN_RENDERED_WIDTH = PANEL_WIDTH / 3;
 constexpr float DITHER_GAMMA = 1.0f;
 
 constexpr int CONTENT_MARGIN_X = ui(10);
 constexpr int CONTENT_TOP = ui(50);
-constexpr int FOOTER_BOTTOM = PANEL_HEIGHT - ui(12);
 constexpr int FOOTER_MAX_LINES = 3;
 constexpr int FOOTER_LINE_HEIGHT = ui(22);
 constexpr int FOOTER_VERTICAL_PADDING = ui(8);

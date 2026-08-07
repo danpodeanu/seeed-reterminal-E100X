@@ -4,10 +4,18 @@ on:
   push:
     paths:
       - "xkcd-viewer/**"
+      - "common/**"
+      - "common-config-portal/**"
+      - "common-sd-web/**"
+      - "image_pipeline/**"
       - ".github/workflows/xkcd-viewer-build.yml"
   pull_request:
     paths:
       - "xkcd-viewer/**"
+      - "common/**"
+      - "common-config-portal/**"
+      - "common-sd-web/**"
+      - "image_pipeline/**"
       - ".github/workflows/xkcd-viewer-build.yml"
   workflow_dispatch:
 
@@ -55,6 +63,7 @@ jobs:
           - reterminal_e1002
           - reterminal_e1003
           - reterminal_e1004
+          - reterminal_e1005
 
     steps:
       - name: Check out repository

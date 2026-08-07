@@ -31,6 +31,11 @@ const char*  ntpPrimary();
 const char*  ntpSecondary();
 
 float        minDisplayScale();
+xkcd_orientation::Orientation orientation();
+bool         isLandscape();
+int          panelRotation();
+int          panelWidth();
+int          panelHeight();
 ::config::DateLocale dateLocale();
 
 bool         debugShowStatusBadges();

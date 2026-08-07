@@ -9,13 +9,64 @@
 #include <ArduinoJson.h>
 
 #include "app_logic.h"
+#include "screenshot_rotation.h"
 #include "text_render_pure.h"
 #include "xkcd_cache_schema.h"
 #include "xkcd_index_pure.h"
 #include "xkcd_manifest_serialize.h"
+#include "xkcd_orientation.h"
 
 void setUp() {}
 void tearDown() {}
+
+void test_e1005_orientation_geometry() {
+  using xkcd_orientation::Orientation;
+
+  TEST_ASSERT_FALSE(xkcd_orientation::isLandscape(Orientation::Portrait));
+  TEST_ASSERT_EQUAL_INT(1,
+                        xkcd_orientation::panelRotation(Orientation::Portrait));
+  TEST_ASSERT_EQUAL_INT(480,
+                        xkcd_orientation::panelWidth(Orientation::Portrait));
+  TEST_ASSERT_EQUAL_INT(800,
+                        xkcd_orientation::panelHeight(Orientation::Portrait));
+
+  TEST_ASSERT_TRUE(xkcd_orientation::isLandscape(Orientation::RotateCW));
+  TEST_ASSERT_EQUAL_INT(0,
+                        xkcd_orientation::panelRotation(Orientation::RotateCW));
+  TEST_ASSERT_EQUAL_INT(800,
+                        xkcd_orientation::panelWidth(Orientation::RotateCW));
+  TEST_ASSERT_EQUAL_INT(480,
+                        xkcd_orientation::panelHeight(Orientation::RotateCW));
+
+  TEST_ASSERT_TRUE(xkcd_orientation::isLandscape(Orientation::RotateCCW));
+  TEST_ASSERT_EQUAL_INT(
+      2, xkcd_orientation::panelRotation(Orientation::RotateCCW));
+  TEST_ASSERT_EQUAL_INT(800,
+                        xkcd_orientation::panelWidth(Orientation::RotateCCW));
+  TEST_ASSERT_EQUAL_INT(480,
+                        xkcd_orientation::panelHeight(Orientation::RotateCCW));
+}
+
+void test_screenshot_rotation_maps_logical_pixels_to_native_buffer() {
+  screenshot::PixelCoordinate pixel =
+      screenshot::nativePixelCoordinate(0, 800, 480, 17, 23);
+  TEST_ASSERT_EQUAL_INT(17, pixel.x);
+  TEST_ASSERT_EQUAL_INT(23, pixel.y);
+
+  pixel = screenshot::nativePixelCoordinate(1, 480, 800, 0, 0);
+  TEST_ASSERT_EQUAL_INT(799, pixel.x);
+  TEST_ASSERT_EQUAL_INT(0, pixel.y);
+  pixel = screenshot::nativePixelCoordinate(1, 480, 800, 479, 799);
+  TEST_ASSERT_EQUAL_INT(0, pixel.x);
+  TEST_ASSERT_EQUAL_INT(479, pixel.y);
+
+  pixel = screenshot::nativePixelCoordinate(2, 800, 480, 0, 0);
+  TEST_ASSERT_EQUAL_INT(799, pixel.x);
+  TEST_ASSERT_EQUAL_INT(479, pixel.y);
+  pixel = screenshot::nativePixelCoordinate(2, 800, 480, 799, 479);
+  TEST_ASSERT_EQUAL_INT(0, pixel.x);
+  TEST_ASSERT_EQUAL_INT(0, pixel.y);
+}
 
 void test_startup_beep_only_for_cold_boot_and_button_wake() {
   TEST_ASSERT_TRUE(app_logic::startupBeepRequired(true, false));
@@ -574,6 +625,8 @@ void test_manifest_append_new_comic_produces_expected_jsonl_stream() {
 
 int main(int, char**) {
   UNITY_BEGIN();
+  RUN_TEST(test_e1005_orientation_geometry);
+  RUN_TEST(test_screenshot_rotation_maps_logical_pixels_to_native_buffer);
   RUN_TEST(test_startup_beep_only_for_cold_boot_and_button_wake);
   RUN_TEST(test_display_text_preserves_utf8_and_normalizes);
   RUN_TEST(test_display_text_strips_control_bytes);

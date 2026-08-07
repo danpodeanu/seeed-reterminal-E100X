@@ -82,8 +82,9 @@ family. Panel resolution, color capabilities, peripherals, and pin mappings
 differ between models, so consult each application's README before building or
 uploading firmware.
 
-All three viewer applications support E1001-E1004. Weather Viewer also
-supports the monochrome E1005; the E1005 hardware tools live under `tools/`.
+All three viewer applications support E1001-E1004. Weather Viewer and
+XKCD Viewer also support the monochrome E1005; the E1005 hardware tools
+live under `tools/`.
 Model-specific firmware for supported combinations is included in releases.
 
 ## Getting started
@@ -95,8 +96,8 @@ another; select the exact device target during compilation.
 For pre-built firmware, the
 [web flasher](https://danpodeanu.github.io/seeed-reterminal-E100X/) writes
 the latest GitHub Release for supported E1001-E1004 application/board
-combinations directly from Chrome or Edge over USB. E1005 Weather Viewer
-firmware is available as a release binary or source build. See
+combinations directly from Chrome or Edge over USB. E1005 Weather and
+XKCD Viewer firmware is available as a release binary or source build. See
 [`docs/`](docs/) for how the flasher is wired up.
 
 ## Updating firmware (SD card)
@@ -144,7 +145,7 @@ Use the same command inside `weather-viewer` or `photo-viewer`. Their GitHub
 Actions workflows run these tests on every relevant push and pull request.
 
 Release qualification builds the 12 E1001-E1004 application/board
-combinations plus Weather Viewer for E1005.
+combinations plus Weather Viewer and XKCD Viewer for E1005.
 
 ## Contributing
 

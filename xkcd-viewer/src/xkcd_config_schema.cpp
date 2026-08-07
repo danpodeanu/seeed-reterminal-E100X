@@ -8,6 +8,8 @@ using config_portal::FieldType;
 using config_portal::Section;
 
 const char* const kDateLocaleValues[] = {"DMY", "MDY", "YMD", nullptr};
+const char* const kOrientationValues[] = {
+    "Portrait", "RotateCW", "RotateCCW", nullptr};
 
 const Field kRefreshFields[] = {
     {kKeySleepSeconds,
@@ -55,6 +57,10 @@ const Field kNtpFields[] = {
 };
 
 const Field kDisplayFields[] = {
+    {kKeyOrientation,
+     "Panel orientation",
+     "E1005 only. Portrait keeps USB at the bottom. RotateCW and RotateCCW support both physical landscape directions.",
+     FieldType::Enum, "Portrait", kOrientationValues, 0, 0, nullptr},
     {kKeyMinScale,
      "Minimum display scale",
      "Minimum on-panel scale factor. Comics needing less are skipped. Range 0.10..1.00.",

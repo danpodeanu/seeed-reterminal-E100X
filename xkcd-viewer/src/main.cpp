@@ -48,6 +48,7 @@
 #include "smooth_font_manager.h"
 #include "panel_watchdog.h"
 #include "peripheral_power.h"
+#include "power_latch.h"
 #include "timestamped_logger.h"
 #include "config_portal.h"
 #include "config_portal_ui.h"
@@ -73,9 +74,17 @@ TimestampedLogger appLog(Serial1);
 namespace {
 
 using namespace ::board;
-constexpr int PIN_BUTTON_GREEN = 3;
-constexpr int PIN_BUTTON_RIGHT = 4;
-constexpr int PIN_BUTTON_LEFT = 5;
+constexpr int PIN_BUTTON_GREEN = board::PIN_BUTTON_0;
+constexpr int PIN_BUTTON_RIGHT = board::PIN_BUTTON_1;
+constexpr int PIN_BUTTON_LEFT = board::PIN_BUTTON_2;
+
+#if RETERMINAL_MODEL == 1005
+constexpr char PRIMARY_BUTTON_LABEL[] = "OK";
+constexpr char PORTAL_EXIT_HINT[] = "Press OK to return to XKCD";
+#else
+constexpr char PRIMARY_BUTTON_LABEL[] = "green";
+constexpr char PORTAL_EXIT_HINT[] = "Press green button to return to XKCD";
+#endif
 
 #if RETERMINAL_MODEL == 1001
 constexpr uint32_t PANEL_WHITE = TFT_GRAY_3;
@@ -113,6 +122,17 @@ constexpr uint32_t PANEL_STATUS_DITHER_COLOR = TFT_BLACK;
 constexpr uint8_t PANEL_STATUS_DITHER_THRESHOLD = 4;
 constexpr uint32_t PANEL_CACHE_STATS_COLOR = TFT_DARKGREY;
 constexpr DitherPalette PANEL_PALETTE = PAL_E6;
+#elif RETERMINAL_MODEL == 1005
+constexpr uint32_t PANEL_WHITE = TFT_WHITE;
+constexpr uint32_t PANEL_BLACK = TFT_BLACK;
+constexpr uint32_t PANEL_STATUS_BACKGROUND = TFT_WHITE;
+constexpr bool PANEL_STATUS_DITHERED = false;
+constexpr uint32_t PANEL_STATUS_DITHER_COLOR = TFT_BLACK;
+constexpr uint8_t PANEL_STATUS_DITHER_THRESHOLD = 0;
+constexpr uint32_t PANEL_CACHE_STATS_COLOR = TFT_BLACK;
+constexpr DitherPalette PANEL_PALETTE = PAL_BW;
+#else
+#error "RETERMINAL_MODEL must be 1001, 1002, 1003, 1004, or 1005"
 #endif
 
 EPaper epaper;
@@ -133,6 +153,70 @@ bool quietSleepNotice = false;
 uint32_t networkOperationDeadlineMs = 0;
 volatile uint8_t maintenanceButtonInterruptMask = 0;
 bool maintenanceCancelled = false;
+
+inline int panelWidth() {
+  return xkcd_config::runtime::panelWidth();
+}
+
+inline int panelHeight() {
+  return xkcd_config::runtime::panelHeight();
+}
+
+inline bool compactPortraitLayout() {
+  return config::MODEL == 1005 && !xkcd_config::runtime::isLandscape();
+}
+
+inline int headerBottom() {
+  return compactPortraitLayout() ? 72 : config::ui(44);
+}
+
+inline int contentTop() {
+  return compactPortraitLayout() ? 78 : config::CONTENT_TOP;
+}
+
+inline int footerBottom() {
+  return panelHeight() - config::ui(12);
+}
+
+inline int minRenderedWidth() {
+  return panelWidth() / 3;
+}
+
+String configurationGestureHint(bool reconfigure) {
+#if RETERMINAL_MODEL == 1005
+  return "Hold OK 2s from sleep to " +
+         String(reconfigure ? "reconfigure" : "configure");
+#else
+  if (reconfigure) {
+    return "Keep the green button pressed for 2 seconds to reconfigure.";
+  }
+  return "To configure device - from sleep, hold green for 2 seconds";
+#endif
+}
+
+void beginPanel() {
+#if RETERMINAL_MODEL == 1005
+  // E1005 SD shares SCK/MOSI with the panel on a separate power rail.
+  // Power and deselect it before any display traffic.
+  pinMode(board::PIN_SD_CS, OUTPUT);
+  digitalWrite(board::PIN_SD_CS, HIGH);
+  peripheral_power::enableSd();
+  delay(board::SD_POWER_SETTLE_MS);
+#endif
+  epaper_setup::begin(epaper);
+#if RETERMINAL_MODEL == 1005
+  epaper.setRotation(xkcd_config::runtime::panelRotation());
+  LOG.printf("[panel] orientation=%s rotation=%d geometry=%dx%d\n",
+             xkcd_config::runtime::isLandscape()
+                 ? (xkcd_config::runtime::orientation() ==
+                            xkcd_orientation::Orientation::RotateCW
+                        ? "rotate-cw"
+                        : "rotate-ccw")
+                 : "portrait",
+             xkcd_config::runtime::panelRotation(), panelWidth(),
+             panelHeight());
+#endif
+}
 
 constexpr uint8_t MAINTENANCE_BUTTON_GREEN = 1U << 0;
 constexpr uint8_t MAINTENANCE_BUTTON_RIGHT = 1U << 1;
@@ -266,6 +350,10 @@ constexpr int SMOOTH_FONT_FOOTER_PX = 30;  // matches FreeSansBold18pt7b
 #elif RETERMINAL_MODEL == 1004
 constexpr int SMOOTH_FONT_TITLE_PX = 30;   // matches FreeSansBold18pt7b
 constexpr int SMOOTH_FONT_FOOTER_PX = 20;  // matches FreeSansBold12pt7b
+#elif RETERMINAL_MODEL == 1005
+// Smaller antialiased cuts lose stroke weight on the one-bit panel.
+constexpr int SMOOTH_FONT_TITLE_PX = 20;
+constexpr int SMOOTH_FONT_FOOTER_PX = 20;
 #else
 constexpr int SMOOTH_FONT_TITLE_PX = 20;   // matches FreeSansBold12pt7b
 constexpr int SMOOTH_FONT_FOOTER_PX = 16;  // matches FreeSansBold9pt7b
@@ -279,6 +367,9 @@ constexpr const GFXfont* TITLE_FALLBACK_FONT = &FreeSansBold24pt7b;
 constexpr const GFXfont* FOOTER_FALLBACK_FONT = &FreeSansBold18pt7b;
 #elif RETERMINAL_MODEL == 1004
 constexpr const GFXfont* TITLE_FALLBACK_FONT = &FreeSansBold18pt7b;
+constexpr const GFXfont* FOOTER_FALLBACK_FONT = &FreeSansBold12pt7b;
+#elif RETERMINAL_MODEL == 1005
+constexpr const GFXfont* TITLE_FALLBACK_FONT = &FreeSansBold12pt7b;
 constexpr const GFXfont* FOOTER_FALLBACK_FONT = &FreeSansBold12pt7b;
 #else
 constexpr const GFXfont* TITLE_FALLBACK_FONT = &FreeSansBold12pt7b;
@@ -334,6 +425,66 @@ static int smoothCenterYAdjust() {
   const int a  = static_cast<int>(epaper.gFont.ascent);
   // Approximate cap-height as ascent * 0.78 (DejaVu Sans Bold).
   return (yA / 2) - mA + (a * 78 / 200);
+}
+
+#if RETERMINAL_MODEL == 1005
+bool drawLoadedSmoothTextMonochrome(const String& text,
+                                    int centerX, int centerY) {
+  if (!smoothFontManager.smoothLoaded() || !epaper.fontLoaded ||
+      !epaper.fs_font || !epaper.fontFile) {
+    return false;
+  }
+
+  constexpr uint8_t kSolidAlphaThreshold = 64;
+  uint8_t row[256];
+  int cursorX = centerX - epaper.textWidth(text, 1) / 2;
+  const int cursorY = centerY - epaper.gFont.yAdvance / 2;
+  uint16_t offset = 0;
+  const uint16_t length = static_cast<uint16_t>(text.length());
+  auto* utf8 = reinterpret_cast<uint8_t*>(
+      const_cast<char*>(text.c_str()));
+
+  while (offset < length) {
+    const uint16_t code = epaper.decodeUTF8(utf8, &offset, length - offset);
+    if (code == 0x20) {
+      cursorX += epaper.gFont.spaceWidth;
+      continue;
+    }
+
+    uint16_t glyph = 0;
+    if (!epaper.getUnicodeIndex(code, &glyph)) {
+      cursorX += epaper.gFont.spaceWidth;
+      continue;
+    }
+
+    const uint8_t width = epaper.gWidth[glyph];
+    const uint8_t height = epaper.gHeight[glyph];
+    const int left = cursorX + epaper.gdX[glyph];
+    const int top =
+        cursorY + epaper.gFont.maxAscent - epaper.gdY[glyph];
+    if (!epaper.fontFile.seek(epaper.gBitmap[glyph], fs::SeekSet)) {
+      return false;
+    }
+    for (uint8_t y = 0; y < height; ++y) {
+      if (epaper.fontFile.read(row, width) != width) return false;
+      for (uint8_t x = 0; x < width; ++x) {
+        if (row[x] >= kSolidAlphaThreshold) {
+          epaper.drawPixel(left + x, top + y, PANEL_BLACK);
+        }
+      }
+    }
+    cursorX += epaper.gxAdvance[glyph];
+  }
+  return true;
+}
+#endif
+
+void drawSelectedSmoothTextCentered(const String& text,
+                                    int centerX, int centerY) {
+#if RETERMINAL_MODEL == 1005
+  if (drawLoadedSmoothTextMonochrome(text, centerX, centerY)) return;
+#endif
+  epaper.drawString(text, centerX, centerY, 1);
 }
 
 void selectCacheStatsFont() {
@@ -416,7 +567,7 @@ void drawBadges(uint32_t background = PANEL_WHITE,
   const int w = config::ui(22);
   const int h = config::ui(12);
   const int terminalWidth = max(3, config::ui(5));
-  const int x = config::PANEL_WIDTH - edgeInset - terminalWidth - w;
+  const int x = panelWidth() - edgeInset - terminalWidth - w;
   const int gaugeCenterY = statusCenterY + 2;
   const int y = gaugeCenterY - h / 2;
   const int outline = max(1, config::ui(1));
@@ -432,7 +583,10 @@ void drawBadges(uint32_t background = PANEL_WHITE,
   // right-hand cluster as a single "status" block.
   int nextRightX =
       percentRightX - epaper.textWidth(percent, 1) - config::ui(10);
-  if (xkcd_config::runtime::debugShowStatusBadges() && lastRefreshTime != nullptr &&
+  const bool showExtendedStatus = !compactPortraitLayout();
+  if (showExtendedStatus &&
+      xkcd_config::runtime::debugShowStatusBadges() &&
+      lastRefreshTime != nullptr &&
       !lastRefreshTime->isEmpty()) {
     const int separator = lastRefreshTime->indexOf('T');
     if (separator >= 10 &&
@@ -457,7 +611,9 @@ void drawBadges(uint32_t background = PANEL_WHITE,
     }
   }
 
-  if (xkcd_config::runtime::debugShowStatusBadges() && cacheStatsAvailable) {
+  if (showExtendedStatus &&
+      xkcd_config::runtime::debugShowStatusBadges() &&
+      cacheStatsAvailable) {
     const int statsRightX = nextRightX;
     selectCacheStatsFont();
     epaper.setTextColor(PANEL_CACHE_STATS_COLOR, background,
@@ -490,21 +646,21 @@ void renderStatus(const String& message, const String& detail = "",
   if (!lineAbove.isEmpty()) {
     selectStatusMessageDetailFont();
     epaper.drawString(text_render::ellipsize(epaper, text_render::displayText(lineAbove),
-                                config::PANEL_WIDTH - config::ui(60), 1),
-                      config::PANEL_WIDTH / 2,
-                      config::PANEL_HEIGHT / 2 - config::ui(55), 1);
+                                panelWidth() - config::ui(60), 1),
+                      panelWidth() / 2,
+                      panelHeight() / 2 - config::ui(55), 1);
   }
   selectStatusMessageTitleFont();
   epaper.drawString(text_render::ellipsize(epaper, text_render::displayText(message),
-                              config::PANEL_WIDTH - config::ui(60), 1),
-                    config::PANEL_WIDTH / 2,
-                    config::PANEL_HEIGHT / 2 - config::ui(15), 1);
+                              panelWidth() - config::ui(60), 1),
+                    panelWidth() / 2,
+                    panelHeight() / 2 - config::ui(15), 1);
   if (!detail.isEmpty()) {
     selectStatusMessageDetailFont();
     epaper.drawString(text_render::ellipsize(epaper, text_render::displayText(detail),
-                                config::PANEL_WIDTH - config::ui(60), 1),
-                      config::PANEL_WIDTH / 2,
-                      config::PANEL_HEIGHT / 2 + config::ui(22), 1);
+                                panelWidth() - config::ui(60), 1),
+                      panelWidth() / 2,
+                      panelHeight() / 2 + config::ui(22), 1);
   }
   if (!subHelpBelow.isEmpty()) {
     // Small ASCII sub-line (MAC + firmware) drawn just above the bottom
@@ -512,9 +668,9 @@ void renderStatus(const String& message, const String& detail = "",
     // "Connecting to..." message.
     selectStatusMessageDetailFont();
     epaper.drawString(text_render::ellipsize(epaper, text_render::displayText(subHelpBelow),
-                                config::PANEL_WIDTH - config::ui(60), 1),
-                      config::PANEL_WIDTH / 2,
-                      config::PANEL_HEIGHT - config::ui(46), 1);
+                                panelWidth() - config::ui(60), 1),
+                      panelWidth() / 2,
+                      panelHeight() - config::ui(46), 1);
   }
   if (!helpBelow.isEmpty()) {
     // Bottom-of-panel hint: used for the "hold green at boot to
@@ -522,9 +678,9 @@ void renderStatus(const String& message, const String& detail = "",
     // the same hint on the "XKCD refresh failed" screen.
     selectStatusMessageDetailFont();
     epaper.drawString(text_render::ellipsize(epaper, text_render::displayText(helpBelow),
-                                config::PANEL_WIDTH - config::ui(60), 1),
-                      config::PANEL_WIDTH / 2,
-                      config::PANEL_HEIGHT - config::ui(24), 1);
+                                panelWidth() - config::ui(60), 1),
+                      panelWidth() / 2,
+                      panelHeight() - config::ui(24), 1);
   }
   smoothFontManager.selectGfx(nullptr);
   epaper.setTextFont(2);
@@ -538,8 +694,7 @@ void renderStatus(const String& message, const String& detail = "",
 
 void updatePanel() {
   if (screenshotRequested && sdReady) {
-    screenshot::saveScreenshotBmp(epaper, config::PANEL_WIDTH,
-                                  config::PANEL_HEIGHT);
+    screenshot::saveScreenshotBmp(epaper, panelWidth(), panelHeight());
     screenshotRequested = false;
   }
   const uint32_t heap = ESP.getFreeHeap();
@@ -821,7 +976,7 @@ ImageLayout calculateLayout(const Comic& comic, int sourceWidth, int sourceHeigh
   selectFooterFont();
   layout.footerLineCount = text_render::wrapText(epaper, footer, layout.footerLines,
                                     config::FOOTER_MAX_LINES,
-                                    config::PANEL_WIDTH - config::ui(24), 1);
+                                    panelWidth() - config::ui(24), 1);
   // Size the footer band from the smooth font's actual yAdvance so the
   // strip hugs the text.  Fall back to the compile-time constants when
   // the smooth font failed to load (GFX path preserves legacy sizing).
@@ -837,11 +992,11 @@ ImageLayout calculateLayout(const Comic& comic, int sourceWidth, int sourceHeigh
   // Leave the smooth footer font loaded so renderComic can reuse it
   // without paying another ~2 s SD read for the same size.
   layout.footerDividerY =
-      config::FOOTER_BOTTOM -
+      footerBottom() -
       layout.footerLineCount * layout.footerLineHeightPx -
       2 * layout.footerBandPaddingPx;
-  const int maxWidth = config::PANEL_WIDTH - 2 * config::CONTENT_MARGIN_X;
-  const int maxHeight = layout.footerDividerY - config::CONTENT_TOP - config::ui(6);
+  const int maxWidth = panelWidth() - 2 * config::CONTENT_MARGIN_X;
+  const int maxHeight = layout.footerDividerY - contentTop() - config::ui(6);
   // Contain the comic in this model's actual content rectangle. Unlike the
   // original E1001-only layout, this also enlarges small source comics so they
   // remain readable on high-resolution E1003/E1004 panels.
@@ -849,13 +1004,16 @@ ImageLayout calculateLayout(const Comic& comic, int sourceWidth, int sourceHeigh
                      static_cast<float>(maxHeight) / sourceHeight);
   layout.width = max(2, static_cast<int>(sourceWidth * layout.scale));
   layout.height = max(2, static_cast<int>(sourceHeight * layout.scale));
-  // Packed 4bpp requires an even row width (two pixels per byte), but the
-  // number of rows may be odd. Preserving an odd height also preserves source
-  // images whose final rule or border is drawn on their last row.
+  // Packed 4bpp requires an even row width (two pixels per byte). The E1005
+  // 1bpp path supports arbitrary widths and pads only the final byte of a row.
+#if RETERMINAL_MODEL != 1005
   if (layout.width & 1) --layout.width;
-  layout.x = (config::PANEL_WIDTH - layout.width) / 2;
+#endif
+  layout.x = (panelWidth() - layout.width) / 2;
+#if RETERMINAL_MODEL != 1005
   if (layout.x & 1) --layout.x;
-  layout.y = config::CONTENT_TOP + (maxHeight - layout.height) / 2;
+#endif
+  layout.y = contentTop() + (maxHeight - layout.height) / 2;
   return layout;
 }
 
@@ -865,10 +1023,11 @@ bool layoutIsSuitable(const ImageLayout& layout, int comicNumber) {
                comicNumber, xkcd_config::runtime::minDisplayScale() * 100.0f);
     return false;
   }
-  if (layout.width < config::MIN_RENDERED_WIDTH) {
+  const int minimumWidth = minRenderedWidth();
+  if (layout.width < minimumWidth) {
     LOG.printf("[comic] #%d skipped: rendered width %d is below the "
                "%d-pixel minimum for this panel\n",
-               comicNumber, layout.width, config::MIN_RENDERED_WIDTH);
+               comicNumber, layout.width, minimumWidth);
     return false;
   }
   const size_t renderPixels =
@@ -1025,9 +1184,11 @@ bool renderComic(const Comic& comic, RgbImage& image, ImageLayout layout) {
   if (!indices) indices = static_cast<uint8_t*>(malloc(pixelCount));
   if (!indices) return false;
 
-#if RETERMINAL_MODEL == 1003 || RETERMINAL_MODEL == 1004
-  // A full E1003/E1004 RGB888 resize can consume most or all of the 8 MB
-  // PSRAM. Resample and Bayer-dither directly into the indexed panel buffer.
+#if RETERMINAL_MODEL == 1003 || RETERMINAL_MODEL == 1004 || \
+    RETERMINAL_MODEL == 1005
+  // A full high-resolution RGB888 resize can consume most or all of the
+  // 8 MB PSRAM. Resample and Bayer-dither directly into the indexed panel
+  // buffer. E1005 uses this path to leave room for the decoded source image.
   if (scaling) {
     LOG.printf("[render] %s direct indexed resize %dx%d -> %dx%d, %lu pixels\n",
                COLOR_MODE_NAME, image.width, image.height,
@@ -1061,20 +1222,41 @@ bool renderComic(const Comic& comic, RgbImage& image, ImageLayout layout) {
     image_free(&image);
   }
 
-  xkcd_index::pack4bppInPlace(indices, layout.width, layout.height);
-
   epaper.fillSprite(PANEL_WHITE);
+#if RETERMINAL_MODEL == 1005
+  // TFT_eSPI drawBitmap treats a set bit as the foreground color. PAL_BW
+  // uses index 0 for black, so pack black pixels as set bits.
+  const size_t packedBytes =
+      static_cast<size_t>((layout.width + 7) / 8) * layout.height;
+  uint8_t* packed = static_cast<uint8_t*>(ps_malloc(packedBytes));
+  if (!packed) packed = static_cast<uint8_t*>(malloc(packedBytes));
+  if (!packed) {
+    free(indices);
+    return false;
+  }
+  pack_1bpp_msb(indices, packed, layout.width, layout.height, true);
+  free(indices);
+  epaper.drawBitmap(layout.x, layout.y, packed, layout.width, layout.height,
+                    PANEL_BLACK, PANEL_WHITE);
+  free(packed);
+#else
+  xkcd_index::pack4bppInPlace(indices, layout.width, layout.height);
   epaper.pushImage(layout.x, layout.y, layout.width, layout.height,
                    reinterpret_cast<uint16_t*>(indices));
   free(indices);
+#endif
 
-  epaper.fillRect(0, 0, config::PANEL_WIDTH, config::ui(44), PANEL_WHITE);
-  text_render::fillStatusBackground(epaper, layout.footerDividerY, config::PANEL_HEIGHT - layout.footerDividerY, config::PANEL_WIDTH, config::PANEL_HEIGHT, PANEL_STATUS_BACKGROUND, PANEL_STATUS_DITHERED, PANEL_STATUS_DITHER_COLOR, PANEL_STATUS_DITHER_THRESHOLD);
-  epaper.drawFastHLine(config::CONTENT_MARGIN_X, config::ui(43),
-                       config::PANEL_WIDTH - 2 * config::CONTENT_MARGIN_X,
+  epaper.fillRect(0, 0, panelWidth(), headerBottom(), PANEL_WHITE);
+  text_render::fillStatusBackground(
+      epaper, layout.footerDividerY, panelHeight() - layout.footerDividerY,
+      panelWidth(), panelHeight(), PANEL_STATUS_BACKGROUND,
+      PANEL_STATUS_DITHERED, PANEL_STATUS_DITHER_COLOR,
+      PANEL_STATUS_DITHER_THRESHOLD);
+  epaper.drawFastHLine(config::CONTENT_MARGIN_X, headerBottom() - 1,
+                       panelWidth() - 2 * config::CONTENT_MARGIN_X,
                        PANEL_BLACK);
   epaper.drawFastHLine(config::CONTENT_MARGIN_X, layout.footerDividerY,
-                       config::PANEL_WIDTH - 2 * config::CONTENT_MARGIN_X,
+                       panelWidth() - 2 * config::CONTENT_MARGIN_X,
                        PANEL_BLACK);
 
   // Render the footer first: calculateLayout left the footer smooth
@@ -1093,24 +1275,47 @@ bool renderComic(const Comic& comic, RgbImage& image, ImageLayout layout) {
   }
   epaper.setTextDatum(MC_DATUM);
   int footerY =
-      (layout.footerDividerY + config::PANEL_HEIGHT) / 2 -
+      (layout.footerDividerY + panelHeight()) / 2 -
       (layout.footerLineCount - 1) * layout.footerLineHeightPx / 2;
   const int footerYAdjust = smoothCenterYAdjust();
   for (int i = 0; i < layout.footerLineCount; ++i) {
-    epaper.drawString(layout.footerLines[i], config::PANEL_WIDTH / 2, footerY + footerYAdjust, 1);
+    drawSelectedSmoothTextCentered(
+        layout.footerLines[i], panelWidth() / 2, footerY + footerYAdjust);
     footerY += layout.footerLineHeightPx;
   }
 
   epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, true);
   epaper.setTextDatum(MC_DATUM);
-  const String heading =
-      quietSleepNotice
-          ? "XKCD #" + String(comic.number) + " - sleeping until " +
-                quiet_hours::endLabel()
-          : "XKCD #" + String(comic.number) + " - " + comic.title;
+  String heading;
+  String compactSubheading;
+  if (compactPortraitLayout()) {
+    heading = "XKCD #" + String(comic.number);
+    compactSubheading =
+        quietSleepNotice ? "Sleeping until " + quiet_hours::endLabel()
+                         : text_render::displayText(comic.title);
+  } else {
+    heading =
+        quietSleepNotice
+            ? "XKCD #" + String(comic.number) + " - sleeping until " +
+                  quiet_hours::endLabel()
+            : "XKCD #" + String(comic.number) + " - " + comic.title;
+  }
   selectTitleFont();
-  epaper.drawString(text_render::ellipsize(epaper, text_render::displayText(heading), config::PANEL_WIDTH - config::ui(380), 1),
-                    config::PANEL_WIDTH / 2, config::ui(24) + smoothCenterYAdjust(), 1);
+  const int headingMaxWidth =
+      compactPortraitLayout() ? panelWidth() - 240
+                              : panelWidth() - config::ui(380);
+  const String headingLabel = text_render::ellipsize(
+      epaper, text_render::displayText(heading), headingMaxWidth, 1);
+  drawSelectedSmoothTextCentered(
+      headingLabel, panelWidth() / 2,
+      (compactPortraitLayout() ? 20 : config::ui(24)) +
+          smoothCenterYAdjust());
+  if (!compactSubheading.isEmpty()) {
+    const String subheadingLabel = text_render::ellipsize(
+        epaper, compactSubheading, panelWidth() - config::ui(24), 1);
+    drawSelectedSmoothTextCentered(
+        subheadingLabel, panelWidth() / 2, 50 + smoothCenterYAdjust());
+  }
   smoothFontManager.selectGfx(nullptr);
   epaper.setTextFont(2);
 
@@ -1124,7 +1329,7 @@ bool renderComic(const Comic& comic, RgbImage& image, ImageLayout layout) {
     epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, true);
     epaper.setTextDatum(BR_DATUM);
     epaper.drawString(publishedDate,
-                      config::PANEL_WIDTH - config::CONTENT_MARGIN_X,
+                      panelWidth() - config::CONTENT_MARGIN_X,
                       layout.footerDividerY - config::ui(2), 1);
     smoothFontManager.selectGfx(nullptr);
     epaper.setTextFont(2);
@@ -1156,9 +1361,19 @@ void powerDownAndSleep(uint64_t sleepSeconds = xkcd_config::runtime::sleepSecond
   // sink is attached.
   appLog.detachSdSink();
   if (sdReady) SD.end();
+#if RETERMINAL_MODEL == 1005
+  epaper.getSPIinstance().end();
+  pinMode(board::PIN_SD_CS, INPUT);
+  pinMode(board::PIN_SD_SCK, INPUT);
+  pinMode(board::PIN_SD_MOSI, INPUT);
+  pinMode(board::PIN_SD_MISO, INPUT);
+  peripheral_power::disableSd();
+#endif
   peripheral_power::disable();
-  pinMode(PIN_BATTERY_ENABLE, OUTPUT);
-  digitalWrite(PIN_BATTERY_ENABLE, LOW);
+  if (PIN_BATTERY_ENABLE >= 0) {
+    pinMode(PIN_BATTERY_ENABLE, OUTPUT);
+    digitalWrite(PIN_BATTERY_ENABLE, LOW);
+  }
 
   pinMode(PIN_BUTTON_GREEN, INPUT_PULLUP);
   pinMode(PIN_BUTTON_RIGHT, INPUT_PULLUP);
@@ -1199,8 +1414,9 @@ void powerDownAndSleep(uint64_t sleepSeconds = xkcd_config::runtime::sleepSecond
              digitalRead(PIN_BUTTON_GREEN),
              digitalRead(PIN_BUTTON_RIGHT),
              digitalRead(PIN_BUTTON_LEFT));
-  LOG.printf("[sleep] %llu seconds; GPIO3/GPIO4/GPIO5 wake enabled\n",
-             static_cast<unsigned long long>(sleepSeconds));
+  LOG.printf("[sleep] %llu seconds; GPIO%d/%d/%d wake enabled\n",
+             static_cast<unsigned long long>(sleepSeconds),
+             PIN_BUTTON_GREEN, PIN_BUTTON_RIGHT, PIN_BUTTON_LEFT);
   if (buttonWakeResult != ESP_OK && timerWakeResult != ESP_OK) {
     LOG.println("[sleep] no wake source could be configured; restarting");
     LOG.flush();
@@ -1210,12 +1426,14 @@ void powerDownAndSleep(uint64_t sleepSeconds = xkcd_config::runtime::sleepSecond
   LOG.flush();
   delay(50);
   hardware::setStatusLed(false);
+  power_latch::holdDuringDeepSleep();
   esp_deep_sleep_start();
 }
 
 }  // namespace
 
 void setup() {
+  power_latch::holdOn();
   hardware::setStatusLed(true);
   const esp_sleep_wakeup_cause_t wakeCause = esp_sleep_get_wakeup_cause();
   const uint64_t wakePins = wakeCause == ESP_SLEEP_WAKEUP_EXT1
@@ -1241,8 +1459,8 @@ void setup() {
   xkcd_config::runtime::load();
   xkcd_wifi::load();
 
-  // Unified green-button boot gesture. Applies on both cold boot and
-  // deep-sleep green wakes. A first beep marks the press being registered;
+  // Unified primary-button boot gesture. Applies on both cold boot and
+  // deep-sleep primary-button wakes. A first beep marks the press;
   // a second beep 5 s later marks the switch to screenshot:
   //   * Released before 1 s          -> accidental tap, ignored.
   //   * Released between 1 s and 5 s -> enter config portal.
@@ -1271,17 +1489,18 @@ void setup() {
     }
     if (releasedBeforeDecision) {
       if (releasedAtMs < kPortalMinMs) {
-        LOG.printf("[gesture] green released after %u ms (< %u ms min) -> ignored\n",
-                   static_cast<unsigned>(releasedAtMs),
+        LOG.printf("[gesture] %s released after %u ms (< %u ms min) -> ignored\n",
+                   PRIMARY_BUTTON_LABEL, static_cast<unsigned>(releasedAtMs),
                    static_cast<unsigned>(kPortalMinMs));
         gesture = GreenGesture::None;
       } else {
-        LOG.printf("[gesture] green released after %u ms -> portal\n",
-                   static_cast<unsigned>(releasedAtMs));
+        LOG.printf("[gesture] %s released after %u ms -> portal\n",
+                   PRIMARY_BUTTON_LABEL, static_cast<unsigned>(releasedAtMs));
         gesture = GreenGesture::PortalRequest;
       }
     } else {
-      LOG.printf("[gesture] green still held at %u ms -> screenshot\n",
+      LOG.printf("[gesture] %s still held at %u ms -> screenshot\n",
+                 PRIMARY_BUTTON_LABEL,
                  static_cast<unsigned>(kPortalDecisionMs));
       hardware::beep();  // second beep: past portal window, screenshot armed.
       gesture = GreenGesture::ScreenshotRequest;
@@ -1309,7 +1528,7 @@ void setup() {
   if (portalRequested) {
     LOG.printf("[portal] entering config portal (no_wifi=%d gesture=%s)\n",
                wifiUnconfigured,
-               gesture == GreenGesture::PortalRequest ? "green-tap" : "auto");
+               gesture == GreenGesture::PortalRequest ? "button-hold" : "auto");
     // Restore the wall clock from the battery-backed PCF8563 before we
     // start the portal. NTP isn't available here (Wi-Fi is almost
     // certainly unconfigured - that's why we're in the portal), and
@@ -1322,7 +1541,7 @@ void setup() {
     // AP won't be advertising anyway, so this gives a clearer failure
     // mode than "AP up, panel blank".
     LOG.println("[portal] panel: begin");
-    epaper_setup::begin(epaper);
+    beginPanel();
 #if RETERMINAL_MODEL == 1001
     epaper.initGrayMode(GRAY_LEVEL4);
     const GFXfont* titleFont    = &FreeSansBold18pt7b;
@@ -1401,6 +1620,7 @@ void setup() {
           info.wifiPassword.length() ? info.wifiPassword.c_str() : nullptr);
       info.urlPayload = config_portal::urlQrPayload(
           config_portal::currentIp(), config_portal::currentPort(), "/wifi");
+      info.footerHint = PORTAL_EXIT_HINT;
       info.fonts.titleFont = titleFont;
       info.fonts.subtitleFont = subtitleFont;
       info.fonts.captionFont = captionFont;
@@ -1408,7 +1628,7 @@ void setup() {
       LOG.println("[portal] rendering QR splash");
       const uint32_t drawStart = millis();
       config_portal::ui::renderPortalScreen<EPaper>(
-          epaper, config::PANEL_WIDTH, config::PANEL_HEIGHT, PANEL_BLACK,
+          epaper, panelWidth(), panelHeight(), PANEL_BLACK,
           PANEL_WHITE, info);
       LOG.printf("[portal] splash drawn in %u ms; committing to panel\n",
                  static_cast<unsigned>(millis() - drawStart));
@@ -1438,14 +1658,15 @@ void setup() {
              !sd_web_portal::exitRequested()) {
         config_portal::loop();
         const uint32_t nowMs = millis();
-        // Green button in the portal = reboot the device. Convenient exit
+        // Primary button in the portal = reboot the device. Convenient exit
         // once you've saved settings on your phone, matching the "Reboot"
         // button on /reset. Debounced at 50 ms.
         if (!digitalRead(PIN_BUTTON_GREEN)) {
           if (greenLowSinceMs == 0) {
             greenLowSinceMs = nowMs;
           } else if (nowMs - greenLowSinceMs >= 50) {
-            LOG.println("[portal] green button pressed -> reboot");
+            LOG.printf("[portal] %s button pressed -> reboot\n",
+                       PRIMARY_BUTTON_LABEL);
             hardware::beep();
             break;
           }
@@ -1509,16 +1730,20 @@ void setup() {
   LOG.println("============================================");
 
   LOG.printf("[boot] wake cause=%d pins=0x%llx, PSRAM=%luK, "
-             "GPIO3=%s GPIO4=%s GPIO5=%s\n",
+             "GPIO%d=%s GPIO%d=%s GPIO%d=%s\n",
              wakeCause, static_cast<unsigned long long>(wakePins),
              static_cast<unsigned long>(ESP.getPsramSize() / 1024),
+             PIN_BUTTON_GREEN,
              greenWokeDevice
                  ? (screenshotRequested ? "long-press" : "short-press")
                  : "idle",
+             PIN_BUTTON_RIGHT,
              rightWokeDevice ? "wake" : "idle",
+             PIN_BUTTON_LEFT,
              leftWokeDevice ? "wake" : "idle");
   if (screenshotRequested) {
-    LOG.println("[screenshot] green-button long press requested export");
+    LOG.printf("[screenshot] %s-button long press requested export\n",
+               PRIMARY_BUTTON_LABEL);
   }
 
   const time_t startupTime = time(nullptr);
@@ -1566,7 +1791,7 @@ void setup() {
     rtc_sync::readAndLog(storedRtc);
   }
 
-  epaper_setup::begin(epaper);
+  beginPanel();
   if (low_battery::shouldWarn(xkcd_config::runtime::lowBatteryWarn(),
                               sensorReadings.batteryValid,
                               sensorReadings.externalPower,
@@ -1575,7 +1800,8 @@ void setup() {
                sensorReadings.batteryPct, sensorReadings.batteryVoltage,
                low_battery::kThresholdPct);
     renderStatus("Please recharge",
-                 "Plug in a USB-C cable then press the green button to continue.",
+                 "Plug in USB-C, then press " +
+                     String(PRIMARY_BUTTON_LABEL) + " to continue.",
                  "Battery low");
     powerDownAndSleep(xkcd_config::runtime::sleepSeconds());
     return;
@@ -1661,7 +1887,7 @@ void setup() {
     LOG.println("[display] showing Wi-Fi connection status");
     renderStatus("Connecting to " + String(xkcd_wifi::ssid()), connectionDetail,
                  "",
-                 "To configure device - from sleep, hold green for 2 seconds",
+                 configurationGestureHint(false),
                  macAndVersion);
   }
 #if RETERMINAL_MODEL == 1001
@@ -1788,9 +2014,9 @@ void setup() {
     const uint64_t retryMinutes = (nextSleepSeconds + 59ULL) / 60ULL;
     const String detail =
         "Retrying in " + String(static_cast<unsigned long>(retryMinutes)) +
-        " minutes. Press the green button to retry now.";
-    const String reconfigureHint =
-        "Keep the green button pressed for 2 seconds to reconfigure.";
+        " minutes. Press " + String(PRIMARY_BUTTON_LABEL) +
+        " to retry now.";
+    const String reconfigureHint = configurationGestureHint(true);
     renderStatus("XKCD refresh failed", detail, reason, reconfigureHint);
   }
 

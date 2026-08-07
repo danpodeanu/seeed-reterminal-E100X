@@ -1,4 +1,4 @@
-# XKCD Viewer for reTerminal E1001–E1004
+# XKCD Viewer for reTerminal E1001–E1005
 
 A battery-powered, always-on XKCD comic frame. The device wakes on a
 schedule, picks a random XKCD, renders it on the e-paper panel, then
@@ -46,6 +46,7 @@ screenshot feature.*
 | `reterminal_e1002` | 800×480 ED2208 | six-color |
 | `reterminal_e1003` | 1872×1404 ED103TC2 | 16-level gray |
 | `reterminal_e1004` | 1200×1600 T133A01 | six-color |
+| `reterminal_e1005` | 480×800 / 800×480 SSD1677 | monochrome, runtime rotation |
 
 Use the firmware environment matching your device; panel drivers and
 dimensions differ between models.
@@ -63,13 +64,18 @@ You will also need:
 
 ### 1. Flash the firmware
 
-The fastest path is the web flasher — no installer, no `esptool.py`:
+For E1001–E1004, the fastest path is the web flasher — no installer,
+no `esptool.py`:
 
 > [Flash your reTerminal from the browser →](https://danpodeanu.github.io/seeed-reterminal-E100X/)
 
 Pick the reTerminal model, select **XKCD Viewer**, connect over USB-C,
 and Chrome or Edge writes the latest release directly. To build from
 source instead, see [Building from source](#building-from-source).
+
+For E1005, use the `reterminal_e1005` release binary or build from
+source. The web flasher does not yet publish the E1005-specific 32 MB
+boot chain.
 
 ### 2. Connect to Wi-Fi
 
@@ -83,13 +89,14 @@ panel:
 - Scan the second QR to open the settings page in a browser.
 
 The settings page lets you pick a Wi-Fi network, set a timezone, edit
-quiet hours, choose the refresh cadence, and more. Values persist in
-NVS and survive reflashing.
+quiet hours, choose the refresh cadence, and select E1005 portrait,
+clockwise landscape, or counter-clockwise landscape orientation.
+Values persist in NVS and survive reflashing.
 
 You can re-enter the portal at any time: **while the device is
-sleeping, hold the green button for 1–5 seconds**. Wait for the first
-beep and keep holding — when the panel switches to the QR-code portal
-you're in.
+sleeping, hold the green button (E1001–E1004) or OK button (E1005) for
+1–5 seconds**. Wait for the first beep and keep holding — when the
+panel switches to the QR-code portal you're in.
 
 ### 3. Optional: seed an SD card
 
@@ -119,9 +126,9 @@ The details are in [Pre-populating an SD card](#pre-populating-an-sd-card).
   the portal.
 - **Buttons on the front** all wake the device:
   - Any front button → jump to a new random comic.
-  - **Green button + 1–5 s hold from sleep** → open the Wi-Fi
+  - **Green/OK button + 1–5 s hold from sleep** → open the Wi-Fi
     configuration portal (QR codes on the panel).
-  - **Green button + longer hold (>5 s) from sleep** → save a
+  - **Green/OK button + longer hold (>5 s) from sleep** → save a
     screenshot of the current frame to `/screenshot.bmp`.
   - A short GPIO45 beep confirms every button wake.
 - **Header readouts** update on every refresh:
@@ -146,7 +153,7 @@ The details are in [Pre-populating an SD card](#pre-populating-an-sd-card).
 
 - **Panel is stuck on "Connecting to <SSID>"** — the stored Wi-Fi
   credentials probably don't match your network. Re-enter the portal
-  (hold green 1–5 s while sleeping) and update them.
+  (hold green/OK 1–5 s while sleeping) and update them.
 - **Titles or alt text show empty boxes or dropped characters** —
   the DejaVu Sans smooth fonts are not on the SD card. Regenerate them
   with `python3 tools/preload_sd.py /Volumes/XKCD --with-fonts`.
@@ -334,7 +341,7 @@ constexpr uint8_t QUIET_END_MINUTE = 0;
 
 PNG, baseline JPEG, and supported BMP images can be displayed. GIFs,
 progressive JPEGs, corrupt files, and images requiring reduction below
-65% are skipped. Results narrower than one quarter of the selected
+65% are skipped. Results narrower than one third of the selected
 panel are also skipped so extreme portrait comics remain readable. Up
 to eight random candidates are tried before an error is shown.
 
@@ -342,7 +349,9 @@ Suitability is calculated from the selected model's native resolution
 and its actual header/footer area. Small comics are enlarged to fill
 the available content rectangle while preserving their aspect ratio.
 Large comics accepted on E1003 or E1004 may still be skipped on the
-smaller E1001 or E1002 panels.
+smaller E1001, E1002, or portrait E1005 layouts. E1005 converts comic
+art to one-bit black and white with ordered or Floyd–Steinberg
+dithering and uses solid thresholded Unicode glyphs for readable text.
 
 With an SD card, image originals are stored as
 `/xkcd/<number>.<ext>` and all per-comic metadata (title, alt text,
@@ -458,7 +467,7 @@ Build every supported target before submitting a change:
 
 ```bash
 pio run -e reterminal_e1001 -e reterminal_e1002 \
-  -e reterminal_e1003 -e reterminal_e1004
+  -e reterminal_e1003 -e reterminal_e1004 -e reterminal_e1005
 ```
 
 Run the native unit tests:

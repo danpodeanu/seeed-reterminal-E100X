@@ -11,6 +11,8 @@
 
 #include <Arduino.h>
 
+#include "xkcd_orientation.h"
+
 namespace config {
 
 // --- Refresh cadence --------------------------------------------------------
@@ -47,6 +49,11 @@ constexpr char NTP_SERVER_SECONDARY[] = "time.cloudflare.com";
 // to squeeze it onto the panel. Comics that would need to shrink below this
 // scale are skipped and another is picked.
 constexpr float MIN_DISPLAY_SCALE = 0.65f;
+
+// E1005 can be mounted vertically or in either landscape direction.
+// Other models keep their native fixed orientation.
+constexpr xkcd_orientation::Orientation ORIENTATION_DEFAULT =
+    xkcd_orientation::Orientation::Portrait;
 
 // --- Debug knobs ------------------------------------------------------------
 // Show the diagnostic badges in the top-right corner (last-refresh

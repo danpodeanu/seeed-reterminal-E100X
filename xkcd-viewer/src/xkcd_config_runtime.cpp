@@ -20,6 +20,8 @@ struct Cache {
   String   ntpSecondary = ::config::NTP_SERVER_SECONDARY;
 
   float    minDisplayScale = ::config::MIN_DISPLAY_SCALE;
+  xkcd_orientation::Orientation orientation =
+      ::config::ORIENTATION_DEFAULT;
   ::config::DateLocale dateLocale = ::config::DATE_LOCALE;
 
   bool     debugShowStatusBadges = ::config::DEBUG_SHOW_STATUS_BADGES;
@@ -35,6 +37,12 @@ bool  g_loaded = false;
   if (s == "MDY") return ::config::DateLocale::MDY;
   if (s == "YMD") return ::config::DateLocale::YMD;
   return ::config::DateLocale::DMY;
+}
+
+xkcd_orientation::Orientation parseOrientation(const String& s) {
+  if (s == "RotateCW") return xkcd_orientation::Orientation::RotateCW;
+  if (s == "RotateCCW") return xkcd_orientation::Orientation::RotateCCW;
+  return xkcd_orientation::Orientation::Portrait;
 }
 
 }  // namespace
@@ -73,6 +81,8 @@ void load() {
 
   g_cache.minDisplayScale =
       config_portal::storage::getFloat(prefs, kSchema, kKeyMinScale);
+  g_cache.orientation = parseOrientation(
+      config_portal::storage::getString(prefs, kSchema, kKeyOrientation));
   g_cache.dateLocale =
       parseDateLocale(config_portal::storage::getString(prefs, kSchema, kKeyDateLocale));
 
@@ -101,6 +111,30 @@ const char*  ntpPrimary()            { return g_cache.ntpPrimary.c_str(); }
 const char*  ntpSecondary()          { return g_cache.ntpSecondary.c_str(); }
 
 float        minDisplayScale()       { return g_cache.minDisplayScale; }
+xkcd_orientation::Orientation orientation() {
+  if (::config::MODEL != 1005) {
+    return xkcd_orientation::Orientation::Portrait;
+  }
+  return g_cache.orientation;
+}
+bool isLandscape() {
+  return xkcd_orientation::isLandscape(orientation());
+}
+int panelRotation() {
+  return ::config::MODEL == 1005
+             ? xkcd_orientation::panelRotation(orientation())
+             : 0;
+}
+int panelWidth() {
+  return ::config::MODEL == 1005
+             ? xkcd_orientation::panelWidth(orientation())
+             : ::config::PANEL_WIDTH;
+}
+int panelHeight() {
+  return ::config::MODEL == 1005
+             ? xkcd_orientation::panelHeight(orientation())
+             : ::config::PANEL_HEIGHT;
+}
 ::config::DateLocale dateLocale()    { return g_cache.dateLocale; }
 
 bool         debugShowStatusBadges() { return g_cache.debugShowStatusBadges; }

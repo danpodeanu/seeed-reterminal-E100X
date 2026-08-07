@@ -8,6 +8,7 @@
 
 #include "app_logger.h"
 #include "sd_card.h"
+#include "screenshot_rotation.h"
 
 // Screenshot BMP writer shared by the xkcd and weather viewers (photo does
 // not export screenshots). The palette matches the panel color mode
@@ -117,15 +118,34 @@ inline bool saveScreenshotBmp(EPaper& epaper, uint32_t width, uint32_t height,
 
   memset(row, 0, rowSize);
   // BMPs store rows bottom-up when height is positive. readPixelValue()
-  // returns the raw Gray4, Gray16, or E6 palette index from the composed
-  // panel sprite.
+  // returns the raw monochrome, Gray4, Gray16, or E6 palette index from the
+  // composed panel sprite.
+#if RETERMINAL_MODEL == 1005
+  // Pinned Seeed_GFX maps rotation-1 reads with native height instead of
+  // native width, which runs beyond its 1bpp buffer for portrait rows
+  // 480..799. Read the unchanged sprite through rotation 0 and apply the
+  // correct logical-to-native transform here.
+  const uint8_t screenshotRotation = epaper.getRotation();
+  epaper.setRotation(0);
+#endif
   for (int32_t y = static_cast<int32_t>(height) - 1; ok && y >= 0; --y) {
     for (uint32_t x = 0; x < width; ++x) {
+#if RETERMINAL_MODEL == 1005
+      const PixelCoordinate native = nativePixelCoordinate(
+          screenshotRotation, static_cast<int32_t>(width),
+          static_cast<int32_t>(height), static_cast<int32_t>(x), y);
+      row[x] =
+          static_cast<uint8_t>(epaper.readPixelValue(native.x, native.y));
+#else
       row[x] = static_cast<uint8_t>(epaper.readPixelValue(x, y));
+#endif
     }
     ok = file.write(row, rowSize) == rowSize;
     if ((y & 31) == 0) delay(1);
   }
+#if RETERMINAL_MODEL == 1005
+  epaper.setRotation(screenshotRotation);
+#endif
 
   file.flush();
   file.close();

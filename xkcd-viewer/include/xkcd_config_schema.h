@@ -24,6 +24,7 @@ constexpr const char* kKeyQuietEndMin      = "quiet_em";
 constexpr const char* kKeyNtpPrimary       = "ntp1";
 constexpr const char* kKeyNtpSecondary     = "ntp2";
 constexpr const char* kKeyMinScale         = "min_scale";
+constexpr const char* kKeyOrientation      = "orientation";
 constexpr const char* kKeyDateLocale       = "date_locale";
 constexpr const char* kKeyDebugBadges      = "dbg_badges";
 constexpr const char* kKeyForceComic       = "dbg_force";
