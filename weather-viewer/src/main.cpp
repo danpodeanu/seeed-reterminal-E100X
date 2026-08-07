@@ -289,8 +289,16 @@ static int smoothCenterYAdjust() {
 }
 
 #if RETERMINAL_MODEL == 1005
+enum class SolidTextAlign : uint8_t {
+  Left,
+  Center,
+  Right,
+};
+
 bool drawLoadedSmoothTextMonochrome(const String& text,
-                                    int centerX, int centerY) {
+                                    int anchorX, int centerY,
+                                    SolidTextAlign align =
+                                        SolidTextAlign::Center) {
   if (!smoothFontManager.smoothLoaded() || !epaper.fontLoaded ||
       !epaper.fs_font || !epaper.fontFile) {
     return false;
@@ -298,7 +306,13 @@ bool drawLoadedSmoothTextMonochrome(const String& text,
 
   constexpr uint8_t kSolidAlphaThreshold = 64;
   uint8_t row[256];
-  int cursorX = centerX - epaper.textWidth(text, 1) / 2;
+  int cursorX = anchorX;
+  const int textWidth = epaper.textWidth(text, 1);
+  if (align == SolidTextAlign::Center) {
+    cursorX -= textWidth / 2;
+  } else if (align == SolidTextAlign::Right) {
+    cursorX -= textWidth;
+  }
   const int cursorY = centerY - epaper.gFont.yAdvance / 2;
   uint16_t offset = 0;
   const uint16_t length = static_cast<uint16_t>(text.length());
@@ -1351,7 +1365,15 @@ void renderFooter(const WeatherData& weather) {
   const int leftPad = config::ui(12);
   const int providerRight = leftPad + epaper.textWidth(providerText);
   epaper.setTextDatum(ML_DATUM);
+#if RETERMINAL_MODEL == 1005
+  if (!drawLoadedSmoothTextMonochrome(
+          providerText, leftPad, labelY + footerYAdjust,
+          SolidTextAlign::Left)) {
+    epaper.drawString(providerText, leftPad, labelY + footerYAdjust, 1);
+  }
+#else
   epaper.drawString(providerText, leftPad, labelY + footerYAdjust, 1);
+#endif
 
   // Right: location name. Measure similarly to know where the middle
   // band starts.
@@ -1361,8 +1383,17 @@ void renderFooter(const WeatherData& weather) {
   const int locationLeft = panelWidth() - rightPad
                            - epaper.textWidth(locationText);
   epaper.setTextDatum(MR_DATUM);
+#if RETERMINAL_MODEL == 1005
+  if (!drawLoadedSmoothTextMonochrome(
+          locationText, panelWidth() - rightPad, labelY + footerYAdjust,
+          SolidTextAlign::Right)) {
+    epaper.drawString(locationText, panelWidth() - rightPad,
+                     labelY + footerYAdjust, 1);
+  }
+#else
   epaper.drawString(locationText, panelWidth() - rightPad,
                     labelY + footerYAdjust, 1);
+#endif
 
   // Centre: weather-themed proverb whose bucket matches the current
   // WMO code. Random per refresh via esp_random(); if no proverb in
@@ -1377,8 +1408,17 @@ void renderFooter(const WeatherData& weather) {
         weather.weatherCode, esp_random(), epaper, availPx);
     if (quote != nullptr) {
       epaper.setTextDatum(MC_DATUM);
+#if RETERMINAL_MODEL == 1005
+      if (!drawLoadedSmoothTextMonochrome(
+              String(quote), (availStart + availEnd) / 2,
+              labelY + footerYAdjust)) {
+        epaper.drawString(quote, (availStart + availEnd) / 2,
+                         labelY + footerYAdjust, 1);
+      }
+#else
       epaper.drawString(quote, (availStart + availEnd) / 2,
                         labelY + footerYAdjust, 1);
+#endif
     }
   }
 
