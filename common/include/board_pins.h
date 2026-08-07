@@ -63,6 +63,8 @@ constexpr int PIN_TOUCH_RESET = 41;
 constexpr uint32_t TOUCH_POWER_SETTLE_MS = 250;
 constexpr int PIN_POWER_HOLD = 45;
 constexpr int PIN_POWER_LOCK = 46;
+// Active high when a valid external power source is present.
+constexpr int PIN_EXTERNAL_POWER = 9;
 constexpr int PIN_BUTTON_0 = 4;
 constexpr int PIN_BUTTON_1 = 5;
 constexpr int PIN_BUTTON_2 = 6;
@@ -77,6 +79,7 @@ constexpr int PIN_TOUCH_RESET = -1;
 constexpr uint32_t TOUCH_POWER_SETTLE_MS = 0;
 constexpr int PIN_POWER_HOLD = -1;
 constexpr int PIN_POWER_LOCK = -1;
+constexpr int PIN_EXTERNAL_POWER = -1;
 constexpr int PIN_BUTTON_0 = 3;
 constexpr int PIN_BUTTON_1 = 4;
 constexpr int PIN_BUTTON_2 = 5;

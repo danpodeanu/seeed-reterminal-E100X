@@ -28,7 +28,8 @@ struct FuelGaugeReading {
 };
 
 // Read the BQ27220 fuel gauge used by E1005. Voltage and state of charge are
-// mandatory; average current is separate so callers can infer charging.
+// mandatory; average current is retained for diagnostics. E1005 external
+// power presence is read from its dedicated GPIO instead.
 FuelGaugeReading readBq27220();
 
 }  // namespace battery

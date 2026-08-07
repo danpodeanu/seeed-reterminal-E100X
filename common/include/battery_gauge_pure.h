@@ -26,11 +26,6 @@ constexpr int16_t littleEndianSignedWord(uint8_t low, uint8_t high) {
   return signedWord(littleEndianWord(low, high));
 }
 
-// BQ27220 current is positive while discharging and negative while charging.
-constexpr bool chargingFromAverageCurrent(int16_t currentMa) {
-  return currentMa < 0;
-}
-
 constexpr bool stateOfChargeValid(uint16_t percent) {
   return percent <= 100;
 }

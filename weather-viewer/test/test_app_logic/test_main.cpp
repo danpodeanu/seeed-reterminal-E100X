@@ -79,9 +79,6 @@ void test_battery_gauge_decodes_e1005_words_and_rejects_missing_adc() {
   TEST_ASSERT_EQUAL_HEX8(0x2C, BQ27220_STATE_OF_CHARGE_REGISTER);
   TEST_ASSERT_EQUAL_HEX16(0x1234, littleEndianWord(0x34, 0x12));
   TEST_ASSERT_EQUAL_INT16(-100, littleEndianSignedWord(0x9C, 0xFF));
-  TEST_ASSERT_TRUE(chargingFromAverageCurrent(-100));
-  TEST_ASSERT_FALSE(chargingFromAverageCurrent(0));
-  TEST_ASSERT_FALSE(chargingFromAverageCurrent(100));
   TEST_ASSERT_TRUE(stateOfChargeValid(100));
   TEST_ASSERT_FALSE(stateOfChargeValid(101));
 }
