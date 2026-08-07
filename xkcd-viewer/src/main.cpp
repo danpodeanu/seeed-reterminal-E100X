@@ -1858,16 +1858,26 @@ void setup() {
                static_cast<unsigned long>(cachedComicCount),
                cacheOnly ? "local only" : "live until cache reaches threshold");
   }
+  const bool compactConnectionStatus =
+      config::MODEL == 1005 && xkcd_config::runtime::isLandscape();
   String connectionDetail;
   if (sdReady) {
-    connectionDetail = String(cachedComicCount) + " comics cached";
+    connectionDetail = String(cachedComicCount) +
+                       (compactConnectionStatus ? " cached"
+                                                : " comics cached");
     if (ntpDue) {
-      connectionDetail += " - synchronizing clock";
+      connectionDetail += compactConnectionStatus
+                              ? " - syncing clock"
+                              : " - synchronizing clock";
     } else if (!cacheOnly) {
-      connectionDetail += " - building local cache";
+      connectionDetail += compactConnectionStatus
+                              ? " - caching comics"
+                              : " - building local cache";
     }
   } else {
-    connectionDetail = "No SD cache - downloading live";
+    connectionDetail = compactConnectionStatus
+                           ? "No cache - downloading"
+                           : "No SD cache - downloading live";
   }
 
   const bool showConnectionStatus = coldBoot && networkPlanned;
@@ -1877,7 +1887,10 @@ void setup() {
   // shows both its MAC (for identification on the network) and the
   // running build (for confirming an SD-driven update landed).
   const String macAndVersion =
-      String("MAC: ") + stationMac + "  Firmware: " + board::FIRMWARE_VERSION;
+      compactConnectionStatus
+          ? String("MAC ") + stationMac + "  FW " + board::FIRMWARE_VERSION
+          : String("MAC: ") + stationMac + "  Firmware: " +
+                board::FIRMWARE_VERSION;
 
   // Cold-boot "Connecting to Wi-Fi" splash. On gray panels this is pushed
   // before initGrayMode() for a faster monochrome refresh; six-color panels
