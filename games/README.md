@@ -14,7 +14,7 @@ it is produced by applying a random sequence of legal moves to a cleared board.
 
 Touch controls:
 
-- Tap **LIGHTS OUT** on the game-selection screen to play.
+- Tap the Lights Out icon on the game-selection screen to play.
 - Tap a board square to make a move.
 - Tap **NEW** for another puzzle or **RESET** to restore the current puzzle.
 - Tap **GAMES** to save the current puzzle and return to the selection screen.
@@ -29,7 +29,7 @@ you return from the selection screen or deep sleep.
 
 Touch controls:
 
-- Tap **2048** on the game-selection screen to play or resume.
+- Tap the 2048 icon on the game-selection screen to play or resume.
 - Swipe across the board to move all tiles.
 - Tap **NEW** to start over while retaining the best score.
 - Tap **GAMES** to save and return to the selection screen.
@@ -39,8 +39,9 @@ Front buttons:
 - On the selection screen, a short **OK** press does nothing.
 - While playing, a short **OK** press saves the game and returns to the
   selection screen from either game.
-- Hold **OK** for 1.2 seconds anywhere to save and enter deep sleep. Press
-  **OK** again to resume.
+- Hold **OK** for 1.2 seconds anywhere to save and enter deep sleep. The beep
+  confirms that the long press has registered, so the button can be released.
+  Press **OK** again to resume.
 - **UP** and **DOWN** are unused.
 
 The app beeps once at startup and once before sleeping. While the app is open,
@@ -50,7 +51,8 @@ press uses deep sleep for longer idle periods. Resume state is stored in RTC
 slow memory, so normal sleep/resume cycles do not write to flash or the SD
 card. The same saved deep sleep starts automatically after five minutes without
 touch or button input. Below 10% battery, the app saves its state, displays a
-recharge screen, and enters deep sleep unless USB-C power is connected.
+recharge screen, and enters deep sleep unless USB-C power is connected. The
+normal sleep screen includes a QR code for this repository.
 
 The SSD1677 path uses 40 MHz window transfers and reseeds both differential RAM
 planes after every refresh. This keeps normal moves near the panel's physical

@@ -23,6 +23,7 @@
 #include "low_battery.h"
 #include "peripheral_power.h"
 #include "power_latch.h"
+#include "repo_qr.h"
 #include "sd_card.h"
 #include "sd_ota.h"
 
@@ -74,8 +75,6 @@ constexpr Rect kBackButton = {24, 24, 104, 54};
 constexpr Rect kNewButton = {30, 688, 190, 66};
 constexpr Rect kResetButton = {260, 688, 190, 66};
 constexpr Rect k2048NewButton = {145, 688, 190, 66};
-constexpr E1005FastRefresh::Region kFullScreen = {0, 0, kScreenWidth,
-                                                   kScreenHeight};
 constexpr E1005FastRefresh::Region kBoardRegion = {30, 130, 420, 550};
 constexpr E1005FastRefresh::Region k2048BoardRegion = {30, 95, 420, 570};
 
@@ -408,6 +407,18 @@ void fillDarkGrayRoundRect(const Rect& rect, int radius) {
   }
 }
 
+void fillLightGrayRoundRect(const Rect& rect, int radius) {
+  epaper.fillRoundRect(rect.x, rect.y, rect.width, rect.height, radius,
+                      TFT_WHITE);
+  for (int y = rect.y; y < rect.y + rect.height; y += 2) {
+    for (int x = rect.x; x < rect.x + rect.width; x += 2) {
+      if (roundedRectContains(rect, radius, x, y)) {
+        epaper.drawPixel(x, y, TFT_BLACK);
+      }
+    }
+  }
+}
+
 void drawButton(const Rect& rect, const char* label) {
   fillDarkGrayRoundRect(rect, 8);
   epaper.setTextDatum(MC_DATUM);
@@ -453,19 +464,6 @@ void drawLightsOutMenuCard() {
     }
   }
 
-  const Rect title = {
-      kLightsOutMenuCard.x + 8,
-      kLightsOutMenuCard.y + kLightsOutMenuCard.height / 2 - 27,
-      kLightsOutMenuCard.width - 16,
-      54,
-  };
-  fillDarkGrayRoundRect(title, 8);
-  epaper.setTextColor(TFT_WHITE);
-  epaper.setTextDatum(MC_DATUM);
-  epaper.drawString(
-      "LIGHTS OUT",
-      kLightsOutMenuCard.x + kLightsOutMenuCard.width / 2,
-      kLightsOutMenuCard.y + kLightsOutMenuCard.height / 2, 4);
 }
 
 void draw2048Tile(int x, int y, int slotSize, uint32_t value) {
@@ -479,19 +477,25 @@ void draw2048Tile(int x, int y, int slotSize, uint32_t value) {
   }
 
   const bool solid = value >= 128;
-  const bool gray = !solid && (value == 4 || value == 16 || value == 64);
+  const bool lightGray = !solid && (value == 4 || value == 16 || value == 64);
   if (solid) {
     epaper.fillRoundRect(tile.x, tile.y, tile.width, tile.height, 8, TFT_BLACK);
-  } else if (gray) {
-    fillDarkGrayRoundRect(tile, 8);
+  } else if (lightGray) {
+    fillLightGrayRoundRect(tile, 8);
   } else {
     epaper.fillRoundRect(tile.x, tile.y, tile.width, tile.height, 8, TFT_WHITE);
     epaper.drawRoundRect(tile.x, tile.y, tile.width, tile.height, 8, TFT_BLACK);
   }
+  const bool darkNumber = value < 128;
   epaper.setTextDatum(MC_DATUM);
-  epaper.setTextColor((solid || gray) ? TFT_WHITE : TFT_BLACK);
-  epaper.drawString(String(value), x + slotSize / 2, y + slotSize / 2,
-                    value < 10000 ? 4 : 2);
+  epaper.setTextColor(darkNumber ? TFT_BLACK : TFT_WHITE);
+  const int font = value < 100 ? 6 : value < 10000 ? 4 : 2;
+  const int centerX = x + slotSize / 2;
+  const int centerY = y + slotSize / 2;
+  epaper.drawString(String(value), centerX, centerY, font);
+  if (darkNumber) {
+    epaper.drawString(String(value), centerX + 1, centerY, font);
+  }
 }
 
 void draw2048MenuCard() {
@@ -514,17 +518,6 @@ void draw2048MenuCard() {
     }
   }
 
-  const Rect title = {
-      k2048MenuCard.x + 8,
-      k2048MenuCard.y + k2048MenuCard.height / 2 - 27,
-      k2048MenuCard.width - 16,
-      54,
-  };
-  fillDarkGrayRoundRect(title, 8);
-  epaper.setTextColor(TFT_WHITE);
-  epaper.setTextDatum(MC_DATUM);
-  epaper.drawString("2048", k2048MenuCard.x + k2048MenuCard.width / 2,
-                    k2048MenuCard.y + k2048MenuCard.height / 2, 4);
 }
 
 void drawMenu() {
@@ -540,9 +533,30 @@ void drawStatus(const char* title, const char* detail) {
   drawCentered(detail, kScreenWidth / 2, 390, 4);
 }
 
+void drawRepoQr() {
+  constexpr int kScale = 2;
+  constexpr int kQuietModules = 4;
+  constexpr int kQrPixels =
+      (repo_qr::kModules + kQuietModules * 2) * kScale;
+  constexpr int kMargin = 12;
+  const int left = kScreenWidth - kQrPixels - kMargin;
+  const int top = kScreenHeight - kQrPixels - kMargin;
+  epaper.fillRect(left, top, kQrPixels, kQrPixels, TFT_WHITE);
+  for (int row = 0; row < repo_qr::kModules; ++row) {
+    for (int column = 0; column < repo_qr::kModules; ++column) {
+      const uint32_t mask = 1UL << (repo_qr::kModules - 1 - column);
+      if ((repo_qr::kRows[row] & mask) == 0) continue;
+      epaper.fillRect(left + (column + kQuietModules) * kScale,
+                      top + (row + kQuietModules) * kScale, kScale, kScale,
+                      TFT_BLACK);
+    }
+  }
+}
+
 void drawSleepSplash() {
   epaper.fillSprite(TFT_WHITE);
   drawGamesLogo(kScreenWidth / 2, 390, 280);
+  drawRepoQr();
 }
 
 void drawChargeSplash(int batteryPercent) {
@@ -667,6 +681,22 @@ bool refreshRegion(const E1005FastRefresh::Region& region,
   return true;
 }
 
+bool refreshScreen(const char* action) {
+  const uint32_t startedAtMs = millis();
+  epaper.sleep();
+  epaper.update();
+  const E1005FastRefresh::Result result = fastRefresh.begin();
+  if (result != E1005FastRefresh::Result::Ok) {
+    LOG.printf("[games] %s full refresh recovery failed: %s\n", action,
+               E1005FastRefresh::resultMessage(result));
+    touchReady = false;
+    return false;
+  }
+  LOG.printf("[games] %s full refresh=%lu ms\n", action,
+             static_cast<unsigned long>(millis() - startedAtMs));
+  return true;
+}
+
 void showMenu() {
   if (currentScreen == Screen::LightsOut && lightsOutSaved) {
     LOG.println("[games] auto-saving Lights Out");
@@ -676,21 +706,21 @@ void showMenu() {
   currentScreen = Screen::Menu;
   saveResumeState();
   drawMenu();
-  refreshRegion(kFullScreen, "menu");
+  refreshScreen("menu");
 }
 
 void showLightsOut() {
   if (!lightsOutSaved) startNewPuzzle();
   currentScreen = Screen::LightsOut;
   drawLightsOut();
-  refreshRegion(kFullScreen, "lights-out screen");
+  refreshScreen("lights-out screen");
 }
 
 void show2048() {
   if (!game2048Saved) startNew2048();
   currentScreen = Screen::Game2048;
   draw2048();
-  refreshRegion(kFullScreen, "2048 screen");
+  refreshScreen("2048 screen");
 }
 
 void updateLightsOut(const char* action) {
@@ -818,7 +848,7 @@ void pollTouch() {
 }
 
 void powerDownAndSleep(SleepScreen screen = SleepScreen::Resume,
-                       int batteryPercent = -1) {
+                       int batteryPercent = -1, bool beep = true) {
   disableLightSleepWake();
   while (digitalRead(board::PIN_BUTTON_0) == LOW) delay(10);
   const bool wakePinReady = hardware::configureWakePin(board::PIN_BUTTON_0);
@@ -841,7 +871,7 @@ void powerDownAndSleep(SleepScreen screen = SleepScreen::Resume,
   } else {
     drawSleepSplash();
   }
-  hardware::beep();
+  if (beep) hardware::beep();
   LOG.printf("[games] entering deep sleep (%s)\n",
              screen == SleepScreen::Charge ? "low battery" : "requested");
   epaper.update();
@@ -874,8 +904,9 @@ void handleButton(const ButtonEvent& event) {
     return;
   }
   if (event.type == ButtonPressType::Long) {
+    hardware::beep();
     while (digitalRead(button.pin) == LOW) delay(10);
-    powerDownAndSleep();
+    powerDownAndSleep(SleepScreen::Resume, -1, false);
   } else if (currentScreen != Screen::Menu) {
     showMenu();
   } else {
