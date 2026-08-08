@@ -103,8 +103,11 @@ Front buttons:
 - On the selection screen, a short **OK** press does nothing.
 - While playing, a short **OK** press saves the game and returns to the
   selection screen from any game.
-- Hold **OK** for 1.2 seconds anywhere to save and enter deep sleep. Press
-  **OK** again to resume.
+- Hold **OK** for at least 1.2 seconds, then release before 5 seconds, to save
+  and enter deep sleep. Press **OK** again to resume.
+- With the temporary `ENABLE_SCREENSHOT_GESTURE` build flag enabled, hold
+  **OK** continuously for 5 seconds to save the current screen as
+  `/screenshot.bmp` on the SD card. A beep confirms the capture gesture.
 - **UP** and **DOWN** are unused.
 
 The app beeps once at startup and when a game is opened from the selector.

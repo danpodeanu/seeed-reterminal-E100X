@@ -30,6 +30,9 @@
 #include "reversi_game.h"
 #include "sd_card.h"
 #include "sd_ota.h"
+#ifdef ENABLE_SCREENSHOT_GESTURE
+#include "screenshot_bmp.h"
+#endif
 #include "text_render.h"
 
 #if RETERMINAL_MODEL != 1005
@@ -74,6 +77,9 @@ constexpr int kMinesTouchMoveTolerance = 20;
 constexpr int kReversiAiDepth = 3;
 constexpr uint32_t kButtonDebounceMs = 30;
 constexpr uint32_t kButtonLongPressMs = 1200;
+#ifdef ENABLE_SCREENSHOT_GESTURE
+constexpr uint32_t kScreenshotHoldMs = 5000;
+#endif
 constexpr uint32_t kMinesFlagHoldMs = 650;
 constexpr uint32_t kBatteryCheckIntervalMs = 60000;
 constexpr uint32_t kInactivitySleepMs = 5UL * 60UL * 1000UL;
@@ -191,7 +197,24 @@ ButtonState buttons[] = {
 enum class ButtonPressType {
   Short,
   Long,
+#ifdef ENABLE_SCREENSHOT_GESTURE
+  Screenshot,
+#endif
 };
+
+const char* buttonPressTypeName(ButtonPressType type) {
+  switch (type) {
+    case ButtonPressType::Short:
+      return "short";
+    case ButtonPressType::Long:
+      return "long";
+#ifdef ENABLE_SCREENSHOT_GESTURE
+    case ButtonPressType::Screenshot:
+      return "screenshot";
+#endif
+  }
+  return "unknown";
+}
 
 struct ButtonEvent {
   ButtonState* button;
@@ -218,6 +241,9 @@ bool touchReady = false;
 bool touchActive = false;
 bool touchActionHandled = false;
 bool lightSleepReady = false;
+#ifdef ENABLE_SCREENSHOT_GESTURE
+bool sdReady = false;
+#endif
 bool lightsOutSaved = false;
 bool game2048Saved = false;
 bool pipeConnectSaved = false;
@@ -255,6 +281,20 @@ bool pollButtonEvent(ButtonEvent& event) {
     }
     if (level == button.stableLevel ||
         now - button.changedAtMs < kButtonDebounceMs) {
+#ifdef ENABLE_SCREENSHOT_GESTURE
+      const uint32_t holdThreshold =
+          button.pin == board::PIN_BUTTON_0 ? kScreenshotHoldMs
+                                            : kButtonLongPressMs;
+      if (level == LOW && button.stableLevel == LOW &&
+          !button.longPressReported &&
+          now - button.pressedAtMs >= holdThreshold) {
+        button.longPressReported = true;
+        event = {&button, button.pin == board::PIN_BUTTON_0
+                              ? ButtonPressType::Screenshot
+                              : ButtonPressType::Long};
+        return true;
+      }
+#else
       if (level == LOW && button.stableLevel == LOW &&
          !button.longPressReported &&
          now - button.pressedAtMs >= kButtonLongPressMs) {
@@ -262,6 +302,7 @@ bool pollButtonEvent(ButtonEvent& event) {
         event = {&button, ButtonPressType::Long};
         return true;
       }
+#endif
       continue;
     }
     button.stableLevel = level;
@@ -269,7 +310,15 @@ bool pollButtonEvent(ButtonEvent& event) {
       button.pressedAtMs = now;
       button.longPressReported = false;
     } else if (!button.longPressReported) {
+#ifdef ENABLE_SCREENSHOT_GESTURE
+      const bool longPress =
+          button.pin == board::PIN_BUTTON_0 &&
+          now - button.pressedAtMs >= kButtonLongPressMs;
+      event = {&button, longPress ? ButtonPressType::Long
+                                  : ButtonPressType::Short};
+#else
       event = {&button, ButtonPressType::Short};
+#endif
       return true;
     }
   }
@@ -1841,12 +1890,24 @@ void handleButton(const ButtonEvent& event) {
   ButtonState& button = *event.button;
   recordActivity();
   LOG.printf("[games] %s %s press\n", button.name,
-             event.type == ButtonPressType::Long ? "long" : "short");
+             buttonPressTypeName(event.type));
 
   if (button.pin != board::PIN_BUTTON_0) {
     LOG.printf("[games] ignoring %s button\n", button.name);
     return;
   }
+#ifdef ENABLE_SCREENSHOT_GESTURE
+  if (event.type == ButtonPressType::Screenshot) {
+    hardware::beep();
+    if (!sdReady) {
+      LOG.println("[screenshot] request ignored: SD card is unavailable");
+    } else if (!screenshot::saveScreenshotBmp(
+                   epaper, kScreenWidth, kScreenHeight)) {
+      LOG.println("[screenshot] capture failed");
+    }
+    return;
+  }
+#endif
   if (event.type == ButtonPressType::Long) {
     while (digitalRead(button.pin) == LOW) delay(10);
     powerDownAndSleep();
@@ -1928,7 +1989,11 @@ void setup() {
 
   epaper_setup::begin(epaper);
   checkBatteryAndSleepIfNeeded();
+#ifdef ENABLE_SCREENSHOT_GESTURE
+  sdReady = sd_card::mount(epaper.getSPIinstance(), "/games");
+#else
   const bool sdReady = sd_card::mount(epaper.getSPIinstance(), "/games");
+#endif
   if (sdReady && sd_ota::hasUpdate()) {
     drawStatus("UPDATING FIRMWARE", "DO NOT POWER OFF");
     epaper.update();
