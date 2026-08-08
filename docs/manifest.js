@@ -38,6 +38,10 @@ function otaFirmwareUrl(app, board) {
   return `${FIRMWARE_BASE}/${otaAssetName(app, board)}`;
 }
 
+function appSupportedOnBoard(app, board) {
+  return app !== "games" || board === E1005_BOARD;
+}
+
 function bootAssetUrl(stem, board) {
   const suffix = board === E1005_BOARD ? `-${board}` : "";
   return `${FIRMWARE_BASE}/${stem}${suffix}.bin`;
@@ -111,6 +115,11 @@ async function firmwarePresent(url) {
 async function refresh() {
   const app = appSel.value;
   const board = boardSel.value;
+  installer.hidden = true;
+  if (!appSupportedOnBoard(app, board)) {
+    setStatus("Games is available only for reTerminal E1005.", true);
+    return;
+  }
   const otaUrl = otaFirmwareUrl(app, board);
   const requiredUrls = [
     otaUrl,
@@ -118,7 +127,6 @@ async function refresh() {
     bootAssetUrl("partitions", board),
     bootAssetUrl("boot_app0", board),
   ];
-  installer.hidden = true;
   setStatus("Checking firmware…");
   const available = await Promise.all(requiredUrls.map(firmwarePresent));
   if (available.some((present) => !present)) {
@@ -138,7 +146,7 @@ async function refresh() {
 }
 
 function updateAppAvailability() {
-  gamesOption.disabled = boardSel.value !== E1005_BOARD;
+  gamesOption.disabled = !appSupportedOnBoard("games", boardSel.value);
   if (gamesOption.disabled && appSel.value === "games") {
     appSel.value = "weather-viewer";
   }

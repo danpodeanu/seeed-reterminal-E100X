@@ -4,6 +4,10 @@ Touch-friendly, silent meeting games for the Seeed reTerminal E1005
 ("Seeed Sticky"). The app opens on a game-selection screen so additional games
 can be added without installing separate firmware.
 
+| Six-game selector | Mini Minesweeper |
+| --- | --- |
+| ![Games selector showing six games on a reTerminal E1005](assets/e1005-games-menu.png) | ![Mini Minesweeper running on a reTerminal E1005](assets/e1005-minesweeper.png) |
+
 ## Included games
 
 ### Lights Out
