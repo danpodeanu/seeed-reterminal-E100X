@@ -8,6 +8,15 @@ can be added without installing separate firmware.
 | --- | --- |
 | ![Games selector showing six games on a reTerminal E1005](assets/e1005-games-menu.png) | ![Mini Minesweeper running on a reTerminal E1005](assets/e1005-minesweeper.png) |
 
+Included games:
+
+- Lights Out
+- 2048
+- Pipe Connect
+- Mini Minesweeper
+- Nonogram / Picross
+- Reversi / Othello
+
 ## Included games
 
 ### Lights Out

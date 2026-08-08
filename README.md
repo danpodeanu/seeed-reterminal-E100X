@@ -56,6 +56,15 @@ This frame was captured directly from a reTerminal E1001 running the
 These frames were captured directly from a reTerminal E1005 running
 [Games](games/).
 
+Included games:
+
+- Lights Out
+- 2048
+- Pipe Connect
+- Mini Minesweeper
+- Nonogram / Picross
+- Reversi / Othello
+
 ## Future ideas
 
 Possible additions include:
