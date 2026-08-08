@@ -1143,12 +1143,16 @@ void updateMinesweeperCell(int row, int column, const char* action) {
 
 void handleMenuTouch(const Gt911Touch::Point& point) {
   if (kLightsOutMenuCard.contains(point.x, point.y)) {
+    hardware::beep();
     showLightsOut();
   } else if (k2048MenuCard.contains(point.x, point.y)) {
+    hardware::beep();
     show2048();
   } else if (kPipeConnectMenuCard.contains(point.x, point.y)) {
+    hardware::beep();
     showPipeConnect();
   } else if (kMinesweeperMenuCard.contains(point.x, point.y)) {
+    hardware::beep();
     showMinesweeper();
   }
 }
