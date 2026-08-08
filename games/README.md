@@ -86,13 +86,12 @@ Front buttons:
 - On the selection screen, a short **OK** press does nothing.
 - While playing, a short **OK** press saves the game and returns to the
   selection screen from any game.
-- Hold **OK** for 1.2 seconds anywhere to save and enter deep sleep. The beep
-  confirms that the long press has registered, so the button can be released.
-  Press **OK** again to resume.
+- Hold **OK** for 1.2 seconds anywhere to save and enter deep sleep. Press
+  **OK** again to resume.
 - **UP** and **DOWN** are unused.
 
-The app beeps once at startup, when a game is opened from the selector, and
-before sleeping. While the app is open,
+The app beeps once at startup and when a game is opened from the selector.
+While the app is open,
 the ESP32-S3 enters light sleep between touch and button events, then wakes
 immediately for input and logs each light-sleep entry and exit. A long **OK**
 press uses deep sleep for longer idle periods. Resume state is stored in RTC

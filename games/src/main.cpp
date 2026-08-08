@@ -59,7 +59,7 @@ constexpr int kMinesGridTop = 130;
 constexpr int kMinesCellSize = 70;
 constexpr int kMinesGridSize =
     kMinesCellSize * MiniMinesweeperGame::kSize;
-constexpr int kNonogramGridLeft = 140;
+constexpr int kNonogramGridLeft = 125;
 constexpr int kNonogramGridTop = 190;
 constexpr int kNonogramCellSize = 64;
 constexpr int kNonogramGridSize = kNonogramCellSize * NonogramGame::kSize;
@@ -502,39 +502,12 @@ void drawGamesLogo(int centerX, int centerY, int width) {
                     centerY - buttonRadius, buttonRadius, TFT_WHITE);
 }
 
-bool roundedRectContains(const Rect& rect, int radius, int x, int y) {
-  const int left = rect.x;
-  const int right = rect.x + rect.width - 1;
-  const int top = rect.y;
-  const int bottom = rect.y + rect.height - 1;
-  if (x >= left + radius && x <= right - radius) return true;
-  if (y >= top + radius && y <= bottom - radius) return true;
-
-  const int centerX = x < left + radius ? left + radius : right - radius;
-  const int centerY = y < top + radius ? top + radius : bottom - radius;
-  const int dx = x - centerX;
-  const int dy = y - centerY;
-  return dx * dx + dy * dy <= radius * radius;
-}
-
-void fillDarkGrayRoundRect(const Rect& rect, int radius) {
-  epaper.fillRoundRect(rect.x, rect.y, rect.width, rect.height, radius,
-                      TFT_BLACK);
-  for (int y = rect.y; y < rect.y + rect.height; y += 2) {
-    for (int x = rect.x; x < rect.x + rect.width; x += 2) {
-      if (roundedRectContains(rect, radius, x, y)) {
-        epaper.drawPixel(x, y, TFT_WHITE);
-      }
-    }
-  }
-}
-
 void drawButton(const Rect& rect, const char* label) {
-  fillDarkGrayRoundRect(rect, 8);
+  epaper.fillRoundRect(rect.x, rect.y, rect.width, rect.height, 8, TFT_BLACK);
   epaper.setTextDatum(MC_DATUM);
-  epaper.setTextColor(TFT_WHITE);
+  epaper.setTextColor(TFT_WHITE, TFT_BLACK, true);
   epaper.drawString(label, rect.x + rect.width / 2,
-                    rect.y + rect.height / 2, 4);
+                    rect.y + rect.height / 2 + 3, 4);
 }
 
 void drawLightsOutCell(int x, int y, bool on) {
@@ -849,7 +822,8 @@ void drawStatusBar() {
 }
 
 void drawBackIndicator() {
-  fillDarkGrayRoundRect(kBackButton, 8);
+  epaper.fillRoundRect(kBackButton.x, kBackButton.y, kBackButton.width,
+                       kBackButton.height, 8, TFT_BLACK);
   const int centerY = kBackButton.y + kBackButton.height / 2;
   const int tipX = kBackButton.x + 9;
   const int headBaseX = tipX + 13;
@@ -1578,7 +1552,7 @@ void pollTouch() {
 }
 
 void powerDownAndSleep(SleepScreen screen = SleepScreen::Resume,
-                       int batteryPercent = -1, bool beep = true) {
+                       int batteryPercent = -1) {
   disableLightSleepWake();
   while (digitalRead(board::PIN_BUTTON_0) == LOW) delay(10);
   const bool wakePinReady = hardware::configureWakePin(board::PIN_BUTTON_0);
@@ -1601,7 +1575,6 @@ void powerDownAndSleep(SleepScreen screen = SleepScreen::Resume,
   } else {
     drawSleepSplash();
   }
-  if (beep) hardware::beep();
   LOG.printf("[games] entering deep sleep (%s)\n",
              screen == SleepScreen::Charge ? "low battery" : "requested");
   epaper.update();
@@ -1634,9 +1607,8 @@ void handleButton(const ButtonEvent& event) {
     return;
   }
   if (event.type == ButtonPressType::Long) {
-    hardware::beep();
     while (digitalRead(button.pin) == LOW) delay(10);
-    powerDownAndSleep(SleepScreen::Resume, -1, false);
+    powerDownAndSleep();
   } else if (currentScreen != Screen::Menu) {
     showMenu();
   } else {
