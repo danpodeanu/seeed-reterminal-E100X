@@ -27,6 +27,7 @@
 #include "pipe_connect_game.h"
 #include "power_latch.h"
 #include "repo_qr.h"
+#include "reversi_game.h"
 #include "sd_card.h"
 #include "sd_ota.h"
 #include "text_render.h"
@@ -63,6 +64,10 @@ constexpr int kNonogramGridLeft = 125;
 constexpr int kNonogramGridTop = 190;
 constexpr int kNonogramCellSize = 64;
 constexpr int kNonogramGridSize = kNonogramCellSize * NonogramGame::kSize;
+constexpr int kReversiGridLeft = 32;
+constexpr int kReversiGridTop = 150;
+constexpr int kReversiCellSize = 52;
+constexpr int kReversiGridSize = kReversiCellSize * ReversiGame::kSize;
 constexpr int kStatusDividerY = 48;
 constexpr int kSwipeThreshold = 45;
 constexpr int kMinesTouchMoveTolerance = 20;
@@ -73,12 +78,13 @@ constexpr uint32_t kBatteryCheckIntervalMs = 60000;
 constexpr uint32_t kInactivitySleepMs = 5UL * 60UL * 1000UL;
 constexpr int kLowBatteryThresholdPct = 10;
 constexpr uint32_t kPersistedStateMagic = 0x47414D45;
-constexpr uint16_t kPersistedStateVersion = 6;
+constexpr uint16_t kPersistedStateVersion = 7;
 constexpr uint8_t kLightsOutSavedFlag = 1U << 0;
 constexpr uint8_t k2048SavedFlag = 1U << 1;
 constexpr uint8_t kPipeConnectSavedFlag = 1U << 2;
 constexpr uint8_t kMinesweeperSavedFlag = 1U << 3;
 constexpr uint8_t kNonogramSavedFlag = 1U << 4;
+constexpr uint8_t kReversiSavedFlag = 1U << 5;
 
 constexpr uint32_t makeNonogramSolution(uint8_t row0, uint8_t row1,
                                         uint8_t row2, uint8_t row3,
@@ -119,6 +125,7 @@ constexpr Rect k2048MenuCard = {250, 112, 190, 190};
 constexpr Rect kPipeConnectMenuCard = {40, 320, 190, 190};
 constexpr Rect kMinesweeperMenuCard = {250, 320, 190, 190};
 constexpr Rect kNonogramMenuCard = {40, 528, 190, 190};
+constexpr Rect kReversiMenuCard = {250, 528, 190, 190};
 constexpr Rect kBackButton = {8, 6, 48, 36};
 constexpr Rect kNewButton = {30, 688, 190, 66};
 constexpr Rect kResetButton = {260, 688, 190, 66};
@@ -129,6 +136,7 @@ constexpr E1005FastRefresh::Region k2048BoardRegion = {30, 112, 420, 553};
 constexpr E1005FastRefresh::Region kPipeBoardRegion = {25, 112, 430, 553};
 constexpr E1005FastRefresh::Region kMinesBoardRegion = {25, 112, 430, 553};
 constexpr E1005FastRefresh::Region kNonogramBoardRegion = {20, 64, 440, 584};
+constexpr E1005FastRefresh::Region kReversiBoardRegion = {25, 104, 430, 560};
 
 enum class Screen {
   Menu,
@@ -137,6 +145,7 @@ enum class Screen {
   PipeConnect,
   Minesweeper,
   Nonogram,
+  Reversi,
 };
 
 struct PersistedState {
@@ -149,6 +158,7 @@ struct PersistedState {
   PipeConnectGame::Snapshot pipeConnect;
   MiniMinesweeperGame::Snapshot minesweeper;
   NonogramGame::Snapshot nonogram;
+  ReversiGame::Snapshot reversi;
   uint32_t checksum;
 };
 
@@ -193,6 +203,7 @@ Game2048 game2048;
 PipeConnectGame pipeConnect;
 MiniMinesweeperGame minesweeper;
 NonogramGame nonogram;
+ReversiGame reversi;
 Screen currentScreen = Screen::Menu;
 bool touchReady = false;
 bool touchActive = false;
@@ -203,6 +214,7 @@ bool game2048Saved = false;
 bool pipeConnectSaved = false;
 bool minesweeperSaved = false;
 bool nonogramSaved = false;
+bool reversiSaved = false;
 bool batteryStatusSampled = false;
 bool externalPowerPresent = false;
 int batteryPercent = -1;
@@ -303,6 +315,10 @@ void saveResumeState() {
     state.flags |= kNonogramSavedFlag;
     state.nonogram = nonogram.snapshot();
   }
+  if (reversiSaved) {
+    state.flags |= kReversiSavedFlag;
+    state.reversi = reversi.snapshot();
+  }
   state.checksum = stateChecksum(state);
   persistedState = state;
 }
@@ -314,10 +330,10 @@ bool restoreResumeState() {
   if (state.magic != kPersistedStateMagic ||
       state.version != kPersistedStateVersion ||
       state.checksum != stateChecksum(state) ||
-      state.screen > static_cast<uint8_t>(Screen::Nonogram) ||
+      state.screen > static_cast<uint8_t>(Screen::Reversi) ||
       (state.flags & ~(kLightsOutSavedFlag | k2048SavedFlag |
                        kPipeConnectSavedFlag | kMinesweeperSavedFlag |
-                       kNonogramSavedFlag)) != 0) {
+                       kNonogramSavedFlag | kReversiSavedFlag)) != 0) {
     LOG.println("[games] saved resume state is invalid");
     return false;
   }
@@ -370,11 +386,21 @@ bool restoreResumeState() {
     LOG.println("[games] saved screen has no Nonogram game");
     return false;
   }
+  const bool hasReversiSave = (state.flags & kReversiSavedFlag) != 0;
+  if (hasReversiSave && !reversi.restore(state.reversi)) {
+    LOG.println("[games] saved Reversi state is invalid");
+    return false;
+  }
+  if (savedScreen == Screen::Reversi && !hasReversiSave) {
+    LOG.println("[games] saved screen has no Reversi game");
+    return false;
+  }
   lightsOutSaved = hasLightsOutSave;
   game2048Saved = has2048Save;
   pipeConnectSaved = hasPipeConnectSave;
   minesweeperSaved = hasMinesweeperSave;
   nonogramSaved = hasNonogramSave;
+  reversiSaved = hasReversiSave;
   currentScreen = savedScreen;
   return true;
 }
@@ -790,6 +816,51 @@ void drawNonogramMenuCard() {
   }
 }
 
+void drawReversiMarkCell(int x, int y, int size, ReversiGame::Disc disc,
+                         bool legalMove = false) {
+  epaper.fillRect(x, y, size, size, TFT_WHITE);
+  epaper.drawRect(x, y, size, size, TFT_BLACK);
+  const int centerX = x + size / 2;
+  const int centerY = y + size / 2;
+  const int radius = size / 2 - std::max(4, size / 10);
+  if (disc == ReversiGame::Disc::Black) {
+    epaper.fillCircle(centerX, centerY, radius, TFT_BLACK);
+  } else if (disc == ReversiGame::Disc::White) {
+    epaper.fillCircle(centerX, centerY, radius, TFT_BLACK);
+    epaper.fillCircle(centerX, centerY, radius - std::max(3, size / 12),
+                      TFT_WHITE);
+  } else if (legalMove) {
+    epaper.fillCircle(centerX, centerY, std::max(3, size / 14), TFT_BLACK);
+  }
+}
+
+void drawReversiMenuCard() {
+  epaper.fillRoundRect(kReversiMenuCard.x, kReversiMenuCard.y,
+                       kReversiMenuCard.width, kReversiMenuCard.height, 14,
+                       TFT_WHITE);
+  epaper.drawRoundRect(kReversiMenuCard.x, kReversiMenuCard.y,
+                       kReversiMenuCard.width, kReversiMenuCard.height, 14,
+                       TFT_BLACK);
+
+  constexpr int kPreviewCellSize = 36;
+  const int gridLeft = kReversiMenuCard.x + 23;
+  const int gridTop = kReversiMenuCard.y + 23;
+  for (int row = 0; row < 4; ++row) {
+    for (int column = 0; column < 4; ++column) {
+      ReversiGame::Disc disc = ReversiGame::Disc::Empty;
+      if ((row == 1 && column == 1) || (row == 2 && column == 2)) {
+        disc = ReversiGame::Disc::White;
+      } else if ((row == 1 && column == 2) ||
+                 (row == 2 && column == 1)) {
+        disc = ReversiGame::Disc::Black;
+      }
+      drawReversiMarkCell(gridLeft + column * kPreviewCellSize,
+                          gridTop + row * kPreviewCellSize, kPreviewCellSize,
+                          disc);
+    }
+  }
+}
+
 void drawBatteryStatus() {
   constexpr int kCenterY = 24;
   constexpr int kEdgeInset = 6;
@@ -848,6 +919,7 @@ void drawMenu() {
   drawPipeConnectMenuCard();
   drawMinesweeperMenuCard();
   drawNonogramMenuCard();
+  drawReversiMenuCard();
   drawStatusBar();
 }
 
@@ -1102,6 +1174,51 @@ void drawNonogram() {
   drawGameStatusBar("NONOGRAM");
 }
 
+void drawReversiCell(int row, int column) {
+  drawReversiMarkCell(kReversiGridLeft + column * kReversiCellSize,
+                      kReversiGridTop + row * kReversiCellSize,
+                      kReversiCellSize, reversi.at(row, column),
+                      reversi.isLegalMove(row, column));
+}
+
+void drawReversiBoard(const char* status = nullptr) {
+  epaper.fillRect(kReversiBoardRegion.x, kReversiBoardRegion.y,
+                  kReversiBoardRegion.width, kReversiBoardRegion.height,
+                  TFT_WHITE);
+  drawCentered("BLACK " + String(reversi.score(ReversiGame::Disc::Black)) +
+                   "    WHITE " +
+                   String(reversi.score(ReversiGame::Disc::White)),
+               kScreenWidth / 2, 120, 4);
+  for (int row = 0; row < ReversiGame::kSize; ++row) {
+    for (int column = 0; column < ReversiGame::kSize; ++column) {
+      drawReversiCell(row, column);
+    }
+  }
+
+  if (reversi.gameOver()) {
+    const ReversiGame::Disc winner = reversi.winner();
+    const String result =
+        winner == ReversiGame::Disc::Black
+            ? "BLACK WINS"
+            : winner == ReversiGame::Disc::White ? "WHITE WINS" : "DRAW";
+    drawCentered(result, kScreenWidth / 2, 610, 4);
+  } else if (status != nullptr) {
+    drawCentered(status, kScreenWidth / 2, 610, 4);
+  } else {
+    drawCentered(reversi.currentPlayer() == ReversiGame::Disc::Black
+                     ? "BLACK TO MOVE"
+                     : "WHITE TO MOVE",
+                 kScreenWidth / 2, 610, 4);
+  }
+}
+
+void drawReversi() {
+  epaper.fillSprite(TFT_WHITE);
+  drawReversiBoard();
+  drawButton(kCenteredNewButton, "NEW");
+  drawGameStatusBar("REVERSI");
+}
+
 uint32_t randomScramble() {
   uint32_t mask = esp_random() & LightsOutGame::kCellMask;
   int pressed = 0;
@@ -1140,6 +1257,11 @@ void startNewNonogram() {
   }
   nonogram.start(kNonogramPuzzles[puzzleIndex]);
   nonogramSaved = true;
+}
+
+void startNewReversi() {
+  reversi.start();
+  reversiSaved = true;
 }
 
 bool recoverFullRefresh() {
@@ -1200,6 +1322,8 @@ void showMenu() {
     LOG.println("[games] auto-saving Minesweeper");
   } else if (currentScreen == Screen::Nonogram && nonogramSaved) {
     LOG.println("[games] auto-saving Nonogram");
+  } else if (currentScreen == Screen::Reversi && reversiSaved) {
+    LOG.println("[games] auto-saving Reversi");
   }
   currentScreen = Screen::Menu;
   saveResumeState();
@@ -1240,6 +1364,13 @@ void showNonogram() {
   currentScreen = Screen::Nonogram;
   drawNonogram();
   refreshScreen("Nonogram screen");
+}
+
+void showReversi() {
+  if (!reversiSaved) startNewReversi();
+  currentScreen = Screen::Reversi;
+  drawReversi();
+  refreshScreen("Reversi screen");
 }
 
 void updateLightsOut(const char* action) {
@@ -1302,6 +1433,11 @@ void updateNonogramCell(int row, int column, const char* action) {
   refreshRegion(cellRegion, action);
 }
 
+void updateReversi(const char* action, const char* status = nullptr) {
+  drawReversiBoard(status);
+  refreshRegion(kReversiBoardRegion, action);
+}
+
 void handleMenuTouch(const Gt911Touch::Point& point) {
   if (kLightsOutMenuCard.contains(point.x, point.y)) {
     hardware::beep();
@@ -1318,6 +1454,9 @@ void handleMenuTouch(const Gt911Touch::Point& point) {
   } else if (kNonogramMenuCard.contains(point.x, point.y)) {
     hardware::beep();
     showNonogram();
+  } else if (kReversiMenuCard.contains(point.x, point.y)) {
+    hardware::beep();
+    showReversi();
   }
 }
 
@@ -1411,6 +1550,40 @@ void handleNonogramTouch(const Gt911Touch::Point& point) {
     } else {
       updateNonogramCell(row, column, "Nonogram mark");
     }
+  }
+}
+
+void handleReversiTouch(const Gt911Touch::Point& point) {
+  if (kBackButton.contains(point.x, point.y)) {
+    showMenu();
+    return;
+  }
+  if (kCenteredNewButton.contains(point.x, point.y)) {
+    startNewReversi();
+    updateReversi("new Reversi game");
+    return;
+  }
+  if (point.x < kReversiGridLeft ||
+      point.x >= kReversiGridLeft + kReversiGridSize ||
+      point.y < kReversiGridTop ||
+      point.y >= kReversiGridTop + kReversiGridSize) {
+    return;
+  }
+
+  const int column = (point.x - kReversiGridLeft) / kReversiCellSize;
+  const int row = (point.y - kReversiGridTop) / kReversiCellSize;
+  const ReversiGame::MoveResult result = reversi.play(row, column);
+  if (result != ReversiGame::MoveResult::Illegal) {
+    const bool passed = result == ReversiGame::MoveResult::OpponentPassed;
+    const char* passStatus =
+        passed ? reversi.currentPlayer() == ReversiGame::Disc::Black
+                     ? "WHITE PASSES - BLACK AGAIN"
+                     : "BLACK PASSES - WHITE AGAIN"
+               : nullptr;
+    updateReversi(result == ReversiGame::MoveResult::GameOver
+                       ? "Reversi game over"
+                       : passed ? "Reversi pass" : "Reversi move",
+                   passStatus);
   }
 }
 
@@ -1545,6 +1718,9 @@ void pollTouch() {
     touchActionHandled = handleMinesweeperTouchStart(point);
   } else if (currentScreen == Screen::Nonogram) {
     handleNonogramTouch(point);
+    touchActionHandled = true;
+  } else if (currentScreen == Screen::Reversi) {
+    handleReversiTouch(point);
     touchActionHandled = true;
   } else if (currentScreen == Screen::Game2048) {
     touchActionHandled = handle2048TouchStart(point);
@@ -1711,6 +1887,8 @@ void setup() {
     drawMinesweeper();
   } else if (resumed && currentScreen == Screen::Nonogram) {
     drawNonogram();
+  } else if (resumed && currentScreen == Screen::Reversi) {
+    drawReversi();
   } else {
     currentScreen = Screen::Menu;
     drawMenu();
@@ -1726,7 +1904,9 @@ void setup() {
                             ? "saved Minesweeper"
                             : currentScreen == Screen::Nonogram
                                   ? "saved Nonogram"
-                                  : "menu";
+                                  : currentScreen == Screen::Reversi
+                                        ? "saved Reversi"
+                                        : "menu";
   LOG.printf("[games] refreshing %s\n", screenName);
   epaper.update();
   sd_ota::confirmRunningImage();

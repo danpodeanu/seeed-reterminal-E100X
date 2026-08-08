@@ -5,6 +5,7 @@
 #include "mini_minesweeper_game.h"
 #include "nonogram_game.h"
 #include "pipe_connect_game.h"
+#include "reversi_game.h"
 
 void setUp() {}
 void tearDown() {}
@@ -595,6 +596,110 @@ void test_nonogram_invalid_snapshot_is_rejected() {
   TEST_ASSERT_FALSE(game.restore(invalid));
 }
 
+void test_reversi_starts_with_four_discs_and_four_legal_moves() {
+  ReversiGame game;
+  game.start();
+
+  TEST_ASSERT_EQUAL(ReversiGame::Disc::White, game.at(3, 3));
+  TEST_ASSERT_EQUAL(ReversiGame::Disc::Black, game.at(3, 4));
+  TEST_ASSERT_EQUAL_INT(2, game.score(ReversiGame::Disc::Black));
+  TEST_ASSERT_EQUAL_INT(2, game.score(ReversiGame::Disc::White));
+  TEST_ASSERT_EQUAL_UINT64((1ULL << (2 * 8 + 3)) |
+                              (1ULL << (3 * 8 + 2)) |
+                              (1ULL << (4 * 8 + 5)) |
+                              (1ULL << (5 * 8 + 4)),
+                          game.legalMoves());
+}
+
+void test_reversi_move_places_disc_and_flips_opponent() {
+  ReversiGame game;
+  game.start();
+
+  TEST_ASSERT_EQUAL(ReversiGame::MoveResult::Moved, game.play(2, 3));
+  TEST_ASSERT_EQUAL(ReversiGame::Disc::Black, game.at(2, 3));
+  TEST_ASSERT_EQUAL(ReversiGame::Disc::Black, game.at(3, 3));
+  TEST_ASSERT_EQUAL_INT(4, game.score(ReversiGame::Disc::Black));
+  TEST_ASSERT_EQUAL_INT(1, game.score(ReversiGame::Disc::White));
+  TEST_ASSERT_EQUAL(ReversiGame::Disc::White, game.currentPlayer());
+}
+
+void test_reversi_move_flips_in_all_eight_directions() {
+  constexpr int targetRow = 3;
+  constexpr int targetColumn = 3;
+  uint64_t black = 0;
+  uint64_t white = 0;
+  for (int rowDirection = -1; rowDirection <= 1; ++rowDirection) {
+    for (int columnDirection = -1; columnDirection <= 1;
+         ++columnDirection) {
+      if (rowDirection == 0 && columnDirection == 0) continue;
+      white |= 1ULL << ((targetRow + rowDirection) * 8 +
+                       targetColumn + columnDirection);
+      black |= 1ULL << ((targetRow + rowDirection * 2) * 8 +
+                       targetColumn + columnDirection * 2);
+    }
+  }
+  ReversiGame game;
+  TEST_ASSERT_TRUE(game.restore(
+      {black, white, static_cast<uint8_t>(ReversiGame::Disc::Black)}));
+
+  TEST_ASSERT_EQUAL(ReversiGame::MoveResult::GameOver,
+                    game.play(targetRow, targetColumn));
+  TEST_ASSERT_EQUAL_INT(17, game.score(ReversiGame::Disc::Black));
+  TEST_ASSERT_EQUAL_INT(0, game.score(ReversiGame::Disc::White));
+}
+
+void test_reversi_rejects_non_capturing_and_occupied_moves() {
+  ReversiGame game;
+  game.start();
+  const ReversiGame::Snapshot initial = game.snapshot();
+
+  TEST_ASSERT_EQUAL(ReversiGame::MoveResult::Illegal, game.play(0, 0));
+  TEST_ASSERT_EQUAL(ReversiGame::MoveResult::Illegal, game.play(3, 3));
+  TEST_ASSERT_EQUAL_UINT64(initial.black, game.snapshot().black);
+  TEST_ASSERT_EQUAL_UINT64(initial.white, game.snapshot().white);
+}
+
+void test_reversi_full_board_is_game_over() {
+  ReversiGame game;
+  TEST_ASSERT_TRUE(game.restore(
+      {UINT64_MAX, 0, static_cast<uint8_t>(ReversiGame::Disc::Black)}));
+
+  TEST_ASSERT_TRUE(game.gameOver());
+  TEST_ASSERT_EQUAL(ReversiGame::Disc::Black, game.winner());
+}
+
+void test_reversi_automatically_passes_when_opponent_has_no_move() {
+  ReversiGame game;
+  TEST_ASSERT_TRUE(game.restore(
+      {0xF9C1A591ADB59FBCULL, 0x063E5A6E524A4040ULL,
+       static_cast<uint8_t>(ReversiGame::Disc::White)}));
+
+  TEST_ASSERT_EQUAL(ReversiGame::MoveResult::OpponentPassed, game.play(1, 5));
+  TEST_ASSERT_EQUAL(ReversiGame::Disc::White, game.currentPlayer());
+  TEST_ASSERT_FALSE(game.gameOver());
+}
+
+void test_reversi_snapshot_restores_progress() {
+  ReversiGame original;
+  original.start();
+  original.play(2, 3);
+
+  ReversiGame restored;
+  TEST_ASSERT_TRUE(restored.restore(original.snapshot()));
+  TEST_ASSERT_EQUAL_UINT64(original.snapshot().black,
+                           restored.snapshot().black);
+  TEST_ASSERT_EQUAL_UINT64(original.snapshot().white,
+                           restored.snapshot().white);
+  TEST_ASSERT_EQUAL(original.currentPlayer(), restored.currentPlayer());
+}
+
+void test_reversi_invalid_snapshot_is_rejected() {
+  ReversiGame game;
+  TEST_ASSERT_FALSE(game.restore(
+      {1, 1, static_cast<uint8_t>(ReversiGame::Disc::Black)}));
+  TEST_ASSERT_FALSE(game.restore({0xFUL, 0, 0}));
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_corner_press_toggles_three_cells);
@@ -639,5 +744,13 @@ int main(int, char**) {
   RUN_TEST(test_nonogram_reset_clears_marks_but_keeps_solution);
   RUN_TEST(test_nonogram_snapshot_restores_progress);
   RUN_TEST(test_nonogram_invalid_snapshot_is_rejected);
+  RUN_TEST(test_reversi_starts_with_four_discs_and_four_legal_moves);
+  RUN_TEST(test_reversi_move_places_disc_and_flips_opponent);
+  RUN_TEST(test_reversi_move_flips_in_all_eight_directions);
+  RUN_TEST(test_reversi_rejects_non_capturing_and_occupied_moves);
+  RUN_TEST(test_reversi_full_board_is_game_over);
+  RUN_TEST(test_reversi_automatically_passes_when_opponent_has_no_move);
+  RUN_TEST(test_reversi_snapshot_restores_progress);
+  RUN_TEST(test_reversi_invalid_snapshot_is_rejected);
   return UNITY_END();
 }

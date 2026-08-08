@@ -78,8 +78,22 @@ Touch controls:
 - Tap **NEW** for a different picture or **RESET** to clear the current grid.
 - Tap the back arrow to save and return to the selection screen.
 
-The selector uses a two-column, three-row layout, with one open slot for a sixth
-game.
+### Reversi / Othello
+
+Two players take turns placing black and white discs on the eight-by-eight
+board. A move must trap one or more opposing discs between the new disc and
+another disc of the same colour; every trapped line is flipped. The player with
+the most discs when neither player can move wins.
+
+Touch controls:
+
+- Tap the Reversi icon on the game-selection screen to play or resume.
+- Tap a dotted legal-move cell to place the current player's disc.
+- A player with no legal move passes automatically.
+- Tap **NEW** to return to the standard four-disc opening.
+- Tap the back arrow to save and return to the selection screen.
+
+The selector uses a two-column, three-row layout for all six games.
 
 Front buttons:
 
