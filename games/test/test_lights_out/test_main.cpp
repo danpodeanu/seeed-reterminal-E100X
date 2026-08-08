@@ -3,6 +3,7 @@
 #include "game_2048.h"
 #include "lights_out_game.h"
 #include "mini_minesweeper_game.h"
+#include "nonogram_game.h"
 #include "pipe_connect_game.h"
 
 void setUp() {}
@@ -510,6 +511,90 @@ void test_minesweeper_incorrect_fulfilled_flags_can_hit_mine() {
   TEST_ASSERT_TRUE(game.lost());
 }
 
+void test_nonogram_cycles_blank_filled_crossed_blank() {
+  NonogramGame game;
+  game.start(0x15555UL);
+
+  TEST_ASSERT_EQUAL(NonogramGame::CellState::Blank, game.at(1, 2));
+  TEST_ASSERT_TRUE(game.cycle(1, 2));
+  TEST_ASSERT_EQUAL(NonogramGame::CellState::Filled, game.at(1, 2));
+  TEST_ASSERT_TRUE(game.cycle(1, 2));
+  TEST_ASSERT_EQUAL(NonogramGame::CellState::Crossed, game.at(1, 2));
+  TEST_ASSERT_TRUE(game.cycle(1, 2));
+  TEST_ASSERT_EQUAL(NonogramGame::CellState::Blank, game.at(1, 2));
+}
+
+void test_nonogram_matches_only_filled_solution_cells() {
+  constexpr uint32_t solution = (1UL << 0) | (1UL << 6) | (1UL << 12);
+  NonogramGame game;
+  game.start(solution);
+
+  game.cycle(0, 0);
+  game.cycle(1, 1);
+  game.cycle(2, 2);
+  TEST_ASSERT_TRUE(game.solved());
+  TEST_ASSERT_FALSE(game.cycle(4, 4));
+}
+
+void test_nonogram_extra_filled_cell_prevents_completion() {
+  NonogramGame game;
+  game.start(1UL << 0);
+  game.cycle(4, 4);
+  game.cycle(0, 0);
+
+  TEST_ASSERT_FALSE(game.solved());
+}
+
+void test_nonogram_generates_row_and_column_clues() {
+  constexpr uint32_t solution =
+      (1UL << 0) | (1UL << 2) | (1UL << 3) |
+      (1UL << 7) | (1UL << 12) | (1UL << 17) | (1UL << 22);
+  NonogramGame game;
+  game.start(solution);
+  uint8_t clues[NonogramGame::kSize] = {};
+
+  TEST_ASSERT_EQUAL_INT(2, game.rowClues(0, clues));
+  TEST_ASSERT_EQUAL_UINT8(1, clues[0]);
+  TEST_ASSERT_EQUAL_UINT8(2, clues[1]);
+  TEST_ASSERT_EQUAL_INT(1, game.columnClues(2, clues));
+  TEST_ASSERT_EQUAL_UINT8(5, clues[0]);
+}
+
+void test_nonogram_reset_clears_marks_but_keeps_solution() {
+  NonogramGame game;
+  game.start(0x1F1F1FUL);
+  game.cycle(2, 2);
+  const uint32_t solution = game.snapshot().solution;
+  game.reset();
+
+  TEST_ASSERT_EQUAL_UINT32(solution, game.snapshot().solution);
+  TEST_ASSERT_EQUAL_UINT64(0, game.snapshot().cells);
+}
+
+void test_nonogram_snapshot_restores_progress() {
+  NonogramGame original;
+  original.start(0x15555UL);
+  original.cycle(0, 0);
+  original.cycle(1, 1);
+  original.cycle(1, 1);
+
+  NonogramGame restored;
+  TEST_ASSERT_TRUE(restored.restore(original.snapshot()));
+  TEST_ASSERT_EQUAL_UINT32(original.snapshot().solution,
+                           restored.snapshot().solution);
+  TEST_ASSERT_EQUAL_UINT64(original.snapshot().cells,
+                           restored.snapshot().cells);
+}
+
+void test_nonogram_invalid_snapshot_is_rejected() {
+  NonogramGame game;
+  const NonogramGame::Snapshot invalid = {
+      1,
+      3,
+  };
+  TEST_ASSERT_FALSE(game.restore(invalid));
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_corner_press_toggles_three_cells);
@@ -547,5 +632,12 @@ int main(int, char**) {
   RUN_TEST(test_minesweeper_revealed_number_opens_neighbors_when_fulfilled);
   RUN_TEST(test_minesweeper_revealed_number_waits_for_enough_flags);
   RUN_TEST(test_minesweeper_incorrect_fulfilled_flags_can_hit_mine);
+  RUN_TEST(test_nonogram_cycles_blank_filled_crossed_blank);
+  RUN_TEST(test_nonogram_matches_only_filled_solution_cells);
+  RUN_TEST(test_nonogram_extra_filled_cell_prevents_completion);
+  RUN_TEST(test_nonogram_generates_row_and_column_clues);
+  RUN_TEST(test_nonogram_reset_clears_marks_but_keeps_solution);
+  RUN_TEST(test_nonogram_snapshot_restores_progress);
+  RUN_TEST(test_nonogram_invalid_snapshot_is_rejected);
   return UNITY_END();
 }

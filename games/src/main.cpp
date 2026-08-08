@@ -22,6 +22,7 @@
 #include "lights_out_game.h"
 #include "low_battery.h"
 #include "mini_minesweeper_game.h"
+#include "nonogram_game.h"
 #include "peripheral_power.h"
 #include "pipe_connect_game.h"
 #include "power_latch.h"
@@ -58,6 +59,10 @@ constexpr int kMinesGridTop = 130;
 constexpr int kMinesCellSize = 70;
 constexpr int kMinesGridSize =
     kMinesCellSize * MiniMinesweeperGame::kSize;
+constexpr int kNonogramGridLeft = 140;
+constexpr int kNonogramGridTop = 190;
+constexpr int kNonogramCellSize = 64;
+constexpr int kNonogramGridSize = kNonogramCellSize * NonogramGame::kSize;
 constexpr int kStatusDividerY = 48;
 constexpr int kSwipeThreshold = 45;
 constexpr int kMinesTouchMoveTolerance = 20;
@@ -68,11 +73,34 @@ constexpr uint32_t kBatteryCheckIntervalMs = 60000;
 constexpr uint32_t kInactivitySleepMs = 5UL * 60UL * 1000UL;
 constexpr int kLowBatteryThresholdPct = 10;
 constexpr uint32_t kPersistedStateMagic = 0x47414D45;
-constexpr uint16_t kPersistedStateVersion = 5;
+constexpr uint16_t kPersistedStateVersion = 6;
 constexpr uint8_t kLightsOutSavedFlag = 1U << 0;
 constexpr uint8_t k2048SavedFlag = 1U << 1;
 constexpr uint8_t kPipeConnectSavedFlag = 1U << 2;
 constexpr uint8_t kMinesweeperSavedFlag = 1U << 3;
+constexpr uint8_t kNonogramSavedFlag = 1U << 4;
+
+constexpr uint32_t makeNonogramSolution(uint8_t row0, uint8_t row1,
+                                        uint8_t row2, uint8_t row3,
+                                        uint8_t row4) {
+  return static_cast<uint32_t>(row0) |
+         (static_cast<uint32_t>(row1) << 5) |
+         (static_cast<uint32_t>(row2) << 10) |
+         (static_cast<uint32_t>(row3) << 15) |
+         (static_cast<uint32_t>(row4) << 20);
+}
+
+constexpr uint32_t kNonogramPuzzles[] = {
+    makeNonogramSolution(0b00100, 0b01110, 0b11111, 0b01110, 0b00100),
+    makeNonogramSolution(0b01010, 0b11111, 0b11111, 0b01110, 0b00100),
+    makeNonogramSolution(0b00100, 0b00100, 0b11111, 0b00100, 0b00100),
+    makeNonogramSolution(0b11111, 0b10001, 0b10001, 0b10001, 0b11111),
+    makeNonogramSolution(0b00100, 0b01100, 0b11111, 0b01100, 0b00100),
+    makeNonogramSolution(0b00100, 0b01110, 0b11111, 0b00100, 0b01110),
+    makeNonogramSolution(0b00100, 0b01110, 0b11111, 0b10101, 0b11111),
+};
+constexpr size_t kNonogramPuzzleCount =
+    sizeof(kNonogramPuzzles) / sizeof(kNonogramPuzzles[0]);
 
 struct Rect {
   int x;
@@ -86,10 +114,11 @@ struct Rect {
   }
 };
 
-constexpr Rect kLightsOutMenuCard = {40, 165, 190, 190};
-constexpr Rect k2048MenuCard = {250, 165, 190, 190};
-constexpr Rect kPipeConnectMenuCard = {40, 380, 190, 190};
-constexpr Rect kMinesweeperMenuCard = {250, 380, 190, 190};
+constexpr Rect kLightsOutMenuCard = {40, 112, 190, 190};
+constexpr Rect k2048MenuCard = {250, 112, 190, 190};
+constexpr Rect kPipeConnectMenuCard = {40, 320, 190, 190};
+constexpr Rect kMinesweeperMenuCard = {250, 320, 190, 190};
+constexpr Rect kNonogramMenuCard = {40, 528, 190, 190};
 constexpr Rect kBackButton = {8, 6, 48, 36};
 constexpr Rect kNewButton = {30, 688, 190, 66};
 constexpr Rect kResetButton = {260, 688, 190, 66};
@@ -99,6 +128,7 @@ constexpr E1005FastRefresh::Region kBoardRegion = {30, 130, 420, 550};
 constexpr E1005FastRefresh::Region k2048BoardRegion = {30, 112, 420, 553};
 constexpr E1005FastRefresh::Region kPipeBoardRegion = {25, 112, 430, 553};
 constexpr E1005FastRefresh::Region kMinesBoardRegion = {25, 112, 430, 553};
+constexpr E1005FastRefresh::Region kNonogramBoardRegion = {20, 64, 440, 584};
 
 enum class Screen {
   Menu,
@@ -106,6 +136,7 @@ enum class Screen {
   Game2048,
   PipeConnect,
   Minesweeper,
+  Nonogram,
 };
 
 struct PersistedState {
@@ -117,6 +148,7 @@ struct PersistedState {
   Game2048::Snapshot game2048;
   PipeConnectGame::Snapshot pipeConnect;
   MiniMinesweeperGame::Snapshot minesweeper;
+  NonogramGame::Snapshot nonogram;
   uint32_t checksum;
 };
 
@@ -160,6 +192,7 @@ LightsOutGame lightsOut;
 Game2048 game2048;
 PipeConnectGame pipeConnect;
 MiniMinesweeperGame minesweeper;
+NonogramGame nonogram;
 Screen currentScreen = Screen::Menu;
 bool touchReady = false;
 bool touchActive = false;
@@ -169,6 +202,7 @@ bool lightsOutSaved = false;
 bool game2048Saved = false;
 bool pipeConnectSaved = false;
 bool minesweeperSaved = false;
+bool nonogramSaved = false;
 bool batteryStatusSampled = false;
 bool externalPowerPresent = false;
 int batteryPercent = -1;
@@ -265,6 +299,10 @@ void saveResumeState() {
     state.flags |= kMinesweeperSavedFlag;
     state.minesweeper = minesweeper.snapshot();
   }
+  if (nonogramSaved) {
+    state.flags |= kNonogramSavedFlag;
+    state.nonogram = nonogram.snapshot();
+  }
   state.checksum = stateChecksum(state);
   persistedState = state;
 }
@@ -276,9 +314,10 @@ bool restoreResumeState() {
   if (state.magic != kPersistedStateMagic ||
       state.version != kPersistedStateVersion ||
       state.checksum != stateChecksum(state) ||
-      state.screen > static_cast<uint8_t>(Screen::Minesweeper) ||
+      state.screen > static_cast<uint8_t>(Screen::Nonogram) ||
       (state.flags & ~(kLightsOutSavedFlag | k2048SavedFlag |
-                       kPipeConnectSavedFlag | kMinesweeperSavedFlag)) != 0) {
+                       kPipeConnectSavedFlag | kMinesweeperSavedFlag |
+                       kNonogramSavedFlag)) != 0) {
     LOG.println("[games] saved resume state is invalid");
     return false;
   }
@@ -322,10 +361,20 @@ bool restoreResumeState() {
     LOG.println("[games] saved screen has no Minesweeper game");
     return false;
   }
+  const bool hasNonogramSave = (state.flags & kNonogramSavedFlag) != 0;
+  if (hasNonogramSave && !nonogram.restore(state.nonogram)) {
+    LOG.println("[games] saved Nonogram state is invalid");
+    return false;
+  }
+  if (savedScreen == Screen::Nonogram && !hasNonogramSave) {
+    LOG.println("[games] saved screen has no Nonogram game");
+    return false;
+  }
   lightsOutSaved = hasLightsOutSave;
   game2048Saved = has2048Save;
   pipeConnectSaved = hasPipeConnectSave;
   minesweeperSaved = hasMinesweeperSave;
+  nonogramSaved = hasNonogramSave;
   currentScreen = savedScreen;
   return true;
 }
@@ -724,6 +773,50 @@ void drawMinesweeperMenuCard() {
                   kPreviewCellSize - 8, kPreviewCellSize - 8, TFT_WHITE);
 }
 
+void drawNonogramMarkCell(int x, int y, int size,
+                          NonogramGame::CellState state) {
+  epaper.fillRect(x, y, size, size, TFT_WHITE);
+  epaper.drawRect(x, y, size, size, TFT_BLACK);
+  if (state == NonogramGame::CellState::Filled) {
+    constexpr int kInset = 4;
+    epaper.fillRect(x + kInset, y + kInset, size - kInset * 2,
+                   size - kInset * 2, TFT_BLACK);
+  } else if (state == NonogramGame::CellState::Crossed) {
+    const int inset = std::max(7, size / 5);
+    for (int offset = -1; offset <= 1; ++offset) {
+      epaper.drawLine(x + inset, y + inset + offset, x + size - inset - 1,
+                      y + size - inset - 1 + offset, TFT_BLACK);
+      epaper.drawLine(x + inset, y + size - inset - 1 + offset,
+                      x + size - inset - 1, y + inset + offset, TFT_BLACK);
+    }
+  }
+}
+
+void drawNonogramMenuCard() {
+  epaper.fillRoundRect(kNonogramMenuCard.x, kNonogramMenuCard.y,
+                       kNonogramMenuCard.width, kNonogramMenuCard.height, 14,
+                       TFT_WHITE);
+  epaper.drawRoundRect(kNonogramMenuCard.x, kNonogramMenuCard.y,
+                       kNonogramMenuCard.width, kNonogramMenuCard.height, 14,
+                       TFT_BLACK);
+
+  constexpr int kPreviewCellSize = 30;
+  const int gridLeft = kNonogramMenuCard.x + 20;
+  const int gridTop = kNonogramMenuCard.y + 20;
+  const uint32_t solution = kNonogramPuzzles[0];
+  for (int row = 0; row < NonogramGame::kSize; ++row) {
+    for (int column = 0; column < NonogramGame::kSize; ++column) {
+      const bool filled =
+          (solution & (1UL << (row * NonogramGame::kSize + column))) != 0;
+      drawNonogramMarkCell(
+          gridLeft + column * kPreviewCellSize,
+          gridTop + row * kPreviewCellSize, kPreviewCellSize,
+          filled ? NonogramGame::CellState::Filled
+                 : NonogramGame::CellState::Blank);
+    }
+  }
+}
+
 void drawBatteryStatus() {
   constexpr int kCenterY = 24;
   constexpr int kEdgeInset = 6;
@@ -775,11 +868,12 @@ void drawGameStatusBar(const char* title) {
 
 void drawMenu() {
   epaper.fillSprite(TFT_WHITE);
-  drawGamesLogo(kScreenWidth / 2, 105, 110);
+  drawGamesLogo(kScreenWidth / 2, 80, 72);
   drawLightsOutMenuCard();
   draw2048MenuCard();
   drawPipeConnectMenuCard();
   drawMinesweeperMenuCard();
+  drawNonogramMenuCard();
   drawStatusBar();
 }
 
@@ -976,6 +1070,64 @@ void drawMinesweeper() {
   drawGameStatusBar("MINESWEEPER");
 }
 
+void drawNonogramCell(int row, int column) {
+  drawNonogramMarkCell(kNonogramGridLeft + column * kNonogramCellSize,
+                       kNonogramGridTop + row * kNonogramCellSize,
+                       kNonogramCellSize, nonogram.at(row, column));
+}
+
+void drawNonogramClues() {
+  uint8_t clues[NonogramGame::kSize] = {};
+  for (int column = 0; column < NonogramGame::kSize; ++column) {
+    const int count = nonogram.columnClues(column, clues);
+    for (int index = 0; index < count; ++index) {
+      const int centerY =
+          kNonogramGridTop - 21 - (count - index - 1) * 31;
+      drawCenteredNumber(
+          clues[index],
+          kNonogramGridLeft + column * kNonogramCellSize +
+              kNonogramCellSize / 2,
+          centerY, 4, TFT_BLACK, TFT_WHITE);
+    }
+  }
+
+  for (int row = 0; row < NonogramGame::kSize; ++row) {
+    const int count = nonogram.rowClues(row, clues);
+    for (int index = 0; index < count; ++index) {
+      const int centerX =
+          kNonogramGridLeft - 21 - (count - index - 1) * 31;
+      drawCenteredNumber(
+          clues[index], centerX,
+          kNonogramGridTop + row * kNonogramCellSize +
+              kNonogramCellSize / 2,
+          4, TFT_BLACK, TFT_WHITE);
+    }
+  }
+}
+
+void drawNonogramBoard() {
+  epaper.fillRect(kNonogramBoardRegion.x, kNonogramBoardRegion.y,
+                  kNonogramBoardRegion.width, kNonogramBoardRegion.height,
+                  TFT_WHITE);
+  drawNonogramClues();
+  for (int row = 0; row < NonogramGame::kSize; ++row) {
+    for (int column = 0; column < NonogramGame::kSize; ++column) {
+      drawNonogramCell(row, column);
+    }
+  }
+  if (nonogram.solved()) {
+    drawCentered("PUZZLE SOLVED!", kScreenWidth / 2, 590, 4);
+  }
+}
+
+void drawNonogram() {
+  epaper.fillSprite(TFT_WHITE);
+  drawNonogramBoard();
+  drawButton(kNewButton, "NEW");
+  drawButton(kResetButton, "RESET");
+  drawGameStatusBar("NONOGRAM");
+}
+
 uint32_t randomScramble() {
   uint32_t mask = esp_random() & LightsOutGame::kCellMask;
   int pressed = 0;
@@ -1004,6 +1156,16 @@ void startNewPipeConnect() {
 void startNewMinesweeper() {
   minesweeper.start(esp_random());
   minesweeperSaved = true;
+}
+
+void startNewNonogram() {
+  size_t puzzleIndex = esp_random() % kNonogramPuzzleCount;
+  if (nonogramSaved &&
+      kNonogramPuzzles[puzzleIndex] == nonogram.snapshot().solution) {
+    puzzleIndex = (puzzleIndex + 1) % kNonogramPuzzleCount;
+  }
+  nonogram.start(kNonogramPuzzles[puzzleIndex]);
+  nonogramSaved = true;
 }
 
 bool recoverFullRefresh() {
@@ -1062,6 +1224,8 @@ void showMenu() {
     LOG.println("[games] auto-saving Pipe Connect");
   } else if (currentScreen == Screen::Minesweeper && minesweeperSaved) {
     LOG.println("[games] auto-saving Minesweeper");
+  } else if (currentScreen == Screen::Nonogram && nonogramSaved) {
+    LOG.println("[games] auto-saving Nonogram");
   }
   currentScreen = Screen::Menu;
   saveResumeState();
@@ -1095,6 +1259,13 @@ void showMinesweeper() {
   currentScreen = Screen::Minesweeper;
   drawMinesweeper();
   refreshScreen("Minesweeper screen");
+}
+
+void showNonogram() {
+  if (!nonogramSaved) startNewNonogram();
+  currentScreen = Screen::Nonogram;
+  drawNonogram();
+  refreshScreen("Nonogram screen");
 }
 
 void updateLightsOut(const char* action) {
@@ -1141,6 +1312,22 @@ void updateMinesweeperCell(int row, int column, const char* action) {
   refreshRegion(cellRegion, action);
 }
 
+void updateNonogram(const char* action) {
+  drawNonogramBoard();
+  refreshRegion(kNonogramBoardRegion, action);
+}
+
+void updateNonogramCell(int row, int column, const char* action) {
+  drawNonogramCell(row, column);
+  const E1005FastRefresh::Region cellRegion = {
+      kNonogramGridLeft + column * kNonogramCellSize,
+      kNonogramGridTop + row * kNonogramCellSize,
+      kNonogramCellSize,
+      kNonogramCellSize,
+  };
+  refreshRegion(cellRegion, action);
+}
+
 void handleMenuTouch(const Gt911Touch::Point& point) {
   if (kLightsOutMenuCard.contains(point.x, point.y)) {
     hardware::beep();
@@ -1154,6 +1341,9 @@ void handleMenuTouch(const Gt911Touch::Point& point) {
   } else if (kMinesweeperMenuCard.contains(point.x, point.y)) {
     hardware::beep();
     showMinesweeper();
+  } else if (kNonogramMenuCard.contains(point.x, point.y)) {
+    hardware::beep();
+    showNonogram();
   }
 }
 
@@ -1213,6 +1403,39 @@ void handlePipeConnectTouch(const Gt911Touch::Point& point) {
       updatePipeConnect("Pipe Connect solved");
     } else {
       updatePipeConnectCell(row, column, "Pipe Connect rotation");
+    }
+  }
+}
+
+void handleNonogramTouch(const Gt911Touch::Point& point) {
+  if (kBackButton.contains(point.x, point.y)) {
+    showMenu();
+    return;
+  }
+  if (kNewButton.contains(point.x, point.y)) {
+    startNewNonogram();
+    updateNonogram("new Nonogram puzzle");
+    return;
+  }
+  if (kResetButton.contains(point.x, point.y)) {
+    nonogram.reset();
+    updateNonogram("reset Nonogram puzzle");
+    return;
+  }
+  if (point.x < kNonogramGridLeft ||
+      point.x >= kNonogramGridLeft + kNonogramGridSize ||
+      point.y < kNonogramGridTop ||
+      point.y >= kNonogramGridTop + kNonogramGridSize) {
+    return;
+  }
+
+  const int column = (point.x - kNonogramGridLeft) / kNonogramCellSize;
+  const int row = (point.y - kNonogramGridTop) / kNonogramCellSize;
+  if (nonogram.cycle(row, column)) {
+    if (nonogram.solved()) {
+      updateNonogram("Nonogram solved");
+    } else {
+      updateNonogramCell(row, column, "Nonogram mark");
     }
   }
 }
@@ -1346,6 +1569,9 @@ void pollTouch() {
     touchActionHandled = true;
   } else if (currentScreen == Screen::Minesweeper) {
     touchActionHandled = handleMinesweeperTouchStart(point);
+  } else if (currentScreen == Screen::Nonogram) {
+    handleNonogramTouch(point);
+    touchActionHandled = true;
   } else if (currentScreen == Screen::Game2048) {
     touchActionHandled = handle2048TouchStart(point);
   }
@@ -1511,6 +1737,8 @@ void setup() {
     drawPipeConnect();
   } else if (resumed && currentScreen == Screen::Minesweeper) {
     drawMinesweeper();
+  } else if (resumed && currentScreen == Screen::Nonogram) {
+    drawNonogram();
   } else {
     currentScreen = Screen::Menu;
     drawMenu();
@@ -1524,7 +1752,9 @@ void setup() {
                       ? "saved Pipe Connect"
                       : currentScreen == Screen::Minesweeper
                             ? "saved Minesweeper"
-                            : "menu";
+                            : currentScreen == Screen::Nonogram
+                                  ? "saved Nonogram"
+                                  : "menu";
   LOG.printf("[games] refreshing %s\n", screenName);
   epaper.update();
   sd_ota::confirmRunningImage();

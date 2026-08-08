@@ -64,6 +64,23 @@ Touch controls:
 - Tap **NEW** for another field.
 - Tap the back arrow to save and return to the selection screen.
 
+### Nonogram / Picross
+
+Use the number clues above and beside the five-by-five grid to reveal the hidden
+picture. Each clue describes a consecutive run of filled cells; separate clues
+have at least one empty cell between them. The current puzzle and marks persist
+across menu returns and deep sleep.
+
+Touch controls:
+
+- Tap the Nonogram icon on the game-selection screen to play or resume.
+- Tap a cell to cycle it from blank, to filled, to crossed, then back to blank.
+- Tap **NEW** for a different picture or **RESET** to clear the current grid.
+- Tap the back arrow to save and return to the selection screen.
+
+The selector uses a two-column, three-row layout, with one open slot for a sixth
+game.
+
 Front buttons:
 
 - On the selection screen, a short **OK** press does nothing.
@@ -74,7 +91,8 @@ Front buttons:
   Press **OK** again to resume.
 - **UP** and **DOWN** are unused.
 
-The app beeps once at startup and once before sleeping. While the app is open,
+The app beeps once at startup, when a game is opened from the selector, and
+before sleeping. While the app is open,
 the ESP32-S3 enters light sleep between touch and button events, then wakes
 immediately for input and logs each light-sleep entry and exit. A long **OK**
 press uses deep sleep for longer idle periods. Resume state is stored in RTC
