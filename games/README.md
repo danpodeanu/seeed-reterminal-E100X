@@ -17,7 +17,7 @@ Touch controls:
 - Tap the Lights Out icon on the game-selection screen to play.
 - Tap a board square to make a move.
 - Tap **NEW** for another puzzle or **RESET** to restore the current puzzle.
-- Tap **GAMES** to save the current puzzle and return to the selection screen.
+- Tap the back arrow to save the current puzzle and return to the selection screen.
   Opening Lights Out again resumes that puzzle.
 
 ### 2048
@@ -32,7 +32,7 @@ Touch controls:
 - Tap the 2048 icon on the game-selection screen to play or resume.
 - Swipe across the board to move all tiles.
 - Tap **NEW** to start over while retaining the best score.
-- Tap **GAMES** to save and return to the selection screen.
+- Tap the back arrow to save and return to the selection screen.
 
 Front buttons:
 
@@ -55,8 +55,8 @@ recharge screen, and enters deep sleep unless USB-C power is connected. The
 normal sleep screen includes a QR code for this repository. All active screens
 show the current battery percentage and the shared battery gauge used by the
 other viewer apps; the gauge displays a charging bolt while USB-C power is
-connected. A full-width rule separates this status bar from the content, and
-each game screen shows its game name as the title below the rule.
+connected. On each game screen, the back arrow, game title, and battery status
+share the top bar above a full-width divider.
 
 The SSD1677 path uses 40 MHz window transfers and reseeds both differential RAM
 planes after every refresh. This keeps normal moves near the panel's physical

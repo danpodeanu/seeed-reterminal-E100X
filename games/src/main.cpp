@@ -73,7 +73,7 @@ struct Rect {
 
 constexpr Rect kLightsOutMenuCard = {40, 165, 190, 190};
 constexpr Rect k2048MenuCard = {250, 165, 190, 190};
-constexpr Rect kBackButton = {24, 58, 104, 48};
+constexpr Rect kBackButton = {8, 6, 48, 36};
 constexpr Rect kNewButton = {30, 688, 190, 66};
 constexpr Rect kResetButton = {260, 688, 190, 66};
 constexpr Rect k2048NewButton = {145, 688, 190, 66};
@@ -542,6 +542,24 @@ void drawStatusBar() {
   epaper.drawFastHLine(0, kStatusDividerY, kScreenWidth, TFT_BLACK);
 }
 
+void drawBackIndicator() {
+  fillDarkGrayRoundRect(kBackButton, 8);
+  const int centerY = kBackButton.y + kBackButton.height / 2;
+  const int tipX = kBackButton.x + 9;
+  const int headBaseX = tipX + 13;
+  const int tailX = kBackButton.x + kBackButton.width - 9;
+  epaper.fillTriangle(tipX, centerY, headBaseX, centerY - 11, headBaseX,
+                      centerY + 11, TFT_WHITE);
+  epaper.fillRect(headBaseX - 1, centerY - 3, tailX - headBaseX + 1, 7,
+                  TFT_WHITE);
+}
+
+void drawGameStatusBar(const char* title) {
+  drawBackIndicator();
+  drawCentered(title, kScreenWidth / 2, 24, 4);
+  drawStatusBar();
+}
+
 void drawMenu() {
   epaper.fillSprite(TFT_WHITE);
   drawGamesLogo(kScreenWidth / 2, 105, 110);
@@ -617,12 +635,10 @@ void drawLightsOutBoard() {
 
 void drawLightsOut() {
   epaper.fillSprite(TFT_WHITE);
-  drawButton(kBackButton, "GAMES");
-  drawCentered("LIGHTS OUT", 292, 82, 4);
   drawLightsOutBoard();
   drawButton(kNewButton, "NEW");
   drawButton(kResetButton, "RESET");
-  drawStatusBar();
+  drawGameStatusBar("LIGHTS OUT");
 }
 
 void draw2048Board() {
@@ -648,11 +664,9 @@ void draw2048Board() {
 
 void draw2048() {
   epaper.fillSprite(TFT_WHITE);
-  drawButton(kBackButton, "GAMES");
-  drawCentered("2048", 292, 82, 4);
   draw2048Board();
   drawButton(k2048NewButton, "NEW");
-  drawStatusBar();
+  drawGameStatusBar("2048");
 }
 
 uint32_t randomScramble() {
