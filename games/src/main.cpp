@@ -43,6 +43,7 @@ constexpr int kGridSize = kCellSize * LightsOutGame::kSize;
 constexpr uint32_t kButtonDebounceMs = 30;
 constexpr uint32_t kButtonLongPressMs = 1200;
 constexpr uint32_t kBatteryCheckIntervalMs = 60000;
+constexpr uint32_t kInactivitySleepMs = 5UL * 60UL * 1000UL;
 constexpr int kLowBatteryThresholdPct = 10;
 constexpr uint32_t kPersistedStateMagic = 0x47414D45;
 constexpr uint16_t kPersistedStateVersion = 2;
@@ -125,6 +126,7 @@ bool touchActive = false;
 bool lightSleepReady = false;
 bool lightsOutSaved = false;
 uint32_t nextBatteryCheckAtMs = 0;
+uint32_t lastActivityAtMs = 0;
 
 void configureButtons() {
   for (ButtonState& button : buttons) {
@@ -179,6 +181,8 @@ bool inputHandlingActive() {
   }
   return false;
 }
+
+void recordActivity() { lastActivityAtMs = millis(); }
 
 uint32_t stateChecksum(const PersistedState& state) {
   const auto* bytes = reinterpret_cast<const uint8_t*>(&state);
@@ -278,10 +282,15 @@ void idleInLightSleep() {
   }
 
   const uint32_t now = millis();
-  const int32_t remainingMs =
+  const int32_t batteryRemainingMs =
       static_cast<int32_t>(nextBatteryCheckAtMs - now);
-  if (remainingMs <= 0) return;
-  const uint64_t timerUs = static_cast<uint64_t>(remainingMs) * 1000ULL;
+  const int32_t inactivityRemainingMs = static_cast<int32_t>(
+      kInactivitySleepMs - static_cast<uint32_t>(now - lastActivityAtMs));
+  if (batteryRemainingMs <= 0 || inactivityRemainingMs <= 0) return;
+  const uint32_t sleepMs = std::min(
+      static_cast<uint32_t>(batteryRemainingMs),
+      static_cast<uint32_t>(inactivityRemainingMs));
+  const uint64_t timerUs = static_cast<uint64_t>(sleepMs) * 1000ULL;
   if (esp_sleep_enable_timer_wakeup(timerUs) != ESP_OK) {
     LOG.println("[games] light-sleep timer wake unavailable");
     disableLightSleepWake();
@@ -387,7 +396,6 @@ void drawMenu() {
   epaper.setTextColor(TFT_WHITE);
   epaper.setTextDatum(MC_DATUM);
   epaper.drawString("LIGHTS OUT", kScreenWidth / 2, 300, 4);
-  epaper.drawString("TAP TO PLAY", kScreenWidth / 2, 360, 4);
 }
 
 void drawStatus(const char* title, const char* detail) {
@@ -401,8 +409,6 @@ void drawSleepSplash() {
   drawCentered("Resume", kScreenWidth / 2, 130, 4);
   drawCentered("PRESS OK", kScreenWidth / 2, 172, 4);
   drawGamesLogo(kScreenWidth / 2, 390, 280);
-  drawCentered("GAMES SLEEPING", kScreenWidth / 2, 535, 4);
-  drawCentered("Your game is saved", kScreenWidth / 2, 585, 4);
 }
 
 void drawChargeSplash(int batteryPercent) {
@@ -569,6 +575,7 @@ void pollTouch() {
   if (result != Gt911Touch::PollResult::Touch || touchActive) return;
 
   touchActive = true;
+  recordActivity();
   if (currentScreen == Screen::Menu) {
     handleMenuTouch(point);
   } else {
@@ -624,6 +631,7 @@ void powerDownAndSleep(SleepScreen screen = SleepScreen::Resume,
 
 void handleButton(const ButtonEvent& event) {
   ButtonState& button = *event.button;
+  recordActivity();
   LOG.printf("[games] %s %s press\n", button.name,
              event.type == ButtonPressType::Long ? "long" : "short");
 
@@ -666,6 +674,16 @@ void checkBatteryAndSleepIfNeeded() {
                kLowBatteryThresholdPct);
     powerDownAndSleep(SleepScreen::Charge, gauge.percent);
   }
+}
+
+void sleepAfterInactivityIfNeeded() {
+  if (inputHandlingActive() ||
+      static_cast<uint32_t>(millis() - lastActivityAtMs) <
+          kInactivitySleepMs) {
+    return;
+  }
+  LOG.println("[games] five minutes inactive; entering deep sleep");
+  powerDownAndSleep();
 }
 
 }  // namespace
@@ -728,6 +746,7 @@ void setup() {
   } else {
     LOG.println("[touch] GT911 initialization failed");
   }
+  recordActivity();
   lightSleepReady = configureLightSleepWake();
   LOG.printf("[games] idle light sleep: %s\n",
              lightSleepReady ? "enabled" : "unavailable");
@@ -740,5 +759,6 @@ void loop() {
   if (pollButtonEvent(event)) {
     handleButton(event);
   }
+  sleepAfterInactivityIfNeeded();
   idleInLightSleep();
 }

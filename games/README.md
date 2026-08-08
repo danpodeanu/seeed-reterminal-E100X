@@ -34,8 +34,9 @@ the ESP32-S3 enters light sleep between touch and button events, then wakes
 immediately for input and logs each light-sleep entry and exit. A long **OK**
 press uses deep sleep for longer idle periods. Resume state is stored in RTC
 slow memory, so normal sleep/resume cycles do not write to flash or the SD
-card. Below 10% battery, the app saves its state, displays a recharge screen,
-and enters deep sleep unless USB-C power is connected.
+card. The same saved deep sleep starts automatically after five minutes without
+touch or button input. Below 10% battery, the app saves its state, displays a
+recharge screen, and enters deep sleep unless USB-C power is connected.
 
 The SSD1677 path uses 40 MHz window transfers and reseeds both differential RAM
 planes after every refresh. This keeps normal moves near the panel's physical
