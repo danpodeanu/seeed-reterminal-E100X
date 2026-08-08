@@ -316,7 +316,6 @@ Gt911Touch touch;
 E1005FastRefresh fastRefresh(epaper);
 bool touchReady = false;
 bool touchActive = false;
-uint32_t touchShadeIndex = 0;
 
 struct PatternRegion {
   int left;
@@ -427,17 +426,42 @@ void runE1005RefreshBenchmark() {
   }
 }
 
+bool invertGray4Region(const PatternRegion& region) {
+  auto* framebuffer = static_cast<uint8_t*>(epaper.getPointer());
+  if (!framebuffer) return false;
+
+  constexpr int kNativeStrideBytes = PANEL_HEIGHT / 2;
+  for (int y = region.top; y < region.top + region.height; ++y) {
+    const int nativeX = PANEL_HEIGHT - y - 1;
+    const uint8_t mask = (nativeX & 1) == 0 ? 0x30 : 0x03;
+    for (int x = region.left; x < region.left + region.width; ++x) {
+      framebuffer[x * kNativeStrideBytes + nativeX / 2] ^= mask;
+    }
+  }
+  return true;
+}
+
 void showTouchFeedback(const Gt911Touch::Point& point,
                        uint32_t touchDetectedUs) {
   const PatternRegion region = touchedPatternRegion(point);
-  const uint32_t shade = PALETTE[touchShadeIndex++ % PALETTE_COUNT];
-  epaper.fillRect(region.left, region.top, region.width, region.height, shade);
+  if (!invertGray4Region(region)) {
+    LOG.println("[touch] Gray4 framebuffer is unavailable");
+    touchReady = false;
+    return;
+  }
   epaper.update();
-  const uint32_t completedUs = micros();
+  const uint32_t invertedCompleteUs = micros();
+
+  const uint32_t restoreStartedUs = micros();
+  invertGray4Region(region);
+  epaper.update();
+  const uint32_t restoredCompleteUs = micros();
   LOG.printf(
-      "[touch] Gray4 refresh latency=%lu us, shade=%lu\n",
-      static_cast<unsigned long>(completedUs - touchDetectedUs),
-      static_cast<unsigned long>(shade));
+      "[touch] Gray4 invert latency=%lu us, restore latency=%lu us, "
+      "touch cycle=%lu us\n",
+      static_cast<unsigned long>(invertedCompleteUs - touchDetectedUs),
+      static_cast<unsigned long>(restoredCompleteUs - restoreStartedUs),
+      static_cast<unsigned long>(restoredCompleteUs - touchDetectedUs));
 }
 
 void pollTouch() {
@@ -553,7 +577,8 @@ void setup() {
     LOG.printf("[touch] GT%s ready at 0x%02X, sensor=%ux%u\n",
                touch.productId(), touch.address(), touch.sensorWidth(),
                touch.sensorHeight());
-    LOG.println("[panel-test] touch a block to cycle its native Gray4 shade");
+    LOG.println(
+        "[panel-test] touch a block to invert and restore its Gray4 pixels");
   } else {
     LOG.println("[touch] GT911 initialization failed");
   }

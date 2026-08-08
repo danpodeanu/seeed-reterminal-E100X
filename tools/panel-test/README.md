@@ -20,9 +20,11 @@ After drawing, every front-button press beeps. Press and release the primary
 front button wakes with a beep and redraws the test. On E1005, startup first
 benchmarks the existing monochrome full refresh and a game-sized 420x550 fast
 partial refresh, then enables native Gray4 and times the equivalent full-screen
-update. The Gray4 pattern remains displayed. Each GT911 touch cycles the
-touched block through the four native shades, performs the required full Gray4
-refresh, and logs its touch-to-display latency.
+update. The Gray4 pattern remains displayed. Each GT911 touch changes the
+touched block to its inverse Gray4 shades, performs the required full Gray4
+refresh, restores the exact original pixels with a second refresh, and logs
+both latencies. The SSD1677 Gray4 waveform visibly drives the full panel during
+each refresh even though pixels outside the touched block remain unchanged.
 An inserted E1005 SD card can remain in place: the sketch powers and
 deselects it so it cannot interfere with the display's shared SPI bus.
 E1005 portrait output keeps the USB connector at the bottom.
@@ -35,7 +37,7 @@ E1005 portrait output keeps the USB connector at the bottom.
 | E1002  | ED2208 800x480  | Spectra E6 (6 col) | W/Y/G/B/R/K SMPTE bars    |
 | E1003  | ED103TC2 1872x1404 | Gray16 (16 shades) | 16 grey bars + smooth ramp |
 | E1004  | T133A01 1200x1600 | Spectra E6 (6 col) | W/Y/G/B/R/K SMPTE bars    |
-| E1005  | SSD1677 800x480, rotated portrait | Gray4 (4 shades) | 4 grey bars + interactive GT911 shading |
+| E1005  | SSD1677 800x480, rotated portrait | Gray4 (4 shades) | 4 grey bars + interactive GT911 inversion |
 
 All patterns use the standard SMPTE layout:
 
