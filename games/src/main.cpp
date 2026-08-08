@@ -407,18 +407,6 @@ void fillDarkGrayRoundRect(const Rect& rect, int radius) {
   }
 }
 
-void fillLightGrayRoundRect(const Rect& rect, int radius) {
-  epaper.fillRoundRect(rect.x, rect.y, rect.width, rect.height, radius,
-                      TFT_WHITE);
-  for (int y = rect.y; y < rect.y + rect.height; y += 2) {
-    for (int x = rect.x; x < rect.x + rect.width; x += 2) {
-      if (roundedRectContains(rect, radius, x, y)) {
-        epaper.drawPixel(x, y, TFT_BLACK);
-      }
-    }
-  }
-}
-
 void drawButton(const Rect& rect, const char* label) {
   fillDarkGrayRoundRect(rect, 8);
   epaper.setTextDatum(MC_DATUM);
@@ -476,24 +464,21 @@ void draw2048Tile(int x, int y, int slotSize, uint32_t value) {
     return;
   }
 
-  const bool solid = value >= 128;
-  const bool lightGray = !solid && (value == 4 || value == 16 || value == 64);
+  const bool solid =
+      value >= 128 || value == 4 || value == 16 || value == 64;
   if (solid) {
     epaper.fillRoundRect(tile.x, tile.y, tile.width, tile.height, 8, TFT_BLACK);
-  } else if (lightGray) {
-    fillLightGrayRoundRect(tile, 8);
   } else {
     epaper.fillRoundRect(tile.x, tile.y, tile.width, tile.height, 8, TFT_WHITE);
     epaper.drawRoundRect(tile.x, tile.y, tile.width, tile.height, 8, TFT_BLACK);
   }
-  const bool darkNumber = value < 128;
   epaper.setTextDatum(MC_DATUM);
-  epaper.setTextColor(darkNumber ? TFT_BLACK : TFT_WHITE);
+  epaper.setTextColor(solid ? TFT_WHITE : TFT_BLACK);
   const int font = value < 100 ? 6 : value < 10000 ? 4 : 2;
   const int centerX = x + slotSize / 2;
   const int centerY = y + slotSize / 2;
   epaper.drawString(String(value), centerX, centerY, font);
-  if (darkNumber) {
+  if (!solid) {
     epaper.drawString(String(value), centerX + 1, centerY, font);
   }
 }
