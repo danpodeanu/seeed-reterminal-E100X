@@ -679,6 +679,33 @@ void test_reversi_automatically_passes_when_opponent_has_no_move() {
   TEST_ASSERT_FALSE(game.gameOver());
 }
 
+void test_reversi_ai_selects_a_legal_move() {
+  ReversiGame game;
+  game.start();
+  int row = -1;
+  int column = -1;
+
+  TEST_ASSERT_TRUE(game.chooseBestMove(3, row, column));
+  TEST_ASSERT_TRUE(game.isLegalMove(row, column));
+}
+
+void test_reversi_ai_prefers_an_available_corner() {
+  const uint64_t black =
+      (1ULL << 2) | (1ULL << (3 * 8 + 4)) | (1ULL << 63);
+  const uint64_t white = (1ULL << 1) | (1ULL << (3 * 8 + 3));
+  ReversiGame game;
+  TEST_ASSERT_TRUE(game.restore(
+      {black, white, static_cast<uint8_t>(ReversiGame::Disc::Black)}));
+  TEST_ASSERT_TRUE(game.isLegalMove(0, 0));
+  TEST_ASSERT_TRUE(game.isLegalMove(3, 2));
+  int row = -1;
+  int column = -1;
+
+  TEST_ASSERT_TRUE(game.chooseBestMove(3, row, column));
+  TEST_ASSERT_EQUAL_INT(0, row);
+  TEST_ASSERT_EQUAL_INT(0, column);
+}
+
 void test_reversi_snapshot_restores_progress() {
   ReversiGame original;
   original.start();
@@ -750,6 +777,8 @@ int main(int, char**) {
   RUN_TEST(test_reversi_rejects_non_capturing_and_occupied_moves);
   RUN_TEST(test_reversi_full_board_is_game_over);
   RUN_TEST(test_reversi_automatically_passes_when_opponent_has_no_move);
+  RUN_TEST(test_reversi_ai_selects_a_legal_move);
+  RUN_TEST(test_reversi_ai_prefers_an_available_corner);
   RUN_TEST(test_reversi_snapshot_restores_progress);
   RUN_TEST(test_reversi_invalid_snapshot_is_rejected);
   return UNITY_END();

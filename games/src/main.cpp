@@ -71,6 +71,7 @@ constexpr int kReversiGridSize = kReversiCellSize * ReversiGame::kSize;
 constexpr int kStatusDividerY = 48;
 constexpr int kSwipeThreshold = 45;
 constexpr int kMinesTouchMoveTolerance = 20;
+constexpr int kReversiAiDepth = 3;
 constexpr uint32_t kButtonDebounceMs = 30;
 constexpr uint32_t kButtonLongPressMs = 1200;
 constexpr uint32_t kMinesFlagHoldMs = 650;
@@ -78,7 +79,7 @@ constexpr uint32_t kBatteryCheckIntervalMs = 60000;
 constexpr uint32_t kInactivitySleepMs = 5UL * 60UL * 1000UL;
 constexpr int kLowBatteryThresholdPct = 10;
 constexpr uint32_t kPersistedStateMagic = 0x47414D45;
-constexpr uint16_t kPersistedStateVersion = 7;
+constexpr uint16_t kPersistedStateVersion = 8;
 constexpr uint8_t kLightsOutSavedFlag = 1U << 0;
 constexpr uint8_t k2048SavedFlag = 1U << 1;
 constexpr uint8_t kPipeConnectSavedFlag = 1U << 2;
@@ -137,6 +138,7 @@ constexpr E1005FastRefresh::Region kPipeBoardRegion = {25, 112, 430, 553};
 constexpr E1005FastRefresh::Region kMinesBoardRegion = {25, 112, 430, 553};
 constexpr E1005FastRefresh::Region kNonogramBoardRegion = {20, 64, 440, 584};
 constexpr E1005FastRefresh::Region kReversiBoardRegion = {25, 104, 430, 560};
+constexpr E1005FastRefresh::Region kReversiModeRegion = {25, 104, 430, 650};
 
 enum class Screen {
   Menu,
@@ -148,11 +150,17 @@ enum class Screen {
   Reversi,
 };
 
+enum class ReversiMode : uint8_t {
+  SinglePlayer,
+  TwoPlayer,
+};
+
 struct PersistedState {
   uint32_t magic;
   uint16_t version;
   uint8_t screen;
   uint8_t flags;
+  uint8_t reversiMode;
   LightsOutGame::Snapshot lightsOut;
   Game2048::Snapshot game2048;
   PipeConnectGame::Snapshot pipeConnect;
@@ -204,6 +212,7 @@ PipeConnectGame pipeConnect;
 MiniMinesweeperGame minesweeper;
 NonogramGame nonogram;
 ReversiGame reversi;
+ReversiMode reversiMode = ReversiMode::SinglePlayer;
 Screen currentScreen = Screen::Menu;
 bool touchReady = false;
 bool touchActive = false;
@@ -295,6 +304,7 @@ void saveResumeState() {
   state.magic = kPersistedStateMagic;
   state.version = kPersistedStateVersion;
   state.screen = static_cast<uint8_t>(currentScreen);
+  state.reversiMode = static_cast<uint8_t>(reversiMode);
   if (lightsOutSaved) {
     state.flags |= kLightsOutSavedFlag;
     state.lightsOut = lightsOut.snapshot();
@@ -331,6 +341,7 @@ bool restoreResumeState() {
       state.version != kPersistedStateVersion ||
       state.checksum != stateChecksum(state) ||
       state.screen > static_cast<uint8_t>(Screen::Reversi) ||
+      state.reversiMode > static_cast<uint8_t>(ReversiMode::TwoPlayer) ||
       (state.flags & ~(kLightsOutSavedFlag | k2048SavedFlag |
                        kPipeConnectSavedFlag | kMinesweeperSavedFlag |
                        kNonogramSavedFlag | kReversiSavedFlag)) != 0) {
@@ -401,6 +412,7 @@ bool restoreResumeState() {
   minesweeperSaved = hasMinesweeperSave;
   nonogramSaved = hasNonogramSave;
   reversiSaved = hasReversiSave;
+  reversiMode = static_cast<ReversiMode>(state.reversiMode);
   currentScreen = savedScreen;
   return true;
 }
@@ -1212,10 +1224,15 @@ void drawReversiBoard(const char* status = nullptr) {
   }
 }
 
+const char* reversiModeLabel() {
+  return reversiMode == ReversiMode::SinglePlayer ? "1 PLAYER" : "2 PLAYERS";
+}
+
 void drawReversi() {
   epaper.fillSprite(TFT_WHITE);
   drawReversiBoard();
-  drawButton(kCenteredNewButton, "NEW");
+  drawButton(kNewButton, "NEW");
+  drawButton(kResetButton, reversiModeLabel());
   drawGameStatusBar("REVERSI");
 }
 
@@ -1262,6 +1279,25 @@ void startNewNonogram() {
 void startNewReversi() {
   reversi.start();
   reversiSaved = true;
+}
+
+void playReversiComputerTurns() {
+  while (reversiMode == ReversiMode::SinglePlayer &&
+         reversi.currentPlayer() == ReversiGame::Disc::White &&
+         !reversi.gameOver()) {
+    int row = -1;
+    int column = -1;
+    if (!reversi.chooseBestMove(kReversiAiDepth, row, column)) {
+      LOG.println("[games] Reversi AI could not find a legal move");
+      return;
+    }
+    LOG.printf("[games] Reversi AI plays row=%d column=%d\n", row, column);
+    const ReversiGame::MoveResult result = reversi.play(row, column);
+    if (result == ReversiGame::MoveResult::Illegal) {
+      LOG.println("[games] Reversi AI selected an illegal move");
+      return;
+    }
+  }
 }
 
 bool recoverFullRefresh() {
@@ -1368,6 +1404,7 @@ void showNonogram() {
 
 void showReversi() {
   if (!reversiSaved) startNewReversi();
+  playReversiComputerTurns();
   currentScreen = Screen::Reversi;
   drawReversi();
   refreshScreen("Reversi screen");
@@ -1436,6 +1473,13 @@ void updateNonogramCell(int row, int column, const char* action) {
 void updateReversi(const char* action, const char* status = nullptr) {
   drawReversiBoard(status);
   refreshRegion(kReversiBoardRegion, action);
+}
+
+void updateReversiMode(const char* action) {
+  drawReversiBoard();
+  drawButton(kNewButton, "NEW");
+  drawButton(kResetButton, reversiModeLabel());
+  refreshRegion(kReversiModeRegion, action);
 }
 
 void handleMenuTouch(const Gt911Touch::Point& point) {
@@ -1558,9 +1602,17 @@ void handleReversiTouch(const Gt911Touch::Point& point) {
     showMenu();
     return;
   }
-  if (kCenteredNewButton.contains(point.x, point.y)) {
+  if (kNewButton.contains(point.x, point.y)) {
     startNewReversi();
     updateReversi("new Reversi game");
+    return;
+  }
+  if (kResetButton.contains(point.x, point.y)) {
+    reversiMode = reversiMode == ReversiMode::SinglePlayer
+                       ? ReversiMode::TwoPlayer
+                       : ReversiMode::SinglePlayer;
+    startNewReversi();
+    updateReversiMode("Reversi mode");
     return;
   }
   if (point.x < kReversiGridLeft ||
@@ -1572,17 +1624,30 @@ void handleReversiTouch(const Gt911Touch::Point& point) {
 
   const int column = (point.x - kReversiGridLeft) / kReversiCellSize;
   const int row = (point.y - kReversiGridTop) / kReversiCellSize;
+  if (reversiMode == ReversiMode::SinglePlayer &&
+      reversi.currentPlayer() != ReversiGame::Disc::Black) {
+    LOG.println("[games] ignoring Reversi touch during computer turn");
+    return;
+  }
   const ReversiGame::MoveResult result = reversi.play(row, column);
   if (result != ReversiGame::MoveResult::Illegal) {
-    const bool passed = result == ReversiGame::MoveResult::OpponentPassed;
+    const bool humanOpponentPassed =
+        result == ReversiGame::MoveResult::OpponentPassed;
+    if (reversiMode == ReversiMode::SinglePlayer &&
+        reversi.currentPlayer() == ReversiGame::Disc::White &&
+        !reversi.gameOver()) {
+      playReversiComputerTurns();
+    }
     const char* passStatus =
-        passed ? reversi.currentPlayer() == ReversiGame::Disc::Black
-                     ? "WHITE PASSES - BLACK AGAIN"
-                     : "BLACK PASSES - WHITE AGAIN"
-               : nullptr;
+        humanOpponentPassed
+            ? reversi.currentPlayer() == ReversiGame::Disc::Black
+                  ? "WHITE PASSES - BLACK AGAIN"
+                  : "BLACK PASSES - WHITE AGAIN"
+            : nullptr;
     updateReversi(result == ReversiGame::MoveResult::GameOver
                        ? "Reversi game over"
-                       : passed ? "Reversi pass" : "Reversi move",
+                       : humanOpponentPassed ? "Reversi pass"
+                                             : "Reversi move",
                    passStatus);
   }
 }
@@ -1888,6 +1953,7 @@ void setup() {
   } else if (resumed && currentScreen == Screen::Nonogram) {
     drawNonogram();
   } else if (resumed && currentScreen == Screen::Reversi) {
+    playReversiComputerTurns();
     drawReversi();
   } else {
     currentScreen = Screen::Menu;

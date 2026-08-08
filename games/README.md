@@ -83,12 +83,15 @@ Touch controls:
 Two players take turns placing black and white discs on the eight-by-eight
 board. A move must trap one or more opposing discs between the new disc and
 another disc of the same colour; every trapped line is flipped. The player with
-the most discs when neither player can move wins.
+the most discs when neither player can move wins. One-player mode is the
+default: the user plays Black and the built-in AI plays White. Two-player mode
+keeps both colours under touch control.
 
 Touch controls:
 
 - Tap the Reversi icon on the game-selection screen to play or resume.
 - Tap a dotted legal-move cell to place the current player's disc.
+- Tap **1 PLAYER** or **2 PLAYERS** to switch modes and begin a new match.
 - A player with no legal move passes automatically.
 - Tap **NEW** to return to the standard four-disc opening.
 - Tap the back arrow to save and return to the selection screen.

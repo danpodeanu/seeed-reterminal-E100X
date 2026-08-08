@@ -51,6 +51,33 @@ class ReversiGame {
 
   uint64_t legalMoves() const { return legalMovesFor(currentPlayer_); }
 
+  bool chooseBestMove(int depth, int& row, int& column) const {
+    if (gameOver()) return false;
+    if (depth < 1) depth = 1;
+
+    const Disc rootPlayer = currentPlayer_;
+    const uint64_t moves = legalMoves();
+    int bestScore = -kSearchLimit;
+    int alpha = -kSearchLimit;
+    int bestIndex = -1;
+    for (int index = 0; index < kCellCount; ++index) {
+      if ((moves & (1ULL << index)) == 0) continue;
+      ReversiGame candidate = *this;
+      candidate.play(index / kSize, index % kSize);
+      const int candidateScore =
+          minimax(candidate, depth - 1, rootPlayer, alpha, kSearchLimit);
+      if (bestIndex < 0 || candidateScore > bestScore) {
+        bestScore = candidateScore;
+        bestIndex = index;
+      }
+      if (candidateScore > alpha) alpha = candidateScore;
+    }
+    if (bestIndex < 0) return false;
+    row = bestIndex / kSize;
+    column = bestIndex % kSize;
+    return true;
+  }
+
   MoveResult play(int row, int column) {
     const uint64_t flips = flipsFor(row, column, currentPlayer_);
     if (flips == 0) return MoveResult::Illegal;
@@ -123,6 +150,7 @@ class ReversiGame {
   }
 
  private:
+  static constexpr int kSearchLimit = 1000000;
   uint64_t black_ = 0;
   uint64_t white_ = 0;
   Disc currentPlayer_ = Disc::Black;
@@ -197,5 +225,72 @@ class ReversiGame {
       }
     }
     return moves;
+  }
+
+  static int evaluate(const ReversiGame& game, Disc rootPlayer) {
+    static constexpr int8_t kPositionWeights[kCellCount] = {
+        120, -25, 20, 5, 5, 20, -25, 120,
+        -25, -45, -5, -5, -5, -5, -45, -25,
+        20, -5, 15, 3, 3, 15, -5, 20,
+        5, -5, 3, 3, 3, 3, -5, 5,
+        5, -5, 3, 3, 3, 3, -5, 5,
+        20, -5, 15, 3, 3, 15, -5, 20,
+        -25, -45, -5, -5, -5, -5, -45, -25,
+        120, -25, 20, 5, 5, 20, -25, 120,
+    };
+    const Disc opponent = other(rootPlayer);
+    const uint64_t rootCells =
+        rootPlayer == Disc::Black ? game.black_ : game.white_;
+    const uint64_t opponentCells =
+        opponent == Disc::Black ? game.black_ : game.white_;
+    const uint64_t rootMoves =
+        legalMovesFor(game.black_, game.white_, rootPlayer);
+    const uint64_t opponentMoves =
+        legalMovesFor(game.black_, game.white_, opponent);
+    if (rootMoves == 0 && opponentMoves == 0) {
+      const int difference =
+          bitCount(rootCells) - bitCount(opponentCells);
+      return difference > 0 ? 100000 + difference
+                            : difference < 0 ? -100000 + difference : 0;
+    }
+
+    int positionScore = 0;
+    for (int index = 0; index < kCellCount; ++index) {
+      const uint64_t bit = 1ULL << index;
+      if ((rootCells & bit) != 0) {
+        positionScore += kPositionWeights[index];
+      } else if ((opponentCells & bit) != 0) {
+        positionScore -= kPositionWeights[index];
+      }
+    }
+    const int mobility =
+        bitCount(rootMoves) - bitCount(opponentMoves);
+    const int discs = bitCount(rootCells) - bitCount(opponentCells);
+    return positionScore + mobility * 8 + discs * 2;
+  }
+
+  static int minimax(const ReversiGame& game, int depth, Disc rootPlayer,
+                     int alpha, int beta) {
+    if (depth == 0 || game.gameOver()) return evaluate(game, rootPlayer);
+
+    const bool maximizing = game.currentPlayer_ == rootPlayer;
+    int bestScore = maximizing ? -kSearchLimit : kSearchLimit;
+    const uint64_t moves = game.legalMoves();
+    for (int index = 0; index < kCellCount; ++index) {
+      if ((moves & (1ULL << index)) == 0) continue;
+      ReversiGame candidate = game;
+      candidate.play(index / kSize, index % kSize);
+      const int candidateScore =
+          minimax(candidate, depth - 1, rootPlayer, alpha, beta);
+      if (maximizing) {
+        if (candidateScore > bestScore) bestScore = candidateScore;
+        if (bestScore > alpha) alpha = bestScore;
+      } else if (candidateScore < bestScore) {
+        bestScore = candidateScore;
+        if (bestScore < beta) beta = bestScore;
+      }
+      if (beta <= alpha) break;
+    }
+    return bestScore;
   }
 };
