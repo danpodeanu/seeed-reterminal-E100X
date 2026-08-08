@@ -61,7 +61,7 @@ Touch controls:
 - Hold a covered tile for 650 ms, then release, to add or remove a flag.
 - Tap a revealed number once that many adjacent tiles are flagged to open the
   other adjacent tiles.
-- Tap **NEW** for another field or **RESET** to replay the current field.
+- Tap **NEW** for another field.
 - Tap the back arrow to save and return to the selection screen.
 
 Front buttons:

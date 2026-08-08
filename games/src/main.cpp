@@ -93,7 +93,7 @@ constexpr Rect kMinesweeperMenuCard = {250, 380, 190, 190};
 constexpr Rect kBackButton = {8, 6, 48, 36};
 constexpr Rect kNewButton = {30, 688, 190, 66};
 constexpr Rect kResetButton = {260, 688, 190, 66};
-constexpr Rect k2048NewButton = {145, 688, 190, 66};
+constexpr Rect kCenteredNewButton = {145, 688, 190, 66};
 constexpr E1005FastRefresh::Region kBatteryStatusRegion = {390, 0, 90, 48};
 constexpr E1005FastRefresh::Region kBoardRegion = {30, 130, 420, 550};
 constexpr E1005FastRefresh::Region k2048BoardRegion = {30, 112, 420, 553};
@@ -420,6 +420,13 @@ void drawCentered(const String& text, int x, int y, int font) {
   epaper.drawString(text, x, y, font);
 }
 
+void drawCenteredNumber(uint32_t value, int x, int y, int font,
+                        uint16_t foreground, uint16_t background) {
+  epaper.setTextDatum(MC_DATUM);
+  epaper.setTextColor(foreground, background, true);
+  epaper.drawNumber(static_cast<long>(value), x, y, font);
+}
+
 void drawGamesLogo(int centerX, int centerY, int width) {
   const int height = width * 5 / 8;
   const int left = centerX - width / 2;
@@ -537,15 +544,12 @@ void draw2048Tile(int x, int y, int slotSize, uint32_t value) {
     epaper.fillRoundRect(tile.x, tile.y, tile.width, tile.height, 8, TFT_WHITE);
     epaper.drawRoundRect(tile.x, tile.y, tile.width, tile.height, 8, TFT_BLACK);
   }
-  epaper.setTextDatum(MC_DATUM);
-  epaper.setTextColor(solid ? TFT_WHITE : TFT_BLACK);
   const int font = value < 100 ? 6 : value < 10000 ? 4 : 2;
   const int centerX = x + slotSize / 2;
   const int centerY = y + slotSize / 2;
-  epaper.drawString(String(value), centerX, centerY, font);
-  if (!solid) {
-    epaper.drawString(String(value), centerX + 1, centerY, font);
-  }
+  drawCenteredNumber(value, centerX, centerY, font,
+                     solid ? TFT_WHITE : TFT_BLACK,
+                     solid ? TFT_BLACK : TFT_WHITE);
 }
 
 void draw2048MenuCard() {
@@ -709,10 +713,10 @@ void drawMinesweeperMenuCard() {
   }
   drawMineSymbol(gridLeft + kPreviewCellSize * 3 / 2,
                  gridTop + kPreviewCellSize * 3 / 2, TFT_BLACK);
-  drawCentered("1", gridLeft + kPreviewCellSize / 2,
-               gridTop + kPreviewCellSize / 2, 4);
-  drawCentered("2", gridLeft + kPreviewCellSize * 5 / 2,
-               gridTop + kPreviewCellSize / 2, 4);
+  drawCenteredNumber(1, gridLeft + kPreviewCellSize / 2,
+                     gridTop + kPreviewCellSize / 2, 6, TFT_BLACK, TFT_WHITE);
+  drawCenteredNumber(2, gridLeft + kPreviewCellSize * 5 / 2,
+                     gridTop + kPreviewCellSize / 2, 6, TFT_BLACK, TFT_WHITE);
   epaper.fillRect(gridLeft, gridTop + kPreviewCellSize * 2,
                   kPreviewCellSize, kPreviewCellSize, TFT_BLACK);
   epaper.drawRect(gridLeft + 4, gridTop + kPreviewCellSize * 2 + 4,
@@ -875,7 +879,7 @@ void draw2048Board() {
 void draw2048() {
   epaper.fillSprite(TFT_WHITE);
   draw2048Board();
-  drawButton(k2048NewButton, "NEW");
+  drawButton(kCenteredNewButton, "NEW");
   drawGameStatusBar("2048");
 }
 
@@ -941,7 +945,7 @@ void drawMinesweeperCell(int row, int column) {
   epaper.drawRect(x, y, kMinesCellSize, kMinesCellSize, TFT_BLACK);
   const int adjacent = minesweeper.adjacentMines(row, column);
   if (adjacent > 0) {
-    drawCentered(String(adjacent), centerX, centerY, 6);
+    drawCenteredNumber(adjacent, centerX, centerY, 6, TFT_BLACK, TFT_WHITE);
   }
 }
 
@@ -958,7 +962,7 @@ void drawMinesweeperBoard() {
   if (minesweeper.won()) {
     drawCentered("FIELD CLEARED!", kScreenWidth / 2, 610, 4);
   } else if (minesweeper.lost()) {
-    drawCentered("MINE HIT - TAP RESET", kScreenWidth / 2, 610, 4);
+    drawCentered("MINE HIT - TAP NEW", kScreenWidth / 2, 610, 4);
   } else {
     drawCentered("6 MINES", kScreenWidth / 2, 610, 4);
   }
@@ -967,8 +971,7 @@ void drawMinesweeperBoard() {
 void drawMinesweeper() {
   epaper.fillSprite(TFT_WHITE);
   drawMinesweeperBoard();
-  drawButton(kNewButton, "NEW");
-  drawButton(kResetButton, "RESET");
+  drawButton(kCenteredNewButton, "NEW");
   drawGameStatusBar("MINESWEEPER");
 }
 
@@ -1214,14 +1217,9 @@ bool handleMinesweeperTouchStart(const Gt911Touch::Point& point) {
     showMenu();
     return true;
   }
-  if (kNewButton.contains(point.x, point.y)) {
+  if (kCenteredNewButton.contains(point.x, point.y)) {
     startNewMinesweeper();
     updateMinesweeper("new Minesweeper game");
-    return true;
-  }
-  if (kResetButton.contains(point.x, point.y)) {
-    minesweeper.reset();
-    updateMinesweeper("reset Minesweeper game");
     return true;
   }
   return point.x < kMinesGridLeft ||
@@ -1264,7 +1262,7 @@ bool handle2048TouchStart(const Gt911Touch::Point& point) {
     showMenu();
     return true;
   }
-  if (k2048NewButton.contains(point.x, point.y)) {
+  if (kCenteredNewButton.contains(point.x, point.y)) {
     startNew2048();
     update2048("new 2048 game");
     return true;
