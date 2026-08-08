@@ -263,9 +263,6 @@ void drawButton(const Rect& rect, const char* label) {
 void drawMenu() {
   epaper.fillSprite(TFT_WHITE);
   drawGamesLogo(kScreenWidth / 2, 60, 110);
-  drawCentered("GAMES", kScreenWidth / 2, 121, 4);
-  drawCentered("Quiet games", kScreenWidth / 2, 157, 4);
-  drawCentered("for your Seeed Sticky", kScreenWidth / 2, 188, 4);
 
   epaper.fillRoundRect(kMenuGameCard.x, kMenuGameCard.y, kMenuGameCard.width,
                       kMenuGameCard.height, 14, TFT_BLACK);
@@ -278,8 +275,6 @@ void drawMenu() {
   epaper.drawString("Turn every light off", kScreenWidth / 2, 335, 4);
   epaper.drawString("TAP TO PLAY", kScreenWidth / 2, 378, 4);
 
-  drawCentered("More games", kScreenWidth / 2, 468, 4);
-  drawCentered("will appear here", kScreenWidth / 2, 502, 4);
   drawCentered("OK: SLEEP", kScreenWidth / 2, 748, 4);
 }
 
@@ -291,9 +286,6 @@ void drawStatus(const char* title, const char* detail) {
 
 void drawSleepSplash() {
   epaper.fillSprite(TFT_WHITE);
-  epaper.fillTriangle(kScreenWidth / 2, 18, kScreenWidth / 2 - 16, 46,
-                      kScreenWidth / 2 + 16, 46, TFT_BLACK);
-  epaper.fillRect(kScreenWidth / 2 - 5, 42, 10, 58, TFT_BLACK);
   drawCentered("Resume", kScreenWidth / 2, 130, 4);
   drawCentered("PRESS OK", kScreenWidth / 2, 172, 4);
   drawGamesLogo(kScreenWidth / 2, 390, 280);
