@@ -7,7 +7,7 @@
 //   E1002 : six-colour Spectra E6.               800x480 landscape.
 //   E1003 : sixteen grey shades (Gray16).        1872x1404 landscape.
 //   E1004 : six-colour Spectra E6.               1200x1600 portrait.
-//   E1005 : monochrome + interactive GT911 test. 480x800 portrait.
+//   E1005 : four grey shades + interactive GT911 test. 480x800 portrait.
 //
 // Layout (all panels):
 //
@@ -21,7 +21,7 @@
 //                 grayscale ramp using intermediate codes if the panel
 //                 has more than two greys.
 //
-// After the first refresh, every front button beeps. The primary green/OK
+// After the refresh benchmark, every front button beeps. The primary green/OK
 // button enters deep sleep; any front button wakes, beeps, and redraws.
 
 #include <Arduino.h>
@@ -108,13 +108,13 @@ constexpr const char* PALETTE_NAMES[] = {"W", "Y", "G", "B", "R", "K"};
 constexpr bool PALETTE_DARK[] = {false, false, false, true, true, true};
 constexpr uint32_t RAMP[] = {TFT_WHITE, TFT_BLACK};
 #elif RETERMINAL_MODEL == 1005
-constexpr uint32_t PANEL_BLACK = TFT_BLACK;
-constexpr uint32_t PANEL_WHITE = TFT_WHITE;
-constexpr const char* PANEL_LABEL = "reTerminal Sticky E1005 - Mono + Touch";
-constexpr uint32_t PALETTE[] = {TFT_WHITE, TFT_BLACK};
-constexpr const char* PALETTE_NAMES[] = {"W", "K"};
-constexpr bool PALETTE_DARK[] = {false, true};
-constexpr uint32_t RAMP[] = {TFT_WHITE, TFT_BLACK};
+constexpr uint32_t PANEL_BLACK = TFT_GRAY_0;
+constexpr uint32_t PANEL_WHITE = TFT_GRAY_3;
+constexpr const char* PANEL_LABEL = "reTerminal Sticky E1005 - Gray4 + Touch";
+constexpr uint32_t PALETTE[] = {TFT_GRAY_3, TFT_GRAY_2, TFT_GRAY_1, TFT_GRAY_0};
+constexpr const char* PALETTE_NAMES[] = {"W", "L", "D", "K"};
+constexpr bool PALETTE_DARK[] = {false, false, true, true};
+constexpr uint32_t RAMP[] = {TFT_GRAY_3, TFT_GRAY_2, TFT_GRAY_1, TFT_GRAY_0};
 #else
 #error "RETERMINAL_MODEL must be 1001, 1002, 1003, 1004, or 1005"
 #endif
@@ -316,6 +316,7 @@ Gt911Touch touch;
 E1005FastRefresh fastRefresh(epaper);
 bool touchReady = false;
 bool touchActive = false;
+uint32_t touchShadeIndex = 0;
 
 struct PatternRegion {
   int left;
@@ -354,74 +355,89 @@ PatternRegion touchedPatternRegion(const Gt911Touch::Point& point) {
   return columnRegion(point.x, rampTop, PANEL_HEIGHT - rampTop, RAMP_COUNT);
 }
 
-bool invertTouchRegion(int left, int top, int width, int height) {
-  auto* framebuffer = static_cast<uint8_t*>(epaper.getPointer());
-  if (!framebuffer) return false;
-
-  constexpr int kNativeStrideBytes = PANEL_HEIGHT / 8;
-  for (int y = top; y < top + height; ++y) {
-    const int nativeX = PANEL_HEIGHT - y - 1;
-    const uint8_t mask = static_cast<uint8_t>(0x80U >> (nativeX & 7));
-    for (int x = left; x < left + width; ++x) {
-      const int nativeY = x;
-      framebuffer[nativeY * kNativeStrideBytes + nativeX / 8] ^= mask;
+void renderMonoBenchmarkPattern() {
+  epaper.fillSprite(TFT_WHITE);
+  constexpr int kBlockSize = 80;
+  for (int y = 0; y < PANEL_HEIGHT; y += kBlockSize) {
+    for (int x = 0; x < PANEL_WIDTH; x += kBlockSize) {
+      if (((x / kBlockSize) + (y / kBlockSize)) % 2 != 0) {
+        epaper.fillRect(x, y, kBlockSize, kBlockSize, TFT_BLACK);
+      }
     }
   }
-  return true;
+}
+
+void runE1005RefreshBenchmark() {
+  renderMonoBenchmarkPattern();
+  LOG.println("[benchmark] monochrome full refresh starting");
+  const uint32_t monoFullStartedUs = micros();
+  epaper.update();
+  const uint32_t monoFullUs = micros() - monoFullStartedUs;
+  LOG.printf("[benchmark] monochrome full refresh=%lu us\n",
+             static_cast<unsigned long>(monoFullUs));
+
+  uint32_t monoFastUs = 0;
+  const E1005FastRefresh::Result baselineResult = fastRefresh.begin();
+  if (baselineResult == E1005FastRefresh::Result::Ok) {
+    constexpr E1005FastRefresh::Region kGameRegion = {30, 130, 420, 550};
+    epaper.fillRect(kGameRegion.x, kGameRegion.y, kGameRegion.width,
+                   kGameRegion.height, TFT_BLACK);
+    E1005FastRefresh::Timing timing;
+    const E1005FastRefresh::Result result =
+        fastRefresh.refresh(kGameRegion, timing);
+    if (result == E1005FastRefresh::Result::Ok) {
+      monoFastUs = timing.totalUs;
+      LOG.printf(
+          "[benchmark] monochrome fast 420x550 refresh=%lu us "
+          "(prepare=%lu transfer=%lu panel=%lu reseed=%lu)\n",
+          static_cast<unsigned long>(timing.totalUs),
+          static_cast<unsigned long>(timing.prepareUs),
+          static_cast<unsigned long>(timing.transferUs),
+          static_cast<unsigned long>(timing.panelUs),
+          static_cast<unsigned long>(timing.reseedUs));
+    } else {
+      LOG.printf("[benchmark] monochrome fast refresh failed: %s\n",
+                 E1005FastRefresh::resultMessage(result));
+    }
+  } else {
+    LOG.printf("[benchmark] monochrome baseline failed: %s\n",
+               E1005FastRefresh::resultMessage(baselineResult));
+  }
+  fastRefresh.end();
+  epaper.sleep();
+
+  epaper.initGrayMode(GRAY_LEVEL4);
+  epaper.setRotation(panel_traits::DISPLAY_ROTATION);
+  renderPattern();
+  LOG.println("[benchmark] Gray4 full refresh starting");
+  const uint32_t grayFullStartedUs = micros();
+  epaper.update();
+  const uint32_t grayFullUs = micros() - grayFullStartedUs;
+  LOG.printf("[benchmark] Gray4 full refresh=%lu us\n",
+             static_cast<unsigned long>(grayFullUs));
+  if (monoFastUs != 0) {
+    const uint32_t slowdownTenths =
+        static_cast<uint32_t>((static_cast<uint64_t>(grayFullUs) * 10U +
+                               monoFastUs / 2U) /
+                              monoFastUs);
+    LOG.printf(
+        "[benchmark] Gray4 / monochrome-fast slowdown=%lu.%lux\n",
+        static_cast<unsigned long>(slowdownTenths / 10U),
+        static_cast<unsigned long>(slowdownTenths % 10U));
+  }
 }
 
 void showTouchFeedback(const Gt911Touch::Point& point,
                        uint32_t touchDetectedUs) {
   const PatternRegion region = touchedPatternRegion(point);
-  const E1005FastRefresh::Region refreshRegion = {
-      region.left, region.top, region.width, region.height};
-  invertTouchRegion(region.left, region.top, region.width, region.height);
-  E1005FastRefresh::Timing invertedTiming;
-  const E1005FastRefresh::Result invertedResult =
-      fastRefresh.refresh(refreshRegion, invertedTiming);
-  const bool invertedOk =
-      invertedResult == E1005FastRefresh::Result::Ok;
-  const uint32_t invertedCompleteUs = micros();
-
-  E1005FastRefresh::Timing restoredTiming;
-  const uint32_t restoreStartedUs = micros();
-  invertTouchRegion(region.left, region.top, region.width, region.height);
-  const E1005FastRefresh::Result restoredResult =
-      invertedOk ? fastRefresh.refresh(refreshRegion, restoredTiming)
-                 : invertedResult;
-  const bool restoredOk =
-      restoredResult == E1005FastRefresh::Result::Ok;
-  const uint32_t restoredCompleteUs = micros();
+  const uint32_t shade = PALETTE[touchShadeIndex++ % PALETTE_COUNT];
+  epaper.fillRect(region.left, region.top, region.width, region.height, shade);
+  epaper.update();
+  const uint32_t completedUs = micros();
   LOG.printf(
-      "[touch] invert latency=%lu us "
-      "(prepare=%lu transfer=%lu panel=%lu reseed=%lu)\n",
-      static_cast<unsigned long>(invertedCompleteUs - touchDetectedUs),
-      static_cast<unsigned long>(invertedTiming.prepareUs),
-      static_cast<unsigned long>(invertedTiming.transferUs),
-      static_cast<unsigned long>(invertedTiming.panelUs),
-      static_cast<unsigned long>(invertedTiming.reseedUs));
-  if (invertedOk) {
-    LOG.printf(
-        "[touch] restore latency=%lu us "
-        "(transfer=%lu panel=%lu reseed=%lu), "
-        "touch cycle=%lu us\n",
-        static_cast<unsigned long>(restoredCompleteUs - restoreStartedUs),
-        static_cast<unsigned long>(restoredTiming.transferUs),
-        static_cast<unsigned long>(restoredTiming.panelUs),
-        static_cast<unsigned long>(restoredTiming.reseedUs),
-        static_cast<unsigned long>(restoredCompleteUs - touchDetectedUs));
-  }
-  if (!restoredOk) {
-    LOG.printf("[panel-test] partial refresh failed: %s\n",
-               E1005FastRefresh::resultMessage(restoredResult));
-    LOG.println("[panel-test] restoring pattern with a full refresh");
-    epaper.sleep();
-    epaper.update();
-    if (fastRefresh.begin() != E1005FastRefresh::Result::Ok) {
-      touchReady = false;
-      LOG.println("[panel-test] cannot restore partial refresh baseline");
-    }
-  }
+      "[touch] Gray4 refresh latency=%lu us, shade=%lu\n",
+      static_cast<unsigned long>(completedUs - touchDetectedUs),
+      static_cast<unsigned long>(shade));
 }
 
 void pollTouch() {
@@ -509,6 +525,9 @@ void setup() {
   delay(board::SD_POWER_SETTLE_MS);
 #endif
   epaper_setup::begin(epaper);
+#if RETERMINAL_MODEL == 1005
+  runE1005RefreshBenchmark();
+#else
 #if RETERMINAL_MODEL == 1001
   epaper.initGrayMode(GRAY_LEVEL4);
 #elif RETERMINAL_MODEL == 1003
@@ -520,6 +539,7 @@ void setup() {
   renderPattern();
   LOG.println("[panel-test] refreshing panel");
   epaper.update();
+#endif
 
   // A second, higher-pitched beep marks a completed refresh. Together
   // the pair makes it obvious over serial-less USB whether we made it
@@ -528,19 +548,12 @@ void setup() {
   configureButtons();
 
 #if RETERMINAL_MODEL == 1005
-  // The initial full refresh sleeps the controller. Wake it now so touch
-  // latency excludes reset, then seed both RAM planes for differential updates.
-  LOG.println("[panel-test] E1005 partial refresh SPI=40 MHz");
-  const bool baselineReady =
-      fastRefresh.begin() == E1005FastRefresh::Result::Ok;
-  touchReady = baselineReady && touch.begin(touchWire);
-  if (!baselineReady) {
-    LOG.println("[panel-test] cannot allocate partial refresh baseline");
-  } else if (touchReady) {
+  touchReady = touch.begin(touchWire);
+  if (touchReady) {
     LOG.printf("[touch] GT%s ready at 0x%02X, sensor=%ux%u\n",
                touch.productId(), touch.address(), touch.sensorWidth(),
                touch.sensorHeight());
-    LOG.println("[panel-test] touch the display to invert that area");
+    LOG.println("[panel-test] touch a block to cycle its native Gray4 shade");
   } else {
     LOG.println("[touch] GT911 initialization failed");
   }

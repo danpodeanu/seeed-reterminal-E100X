@@ -17,15 +17,12 @@ for:
 
 After drawing, every front-button press beeps. Press and release the primary
 **GREEN** button on E1001-E1004, or **OK** on E1005, to enter deep sleep; any
-front button wakes with a beep and redraws the test. On E1005, each GT911
-touch is also logged and temporarily inverts the complete pattern
-block containing the contact using two back-to-back partial refreshes. There
-is no intentional hold between inversion and restoration, and serial output
-reports touch-to-inversion, transfer, panel-busy, restoration, and total-cycle
-latencies in microseconds. The SSD1677 touch path transfers only the
-byte-aligned touched window, uses bulk 40 MHz SPI writes, and keeps the
-controller awake after the initial full refresh. It reseeds both differential
-RAM planes after every waveform so repeated touches remain isolated.
+front button wakes with a beep and redraws the test. On E1005, startup first
+benchmarks the existing monochrome full refresh and a game-sized 420x550 fast
+partial refresh, then enables native Gray4 and times the equivalent full-screen
+update. The Gray4 pattern remains displayed. Each GT911 touch cycles the
+touched block through the four native shades, performs the required full Gray4
+refresh, and logs its touch-to-display latency.
 An inserted E1005 SD card can remain in place: the sketch powers and
 deselects it so it cannot interfere with the display's shared SPI bus.
 E1005 portrait output keeps the USB connector at the bottom.
@@ -38,7 +35,7 @@ E1005 portrait output keeps the USB connector at the bottom.
 | E1002  | ED2208 800x480  | Spectra E6 (6 col) | W/Y/G/B/R/K SMPTE bars    |
 | E1003  | ED103TC2 1872x1404 | Gray16 (16 shades) | 16 grey bars + smooth ramp |
 | E1004  | T133A01 1200x1600 | Spectra E6 (6 col) | W/Y/G/B/R/K SMPTE bars    |
-| E1005  | SSD1677 800x480, rotated portrait | Monochrome | W/K bars + interactive GT911 inversion |
+| E1005  | SSD1677 800x480, rotated portrait | Gray4 (4 shades) | 4 grey bars + interactive GT911 shading |
 
 All patterns use the standard SMPTE layout:
 
@@ -73,14 +70,21 @@ Serial output on UART1 (`GPIO43/44`, same as the viewer apps):
 [panel-test] press any button to beep; press and release GREEN to sleep
 ```
 
-E1005 additionally reports GT911 startup and touch coordinates:
+E1005 additionally reports the on-device refresh comparison, GT911 startup,
+touch coordinates, and subsequent Gray4 touch-refresh latency:
 
 ```
-[touch] GT911 ready at 0x5D, sensor=480x800
-[touch] invert latency=643690 us (prepare=15967 transfer=8914 panel=610709 reseed=8109)
-[touch] restore latency=626999 us (transfer=8498 panel=610403 reseed=8109), touch cycle=1270691 us
-[touch] x=241 y=397 size=18 id=0
+[benchmark] monochrome full refresh=2887639 us
+[benchmark] monochrome fast 420x550 refresh=646287 us (prepare=4892 transfer=15558 panel=610479 reseed=15372)
+[benchmark] Gray4 full refresh=2524928 us
+[benchmark] Gray4 / monochrome-fast slowdown=3.9x
+[touch] GT911 ready at 0x14, sensor=480x800
 ```
+
+The sample above was measured on an E1005 at 40 MHz SPI. Native Gray4 was
+slightly faster than the driver's normal monochrome full-screen waveform, but
+interactive game updates use the differential fast path. Against that path,
+Gray4 was 3.9 times slower because the Seeed driver requires a full update.
 
 ## Reference
 
