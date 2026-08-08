@@ -38,9 +38,8 @@ class MiniMinesweeperGame {
     }
     const int index = row * kSize + column;
     const uint64_t bit = 1ULL << index;
-    if ((flagged_ & bit) != 0 || (revealed_ & bit) != 0) {
-      return RevealResult::NoChange;
-    }
+    if ((flagged_ & bit) != 0) return RevealResult::NoChange;
+    if ((revealed_ & bit) != 0) return revealAdjacent(row, column);
 
     if (!generated_) generate(index);
     if ((mines_ & bit) != 0) {
@@ -231,5 +230,42 @@ class MiniMinesweeperGame {
         }
       }
     }
+  }
+
+  RevealResult revealAdjacent(int row, int column) {
+    const int requiredFlags = adjacentMines(row, column);
+    if (requiredFlags == 0) return RevealResult::NoChange;
+
+    int adjacentFlags = 0;
+    for (int rowOffset = -1; rowOffset <= 1; ++rowOffset) {
+      for (int columnOffset = -1; columnOffset <= 1; ++columnOffset) {
+        if (isFlagged(row + rowOffset, column + columnOffset)) {
+          ++adjacentFlags;
+        }
+      }
+    }
+    if (adjacentFlags != requiredFlags) return RevealResult::NoChange;
+
+    bool changed = false;
+    for (int rowOffset = -1; rowOffset <= 1; ++rowOffset) {
+      for (int columnOffset = -1; columnOffset <= 1; ++columnOffset) {
+        const int neighborRow = row + rowOffset;
+        const int neighborColumn = column + columnOffset;
+        if (!validCell(neighborRow, neighborColumn) ||
+            isFlagged(neighborRow, neighborColumn) ||
+            isRevealed(neighborRow, neighborColumn)) {
+          continue;
+        }
+        const int neighbor = neighborRow * kSize + neighborColumn;
+        if (isMine(neighborRow, neighborColumn)) {
+          revealed_ |= 1ULL << neighbor;
+          return RevealResult::Lost;
+        }
+        revealSafeArea(neighbor);
+        changed = true;
+      }
+    }
+    if (!changed) return RevealResult::NoChange;
+    return won() ? RevealResult::Won : RevealResult::Revealed;
   }
 };

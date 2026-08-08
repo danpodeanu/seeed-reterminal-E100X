@@ -59,6 +59,8 @@ Touch controls:
 - Tap the Minesweeper icon on the game-selection screen to play or resume.
 - Tap a covered tile to reveal it.
 - Hold a covered tile for 650 ms, then release, to add or remove a flag.
+- Tap a revealed number once that many adjacent tiles are flagged to open the
+  other adjacent tiles.
 - Tap **NEW** for another field or **RESET** to replay the current field.
 - Tap the back arrow to save and return to the selection screen.
 

@@ -463,6 +463,53 @@ void test_minesweeper_invalid_snapshot_is_rejected() {
   TEST_ASSERT_FALSE(restored.restore(snapshot));
 }
 
+MiniMinesweeperGame::Snapshot minesweeperChordSnapshot(uint64_t flags) {
+  MiniMinesweeperGame::Snapshot snapshot = {};
+  snapshot.mines = (1ULL << 0) | (1ULL << 5) | (1ULL << 14) |
+                   (1ULL << 21) | (1ULL << 30) | (1ULL << 35);
+  snapshot.revealed = 1ULL << 7;
+  snapshot.flagged = flags;
+  snapshot.seed = 1;
+  snapshot.generated = 1;
+  return snapshot;
+}
+
+void test_minesweeper_revealed_number_opens_neighbors_when_fulfilled() {
+  MiniMinesweeperGame game;
+  TEST_ASSERT_TRUE(
+      game.restore(minesweeperChordSnapshot((1ULL << 0) | (1ULL << 14))));
+  TEST_ASSERT_EQUAL_INT(2, game.adjacentMines(1, 1));
+
+  const MiniMinesweeperGame::RevealResult result = game.reveal(1, 1);
+
+  TEST_ASSERT_NOT_EQUAL(MiniMinesweeperGame::RevealResult::NoChange, result);
+  TEST_ASSERT_NOT_EQUAL(MiniMinesweeperGame::RevealResult::Lost, result);
+  TEST_ASSERT_TRUE(game.isRevealed(0, 1));
+  TEST_ASSERT_TRUE(game.isRevealed(1, 0));
+  TEST_ASSERT_TRUE(game.isRevealed(1, 2));
+  TEST_ASSERT_FALSE(game.lost());
+}
+
+void test_minesweeper_revealed_number_waits_for_enough_flags() {
+  MiniMinesweeperGame game;
+  TEST_ASSERT_TRUE(game.restore(minesweeperChordSnapshot(1ULL << 0)));
+
+  TEST_ASSERT_EQUAL(MiniMinesweeperGame::RevealResult::NoChange,
+                    game.reveal(1, 1));
+  TEST_ASSERT_FALSE(game.isRevealed(0, 1));
+}
+
+void test_minesweeper_incorrect_fulfilled_flags_can_hit_mine() {
+  MiniMinesweeperGame game;
+  TEST_ASSERT_TRUE(
+      game.restore(minesweeperChordSnapshot((1ULL << 0) | (1ULL << 1))));
+
+  TEST_ASSERT_EQUAL(MiniMinesweeperGame::RevealResult::Lost,
+                    game.reveal(1, 1));
+  TEST_ASSERT_TRUE(game.isRevealed(2, 2));
+  TEST_ASSERT_TRUE(game.lost());
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_corner_press_toggles_three_cells);
@@ -497,5 +544,8 @@ int main(int, char**) {
   RUN_TEST(test_minesweeper_reset_keeps_board_and_clears_progress);
   RUN_TEST(test_minesweeper_snapshot_restores_progress);
   RUN_TEST(test_minesweeper_invalid_snapshot_is_rejected);
+  RUN_TEST(test_minesweeper_revealed_number_opens_neighbors_when_fulfilled);
+  RUN_TEST(test_minesweeper_revealed_number_waits_for_enough_flags);
+  RUN_TEST(test_minesweeper_incorrect_fulfilled_flags_can_hit_mine);
   return UNITY_END();
 }

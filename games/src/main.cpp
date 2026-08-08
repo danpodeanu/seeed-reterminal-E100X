@@ -941,7 +941,7 @@ void drawMinesweeperCell(int row, int column) {
   epaper.drawRect(x, y, kMinesCellSize, kMinesCellSize, TFT_BLACK);
   const int adjacent = minesweeper.adjacentMines(row, column);
   if (adjacent > 0) {
-    drawCentered(String(adjacent), centerX, centerY, 4);
+    drawCentered(String(adjacent), centerX, centerY, 6);
   }
 }
 
