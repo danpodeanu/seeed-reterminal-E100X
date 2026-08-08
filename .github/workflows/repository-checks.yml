@@ -37,6 +37,7 @@ jobs:
           test -f games/README.md
           test -f games/platformio.ini
           test -f games/platformio-test.ini
+          test -f games/src/game_2048.h
           test -f games/src/lights_out_game.h
           test -f games/test/test_lights_out/test_main.cpp
           test -f photo-viewer/tools/prepare_photos.py

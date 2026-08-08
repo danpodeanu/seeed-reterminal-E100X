@@ -1,5 +1,6 @@
 #include <unity.h>
 
+#include "game_2048.h"
 #include "lights_out_game.h"
 
 void setUp() {}
@@ -105,6 +106,132 @@ void test_invalid_snapshot_is_rejected() {
   TEST_ASSERT_FALSE(game.restore(invalid));
 }
 
+Game2048::Snapshot snapshot2048With(
+    const uint32_t (&cells)[Game2048::kCellCount], uint32_t score = 0,
+    uint32_t bestScore = 0) {
+  Game2048::Snapshot snapshot = {};
+  for (int index = 0; index < Game2048::kCellCount; ++index) {
+    snapshot.cells[index] = cells[index];
+  }
+  snapshot.score = score;
+  snapshot.bestScore = bestScore;
+  return snapshot;
+}
+
+void test_2048_start_adds_two_tiles() {
+  Game2048 game;
+  game.start(0, 1);
+
+  int populated = 0;
+  for (int row = 0; row < Game2048::kSize; ++row) {
+    for (int column = 0; column < Game2048::kSize; ++column) {
+      if (game.at(row, column) != 0) ++populated;
+    }
+  }
+  TEST_ASSERT_EQUAL_INT(2, populated);
+}
+
+void test_2048_left_move_merges_each_pair_once() {
+  constexpr uint32_t cells[Game2048::kCellCount] = {
+      2, 2, 2, 2,
+      0, 0, 0, 0,
+      0, 0, 0, 0,
+      0, 0, 0, 0,
+  };
+  Game2048 game;
+  TEST_ASSERT_TRUE(game.restore(snapshot2048With(cells)));
+  TEST_ASSERT_TRUE(game.move(Game2048::Direction::Left, 15));
+
+  TEST_ASSERT_EQUAL_UINT32(4, game.at(0, 0));
+  TEST_ASSERT_EQUAL_UINT32(4, game.at(0, 1));
+  TEST_ASSERT_EQUAL_UINT32(8, game.score());
+}
+
+void test_2048_right_move_preserves_direction() {
+  constexpr uint32_t cells[Game2048::kCellCount] = {
+      2, 0, 2, 4,
+      0, 0, 0, 0,
+      0, 0, 0, 0,
+      0, 0, 0, 0,
+  };
+  Game2048 game;
+  TEST_ASSERT_TRUE(game.restore(snapshot2048With(cells)));
+  TEST_ASSERT_TRUE(game.move(Game2048::Direction::Right, 0));
+
+  TEST_ASSERT_EQUAL_UINT32(4, game.at(0, 2));
+  TEST_ASSERT_EQUAL_UINT32(4, game.at(0, 3));
+}
+
+void test_2048_up_move_merges_columns() {
+  constexpr uint32_t cells[Game2048::kCellCount] = {
+      2, 0, 0, 0,
+      2, 0, 0, 0,
+      4, 0, 0, 0,
+      4, 0, 0, 0,
+  };
+  Game2048 game;
+  TEST_ASSERT_TRUE(game.restore(snapshot2048With(cells)));
+  TEST_ASSERT_TRUE(game.move(Game2048::Direction::Up, 15));
+
+  TEST_ASSERT_EQUAL_UINT32(4, game.at(0, 0));
+  TEST_ASSERT_EQUAL_UINT32(8, game.at(1, 0));
+  TEST_ASSERT_EQUAL_UINT32(12, game.score());
+}
+
+void test_2048_no_op_move_does_not_add_tile() {
+  constexpr uint32_t cells[Game2048::kCellCount] = {
+      2, 4, 8, 16,
+      0, 0, 0, 0,
+      0, 0, 0, 0,
+      0, 0, 0, 0,
+  };
+  Game2048 game;
+  TEST_ASSERT_TRUE(game.restore(snapshot2048With(cells)));
+  TEST_ASSERT_FALSE(game.move(Game2048::Direction::Left, 7));
+
+  TEST_ASSERT_EQUAL_UINT32(0, game.at(1, 0));
+  TEST_ASSERT_EQUAL_UINT32(0, game.score());
+}
+
+void test_2048_full_board_without_merges_is_game_over() {
+  constexpr uint32_t cells[Game2048::kCellCount] = {
+      2, 4, 2, 4,
+      4, 2, 4, 2,
+      2, 4, 2, 4,
+      4, 2, 4, 8,
+  };
+  Game2048 game;
+  TEST_ASSERT_TRUE(game.restore(snapshot2048With(cells)));
+  TEST_ASSERT_TRUE(game.gameOver());
+  TEST_ASSERT_FALSE(game.move(Game2048::Direction::Left, 0));
+}
+
+void test_2048_snapshot_restores_score_and_win() {
+  constexpr uint32_t cells[Game2048::kCellCount] = {
+      2048, 4, 0, 0,
+      0, 0, 0, 0,
+      0, 0, 0, 0,
+      0, 0, 0, 0,
+  };
+  Game2048 game;
+  TEST_ASSERT_TRUE(game.restore(snapshot2048With(cells, 4096, 8192)));
+
+  TEST_ASSERT_TRUE(game.won());
+  TEST_ASSERT_EQUAL_UINT32(4096, game.score());
+  TEST_ASSERT_EQUAL_UINT32(8192, game.bestScore());
+}
+
+void test_2048_invalid_snapshot_is_rejected() {
+  constexpr uint32_t cells[Game2048::kCellCount] = {
+      3, 0, 0, 0,
+      0, 0, 0, 0,
+      0, 0, 0, 0,
+      0, 0, 0, 0,
+  };
+  Game2048 game;
+  TEST_ASSERT_FALSE(game.restore(snapshot2048With(cells)));
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_corner_press_toggles_three_cells);
@@ -115,5 +242,13 @@ int main(int, char**) {
   RUN_TEST(test_zero_scramble_still_creates_a_puzzle);
   RUN_TEST(test_snapshot_restores_board_and_moves);
   RUN_TEST(test_invalid_snapshot_is_rejected);
+  RUN_TEST(test_2048_start_adds_two_tiles);
+  RUN_TEST(test_2048_left_move_merges_each_pair_once);
+  RUN_TEST(test_2048_right_move_preserves_direction);
+  RUN_TEST(test_2048_up_move_merges_columns);
+  RUN_TEST(test_2048_no_op_move_does_not_add_tile);
+  RUN_TEST(test_2048_full_board_without_merges_is_game_over);
+  RUN_TEST(test_2048_snapshot_restores_score_and_win);
+  RUN_TEST(test_2048_invalid_snapshot_is_rejected);
   return UNITY_END();
 }

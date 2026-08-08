@@ -20,11 +20,25 @@ Touch controls:
 - Tap **GAMES** to save the current puzzle and return to the selection screen.
   Opening Lights Out again resumes that puzzle.
 
+### 2048
+
+Swipe the four-by-four board up, down, left, or right to slide matching tiles
+together. A new 2 or 4 tile appears after each move that changes the board.
+The score, best score, board, win state, and game-over state are restored when
+you return from the selection screen or deep sleep.
+
+Touch controls:
+
+- Tap **2048** on the game-selection screen to play or resume.
+- Swipe across the board to move all tiles.
+- Tap **NEW** to start over while retaining the best score.
+- Tap **GAMES** to save and return to the selection screen.
+
 Front buttons:
 
 - On the selection screen, a short **OK** press does nothing.
 - While playing, a short **OK** press saves the game and returns to the
-  selection screen.
+  selection screen from either game.
 - Hold **OK** for 1.2 seconds anywhere to save and enter deep sleep. Press
   **OK** again to resume.
 - **UP** and **DOWN** are unused.

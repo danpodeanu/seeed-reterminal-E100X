@@ -16,6 +16,7 @@
 #include "driver.h"
 #include "e1005_fast_refresh.h"
 #include "epaper_setup.h"
+#include "game_2048.h"
 #include "gt911_touch.h"
 #include "hardware.h"
 #include "lights_out_game.h"
@@ -40,14 +41,20 @@ constexpr int kGridLeft = 40;
 constexpr int kGridTop = 150;
 constexpr int kCellSize = 80;
 constexpr int kGridSize = kCellSize * LightsOutGame::kSize;
+constexpr int k2048GridLeft = 40;
+constexpr int k2048GridTop = 150;
+constexpr int k2048CellSize = 100;
+constexpr int k2048GridSize = k2048CellSize * Game2048::kSize;
+constexpr int kSwipeThreshold = 45;
 constexpr uint32_t kButtonDebounceMs = 30;
 constexpr uint32_t kButtonLongPressMs = 1200;
 constexpr uint32_t kBatteryCheckIntervalMs = 60000;
 constexpr uint32_t kInactivitySleepMs = 5UL * 60UL * 1000UL;
 constexpr int kLowBatteryThresholdPct = 10;
 constexpr uint32_t kPersistedStateMagic = 0x47414D45;
-constexpr uint16_t kPersistedStateVersion = 2;
+constexpr uint16_t kPersistedStateVersion = 3;
 constexpr uint8_t kLightsOutSavedFlag = 1U << 0;
+constexpr uint8_t k2048SavedFlag = 1U << 1;
 
 struct Rect {
   int x;
@@ -61,17 +68,21 @@ struct Rect {
   }
 };
 
-constexpr Rect kMenuGameCard = {40, 165, 190, 190};
+constexpr Rect kLightsOutMenuCard = {40, 165, 190, 190};
+constexpr Rect k2048MenuCard = {250, 165, 190, 190};
 constexpr Rect kBackButton = {24, 24, 104, 54};
 constexpr Rect kNewButton = {30, 688, 190, 66};
 constexpr Rect kResetButton = {260, 688, 190, 66};
+constexpr Rect k2048NewButton = {145, 688, 190, 66};
 constexpr E1005FastRefresh::Region kFullScreen = {0, 0, kScreenWidth,
                                                    kScreenHeight};
 constexpr E1005FastRefresh::Region kBoardRegion = {30, 130, 420, 550};
+constexpr E1005FastRefresh::Region k2048BoardRegion = {30, 95, 420, 570};
 
 enum class Screen {
   Menu,
   LightsOut,
+  Game2048,
 };
 
 struct PersistedState {
@@ -80,6 +91,7 @@ struct PersistedState {
   uint8_t screen;
   uint8_t flags;
   LightsOutGame::Snapshot lightsOut;
+  Game2048::Snapshot game2048;
   uint32_t checksum;
 };
 
@@ -120,13 +132,18 @@ TwoWire touchWire(1);
 Gt911Touch touch;
 E1005FastRefresh fastRefresh(epaper);
 LightsOutGame lightsOut;
+Game2048 game2048;
 Screen currentScreen = Screen::Menu;
 bool touchReady = false;
 bool touchActive = false;
+bool touchActionHandled = false;
 bool lightSleepReady = false;
 bool lightsOutSaved = false;
+bool game2048Saved = false;
 uint32_t nextBatteryCheckAtMs = 0;
 uint32_t lastActivityAtMs = 0;
+Gt911Touch::Point touchStart = {};
+Gt911Touch::Point touchLast = {};
 
 void configureButtons() {
   for (ButtonState& button : buttons) {
@@ -203,6 +220,10 @@ void saveResumeState() {
     state.flags |= kLightsOutSavedFlag;
     state.lightsOut = lightsOut.snapshot();
   }
+  if (game2048Saved) {
+    state.flags |= k2048SavedFlag;
+    state.game2048 = game2048.snapshot();
+  }
   state.checksum = stateChecksum(state);
   persistedState = state;
 }
@@ -214,8 +235,8 @@ bool restoreResumeState() {
   if (state.magic != kPersistedStateMagic ||
       state.version != kPersistedStateVersion ||
       state.checksum != stateChecksum(state) ||
-      state.screen > static_cast<uint8_t>(Screen::LightsOut) ||
-      (state.flags & ~kLightsOutSavedFlag) != 0) {
+      state.screen > static_cast<uint8_t>(Screen::Game2048) ||
+      (state.flags & ~(kLightsOutSavedFlag | k2048SavedFlag)) != 0) {
     LOG.println("[games] saved resume state is invalid");
     return false;
   }
@@ -230,7 +251,17 @@ bool restoreResumeState() {
     LOG.println("[games] saved screen has no Lights Out game");
     return false;
   }
+  const bool has2048Save = (state.flags & k2048SavedFlag) != 0;
+  if (has2048Save && !game2048.restore(state.game2048)) {
+    LOG.println("[games] saved 2048 state is invalid");
+    return false;
+  }
+  if (savedScreen == Screen::Game2048 && !has2048Save) {
+    LOG.println("[games] saved screen has no 2048 game");
+    return false;
+  }
   lightsOutSaved = hasLightsOutSave;
+  game2048Saved = has2048Save;
   currentScreen = savedScreen;
   return true;
 }
@@ -401,20 +432,20 @@ void drawLightsOutCell(int x, int y, bool on) {
   }
 }
 
-void drawMenuGameCard() {
-  epaper.fillRoundRect(kMenuGameCard.x, kMenuGameCard.y,
-                      kMenuGameCard.width, kMenuGameCard.height, 14,
+void drawLightsOutMenuCard() {
+  epaper.fillRoundRect(kLightsOutMenuCard.x, kLightsOutMenuCard.y,
+                      kLightsOutMenuCard.width, kLightsOutMenuCard.height, 14,
                       TFT_WHITE);
-  epaper.drawRoundRect(kMenuGameCard.x, kMenuGameCard.y,
-                      kMenuGameCard.width, kMenuGameCard.height, 14,
+  epaper.drawRoundRect(kLightsOutMenuCard.x, kLightsOutMenuCard.y,
+                      kLightsOutMenuCard.width, kLightsOutMenuCard.height, 14,
                       TFT_BLACK);
 
   constexpr bool lights[2][2] = {
       {true, false},
       {false, true},
   };
-  const int gridLeft = kMenuGameCard.x + 15;
-  const int gridTop = kMenuGameCard.y + 15;
+  const int gridLeft = kLightsOutMenuCard.x + 15;
+  const int gridTop = kLightsOutMenuCard.y + 15;
   for (int row = 0; row < 2; ++row) {
     for (int column = 0; column < 2; ++column) {
       drawLightsOutCell(gridLeft + column * kCellSize,
@@ -423,22 +454,84 @@ void drawMenuGameCard() {
   }
 
   const Rect title = {
-      kMenuGameCard.x + 8,
-      kMenuGameCard.y + kMenuGameCard.height / 2 - 27,
-      kMenuGameCard.width - 16,
+      kLightsOutMenuCard.x + 8,
+      kLightsOutMenuCard.y + kLightsOutMenuCard.height / 2 - 27,
+      kLightsOutMenuCard.width - 16,
       54,
   };
   fillDarkGrayRoundRect(title, 8);
   epaper.setTextColor(TFT_WHITE);
   epaper.setTextDatum(MC_DATUM);
-  epaper.drawString("LIGHTS OUT", kMenuGameCard.x + kMenuGameCard.width / 2,
-                    kMenuGameCard.y + kMenuGameCard.height / 2, 4);
+  epaper.drawString(
+      "LIGHTS OUT",
+      kLightsOutMenuCard.x + kLightsOutMenuCard.width / 2,
+      kLightsOutMenuCard.y + kLightsOutMenuCard.height / 2, 4);
+}
+
+void draw2048Tile(int x, int y, int slotSize, uint32_t value) {
+  const int inset = 4;
+  const int size = slotSize - inset * 2;
+  const Rect tile = {x + inset, y + inset, size, size};
+  if (value == 0) {
+    epaper.fillRoundRect(tile.x, tile.y, tile.width, tile.height, 8, TFT_WHITE);
+    epaper.drawRoundRect(tile.x, tile.y, tile.width, tile.height, 8, TFT_BLACK);
+    return;
+  }
+
+  const bool solid = value >= 128;
+  const bool gray = !solid && (value == 4 || value == 16 || value == 64);
+  if (solid) {
+    epaper.fillRoundRect(tile.x, tile.y, tile.width, tile.height, 8, TFT_BLACK);
+  } else if (gray) {
+    fillDarkGrayRoundRect(tile, 8);
+  } else {
+    epaper.fillRoundRect(tile.x, tile.y, tile.width, tile.height, 8, TFT_WHITE);
+    epaper.drawRoundRect(tile.x, tile.y, tile.width, tile.height, 8, TFT_BLACK);
+  }
+  epaper.setTextDatum(MC_DATUM);
+  epaper.setTextColor((solid || gray) ? TFT_WHITE : TFT_BLACK);
+  epaper.drawString(String(value), x + slotSize / 2, y + slotSize / 2,
+                    value < 10000 ? 4 : 2);
+}
+
+void draw2048MenuCard() {
+  epaper.fillRoundRect(k2048MenuCard.x, k2048MenuCard.y, k2048MenuCard.width,
+                      k2048MenuCard.height, 14, TFT_WHITE);
+  epaper.drawRoundRect(k2048MenuCard.x, k2048MenuCard.y, k2048MenuCard.width,
+                      k2048MenuCard.height, 14, TFT_BLACK);
+
+  constexpr uint32_t tiles[2][2] = {
+      {2, 4},
+      {8, 16},
+  };
+  const int gridLeft = k2048MenuCard.x + 15;
+  const int gridTop = k2048MenuCard.y + 15;
+  for (int row = 0; row < 2; ++row) {
+    for (int column = 0; column < 2; ++column) {
+      draw2048Tile(gridLeft + column * kCellSize,
+                   gridTop + row * kCellSize, kCellSize,
+                   tiles[row][column]);
+    }
+  }
+
+  const Rect title = {
+      k2048MenuCard.x + 8,
+      k2048MenuCard.y + k2048MenuCard.height / 2 - 27,
+      k2048MenuCard.width - 16,
+      54,
+  };
+  fillDarkGrayRoundRect(title, 8);
+  epaper.setTextColor(TFT_WHITE);
+  epaper.setTextDatum(MC_DATUM);
+  epaper.drawString("2048", k2048MenuCard.x + k2048MenuCard.width / 2,
+                    k2048MenuCard.y + k2048MenuCard.height / 2, 4);
 }
 
 void drawMenu() {
   epaper.fillSprite(TFT_WHITE);
   drawGamesLogo(kScreenWidth / 2, 60, 110);
-  drawMenuGameCard();
+  drawLightsOutMenuCard();
+  draw2048MenuCard();
 }
 
 void drawStatus(const char* title, const char* detail) {
@@ -494,6 +587,35 @@ void drawLightsOut() {
   drawButton(kResetButton, "RESET");
 }
 
+void draw2048Board() {
+  epaper.fillRect(k2048BoardRegion.x, k2048BoardRegion.y,
+                  k2048BoardRegion.width, k2048BoardRegion.height, TFT_WHITE);
+  drawCentered("SCORE " + String(game2048.score()), 135, 110, 4);
+  drawCentered("BEST " + String(game2048.bestScore()), 350, 110, 4);
+
+  for (int row = 0; row < Game2048::kSize; ++row) {
+    for (int column = 0; column < Game2048::kSize; ++column) {
+      draw2048Tile(k2048GridLeft + column * k2048CellSize,
+                   k2048GridTop + row * k2048CellSize, k2048CellSize,
+                   game2048.at(row, column));
+    }
+  }
+
+  if (game2048.gameOver()) {
+    drawCentered("NO MOVES - TAP NEW", kScreenWidth / 2, 610, 4);
+  } else if (game2048.won()) {
+    drawCentered("2048! KEEP GOING", kScreenWidth / 2, 610, 4);
+  }
+}
+
+void draw2048() {
+  epaper.fillSprite(TFT_WHITE);
+  drawButton(kBackButton, "GAMES");
+  drawCentered("2048", 292, 51, 4);
+  draw2048Board();
+  drawButton(k2048NewButton, "NEW");
+}
+
 uint32_t randomScramble() {
   uint32_t mask = esp_random() & LightsOutGame::kCellMask;
   int pressed = 0;
@@ -507,6 +629,11 @@ uint32_t randomScramble() {
 void startNewPuzzle() {
   lightsOut.startPuzzle(randomScramble());
   lightsOutSaved = true;
+}
+
+void startNew2048() {
+  game2048.start(esp_random(), esp_random());
+  game2048Saved = true;
 }
 
 bool recoverFullRefresh() {
@@ -543,6 +670,8 @@ bool refreshRegion(const E1005FastRefresh::Region& region,
 void showMenu() {
   if (currentScreen == Screen::LightsOut && lightsOutSaved) {
     LOG.println("[games] auto-saving Lights Out");
+  } else if (currentScreen == Screen::Game2048 && game2048Saved) {
+    LOG.println("[games] auto-saving 2048");
   }
   currentScreen = Screen::Menu;
   saveResumeState();
@@ -557,14 +686,28 @@ void showLightsOut() {
   refreshRegion(kFullScreen, "lights-out screen");
 }
 
+void show2048() {
+  if (!game2048Saved) startNew2048();
+  currentScreen = Screen::Game2048;
+  draw2048();
+  refreshRegion(kFullScreen, "2048 screen");
+}
+
 void updateLightsOut(const char* action) {
   drawLightsOutBoard();
   refreshRegion(kBoardRegion, action);
 }
 
+void update2048(const char* action) {
+  draw2048Board();
+  refreshRegion(k2048BoardRegion, action);
+}
+
 void handleMenuTouch(const Gt911Touch::Point& point) {
-  if (kMenuGameCard.contains(point.x, point.y)) {
+  if (kLightsOutMenuCard.contains(point.x, point.y)) {
     showLightsOut();
+  } else if (k2048MenuCard.contains(point.x, point.y)) {
+    show2048();
   }
 }
 
@@ -595,23 +738,82 @@ void handleLightsOutTouch(const Gt911Touch::Point& point) {
   }
 }
 
+bool handle2048TouchStart(const Gt911Touch::Point& point) {
+  if (kBackButton.contains(point.x, point.y)) {
+    showMenu();
+    return true;
+  }
+  if (k2048NewButton.contains(point.x, point.y)) {
+    startNew2048();
+    update2048("new 2048 game");
+    return true;
+  }
+  return point.x < k2048GridLeft ||
+         point.x >= k2048GridLeft + k2048GridSize ||
+         point.y < k2048GridTop ||
+         point.y >= k2048GridTop + k2048GridSize;
+}
+
+void handle2048Swipe(const Gt911Touch::Point& start,
+                     const Gt911Touch::Point& end) {
+  const int dx = static_cast<int>(end.x) - static_cast<int>(start.x);
+  const int dy = static_cast<int>(end.y) - static_cast<int>(start.y);
+  const int absX = dx < 0 ? -dx : dx;
+  const int absY = dy < 0 ? -dy : dy;
+  if (std::max(absX, absY) < kSwipeThreshold) return;
+
+  Game2048::Direction direction;
+  const char* action;
+  if (absX > absY) {
+    direction = dx < 0 ? Game2048::Direction::Left
+                       : Game2048::Direction::Right;
+    action = dx < 0 ? "2048 swipe left" : "2048 swipe right";
+  } else {
+    direction =
+        dy < 0 ? Game2048::Direction::Up : Game2048::Direction::Down;
+    action = dy < 0 ? "2048 swipe up" : "2048 swipe down";
+  }
+
+  if (game2048.move(direction, esp_random())) {
+    update2048(action);
+  } else {
+    LOG.printf("[games] %s did not change the board\n", action);
+  }
+}
+
 void pollTouch() {
   if (!touchReady) return;
 
   Gt911Touch::Point point = {};
   const Gt911Touch::PollResult result = touch.poll(point);
   if (result == Gt911Touch::PollResult::Release) {
+    if (touchActive && currentScreen == Screen::Game2048 &&
+        !touchActionHandled) {
+      handle2048Swipe(touchStart, touchLast);
+    }
     touchActive = false;
+    touchActionHandled = false;
     return;
   }
-  if (result != Gt911Touch::PollResult::Touch || touchActive) return;
+  if (result != Gt911Touch::PollResult::Touch) return;
+  recordActivity();
+  if (touchActive) {
+    touchLast = point;
+    return;
+  }
 
   touchActive = true;
-  recordActivity();
+  touchActionHandled = false;
+  touchStart = point;
+  touchLast = point;
   if (currentScreen == Screen::Menu) {
     handleMenuTouch(point);
-  } else {
+    touchActionHandled = true;
+  } else if (currentScreen == Screen::LightsOut) {
     handleLightsOutTouch(point);
+    touchActionHandled = true;
+  } else {
+    touchActionHandled = handle2048TouchStart(point);
   }
 }
 
@@ -674,7 +876,7 @@ void handleButton(const ButtonEvent& event) {
   if (event.type == ButtonPressType::Long) {
     while (digitalRead(button.pin) == LOW) delay(10);
     powerDownAndSleep();
-  } else if (currentScreen == Screen::LightsOut) {
+  } else if (currentScreen != Screen::Menu) {
     showMenu();
   } else {
     LOG.println("[games] ignoring OK on game selection");
@@ -753,12 +955,17 @@ void setup() {
 
   if (resumed && currentScreen == Screen::LightsOut) {
     drawLightsOut();
+  } else if (resumed && currentScreen == Screen::Game2048) {
+    draw2048();
   } else {
     currentScreen = Screen::Menu;
     drawMenu();
   }
-  LOG.printf("[games] refreshing %s\n",
-             currentScreen == Screen::LightsOut ? "saved game" : "menu");
+  const char* screenName =
+      currentScreen == Screen::LightsOut
+          ? "saved Lights Out"
+          : currentScreen == Screen::Game2048 ? "saved 2048" : "menu";
+  LOG.printf("[games] refreshing %s\n", screenName);
   epaper.update();
   sd_ota::confirmRunningImage();
 
