@@ -14,6 +14,7 @@
 #include "battery_gauge.h"
 #include "board_pins.h"
 #include "driver.h"
+#include "dots_and_boxes_game.h"
 #include "e1005_fast_refresh.h"
 #include "epaper_setup.h"
 #include "game_2048.h"
@@ -23,6 +24,7 @@
 #include "low_battery.h"
 #include "mini_minesweeper_game.h"
 #include "nonogram_game.h"
+#include "peg_solitaire_game.h"
 #include "peripheral_power.h"
 #include "pipe_connect_game.h"
 #include "power_latch.h"
@@ -30,6 +32,8 @@
 #include "reversi_game.h"
 #include "sd_card.h"
 #include "sd_ota.h"
+#include "slitherlink_game.h"
+#include "sokoban_game.h"
 #ifdef ENABLE_SCREENSHOT_GESTURE
 #include "screenshot_bmp.h"
 #endif
@@ -71,6 +75,22 @@ constexpr int kReversiGridLeft = 32;
 constexpr int kReversiGridTop = 150;
 constexpr int kReversiCellSize = 52;
 constexpr int kReversiGridSize = kReversiCellSize * ReversiGame::kSize;
+constexpr int kDotsGridLeft = 80;
+constexpr int kDotsGridTop = 155;
+constexpr int kDotsSpacing = 80;
+constexpr int kDotsGridSize = kDotsSpacing * DotsAndBoxesGame::kBoxSize;
+constexpr int kSokobanGridTop = 140;
+constexpr int kSokobanCellSize = 56;
+constexpr int kSokobanGridSize = kSokobanCellSize * SokobanGame::kSize;
+constexpr int kPegGridLeft = 44;
+constexpr int kPegGridTop = 140;
+constexpr int kPegCellSize = 56;
+constexpr int kPegGridSize = kPegCellSize * PegSolitaireGame::kSize;
+constexpr int kSlitherlinkGridLeft = 60;
+constexpr int kSlitherlinkGridTop = 150;
+constexpr int kSlitherlinkCellSize = 72;
+constexpr int kSlitherlinkGridSize =
+    kSlitherlinkCellSize * SlitherlinkGame::kSize;
 constexpr int kStatusDividerY = 48;
 constexpr int kSwipeThreshold = 45;
 constexpr int kMinesTouchMoveTolerance = 20;
@@ -85,13 +105,17 @@ constexpr uint32_t kBatteryCheckIntervalMs = 60000;
 constexpr uint32_t kInactivitySleepMs = 5UL * 60UL * 1000UL;
 constexpr int kLowBatteryThresholdPct = 10;
 constexpr uint32_t kPersistedStateMagic = 0x47414D45;
-constexpr uint16_t kPersistedStateVersion = 8;
-constexpr uint8_t kLightsOutSavedFlag = 1U << 0;
-constexpr uint8_t k2048SavedFlag = 1U << 1;
-constexpr uint8_t kPipeConnectSavedFlag = 1U << 2;
-constexpr uint8_t kMinesweeperSavedFlag = 1U << 3;
-constexpr uint8_t kNonogramSavedFlag = 1U << 4;
-constexpr uint8_t kReversiSavedFlag = 1U << 5;
+constexpr uint16_t kPersistedStateVersion = 9;
+constexpr uint16_t kLightsOutSavedFlag = 1U << 0;
+constexpr uint16_t k2048SavedFlag = 1U << 1;
+constexpr uint16_t kPipeConnectSavedFlag = 1U << 2;
+constexpr uint16_t kMinesweeperSavedFlag = 1U << 3;
+constexpr uint16_t kNonogramSavedFlag = 1U << 4;
+constexpr uint16_t kReversiSavedFlag = 1U << 5;
+constexpr uint16_t kDotsAndBoxesSavedFlag = 1U << 6;
+constexpr uint16_t kSokobanSavedFlag = 1U << 7;
+constexpr uint16_t kPegSolitaireSavedFlag = 1U << 8;
+constexpr uint16_t kSlitherlinkSavedFlag = 1U << 9;
 
 constexpr uint32_t makeNonogramSolution(uint8_t row0, uint8_t row1,
                                         uint8_t row2, uint8_t row3,
@@ -133,6 +157,12 @@ constexpr Rect kPipeConnectMenuCard = {40, 320, 190, 190};
 constexpr Rect kMinesweeperMenuCard = {250, 320, 190, 190};
 constexpr Rect kNonogramMenuCard = {40, 528, 190, 190};
 constexpr Rect kReversiMenuCard = {250, 528, 190, 190};
+constexpr Rect kDotsAndBoxesMenuCard = kLightsOutMenuCard;
+constexpr Rect kSokobanMenuCard = k2048MenuCard;
+constexpr Rect kPegSolitaireMenuCard = kPipeConnectMenuCard;
+constexpr Rect kSlitherlinkMenuCard = kMinesweeperMenuCard;
+constexpr Rect kPreviousPageButton = {40, 736, 190, 52};
+constexpr Rect kNextPageButton = {250, 736, 190, 52};
 constexpr Rect kBackButton = {8, 6, 48, 36};
 constexpr Rect kNewButton = {30, 688, 190, 66};
 constexpr Rect kResetButton = {260, 688, 190, 66};
@@ -145,6 +175,10 @@ constexpr E1005FastRefresh::Region kMinesBoardRegion = {25, 112, 430, 553};
 constexpr E1005FastRefresh::Region kNonogramBoardRegion = {20, 64, 440, 584};
 constexpr E1005FastRefresh::Region kReversiBoardRegion = {25, 104, 430, 560};
 constexpr E1005FastRefresh::Region kReversiModeRegion = {25, 104, 430, 650};
+constexpr E1005FastRefresh::Region kDotsBoardRegion = {25, 104, 430, 560};
+constexpr E1005FastRefresh::Region kSokobanBoardRegion = {25, 104, 430, 560};
+constexpr E1005FastRefresh::Region kPegBoardRegion = {25, 104, 430, 560};
+constexpr E1005FastRefresh::Region kSlitherlinkBoardRegion = {25, 104, 430, 560};
 
 enum class Screen {
   Menu,
@@ -154,7 +188,44 @@ enum class Screen {
   Minesweeper,
   Nonogram,
   Reversi,
+  DotsAndBoxes,
+  Sokoban,
+  PegSolitaire,
+  Slitherlink,
 };
+
+enum class MenuPage : uint8_t {
+  First,
+  Second,
+};
+
+const char* screenName(Screen screen) {
+  switch (screen) {
+    case Screen::Menu:
+      return "menu";
+    case Screen::LightsOut:
+      return "saved Lights Out";
+    case Screen::Game2048:
+      return "saved 2048";
+    case Screen::PipeConnect:
+      return "saved Pipe Connect";
+    case Screen::Minesweeper:
+      return "saved Minesweeper";
+    case Screen::Nonogram:
+      return "saved Nonogram";
+    case Screen::Reversi:
+      return "saved Reversi";
+    case Screen::DotsAndBoxes:
+      return "saved Dots and Boxes";
+    case Screen::Sokoban:
+      return "saved Sokoban";
+    case Screen::PegSolitaire:
+      return "saved Peg Solitaire";
+    case Screen::Slitherlink:
+      return "saved Slitherlink";
+  }
+  return "unknown";
+}
 
 enum class ReversiMode : uint8_t {
   SinglePlayer,
@@ -165,7 +236,8 @@ struct PersistedState {
   uint32_t magic;
   uint16_t version;
   uint8_t screen;
-  uint8_t flags;
+  uint8_t menuPage;
+  uint16_t flags;
   uint8_t reversiMode;
   LightsOutGame::Snapshot lightsOut;
   Game2048::Snapshot game2048;
@@ -173,6 +245,10 @@ struct PersistedState {
   MiniMinesweeperGame::Snapshot minesweeper;
   NonogramGame::Snapshot nonogram;
   ReversiGame::Snapshot reversi;
+  DotsAndBoxesGame::Snapshot dotsAndBoxes;
+  SokobanGame::Snapshot sokoban;
+  PegSolitaireGame::Snapshot pegSolitaire;
+  SlitherlinkGame::Snapshot slitherlink;
   uint32_t checksum;
 };
 
@@ -235,8 +311,13 @@ PipeConnectGame pipeConnect;
 MiniMinesweeperGame minesweeper;
 NonogramGame nonogram;
 ReversiGame reversi;
+DotsAndBoxesGame dotsAndBoxes;
+SokobanGame sokoban;
+PegSolitaireGame pegSolitaire;
+SlitherlinkGame slitherlink;
 ReversiMode reversiMode = ReversiMode::SinglePlayer;
 Screen currentScreen = Screen::Menu;
+MenuPage currentMenuPage = MenuPage::First;
 bool touchReady = false;
 bool touchActive = false;
 bool touchActionHandled = false;
@@ -250,6 +331,10 @@ bool pipeConnectSaved = false;
 bool minesweeperSaved = false;
 bool nonogramSaved = false;
 bool reversiSaved = false;
+bool dotsAndBoxesSaved = false;
+bool sokobanSaved = false;
+bool pegSolitaireSaved = false;
+bool slitherlinkSaved = false;
 bool batteryStatusSampled = false;
 bool externalPowerPresent = false;
 int batteryPercent = -1;
@@ -353,6 +438,7 @@ void saveResumeState() {
   state.magic = kPersistedStateMagic;
   state.version = kPersistedStateVersion;
   state.screen = static_cast<uint8_t>(currentScreen);
+  state.menuPage = static_cast<uint8_t>(currentMenuPage);
   state.reversiMode = static_cast<uint8_t>(reversiMode);
   if (lightsOutSaved) {
     state.flags |= kLightsOutSavedFlag;
@@ -378,6 +464,22 @@ void saveResumeState() {
     state.flags |= kReversiSavedFlag;
     state.reversi = reversi.snapshot();
   }
+  if (dotsAndBoxesSaved) {
+    state.flags |= kDotsAndBoxesSavedFlag;
+    state.dotsAndBoxes = dotsAndBoxes.snapshot();
+  }
+  if (sokobanSaved) {
+    state.flags |= kSokobanSavedFlag;
+    state.sokoban = sokoban.snapshot();
+  }
+  if (pegSolitaireSaved) {
+    state.flags |= kPegSolitaireSavedFlag;
+    state.pegSolitaire = pegSolitaire.snapshot();
+  }
+  if (slitherlinkSaved) {
+    state.flags |= kSlitherlinkSavedFlag;
+    state.slitherlink = slitherlink.snapshot();
+  }
   state.checksum = stateChecksum(state);
   persistedState = state;
 }
@@ -389,11 +491,14 @@ bool restoreResumeState() {
   if (state.magic != kPersistedStateMagic ||
       state.version != kPersistedStateVersion ||
       state.checksum != stateChecksum(state) ||
-      state.screen > static_cast<uint8_t>(Screen::Reversi) ||
+      state.screen > static_cast<uint8_t>(Screen::Slitherlink) ||
+      state.menuPage > static_cast<uint8_t>(MenuPage::Second) ||
       state.reversiMode > static_cast<uint8_t>(ReversiMode::TwoPlayer) ||
       (state.flags & ~(kLightsOutSavedFlag | k2048SavedFlag |
                        kPipeConnectSavedFlag | kMinesweeperSavedFlag |
-                       kNonogramSavedFlag | kReversiSavedFlag)) != 0) {
+                       kNonogramSavedFlag | kReversiSavedFlag |
+                       kDotsAndBoxesSavedFlag | kSokobanSavedFlag |
+                       kPegSolitaireSavedFlag | kSlitherlinkSavedFlag)) != 0) {
     LOG.println("[games] saved resume state is invalid");
     return false;
   }
@@ -455,13 +560,60 @@ bool restoreResumeState() {
     LOG.println("[games] saved screen has no Reversi game");
     return false;
   }
+  const bool hasDotsAndBoxesSave =
+      (state.flags & kDotsAndBoxesSavedFlag) != 0;
+  if (hasDotsAndBoxesSave &&
+      !dotsAndBoxes.restore(state.dotsAndBoxes)) {
+    LOG.println("[games] saved Dots and Boxes state is invalid");
+    return false;
+  }
+  if (savedScreen == Screen::DotsAndBoxes && !hasDotsAndBoxesSave) {
+    LOG.println("[games] saved screen has no Dots and Boxes game");
+    return false;
+  }
+  const bool hasSokobanSave = (state.flags & kSokobanSavedFlag) != 0;
+  if (hasSokobanSave && !sokoban.restore(state.sokoban)) {
+    LOG.println("[games] saved Sokoban state is invalid");
+    return false;
+  }
+  if (savedScreen == Screen::Sokoban && !hasSokobanSave) {
+    LOG.println("[games] saved screen has no Sokoban game");
+    return false;
+  }
+  const bool hasPegSolitaireSave =
+      (state.flags & kPegSolitaireSavedFlag) != 0;
+  if (hasPegSolitaireSave &&
+      !pegSolitaire.restore(state.pegSolitaire)) {
+    LOG.println("[games] saved Peg Solitaire state is invalid");
+    return false;
+  }
+  if (savedScreen == Screen::PegSolitaire && !hasPegSolitaireSave) {
+    LOG.println("[games] saved screen has no Peg Solitaire game");
+    return false;
+  }
+  const bool hasSlitherlinkSave =
+      (state.flags & kSlitherlinkSavedFlag) != 0;
+  if (hasSlitherlinkSave &&
+      !slitherlink.restore(state.slitherlink)) {
+    LOG.println("[games] saved Slitherlink state is invalid");
+    return false;
+  }
+  if (savedScreen == Screen::Slitherlink && !hasSlitherlinkSave) {
+    LOG.println("[games] saved screen has no Slitherlink game");
+    return false;
+  }
   lightsOutSaved = hasLightsOutSave;
   game2048Saved = has2048Save;
   pipeConnectSaved = hasPipeConnectSave;
   minesweeperSaved = hasMinesweeperSave;
   nonogramSaved = hasNonogramSave;
   reversiSaved = hasReversiSave;
+  dotsAndBoxesSaved = hasDotsAndBoxesSave;
+  sokobanSaved = hasSokobanSave;
+  pegSolitaireSaved = hasPegSolitaireSave;
+  slitherlinkSaved = hasSlitherlinkSave;
   reversiMode = static_cast<ReversiMode>(state.reversiMode);
+  currentMenuPage = static_cast<MenuPage>(state.menuPage);
   currentScreen = savedScreen;
   return true;
 }
@@ -595,6 +747,11 @@ void drawButton(const Rect& rect, const char* label) {
   epaper.setTextColor(TFT_WHITE, TFT_BLACK, true);
   epaper.drawString(label, rect.x + rect.width / 2,
                     rect.y + rect.height / 2 + 3, 4);
+}
+
+void drawMenuCardFrame(const Rect& card) {
+  epaper.fillRoundRect(card.x, card.y, card.width, card.height, 14, TFT_WHITE);
+  epaper.drawRoundRect(card.x, card.y, card.width, card.height, 14, TFT_BLACK);
 }
 
 void drawLightsOutCell(int x, int y, bool on) {
@@ -922,6 +1079,104 @@ void drawReversiMenuCard() {
   }
 }
 
+void drawDotsAndBoxesMenuCard() {
+  drawMenuCardFrame(kDotsAndBoxesMenuCard);
+  constexpr int kSpacing = 44;
+  constexpr int kDotRadius = 5;
+  const int left = kDotsAndBoxesMenuCard.x + 29;
+  const int top = kDotsAndBoxesMenuCard.y + 29;
+  for (int row = 0; row < 4; ++row) {
+    for (int column = 0; column < 4; ++column) {
+      const int x = left + column * kSpacing;
+      const int y = top + row * kSpacing;
+      if (column < 3 && (row + column) % 3 != 1) {
+        epaper.fillRect(x, y - 2, kSpacing, 5, TFT_BLACK);
+      }
+      if (row < 3 && (row * 2 + column) % 4 != 1) {
+        epaper.fillRect(x - 2, y, 5, kSpacing, TFT_BLACK);
+      }
+    }
+  }
+  for (int row = 0; row < 4; ++row) {
+    for (int column = 0; column < 4; ++column) {
+      epaper.fillCircle(left + column * kSpacing, top + row * kSpacing,
+                        kDotRadius, TFT_BLACK);
+    }
+  }
+}
+
+void drawSokobanMenuCard() {
+  drawMenuCardFrame(kSokobanMenuCard);
+  constexpr int kSize = 44;
+  const int left = kSokobanMenuCard.x + 29;
+  const int top = kSokobanMenuCard.y + 29;
+  for (int row = 0; row < 3; ++row) {
+    for (int column = 0; column < 3; ++column) {
+      const int x = left + column * kSize;
+      const int y = top + row * kSize;
+      epaper.drawRect(x, y, kSize, kSize, TFT_BLACK);
+      if ((row == 0 && column != 1) || (row == 2 && column == 2)) {
+        epaper.fillRect(x + 4, y + 4, kSize - 8, kSize - 8, TFT_BLACK);
+      }
+    }
+  }
+  const int boxX = left + kSize + 7;
+  const int boxY = top + kSize + 7;
+  epaper.drawRect(boxX, boxY, kSize - 14, kSize - 14, TFT_BLACK);
+  epaper.drawLine(boxX, boxY, boxX + kSize - 15, boxY + kSize - 15,
+                  TFT_BLACK);
+  epaper.drawLine(boxX + kSize - 15, boxY, boxX, boxY + kSize - 15,
+                  TFT_BLACK);
+  epaper.fillCircle(left + kSize / 2, top + kSize * 5 / 2, 11, TFT_BLACK);
+  epaper.drawCircle(left + kSize * 5 / 2, top + kSize * 3 / 2, 12,
+                    TFT_BLACK);
+}
+
+void drawPegSolitaireMenuCard() {
+  drawMenuCardFrame(kPegSolitaireMenuCard);
+  constexpr int kSpacing = 29;
+  constexpr int kRadius = 9;
+  const int left = kPegSolitaireMenuCard.x + 37;
+  const int top = kPegSolitaireMenuCard.y + 37;
+  for (int row = 0; row < 5; ++row) {
+    for (int column = 0; column < 5; ++column) {
+      if ((row < 2 || row > 2) && (column < 2 || column > 2)) continue;
+      const int x = left + column * kSpacing;
+      const int y = top + row * kSpacing;
+      if (row == 2 && column == 2) {
+        epaper.drawCircle(x, y, kRadius, TFT_BLACK);
+      } else {
+        epaper.fillCircle(x, y, kRadius, TFT_BLACK);
+      }
+    }
+  }
+}
+
+void drawSlitherlinkMenuCard() {
+  drawMenuCardFrame(kSlitherlinkMenuCard);
+  constexpr int kSpacing = 42;
+  constexpr int kDotRadius = 4;
+  const int left = kSlitherlinkMenuCard.x + 32;
+  const int top = kSlitherlinkMenuCard.y + 32;
+  epaper.fillRect(left, top - 2, kSpacing * 2, 5, TFT_BLACK);
+  epaper.fillRect(left + kSpacing * 2 - 2, top, 5, kSpacing * 2, TFT_BLACK);
+  epaper.fillRect(left + kSpacing, top + kSpacing * 3 - 2, kSpacing * 2, 5,
+                  TFT_BLACK);
+  epaper.fillRect(left - 2, top + kSpacing, 5, kSpacing * 2, TFT_BLACK);
+  drawCenteredNumber(2, left + kSpacing / 2, top + kSpacing / 2, 4,
+                     TFT_BLACK, TFT_WHITE);
+  drawCenteredNumber(3, left + kSpacing * 3 / 2,
+                     top + kSpacing * 3 / 2, 4, TFT_BLACK, TFT_WHITE);
+  drawCenteredNumber(1, left + kSpacing * 5 / 2,
+                     top + kSpacing * 5 / 2, 4, TFT_BLACK, TFT_WHITE);
+  for (int row = 0; row < 4; ++row) {
+    for (int column = 0; column < 4; ++column) {
+      epaper.fillCircle(left + column * kSpacing, top + row * kSpacing,
+                        kDotRadius, TFT_BLACK);
+    }
+  }
+}
+
 void drawBatteryStatus() {
   constexpr int kCenterY = 24;
   constexpr int kEdgeInset = 6;
@@ -975,12 +1230,21 @@ void drawGameStatusBar(const char* title) {
 void drawMenu() {
   epaper.fillSprite(TFT_WHITE);
   drawGamesLogo(kScreenWidth / 2, 80, 72);
-  drawLightsOutMenuCard();
-  draw2048MenuCard();
-  drawPipeConnectMenuCard();
-  drawMinesweeperMenuCard();
-  drawNonogramMenuCard();
-  drawReversiMenuCard();
+  if (currentMenuPage == MenuPage::First) {
+    drawLightsOutMenuCard();
+    draw2048MenuCard();
+    drawPipeConnectMenuCard();
+    drawMinesweeperMenuCard();
+    drawNonogramMenuCard();
+    drawReversiMenuCard();
+  } else {
+    drawDotsAndBoxesMenuCard();
+    drawSokobanMenuCard();
+    drawPegSolitaireMenuCard();
+    drawSlitherlinkMenuCard();
+  }
+  drawButton(kPreviousPageButton, "< PREV");
+  drawButton(kNextPageButton, "NEXT >");
   drawStatusBar();
 }
 
@@ -1285,6 +1549,257 @@ void drawReversi() {
   drawGameStatusBar("REVERSI");
 }
 
+void drawDotsAndBoxesBoard() {
+  epaper.fillRect(kDotsBoardRegion.x, kDotsBoardRegion.y,
+                  kDotsBoardRegion.width, kDotsBoardRegion.height, TFT_WHITE);
+  drawCentered("P1 " + String(dotsAndBoxes.player1Score()) + "    P2 " +
+                   String(dotsAndBoxes.player2Score()),
+               kScreenWidth / 2, 112, 4);
+
+  for (int row = 0; row < DotsAndBoxesGame::kBoxSize; ++row) {
+    for (int column = 0; column < DotsAndBoxesGame::kBoxSize; ++column) {
+      const int owner = static_cast<int>(dotsAndBoxes.owner(row, column));
+      if (owner == 0) continue;
+      const int x = kDotsGridLeft + column * kDotsSpacing + 8;
+      const int y = kDotsGridTop + row * kDotsSpacing + 8;
+      const int size = kDotsSpacing - 16;
+      if (owner == 1) {
+        epaper.fillRect(x, y, size, size, TFT_BLACK);
+        drawCenteredNumber(1, x + size / 2, y + size / 2, 4, TFT_WHITE,
+                           TFT_BLACK);
+      } else {
+        epaper.drawRect(x, y, size, size, TFT_BLACK);
+        epaper.drawRect(x + 3, y + 3, size - 6, size - 6, TFT_BLACK);
+        drawCenteredNumber(2, x + size / 2, y + size / 2, 4, TFT_BLACK,
+                           TFT_WHITE);
+      }
+    }
+  }
+
+  for (int row = 0; row <= DotsAndBoxesGame::kBoxSize; ++row) {
+    for (int column = 0; column < DotsAndBoxesGame::kBoxSize; ++column) {
+      if (!dotsAndBoxes.horizontalEdge(row, column)) continue;
+      epaper.fillRect(kDotsGridLeft + column * kDotsSpacing,
+                      kDotsGridTop + row * kDotsSpacing - 3,
+                      kDotsSpacing + 1, 7, TFT_BLACK);
+    }
+  }
+  for (int row = 0; row < DotsAndBoxesGame::kBoxSize; ++row) {
+    for (int column = 0; column <= DotsAndBoxesGame::kBoxSize; ++column) {
+      if (!dotsAndBoxes.verticalEdge(row, column)) continue;
+      epaper.fillRect(kDotsGridLeft + column * kDotsSpacing - 3,
+                      kDotsGridTop + row * kDotsSpacing, 7,
+                      kDotsSpacing + 1, TFT_BLACK);
+    }
+  }
+  for (int row = 0; row <= DotsAndBoxesGame::kBoxSize; ++row) {
+    for (int column = 0; column <= DotsAndBoxesGame::kBoxSize; ++column) {
+      epaper.fillCircle(kDotsGridLeft + column * kDotsSpacing,
+                        kDotsGridTop + row * kDotsSpacing, 7, TFT_BLACK);
+    }
+  }
+
+  if (dotsAndBoxes.gameOver()) {
+    const int winner = static_cast<int>(dotsAndBoxes.winner());
+    drawCentered(winner == 0 ? "DRAW"
+                             : winner == 1 ? "PLAYER 1 WINS"
+                                           : "PLAYER 2 WINS",
+                 kScreenWidth / 2, 590, 4);
+  } else {
+    drawCentered("PLAYER " +
+                     String(static_cast<int>(dotsAndBoxes.currentPlayer())) +
+                     " TO MOVE",
+                 kScreenWidth / 2, 590, 4);
+  }
+}
+
+void drawDotsAndBoxes() {
+  epaper.fillSprite(TFT_WHITE);
+  drawDotsAndBoxesBoard();
+  drawButton(kCenteredNewButton, "NEW");
+  drawGameStatusBar("DOTS + BOXES");
+}
+
+int sokobanGridLeft() {
+  return (kScreenWidth - sokoban.width() * kSokobanCellSize) / 2;
+}
+
+void drawSokobanCell(int row, int column) {
+  const int x = sokobanGridLeft() + column * kSokobanCellSize;
+  const int y = kSokobanGridTop + row * kSokobanCellSize;
+  epaper.fillRect(x, y, kSokobanCellSize, kSokobanCellSize, TFT_WHITE);
+  if (sokoban.isWall(row, column)) {
+    epaper.fillRect(x, y, kSokobanCellSize, kSokobanCellSize, TFT_BLACK);
+    epaper.drawRect(x + 4, y + 4, kSokobanCellSize - 8,
+                    kSokobanCellSize - 8, TFT_WHITE);
+    return;
+  }
+  epaper.drawRect(x, y, kSokobanCellSize, kSokobanCellSize, TFT_BLACK);
+  const int centerX = x + kSokobanCellSize / 2;
+  const int centerY = y + kSokobanCellSize / 2;
+  if (sokoban.isTarget(row, column)) {
+    epaper.drawCircle(centerX, centerY, 12, TFT_BLACK);
+    epaper.fillCircle(centerX, centerY, 4, TFT_BLACK);
+  }
+  if (sokoban.hasBox(row, column)) {
+    constexpr int kInset = 7;
+    epaper.fillRect(x + kInset, y + kInset,
+                    kSokobanCellSize - kInset * 2,
+                    kSokobanCellSize - kInset * 2, TFT_BLACK);
+    epaper.drawLine(x + kInset + 5, y + kInset + 5,
+                    x + kSokobanCellSize - kInset - 6,
+                    y + kSokobanCellSize - kInset - 6, TFT_WHITE);
+    epaper.drawLine(x + kSokobanCellSize - kInset - 6, y + kInset + 5,
+                    x + kInset + 5, y + kSokobanCellSize - kInset - 6,
+                    TFT_WHITE);
+  }
+  if (sokoban.playerRow() == row && sokoban.playerColumn() == column) {
+    epaper.fillCircle(centerX, centerY, 16, TFT_BLACK);
+    epaper.fillCircle(centerX, centerY - 4, 5, TFT_WHITE);
+    epaper.fillRect(centerX - 7, centerY + 3, 14, 8, TFT_WHITE);
+  }
+}
+
+void drawSokobanBoard() {
+  epaper.fillRect(kSokobanBoardRegion.x, kSokobanBoardRegion.y,
+                  kSokobanBoardRegion.width, kSokobanBoardRegion.height,
+                  TFT_WHITE);
+  drawCentered("LEVEL " + String(sokoban.levelIndex() + 1) + "/" +
+                   String(SokobanGame::kLevelCount),
+               kScreenWidth / 2, 112, 4);
+  for (int row = 0; row < sokoban.height(); ++row) {
+    for (int column = 0; column < sokoban.width(); ++column) {
+      drawSokobanCell(row, column);
+    }
+  }
+  if (sokoban.solved()) {
+    drawCentered("SOLVED - TAP NEW", kScreenWidth / 2, 590, 4);
+  } else {
+    drawCentered(String(sokoban.moveCount()) + " MOVES  " +
+                     String(sokoban.pushCount()) + " PUSHES",
+                 kScreenWidth / 2, 590, 4);
+  }
+}
+
+void drawSokoban() {
+  epaper.fillSprite(TFT_WHITE);
+  drawSokobanBoard();
+  drawButton(kNewButton, "NEW");
+  drawButton(kResetButton, "RESET");
+  drawGameStatusBar("SOKOBAN");
+}
+
+void drawPegSolitaireBoard() {
+  epaper.fillRect(kPegBoardRegion.x, kPegBoardRegion.y, kPegBoardRegion.width,
+                  kPegBoardRegion.height, TFT_WHITE);
+  drawCentered(String(pegSolitaire.pegCount()) + " PEGS", kScreenWidth / 2,
+               112, 4);
+  for (int row = 0; row < PegSolitaireGame::kSize; ++row) {
+    for (int column = 0; column < PegSolitaireGame::kSize; ++column) {
+      if (!pegSolitaire.validCell(row, column)) continue;
+      const int centerX =
+          kPegGridLeft + column * kPegCellSize + kPegCellSize / 2;
+      const int centerY =
+          kPegGridTop + row * kPegCellSize + kPegCellSize / 2;
+      epaper.drawCircle(centerX, centerY, 18, TFT_BLACK);
+      epaper.drawCircle(centerX, centerY, 17, TFT_BLACK);
+      if (!pegSolitaire.hasPeg(row, column)) continue;
+      epaper.fillCircle(centerX, centerY, 15, TFT_BLACK);
+      if (pegSolitaire.selectedRow() == row &&
+          pegSolitaire.selectedColumn() == column) {
+        epaper.drawCircle(centerX, centerY, 9, TFT_WHITE);
+        epaper.drawCircle(centerX, centerY, 8, TFT_WHITE);
+      }
+    }
+  }
+  if (pegSolitaire.solved()) {
+    drawCentered("PERFECT CENTER FINISH!", kScreenWidth / 2, 590, 4);
+  } else if (!pegSolitaire.hasAvailableMove()) {
+    drawCentered("NO MOVES - " + String(pegSolitaire.pegCount()) + " PEGS",
+                 kScreenWidth / 2, 590, 4);
+  } else {
+    drawCentered(String(pegSolitaire.moves()) + " MOVES", kScreenWidth / 2,
+                 590, 4);
+  }
+}
+
+void drawPegSolitaire() {
+  epaper.fillSprite(TFT_WHITE);
+  drawPegSolitaireBoard();
+  drawButton(kCenteredNewButton, "RESET");
+  drawGameStatusBar("PEG SOLITAIRE");
+}
+
+void drawSlitherlinkBoard() {
+  epaper.fillRect(kSlitherlinkBoardRegion.x, kSlitherlinkBoardRegion.y,
+                  kSlitherlinkBoardRegion.width,
+                  kSlitherlinkBoardRegion.height, TFT_WHITE);
+  drawCentered("PUZZLE " + String(slitherlink.puzzleIndex() + 1) + "/" +
+                   String(SlitherlinkGame::kPuzzleCount),
+               kScreenWidth / 2, 112, 4);
+  for (int row = 0; row < SlitherlinkGame::kSize; ++row) {
+    for (int column = 0; column < SlitherlinkGame::kSize; ++column) {
+      const int clue = slitherlink.clue(row, column);
+      if (clue >= 0) {
+        drawCenteredNumber(
+            static_cast<uint32_t>(clue),
+            kSlitherlinkGridLeft + column * kSlitherlinkCellSize +
+                kSlitherlinkCellSize / 2,
+            kSlitherlinkGridTop + row * kSlitherlinkCellSize +
+                kSlitherlinkCellSize / 2,
+            4, TFT_BLACK, TFT_WHITE);
+      }
+    }
+  }
+  for (int row = 0; row <= SlitherlinkGame::kSize; ++row) {
+    for (int column = 0; column < SlitherlinkGame::kSize; ++column) {
+      const int x = kSlitherlinkGridLeft + column * kSlitherlinkCellSize;
+      const int y = kSlitherlinkGridTop + row * kSlitherlinkCellSize;
+      const SlitherlinkGame::EdgeState edge =
+          slitherlink.horizontalEdge(row, column);
+      if (edge == SlitherlinkGame::EdgeState::Line) {
+        epaper.fillRect(x, y - 3, kSlitherlinkCellSize + 1, 7, TFT_BLACK);
+      } else if (edge == SlitherlinkGame::EdgeState::Cross) {
+        const int centerX = x + kSlitherlinkCellSize / 2;
+        epaper.drawLine(centerX - 8, y - 8, centerX + 8, y + 8, TFT_BLACK);
+        epaper.drawLine(centerX - 8, y + 8, centerX + 8, y - 8, TFT_BLACK);
+      }
+    }
+  }
+  for (int row = 0; row < SlitherlinkGame::kSize; ++row) {
+    for (int column = 0; column <= SlitherlinkGame::kSize; ++column) {
+      const int x = kSlitherlinkGridLeft + column * kSlitherlinkCellSize;
+      const int y = kSlitherlinkGridTop + row * kSlitherlinkCellSize;
+      const SlitherlinkGame::EdgeState edge =
+          slitherlink.verticalEdge(row, column);
+      if (edge == SlitherlinkGame::EdgeState::Line) {
+        epaper.fillRect(x - 3, y, 7, kSlitherlinkCellSize + 1, TFT_BLACK);
+      } else if (edge == SlitherlinkGame::EdgeState::Cross) {
+        const int centerY = y + kSlitherlinkCellSize / 2;
+        epaper.drawLine(x - 8, centerY - 8, x + 8, centerY + 8, TFT_BLACK);
+        epaper.drawLine(x - 8, centerY + 8, x + 8, centerY - 8, TFT_BLACK);
+      }
+    }
+  }
+  for (int row = 0; row <= SlitherlinkGame::kSize; ++row) {
+    for (int column = 0; column <= SlitherlinkGame::kSize; ++column) {
+      epaper.fillCircle(kSlitherlinkGridLeft + column * kSlitherlinkCellSize,
+                        kSlitherlinkGridTop + row * kSlitherlinkCellSize, 6,
+                        TFT_BLACK);
+    }
+  }
+  drawCentered(slitherlink.solved() ? "LOOP COMPLETE!" : "MAKE ONE LOOP",
+               kScreenWidth / 2, 590, 4);
+}
+
+void drawSlitherlink() {
+  epaper.fillSprite(TFT_WHITE);
+  drawSlitherlinkBoard();
+  drawButton(kNewButton, "NEW");
+  drawButton(kResetButton, "RESET");
+  drawGameStatusBar("SLITHERLINK");
+}
+
 uint32_t randomScramble() {
   uint32_t mask = esp_random() & LightsOutGame::kCellMask;
   int pressed = 0;
@@ -1328,6 +1843,26 @@ void startNewNonogram() {
 void startNewReversi() {
   reversi.start();
   reversiSaved = true;
+}
+
+void startNewDotsAndBoxes() {
+  dotsAndBoxes.start();
+  dotsAndBoxesSaved = true;
+}
+
+void startNewSokoban() {
+  sokoban.start(0);
+  sokobanSaved = true;
+}
+
+void startNewPegSolitaire() {
+  pegSolitaire.start();
+  pegSolitaireSaved = true;
+}
+
+void startNewSlitherlink() {
+  slitherlink.start(0);
+  slitherlinkSaved = true;
 }
 
 void playReversiComputerTurns() {
@@ -1409,6 +1944,14 @@ void showMenu() {
     LOG.println("[games] auto-saving Nonogram");
   } else if (currentScreen == Screen::Reversi && reversiSaved) {
     LOG.println("[games] auto-saving Reversi");
+  } else if (currentScreen == Screen::DotsAndBoxes && dotsAndBoxesSaved) {
+    LOG.println("[games] auto-saving Dots and Boxes");
+  } else if (currentScreen == Screen::Sokoban && sokobanSaved) {
+    LOG.println("[games] auto-saving Sokoban");
+  } else if (currentScreen == Screen::PegSolitaire && pegSolitaireSaved) {
+    LOG.println("[games] auto-saving Peg Solitaire");
+  } else if (currentScreen == Screen::Slitherlink && slitherlinkSaved) {
+    LOG.println("[games] auto-saving Slitherlink");
   }
   currentScreen = Screen::Menu;
   saveResumeState();
@@ -1457,6 +2000,34 @@ void showReversi() {
   currentScreen = Screen::Reversi;
   drawReversi();
   refreshScreen("Reversi screen");
+}
+
+void showDotsAndBoxes() {
+  if (!dotsAndBoxesSaved) startNewDotsAndBoxes();
+  currentScreen = Screen::DotsAndBoxes;
+  drawDotsAndBoxes();
+  refreshScreen("Dots and Boxes screen");
+}
+
+void showSokoban() {
+  if (!sokobanSaved) startNewSokoban();
+  currentScreen = Screen::Sokoban;
+  drawSokoban();
+  refreshScreen("Sokoban screen");
+}
+
+void showPegSolitaire() {
+  if (!pegSolitaireSaved) startNewPegSolitaire();
+  currentScreen = Screen::PegSolitaire;
+  drawPegSolitaire();
+  refreshScreen("Peg Solitaire screen");
+}
+
+void showSlitherlink() {
+  if (!slitherlinkSaved) startNewSlitherlink();
+  currentScreen = Screen::Slitherlink;
+  drawSlitherlink();
+  refreshScreen("Slitherlink screen");
 }
 
 void updateLightsOut(const char* action) {
@@ -1531,7 +2102,56 @@ void updateReversiMode(const char* action) {
   refreshRegion(kReversiModeRegion, action);
 }
 
+void updateDotsAndBoxes(const char* action) {
+  drawDotsAndBoxesBoard();
+  refreshRegion(kDotsBoardRegion, action);
+}
+
+void updateSokoban(const char* action) {
+  drawSokobanBoard();
+  refreshRegion(kSokobanBoardRegion, action);
+}
+
+void updatePegSolitaire(const char* action) {
+  drawPegSolitaireBoard();
+  refreshRegion(kPegBoardRegion, action);
+}
+
+void updateSlitherlink(const char* action) {
+  drawSlitherlinkBoard();
+  refreshRegion(kSlitherlinkBoardRegion, action);
+}
+
+void showMenuPage(MenuPage page) {
+  currentMenuPage = page;
+  saveResumeState();
+  drawMenu();
+  refreshScreen(page == MenuPage::First ? "menu page 1" : "menu page 2");
+}
+
 void handleMenuTouch(const Gt911Touch::Point& point) {
+  if (kPreviousPageButton.contains(point.x, point.y) ||
+      kNextPageButton.contains(point.x, point.y)) {
+    showMenuPage(currentMenuPage == MenuPage::First ? MenuPage::Second
+                                                    : MenuPage::First);
+    return;
+  }
+  if (currentMenuPage == MenuPage::Second) {
+    if (kDotsAndBoxesMenuCard.contains(point.x, point.y)) {
+      hardware::beep();
+      showDotsAndBoxes();
+    } else if (kSokobanMenuCard.contains(point.x, point.y)) {
+      hardware::beep();
+      showSokoban();
+    } else if (kPegSolitaireMenuCard.contains(point.x, point.y)) {
+      hardware::beep();
+      showPegSolitaire();
+    } else if (kSlitherlinkMenuCard.contains(point.x, point.y)) {
+      hardware::beep();
+      showSlitherlink();
+    }
+    return;
+  }
   if (kLightsOutMenuCard.contains(point.x, point.y)) {
     hardware::beep();
     showLightsOut();
@@ -1701,6 +2321,196 @@ void handleReversiTouch(const Gt911Touch::Point& point) {
   }
 }
 
+int absoluteDistance(int first, int second) {
+  const int difference = first - second;
+  return difference < 0 ? -difference : difference;
+}
+
+void handleDotsAndBoxesTouch(const Gt911Touch::Point& point) {
+  if (kBackButton.contains(point.x, point.y)) {
+    showMenu();
+    return;
+  }
+  if (kCenteredNewButton.contains(point.x, point.y)) {
+    startNewDotsAndBoxes();
+    updateDotsAndBoxes("new Dots and Boxes game");
+    return;
+  }
+
+  constexpr int kEdgeTolerance = 20;
+  const int localX = point.x - kDotsGridLeft;
+  const int localY = point.y - kDotsGridTop;
+  if (localX < -kEdgeTolerance ||
+      localX > kDotsGridSize + kEdgeTolerance ||
+      localY < -kEdgeTolerance ||
+      localY > kDotsGridSize + kEdgeTolerance) {
+    return;
+  }
+
+  const int horizontalRow = (localY + kDotsSpacing / 2) / kDotsSpacing;
+  const int horizontalColumn =
+      localX >= 0 ? localX / kDotsSpacing : -1;
+  const int verticalColumn = (localX + kDotsSpacing / 2) / kDotsSpacing;
+  const int verticalRow = localY >= 0 ? localY / kDotsSpacing : -1;
+  const int horizontalDistance =
+      absoluteDistance(localY, horizontalRow * kDotsSpacing);
+  const int verticalDistance =
+      absoluteDistance(localX, verticalColumn * kDotsSpacing);
+  const bool horizontalCandidate =
+      horizontalRow >= 0 &&
+      horizontalRow <= DotsAndBoxesGame::kBoxSize &&
+      horizontalColumn >= 0 &&
+      horizontalColumn < DotsAndBoxesGame::kBoxSize &&
+      localX < kDotsGridSize && horizontalDistance <= kEdgeTolerance;
+  const bool verticalCandidate =
+      verticalRow >= 0 && verticalRow < DotsAndBoxesGame::kBoxSize &&
+      verticalColumn >= 0 &&
+      verticalColumn <= DotsAndBoxesGame::kBoxSize &&
+      localY < kDotsGridSize && verticalDistance <= kEdgeTolerance;
+
+  bool moved = false;
+  if (horizontalCandidate &&
+      (!verticalCandidate || horizontalDistance <= verticalDistance)) {
+    moved = dotsAndBoxes.placeHorizontal(horizontalRow, horizontalColumn);
+  } else if (verticalCandidate) {
+    moved = dotsAndBoxes.placeVertical(verticalRow, verticalColumn);
+  }
+  if (moved) updateDotsAndBoxes("Dots and Boxes edge");
+}
+
+void handleSokobanTouch(const Gt911Touch::Point& point) {
+  if (kBackButton.contains(point.x, point.y)) {
+    showMenu();
+    return;
+  }
+  if (kNewButton.contains(point.x, point.y)) {
+    sokoban.nextLevel();
+    sokobanSaved = true;
+    updateSokoban("next Sokoban level");
+    return;
+  }
+  if (kResetButton.contains(point.x, point.y)) {
+    sokoban.reset();
+    updateSokoban("reset Sokoban level");
+    return;
+  }
+
+  const int gridLeft = sokobanGridLeft();
+  const int gridWidth = sokoban.width() * kSokobanCellSize;
+  const int gridHeight = sokoban.height() * kSokobanCellSize;
+  if (point.x < gridLeft || point.x >= gridLeft + gridWidth ||
+      point.y < kSokobanGridTop ||
+      point.y >= kSokobanGridTop + gridHeight) {
+    return;
+  }
+  const int column = (point.x - gridLeft) / kSokobanCellSize;
+  const int row = (point.y - kSokobanGridTop) / kSokobanCellSize;
+  const int rowDelta = row - sokoban.playerRow();
+  const int columnDelta = column - sokoban.playerColumn();
+  SokobanGame::Direction direction;
+  if (rowDelta == -1 && columnDelta == 0) {
+    direction = SokobanGame::Direction::Up;
+  } else if (rowDelta == 1 && columnDelta == 0) {
+    direction = SokobanGame::Direction::Down;
+  } else if (rowDelta == 0 && columnDelta == -1) {
+    direction = SokobanGame::Direction::Left;
+  } else if (rowDelta == 0 && columnDelta == 1) {
+    direction = SokobanGame::Direction::Right;
+  } else {
+    return;
+  }
+  if (sokoban.move(direction)) updateSokoban("Sokoban move");
+}
+
+void handlePegSolitaireTouch(const Gt911Touch::Point& point) {
+  if (kBackButton.contains(point.x, point.y)) {
+    showMenu();
+    return;
+  }
+  if (kCenteredNewButton.contains(point.x, point.y)) {
+    pegSolitaire.reset();
+    updatePegSolitaire("reset Peg Solitaire");
+    return;
+  }
+  if (point.x < kPegGridLeft ||
+      point.x >= kPegGridLeft + kPegGridSize ||
+      point.y < kPegGridTop ||
+      point.y >= kPegGridTop + kPegGridSize) {
+    return;
+  }
+  const int column = (point.x - kPegGridLeft) / kPegCellSize;
+  const int row = (point.y - kPegGridTop) / kPegCellSize;
+  const PegSolitaireGame::TapResult result = pegSolitaire.tap(row, column);
+  if (result != PegSolitaireGame::TapResult::InvalidCell &&
+      result != PegSolitaireGame::TapResult::NoSelection) {
+    updatePegSolitaire(result == PegSolitaireGame::TapResult::Moved
+                           ? "Peg Solitaire move"
+                           : "Peg Solitaire selection");
+  }
+}
+
+void handleSlitherlinkTouch(const Gt911Touch::Point& point) {
+  if (kBackButton.contains(point.x, point.y)) {
+    showMenu();
+    return;
+  }
+  if (kNewButton.contains(point.x, point.y)) {
+    slitherlink.nextPuzzle();
+    slitherlinkSaved = true;
+    updateSlitherlink("next Slitherlink puzzle");
+    return;
+  }
+  if (kResetButton.contains(point.x, point.y)) {
+    slitherlink.reset();
+    updateSlitherlink("reset Slitherlink puzzle");
+    return;
+  }
+
+  constexpr int kEdgeTolerance = 18;
+  const int localX = point.x - kSlitherlinkGridLeft;
+  const int localY = point.y - kSlitherlinkGridTop;
+  if (localX < -kEdgeTolerance ||
+      localX > kSlitherlinkGridSize + kEdgeTolerance ||
+      localY < -kEdgeTolerance ||
+      localY > kSlitherlinkGridSize + kEdgeTolerance) {
+    return;
+  }
+
+  const int horizontalRow =
+      (localY + kSlitherlinkCellSize / 2) / kSlitherlinkCellSize;
+  const int horizontalColumn =
+      localX >= 0 ? localX / kSlitherlinkCellSize : -1;
+  const int verticalColumn =
+      (localX + kSlitherlinkCellSize / 2) / kSlitherlinkCellSize;
+  const int verticalRow =
+      localY >= 0 ? localY / kSlitherlinkCellSize : -1;
+  const int horizontalDistance =
+      absoluteDistance(localY, horizontalRow * kSlitherlinkCellSize);
+  const int verticalDistance =
+      absoluteDistance(localX, verticalColumn * kSlitherlinkCellSize);
+  const bool horizontalCandidate =
+      horizontalRow >= 0 && horizontalRow <= SlitherlinkGame::kSize &&
+      horizontalColumn >= 0 &&
+      horizontalColumn < SlitherlinkGame::kSize &&
+      localX < kSlitherlinkGridSize &&
+      horizontalDistance <= kEdgeTolerance;
+  const bool verticalCandidate =
+      verticalRow >= 0 && verticalRow < SlitherlinkGame::kSize &&
+      verticalColumn >= 0 &&
+      verticalColumn <= SlitherlinkGame::kSize &&
+      localY < kSlitherlinkGridSize &&
+      verticalDistance <= kEdgeTolerance;
+
+  bool changed = false;
+  if (horizontalCandidate &&
+      (!verticalCandidate || horizontalDistance <= verticalDistance)) {
+    changed = slitherlink.cycleHorizontal(horizontalRow, horizontalColumn);
+  } else if (verticalCandidate) {
+    changed = slitherlink.cycleVertical(verticalRow, verticalColumn);
+  }
+  if (changed) updateSlitherlink("Slitherlink edge");
+}
+
 bool handleMinesweeperTouchStart(const Gt911Touch::Point& point) {
   if (kBackButton.contains(point.x, point.y)) {
     showMenu();
@@ -1835,6 +2645,18 @@ void pollTouch() {
     touchActionHandled = true;
   } else if (currentScreen == Screen::Reversi) {
     handleReversiTouch(point);
+    touchActionHandled = true;
+  } else if (currentScreen == Screen::DotsAndBoxes) {
+    handleDotsAndBoxesTouch(point);
+    touchActionHandled = true;
+  } else if (currentScreen == Screen::Sokoban) {
+    handleSokobanTouch(point);
+    touchActionHandled = true;
+  } else if (currentScreen == Screen::PegSolitaire) {
+    handlePegSolitaireTouch(point);
+    touchActionHandled = true;
+  } else if (currentScreen == Screen::Slitherlink) {
+    handleSlitherlinkTouch(point);
     touchActionHandled = true;
   } else if (currentScreen == Screen::Game2048) {
     touchActionHandled = handle2048TouchStart(point);
@@ -2020,25 +2842,19 @@ void setup() {
   } else if (resumed && currentScreen == Screen::Reversi) {
     playReversiComputerTurns();
     drawReversi();
+  } else if (resumed && currentScreen == Screen::DotsAndBoxes) {
+    drawDotsAndBoxes();
+  } else if (resumed && currentScreen == Screen::Sokoban) {
+    drawSokoban();
+  } else if (resumed && currentScreen == Screen::PegSolitaire) {
+    drawPegSolitaire();
+  } else if (resumed && currentScreen == Screen::Slitherlink) {
+    drawSlitherlink();
   } else {
     currentScreen = Screen::Menu;
     drawMenu();
   }
-  const char* screenName =
-      currentScreen == Screen::LightsOut
-          ? "saved Lights Out"
-          : currentScreen == Screen::Game2048
-                ? "saved 2048"
-                : currentScreen == Screen::PipeConnect
-                      ? "saved Pipe Connect"
-                      : currentScreen == Screen::Minesweeper
-                            ? "saved Minesweeper"
-                            : currentScreen == Screen::Nonogram
-                                  ? "saved Nonogram"
-                                  : currentScreen == Screen::Reversi
-                                        ? "saved Reversi"
-                                        : "menu";
-  LOG.printf("[games] refreshing %s\n", screenName);
+  LOG.printf("[games] refreshing %s\n", screenName(currentScreen));
   epaper.update();
   sd_ota::confirmRunningImage();
 

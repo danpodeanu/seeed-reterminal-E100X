@@ -1,11 +1,15 @@
 #include <unity.h>
 
+#include "dots_and_boxes_game.h"
 #include "game_2048.h"
 #include "lights_out_game.h"
 #include "mini_minesweeper_game.h"
 #include "nonogram_game.h"
+#include "peg_solitaire_game.h"
 #include "pipe_connect_game.h"
 #include "reversi_game.h"
+#include "slitherlink_game.h"
+#include "sokoban_game.h"
 
 void setUp() {}
 void tearDown() {}
@@ -727,6 +731,312 @@ void test_reversi_invalid_snapshot_is_rejected() {
   TEST_ASSERT_FALSE(game.restore({0xFUL, 0, 0}));
 }
 
+void test_dots_and_boxes_starts_empty_with_player_one() {
+  DotsAndBoxesGame game;
+  game.start();
+
+  TEST_ASSERT_EQUAL(DotsAndBoxesGame::Player::Player1,
+                    game.currentPlayer());
+  TEST_ASSERT_EQUAL_UINT8(0, game.moves());
+  TEST_ASSERT_EQUAL_UINT8(0, game.player1Score());
+  TEST_ASSERT_EQUAL_UINT8(0, game.player2Score());
+  TEST_ASSERT_FALSE(game.gameOver());
+}
+
+void test_dots_and_boxes_alternates_after_uncaptured_edge() {
+  DotsAndBoxesGame game;
+  game.start();
+
+  TEST_ASSERT_TRUE(game.placeHorizontal(0, 0));
+  TEST_ASSERT_EQUAL(DotsAndBoxesGame::Player::Player2,
+                    game.currentPlayer());
+  TEST_ASSERT_FALSE(game.placeHorizontal(0, 0));
+  TEST_ASSERT_EQUAL_UINT8(1, game.moves());
+}
+
+void test_dots_and_boxes_capture_grants_another_turn() {
+  DotsAndBoxesGame game;
+  game.start();
+  TEST_ASSERT_TRUE(game.placeHorizontal(0, 0));
+  TEST_ASSERT_TRUE(game.placeVertical(0, 0));
+  TEST_ASSERT_TRUE(game.placeHorizontal(1, 0));
+
+  TEST_ASSERT_TRUE(game.placeVertical(0, 1));
+  TEST_ASSERT_EQUAL(DotsAndBoxesGame::Player::Player2, game.owner(0, 0));
+  TEST_ASSERT_EQUAL_UINT8(1, game.player2Score());
+  TEST_ASSERT_EQUAL(DotsAndBoxesGame::Player::Player2,
+                    game.currentPlayer());
+}
+
+void test_dots_and_boxes_shared_edge_can_capture_two_boxes() {
+  DotsAndBoxesGame game;
+  const uint32_t horizontal =
+      (1UL << 0) | (1UL << 1) | (1UL << 4) | (1UL << 5);
+  const uint32_t vertical = (1UL << 0) | (1UL << 2);
+  TEST_ASSERT_TRUE(game.restore(
+      {horizontal, vertical, 0, 0,
+       static_cast<uint8_t>(DotsAndBoxesGame::Player::Player1)}));
+
+  TEST_ASSERT_TRUE(game.placeVertical(0, 1));
+  TEST_ASSERT_EQUAL_UINT8(2, game.player1Score());
+  TEST_ASSERT_EQUAL(DotsAndBoxesGame::Player::Player1,
+                    game.currentPlayer());
+}
+
+void test_dots_and_boxes_snapshot_rejects_unowned_complete_box() {
+  DotsAndBoxesGame game;
+  TEST_ASSERT_FALSE(game.restore(
+      {(1UL << 0) | (1UL << 4), (1UL << 0) | (1UL << 1), 0, 0,
+       static_cast<uint8_t>(DotsAndBoxesGame::Player::Player1)}));
+}
+
+void test_peg_solitaire_starts_with_center_empty() {
+  PegSolitaireGame game;
+  game.start();
+
+  TEST_ASSERT_EQUAL_UINT8(32, game.pegCount());
+  TEST_ASSERT_FALSE(game.hasPeg(3, 3));
+  TEST_ASSERT_TRUE(game.hasPeg(3, 1));
+  TEST_ASSERT_TRUE(game.hasAvailableMove());
+}
+
+void test_peg_solitaire_direct_jump_removes_middle_peg() {
+  PegSolitaireGame game;
+  game.start();
+
+  TEST_ASSERT_TRUE(game.move(3, 1, 3, 3));
+  TEST_ASSERT_FALSE(game.hasPeg(3, 1));
+  TEST_ASSERT_FALSE(game.hasPeg(3, 2));
+  TEST_ASSERT_TRUE(game.hasPeg(3, 3));
+  TEST_ASSERT_EQUAL_UINT8(31, game.pegCount());
+  TEST_ASSERT_EQUAL_UINT8(1, game.moves());
+}
+
+void test_peg_solitaire_taps_select_and_complete_jump() {
+  PegSolitaireGame game;
+  game.start();
+
+  TEST_ASSERT_EQUAL(PegSolitaireGame::TapResult::Selected, game.tap(3, 1));
+  TEST_ASSERT_EQUAL_INT(3, game.selectedRow());
+  TEST_ASSERT_EQUAL_INT(1, game.selectedColumn());
+  TEST_ASSERT_EQUAL(PegSolitaireGame::TapResult::Moved, game.tap(3, 3));
+  TEST_ASSERT_FALSE(game.hasSelection());
+}
+
+void test_peg_solitaire_rejects_invalid_jump() {
+  PegSolitaireGame game;
+  game.start();
+  const PegSolitaireGame::Snapshot before = game.snapshot();
+
+  TEST_ASSERT_FALSE(game.move(0, 2, 2, 2));
+  TEST_ASSERT_EQUAL_UINT64(before.pegs, game.snapshot().pegs);
+}
+
+void test_peg_solitaire_one_center_peg_is_solved() {
+  PegSolitaireGame game;
+  TEST_ASSERT_TRUE(game.restore({1ULL << (3 * 7 + 3),
+                                 PegSolitaireGame::kNoSelection}));
+  TEST_ASSERT_TRUE(game.solved());
+  TEST_ASSERT_FALSE(game.hasAvailableMove());
+}
+
+void test_peg_solitaire_invalid_snapshot_is_rejected() {
+  PegSolitaireGame game;
+  TEST_ASSERT_FALSE(game.restore({0, PegSolitaireGame::kNoSelection}));
+  TEST_ASSERT_FALSE(game.restore({1ULL, PegSolitaireGame::kNoSelection}));
+}
+
+void test_sokoban_tutorial_push_solves_first_level() {
+  SokobanGame game;
+  game.start(0);
+
+  TEST_ASSERT_FALSE(game.solved());
+  TEST_ASSERT_TRUE(game.move(SokobanGame::Direction::Up));
+  TEST_ASSERT_TRUE(game.solved());
+  TEST_ASSERT_EQUAL_UINT16(1, game.moveCount());
+  TEST_ASSERT_EQUAL_UINT16(1, game.pushCount());
+}
+
+void test_sokoban_rejects_wall_and_resets_progress() {
+  SokobanGame game;
+  game.start(0);
+
+  TEST_ASSERT_FALSE(game.move(SokobanGame::Direction::Down));
+  TEST_ASSERT_TRUE(game.move(SokobanGame::Direction::Up));
+  game.reset();
+  TEST_ASSERT_FALSE(game.solved());
+  TEST_ASSERT_EQUAL_UINT16(0, game.moveCount());
+  TEST_ASSERT_EQUAL_UINT16(0, game.pushCount());
+}
+
+void test_sokoban_next_level_and_snapshot_restore() {
+  SokobanGame original;
+  original.start(0);
+  original.nextLevel();
+  TEST_ASSERT_EQUAL_UINT8(1, original.levelIndex());
+  TEST_ASSERT_TRUE(original.move(SokobanGame::Direction::Down));
+
+  SokobanGame restored;
+  TEST_ASSERT_TRUE(restored.restore(original.snapshot()));
+  TEST_ASSERT_EQUAL_UINT8(original.levelIndex(), restored.levelIndex());
+  TEST_ASSERT_EQUAL_INT(original.playerRow(), restored.playerRow());
+  TEST_ASSERT_EQUAL_INT(original.playerColumn(), restored.playerColumn());
+  TEST_ASSERT_EQUAL_UINT16(original.moveCount(), restored.moveCount());
+}
+
+void test_sokoban_invalid_snapshot_is_rejected() {
+  SokobanGame game;
+  SokobanGame::Snapshot invalid = game.snapshot();
+  invalid.levelIndex = SokobanGame::kLevelCount;
+  TEST_ASSERT_FALSE(game.restore(invalid));
+  invalid = game.snapshot();
+  invalid.pushes = 2;
+  invalid.moves = 1;
+  TEST_ASSERT_FALSE(game.restore(invalid));
+}
+
+void test_every_sokoban_level_has_a_verified_solution() {
+  static constexpr const char* kSolutions[SokobanGame::kLevelCount] = {
+      "U",
+      "RDDLULDLU",
+      "DLLLULDDD",
+      "RRRUULURULDDDRDLLL",
+      "DDRDRUDRUULDLU",
+  };
+  for (uint8_t level = 0; level < SokobanGame::kLevelCount; ++level) {
+    SokobanGame game;
+    game.start(level);
+    for (const char* move = kSolutions[level]; *move != '\0'; ++move) {
+      const SokobanGame::Direction direction =
+          *move == 'U'   ? SokobanGame::Direction::Up
+          : *move == 'R' ? SokobanGame::Direction::Right
+          : *move == 'D' ? SokobanGame::Direction::Down
+                         : SokobanGame::Direction::Left;
+      TEST_ASSERT_TRUE(game.move(direction));
+    }
+    TEST_ASSERT_TRUE_MESSAGE(game.solved(), "curated Sokoban level is unsolved");
+  }
+}
+
+void test_slitherlink_edges_cycle_blank_line_cross_blank() {
+  SlitherlinkGame game;
+  game.start(0);
+
+  TEST_ASSERT_EQUAL(SlitherlinkGame::Blank, game.horizontalEdge(0, 0));
+  TEST_ASSERT_TRUE(game.cycleHorizontal(0, 0));
+  TEST_ASSERT_EQUAL(SlitherlinkGame::Line, game.horizontalEdge(0, 0));
+  TEST_ASSERT_TRUE(game.cycleHorizontal(0, 0));
+  TEST_ASSERT_EQUAL(SlitherlinkGame::Cross, game.horizontalEdge(0, 0));
+  TEST_ASSERT_TRUE(game.cycleHorizontal(0, 0));
+  TEST_ASSERT_EQUAL(SlitherlinkGame::Blank, game.horizontalEdge(0, 0));
+}
+
+void test_slitherlink_clue_counts_only_line_edges() {
+  SlitherlinkGame game;
+  game.start(0);
+  TEST_ASSERT_EQUAL_INT8(1, game.clue(0, 1));
+
+  TEST_ASSERT_TRUE(game.setHorizontalEdge(0, 1, SlitherlinkGame::Line));
+  TEST_ASSERT_TRUE(game.setVerticalEdge(0, 1, SlitherlinkGame::Cross));
+  TEST_ASSERT_EQUAL_UINT8(1, game.clueLineCount(0, 1));
+  TEST_ASSERT_TRUE(game.clueSatisfied(0, 1));
+}
+
+void test_slitherlink_next_puzzle_clears_edges() {
+  SlitherlinkGame game;
+  game.start(0);
+  TEST_ASSERT_TRUE(game.cycleVertical(0, 0));
+  game.nextPuzzle();
+
+  TEST_ASSERT_EQUAL_UINT8(1, game.puzzleIndex());
+  TEST_ASSERT_EQUAL(SlitherlinkGame::Blank, game.verticalEdge(0, 0));
+}
+
+void test_slitherlink_invalid_snapshot_is_rejected() {
+  SlitherlinkGame game;
+  TEST_ASSERT_FALSE(game.restore({3ULL, 0, 0}));
+  TEST_ASSERT_FALSE(game.restore({0, 0, SlitherlinkGame::kPuzzleCount}));
+}
+
+struct SlitherlinkTestEdge {
+  uint8_t row;
+  uint8_t column;
+};
+
+template <size_t HorizontalCount, size_t VerticalCount>
+void solveSlitherlink(
+    SlitherlinkGame& game,
+    const SlitherlinkTestEdge (&horizontal)[HorizontalCount],
+    const SlitherlinkTestEdge (&vertical)[VerticalCount]) {
+  for (const SlitherlinkTestEdge& edge : horizontal) {
+    TEST_ASSERT_TRUE(game.setHorizontalEdge(
+        edge.row, edge.column, SlitherlinkGame::Line));
+  }
+  for (const SlitherlinkTestEdge& edge : vertical) {
+    TEST_ASSERT_TRUE(
+        game.setVerticalEdge(edge.row, edge.column, SlitherlinkGame::Line));
+  }
+}
+
+void test_every_slitherlink_puzzle_has_a_verified_single_loop_solution() {
+  static constexpr SlitherlinkTestEdge kHorizontal0[] = {
+      {1, 1}, {1, 2}, {1, 3}, {4, 1}, {4, 2}, {4, 3},
+  };
+  static constexpr SlitherlinkTestEdge kVertical0[] = {
+      {1, 1}, {1, 4}, {2, 1}, {2, 4}, {3, 1}, {3, 4},
+  };
+  static constexpr SlitherlinkTestEdge kHorizontal1[] = {
+      {0, 0}, {0, 1}, {0, 2}, {0, 3}, {0, 4},
+      {5, 0}, {5, 1}, {5, 2}, {5, 3}, {5, 4},
+  };
+  static constexpr SlitherlinkTestEdge kVertical1[] = {
+      {0, 0}, {0, 5}, {1, 0}, {1, 5}, {2, 0},
+      {2, 5}, {3, 0}, {3, 5}, {4, 0}, {4, 5},
+  };
+  static constexpr SlitherlinkTestEdge kHorizontal2[] = {
+      {0, 1}, {0, 2}, {0, 3}, {2, 3}, {3, 0}, {4, 3},
+      {4, 4}, {5, 0}, {5, 1}, {5, 2}, {5, 3}, {5, 4},
+  };
+  static constexpr SlitherlinkTestEdge kVertical2[] = {
+      {0, 1}, {0, 4}, {1, 1}, {1, 4}, {2, 1},
+      {2, 3}, {3, 0}, {3, 3}, {4, 0}, {4, 5},
+  };
+  static constexpr SlitherlinkTestEdge kHorizontal3[] = {
+      {0, 1}, {0, 2}, {0, 3}, {1, 2}, {1, 3}, {2, 0}, {3, 2},
+      {3, 3}, {3, 4}, {5, 0}, {5, 1}, {5, 2}, {5, 3}, {5, 4},
+  };
+  static constexpr SlitherlinkTestEdge kVertical3[] = {
+      {0, 1}, {0, 4}, {1, 1}, {1, 2}, {2, 0},
+      {2, 2}, {3, 0}, {3, 5}, {4, 0}, {4, 5},
+  };
+  static constexpr SlitherlinkTestEdge kHorizontal4[] = {
+      {0, 3}, {0, 4}, {1, 0}, {1, 1}, {1, 2}, {2, 0},
+      {2, 1}, {2, 2}, {2, 3}, {4, 1}, {4, 2}, {4, 3},
+      {5, 1}, {5, 2}, {5, 3}, {5, 4},
+  };
+  static constexpr SlitherlinkTestEdge kVertical4[] = {
+      {0, 3}, {0, 5}, {1, 0}, {1, 5}, {2, 4},
+      {2, 5}, {3, 4}, {3, 5}, {4, 1}, {4, 5},
+  };
+
+  SlitherlinkGame game;
+  game.start(0);
+  solveSlitherlink(game, kHorizontal0, kVertical0);
+  TEST_ASSERT_TRUE(game.solved());
+  game.start(1);
+  solveSlitherlink(game, kHorizontal1, kVertical1);
+  TEST_ASSERT_TRUE(game.solved());
+  game.start(2);
+  solveSlitherlink(game, kHorizontal2, kVertical2);
+  TEST_ASSERT_TRUE(game.solved());
+  game.start(3);
+  solveSlitherlink(game, kHorizontal3, kVertical3);
+  TEST_ASSERT_TRUE(game.solved());
+  game.start(4);
+  solveSlitherlink(game, kHorizontal4, kVertical4);
+  TEST_ASSERT_TRUE(game.solved());
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_corner_press_toggles_three_cells);
@@ -781,5 +1091,27 @@ int main(int, char**) {
   RUN_TEST(test_reversi_ai_prefers_an_available_corner);
   RUN_TEST(test_reversi_snapshot_restores_progress);
   RUN_TEST(test_reversi_invalid_snapshot_is_rejected);
+  RUN_TEST(test_dots_and_boxes_starts_empty_with_player_one);
+  RUN_TEST(test_dots_and_boxes_alternates_after_uncaptured_edge);
+  RUN_TEST(test_dots_and_boxes_capture_grants_another_turn);
+  RUN_TEST(test_dots_and_boxes_shared_edge_can_capture_two_boxes);
+  RUN_TEST(test_dots_and_boxes_snapshot_rejects_unowned_complete_box);
+  RUN_TEST(test_peg_solitaire_starts_with_center_empty);
+  RUN_TEST(test_peg_solitaire_direct_jump_removes_middle_peg);
+  RUN_TEST(test_peg_solitaire_taps_select_and_complete_jump);
+  RUN_TEST(test_peg_solitaire_rejects_invalid_jump);
+  RUN_TEST(test_peg_solitaire_one_center_peg_is_solved);
+  RUN_TEST(test_peg_solitaire_invalid_snapshot_is_rejected);
+  RUN_TEST(test_sokoban_tutorial_push_solves_first_level);
+  RUN_TEST(test_sokoban_rejects_wall_and_resets_progress);
+  RUN_TEST(test_sokoban_next_level_and_snapshot_restore);
+  RUN_TEST(test_sokoban_invalid_snapshot_is_rejected);
+  RUN_TEST(test_every_sokoban_level_has_a_verified_solution);
+  RUN_TEST(test_slitherlink_edges_cycle_blank_line_cross_blank);
+  RUN_TEST(test_slitherlink_clue_counts_only_line_edges);
+  RUN_TEST(test_slitherlink_next_puzzle_clears_edges);
+  RUN_TEST(test_slitherlink_invalid_snapshot_is_rejected);
+  RUN_TEST(
+      test_every_slitherlink_puzzle_has_a_verified_single_loop_solution);
   return UNITY_END();
 }

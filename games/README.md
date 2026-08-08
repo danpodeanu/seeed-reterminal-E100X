@@ -4,9 +4,9 @@ Touch-friendly, silent meeting games for the Seeed reTerminal E1005
 ("Seeed Sticky"). The app opens on a game-selection screen so additional games
 can be added without installing separate firmware.
 
-| Six-game selector | Mini Minesweeper |
+| First selector page | Mini Minesweeper |
 | --- | --- |
-| ![Games selector showing six games on a reTerminal E1005](assets/e1005-games-menu.png) | ![Mini Minesweeper running on a reTerminal E1005](assets/e1005-minesweeper.png) |
+| ![First Games selector page on a reTerminal E1005](assets/e1005-games-menu.png) | ![Mini Minesweeper running on a reTerminal E1005](assets/e1005-minesweeper.png) |
 
 Included games:
 
@@ -16,6 +16,10 @@ Included games:
 - Mini Minesweeper
 - Nonogram / Picross
 - Reversi / Othello
+- Dots and Boxes
+- Sokoban
+- Peg Solitaire
+- Slitherlink
 
 ## Included games
 
@@ -109,7 +113,57 @@ Touch controls:
 - Tap **NEW** to return to the standard four-disc opening.
 - Tap the back arrow to save and return to the selection screen.
 
-The selector uses a two-column, three-row layout for all six games.
+### Dots and Boxes
+
+Two players take turns drawing one edge between adjacent dots. Completing a box
+claims it and grants another turn. The player with the most boxes after all
+edges have been drawn wins.
+
+Touch controls:
+
+- Tap near a horizontal or vertical edge to draw it.
+- Tap **NEW** to start an empty board.
+- Tap the back arrow to save and return to the selection screen.
+
+### Sokoban
+
+Push every crate onto a target in a set of compact, curated warehouse puzzles.
+Crates can be pushed but not pulled, so plan ahead to avoid trapping one against
+a wall.
+
+Touch controls:
+
+- Tap a floor cell directly beside the worker to step or push a crate.
+- Tap **NEW** for the next level or **RESET** to restart the current level.
+- Tap the back arrow to save and return to the selection screen.
+
+### Peg Solitaire
+
+Clear the classic cross-shaped board by jumping one peg over an adjacent peg
+into an empty hole. The jumped peg is removed; the ideal finish is one peg in
+the center.
+
+Touch controls:
+
+- Tap a peg to select it, then tap a legal destination two holes away.
+- Tap **RESET** to restore the full board with its center hole empty.
+- Tap the back arrow to save and return to the selection screen.
+
+### Slitherlink
+
+Draw one continuous loop around the numbered cells. Each number says how many
+of that cell's four edges belong to the loop. Crosses can mark edges that are
+known not to be part of the solution.
+
+Touch controls:
+
+- Tap an edge to cycle it from blank, to line, to crossed, then back to blank.
+- Tap **NEW** for the next puzzle or **RESET** to clear the current puzzle.
+- Tap the back arrow to save and return to the selection screen.
+
+The selector uses two two-column pages. The first page retains the original six
+games and the second page contains the four additions. Solid **PREV** and
+**NEXT** buttons at the bottom switch pages.
 
 Front buttons:
 

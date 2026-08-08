@@ -30,7 +30,7 @@ details.
 | [XKCD Viewer](xkcd-viewer/) | A battery-powered random XKCD display with model-aware scaling, optional SD caching, Unicode titles, environmental readings, and deep sleep. | Available |
 | [Weather Viewer](weather-viewer/) | A low-power current-conditions and three-day forecast display using QWeather or Open-Meteo, with local environmental readings, severe-weather alerts, Unicode location names, and deep sleep. | Available |
 | [Photo Viewer](photo-viewer/) | A private, SD-card photo frame with panel-native preprocessing, full model-specific color, quiet hours, daily time sync, and deep sleep. | Available |
-| [Games](games/) | Six touch-friendly E1005 games with fast refresh and resumable state: Lights Out, 2048, Pipe Connect, Mini Minesweeper, Nonogram, and Reversi. | Available on E1005 |
+| [Games](games/) | Ten touch-friendly E1005 games with fast refresh, two selector pages, and resumable state: Lights Out, 2048, Pipe Connect, Mini Minesweeper, Nonogram, Reversi, Dots and Boxes, Sokoban, Peg Solitaire, and Slitherlink. | Available on E1005 |
 
 ## XKCD Viewer example
 
@@ -49,9 +49,9 @@ This frame was captured directly from a reTerminal E1001 running the
 
 ## Games examples
 
-| Six-game selector | Mini Minesweeper |
+| First selector page | Mini Minesweeper |
 | --- | --- |
-| ![Games selector showing six games on a reTerminal E1005](games/assets/e1005-games-menu.png) | ![Mini Minesweeper running on a reTerminal E1005](games/assets/e1005-minesweeper.png) |
+| ![First Games selector page on a reTerminal E1005](games/assets/e1005-games-menu.png) | ![Mini Minesweeper running on a reTerminal E1005](games/assets/e1005-minesweeper.png) |
 
 These frames were captured directly from a reTerminal E1005 running
 [Games](games/).
@@ -64,6 +64,10 @@ Included games:
 - Mini Minesweeper
 - Nonogram / Picross
 - Reversi / Othello
+- Dots and Boxes
+- Sokoban
+- Peg Solitaire
+- Slitherlink
 
 ## Future ideas
 
@@ -86,7 +90,7 @@ different framework or architecture where that better suits their use case.
 ├── xkcd-viewer/          # Standalone XKCD display firmware
 ├── weather-viewer/       # Standalone weather display firmware
 ├── photo-viewer/         # SD-card photo-frame firmware and preparation tool
-├── games/                # Six touch games for the E1005
+├── games/                # Ten touch games for the E1005
 ├── tools/                # Hardware utilities (i2c-scan, panel-test, sd-web)
 └── README.md             # This project index
 ```
