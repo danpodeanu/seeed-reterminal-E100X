@@ -17,20 +17,25 @@ Touch controls:
 - Tap **LIGHTS OUT** on the game-selection screen to play.
 - Tap a board square to make a move.
 - Tap **NEW** for another puzzle or **RESET** to restore the current puzzle.
-- Tap **GAMES** to return to the selection screen.
+- Tap **GAMES** to save the current puzzle and return to the selection screen.
+  Opening Lights Out again resumes that puzzle.
 
 Front buttons:
 
-- **OK** saves the current screen and game, shows the sleep screen, and enters
-  deep sleep. Press **OK** again to resume exactly where you left off.
-- **UP** starts a new Lights Out puzzle.
-- **DOWN** returns to the game-selection screen.
+- On the selection screen, a short **OK** press does nothing.
+- While playing, a short **OK** press saves the game and returns to the
+  selection screen.
+- Hold **OK** for 1.2 seconds anywhere to save and enter deep sleep. Press
+  **OK** again to resume.
+- **UP** and **DOWN** are unused.
 
 The app beeps once at startup and once before sleeping. While the app is open,
 the ESP32-S3 enters light sleep between touch and button events, then wakes
-immediately for input. Explicit **OK** sleep uses deep sleep for longer idle
-periods. Resume state is stored in RTC slow memory, so normal sleep/resume
-cycles do not write to flash or the SD card.
+immediately for input and logs each light-sleep entry and exit. A long **OK**
+press uses deep sleep for longer idle periods. Resume state is stored in RTC
+slow memory, so normal sleep/resume cycles do not write to flash or the SD
+card. Below 10% battery, the app saves its state, displays a recharge screen,
+and enters deep sleep unless USB-C power is connected.
 
 The SSD1677 path uses 40 MHz window transfers and reseeds both differential RAM
 planes after every refresh. This keeps normal moves near the panel's physical

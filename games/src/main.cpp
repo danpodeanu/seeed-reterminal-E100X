@@ -11,6 +11,7 @@
 #include <cstddef>
 
 #include "app_logger.h"
+#include "battery_gauge.h"
 #include "board_pins.h"
 #include "driver.h"
 #include "e1005_fast_refresh.h"
@@ -18,6 +19,7 @@
 #include "gt911_touch.h"
 #include "hardware.h"
 #include "lights_out_game.h"
+#include "low_battery.h"
 #include "peripheral_power.h"
 #include "power_latch.h"
 #include "sd_card.h"
@@ -39,9 +41,12 @@ constexpr int kGridTop = 150;
 constexpr int kCellSize = 80;
 constexpr int kGridSize = kCellSize * LightsOutGame::kSize;
 constexpr uint32_t kButtonDebounceMs = 30;
-constexpr uint64_t kIdlePollIntervalUs = 100000;
+constexpr uint32_t kButtonLongPressMs = 1200;
+constexpr uint32_t kBatteryCheckIntervalMs = 60000;
+constexpr int kLowBatteryThresholdPct = 10;
 constexpr uint32_t kPersistedStateMagic = 0x47414D45;
-constexpr uint16_t kPersistedStateVersion = 1;
+constexpr uint16_t kPersistedStateVersion = 2;
+constexpr uint8_t kLightsOutSavedFlag = 1U << 0;
 
 struct Rect {
   int x;
@@ -72,7 +77,7 @@ struct PersistedState {
   uint32_t magic;
   uint16_t version;
   uint8_t screen;
-  uint8_t reserved;
+  uint8_t flags;
   LightsOutGame::Snapshot lightsOut;
   uint32_t checksum;
 };
@@ -85,15 +90,32 @@ struct ButtonState {
   int stableLevel;
   int sampledLevel;
   uint32_t changedAtMs;
+  uint32_t pressedAtMs;
+  bool longPressReported;
 };
 
 ButtonState buttons[] = {
-    {board::PIN_BUTTON_0, "OK / power", HIGH, HIGH, 0},
-    {board::PIN_BUTTON_1, "UP / new", HIGH, HIGH, 0},
-    {board::PIN_BUTTON_2, "DOWN / back", HIGH, HIGH, 0},
+    {board::PIN_BUTTON_0, "OK / power", HIGH, HIGH, 0, 0, false},
+    {board::PIN_BUTTON_1, "UP", HIGH, HIGH, 0, 0, false},
+    {board::PIN_BUTTON_2, "DOWN", HIGH, HIGH, 0, 0, false},
 };
 
-TwoWire touchWire(0);
+enum class ButtonPressType {
+  Short,
+  Long,
+};
+
+struct ButtonEvent {
+  ButtonState* button;
+  ButtonPressType type;
+};
+
+enum class SleepScreen {
+  Resume,
+  Charge,
+};
+
+TwoWire touchWire(1);
 Gt911Touch touch;
 E1005FastRefresh fastRefresh(epaper);
 LightsOutGame lightsOut;
@@ -101,6 +123,8 @@ Screen currentScreen = Screen::Menu;
 bool touchReady = false;
 bool touchActive = false;
 bool lightSleepReady = false;
+bool lightsOutSaved = false;
+uint32_t nextBatteryCheckAtMs = 0;
 
 void configureButtons() {
   for (ButtonState& button : buttons) {
@@ -108,10 +132,13 @@ void configureButtons() {
     button.stableLevel = digitalRead(button.pin);
     button.sampledLevel = button.stableLevel;
     button.changedAtMs = millis();
+    button.pressedAtMs =
+        button.stableLevel == LOW ? button.changedAtMs : 0;
+    button.longPressReported = false;
   }
 }
 
-ButtonState* pollButtonPress() {
+bool pollButtonEvent(ButtonEvent& event) {
   const uint32_t now = millis();
   for (ButtonState& button : buttons) {
     const int level = digitalRead(button.pin);
@@ -121,12 +148,36 @@ ButtonState* pollButtonPress() {
     }
     if (level == button.stableLevel ||
         now - button.changedAtMs < kButtonDebounceMs) {
+      if (level == LOW && button.stableLevel == LOW &&
+         !button.longPressReported &&
+         now - button.pressedAtMs >= kButtonLongPressMs) {
+        button.longPressReported = true;
+        event = {&button, ButtonPressType::Long};
+        return true;
+      }
       continue;
     }
     button.stableLevel = level;
-    if (level == LOW) return &button;
+    if (level == LOW) {
+      button.pressedAtMs = now;
+      button.longPressReported = false;
+    } else if (!button.longPressReported) {
+      event = {&button, ButtonPressType::Short};
+      return true;
+    }
   }
-  return nullptr;
+  return false;
+}
+
+bool inputHandlingActive() {
+  if (touchActive) return true;
+  for (const ButtonState& button : buttons) {
+    if (button.sampledLevel != button.stableLevel ||
+        button.stableLevel == LOW) {
+      return true;
+    }
+  }
+  return false;
 }
 
 uint32_t stateChecksum(const PersistedState& state) {
@@ -144,7 +195,10 @@ void saveResumeState() {
   state.magic = kPersistedStateMagic;
   state.version = kPersistedStateVersion;
   state.screen = static_cast<uint8_t>(currentScreen);
-  state.lightsOut = lightsOut.snapshot();
+  if (lightsOutSaved) {
+    state.flags |= kLightsOutSavedFlag;
+    state.lightsOut = lightsOut.snapshot();
+  }
   state.checksum = stateChecksum(state);
   persistedState = state;
 }
@@ -156,17 +210,23 @@ bool restoreResumeState() {
   if (state.magic != kPersistedStateMagic ||
       state.version != kPersistedStateVersion ||
       state.checksum != stateChecksum(state) ||
-      state.screen > static_cast<uint8_t>(Screen::LightsOut)) {
+      state.screen > static_cast<uint8_t>(Screen::LightsOut) ||
+      (state.flags & ~kLightsOutSavedFlag) != 0) {
     LOG.println("[games] saved resume state is invalid");
     return false;
   }
 
   const Screen savedScreen = static_cast<Screen>(state.screen);
-  if (savedScreen == Screen::LightsOut &&
-      !lightsOut.restore(state.lightsOut)) {
+  const bool hasLightsOutSave = (state.flags & kLightsOutSavedFlag) != 0;
+  if (hasLightsOutSave && !lightsOut.restore(state.lightsOut)) {
     LOG.println("[games] saved Lights Out state is invalid");
     return false;
   }
+  if (savedScreen == Screen::LightsOut && !hasLightsOutSave) {
+    LOG.println("[games] saved screen has no Lights Out game");
+    return false;
+  }
+  lightsOutSaved = hasLightsOutSave;
   currentScreen = savedScreen;
   return true;
 }
@@ -212,12 +272,41 @@ void idleInLightSleep() {
     delay(5);
     return;
   }
-  if (esp_sleep_enable_timer_wakeup(kIdlePollIntervalUs) != ESP_OK) {
+  if (inputHandlingActive()) {
+    delay(5);
+    return;
+  }
+
+  const uint32_t now = millis();
+  const int32_t remainingMs =
+      static_cast<int32_t>(nextBatteryCheckAtMs - now);
+  if (remainingMs <= 0) return;
+  const uint64_t timerUs = static_cast<uint64_t>(remainingMs) * 1000ULL;
+  if (esp_sleep_enable_timer_wakeup(timerUs) != ESP_OK) {
     LOG.println("[games] light-sleep timer wake unavailable");
     disableLightSleepWake();
     return;
   }
-  esp_light_sleep_start();
+
+  LOG.println("[games] entering light sleep");
+  LOG.flush();
+  const esp_err_t sleepResult = esp_light_sleep_start();
+  if (sleepResult == ESP_OK) {
+    const esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
+    LOG.printf("[games] exited light sleep (wake=%s)\n",
+               cause == ESP_SLEEP_WAKEUP_GPIO
+                   ? "gpio"
+                   : cause == ESP_SLEEP_WAKEUP_TIMER ? "timer" : "other");
+  } else if (sleepResult == ESP_ERR_SLEEP_REJECT ||
+             sleepResult == ESP_ERR_SLEEP_TOO_SHORT_SLEEP_DURATION) {
+    LOG.printf("[games] light sleep deferred: %s\n",
+               esp_err_to_name(sleepResult));
+    delay(10);
+  } else {
+    LOG.printf("[games] light sleep failed: %s\n",
+               esp_err_to_name(sleepResult));
+    disableLightSleepWake();
+  }
   esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_TIMER);
 }
 
@@ -252,10 +341,37 @@ void drawGamesLogo(int centerX, int centerY, int width) {
                     centerY - buttonRadius, buttonRadius, TFT_WHITE);
 }
 
+bool roundedRectContains(const Rect& rect, int radius, int x, int y) {
+  const int left = rect.x;
+  const int right = rect.x + rect.width - 1;
+  const int top = rect.y;
+  const int bottom = rect.y + rect.height - 1;
+  if (x >= left + radius && x <= right - radius) return true;
+  if (y >= top + radius && y <= bottom - radius) return true;
+
+  const int centerX = x < left + radius ? left + radius : right - radius;
+  const int centerY = y < top + radius ? top + radius : bottom - radius;
+  const int dx = x - centerX;
+  const int dy = y - centerY;
+  return dx * dx + dy * dy <= radius * radius;
+}
+
+void fillDarkGrayRoundRect(const Rect& rect, int radius) {
+  epaper.fillRoundRect(rect.x, rect.y, rect.width, rect.height, radius,
+                      TFT_BLACK);
+  for (int y = rect.y; y < rect.y + rect.height; y += 2) {
+    for (int x = rect.x; x < rect.x + rect.width; x += 2) {
+      if (roundedRectContains(rect, radius, x, y)) {
+        epaper.drawPixel(x, y, TFT_WHITE);
+      }
+    }
+  }
+}
+
 void drawButton(const Rect& rect, const char* label) {
-  epaper.fillRoundRect(rect.x, rect.y, rect.width, rect.height, 8, TFT_BLACK);
+  fillDarkGrayRoundRect(rect, 8);
   epaper.setTextDatum(MC_DATUM);
-  epaper.setTextColor(TFT_WHITE, TFT_BLACK, true);
+  epaper.setTextColor(TFT_WHITE);
   epaper.drawString(label, rect.x + rect.width / 2,
                     rect.y + rect.height / 2, 4);
 }
@@ -264,18 +380,14 @@ void drawMenu() {
   epaper.fillSprite(TFT_WHITE);
   drawGamesLogo(kScreenWidth / 2, 60, 110);
 
-  epaper.fillRoundRect(kMenuGameCard.x, kMenuGameCard.y, kMenuGameCard.width,
-                      kMenuGameCard.height, 14, TFT_BLACK);
+  fillDarkGrayRoundRect(kMenuGameCard, 14);
   epaper.drawRoundRect(kMenuGameCard.x + 8, kMenuGameCard.y + 8,
                       kMenuGameCard.width - 16, kMenuGameCard.height - 16,
                       10, TFT_WHITE);
-  epaper.setTextColor(TFT_WHITE, TFT_BLACK, true);
+  epaper.setTextColor(TFT_WHITE);
   epaper.setTextDatum(MC_DATUM);
-  epaper.drawString("LIGHTS OUT", kScreenWidth / 2, 285, 4);
-  epaper.drawString("Turn every light off", kScreenWidth / 2, 335, 4);
-  epaper.drawString("TAP TO PLAY", kScreenWidth / 2, 378, 4);
-
-  drawCentered("OK: SLEEP", kScreenWidth / 2, 748, 4);
+  epaper.drawString("LIGHTS OUT", kScreenWidth / 2, 300, 4);
+  epaper.drawString("TAP TO PLAY", kScreenWidth / 2, 360, 4);
 }
 
 void drawStatus(const char* title, const char* detail) {
@@ -291,6 +403,17 @@ void drawSleepSplash() {
   drawGamesLogo(kScreenWidth / 2, 390, 280);
   drawCentered("GAMES SLEEPING", kScreenWidth / 2, 535, 4);
   drawCentered("Your game is saved", kScreenWidth / 2, 585, 4);
+}
+
+void drawChargeSplash(int batteryPercent) {
+  epaper.fillSprite(TFT_WHITE);
+  drawCentered("BATTERY LOW", kScreenWidth / 2, 130, 4);
+  drawCentered(String(batteryPercent) + "% remaining", kScreenWidth / 2, 180,
+               4);
+  drawGamesLogo(kScreenWidth / 2, 390, 280);
+  drawCentered("PLEASE CHARGE", kScreenWidth / 2, 545, 4);
+  drawCentered("Connect USB-C", kScreenWidth / 2, 595, 4);
+  drawCentered("Press OK after charging", kScreenWidth / 2, 645, 4);
 }
 
 void drawLightsOutBoard() {
@@ -321,8 +444,6 @@ void drawLightsOutBoard() {
   } else {
     drawCentered(String(lightsOut.moves()) + " moves", kScreenWidth / 2,
                  590, 4);
-    drawCentered("Tap a light", kScreenWidth / 2, 624, 4);
-    drawCentered("to toggle its neighbours", kScreenWidth / 2, 655, 4);
   }
 }
 
@@ -333,7 +454,6 @@ void drawLightsOut() {
   drawLightsOutBoard();
   drawButton(kNewButton, "NEW");
   drawButton(kResetButton, "RESET");
-  drawCentered("OK SLEEP   UP NEW   DOWN BACK", kScreenWidth / 2, 785, 2);
 }
 
 uint32_t randomScramble() {
@@ -348,6 +468,7 @@ uint32_t randomScramble() {
 
 void startNewPuzzle() {
   lightsOut.startPuzzle(randomScramble());
+  lightsOutSaved = true;
 }
 
 bool recoverFullRefresh() {
@@ -382,13 +503,17 @@ bool refreshRegion(const E1005FastRefresh::Region& region,
 }
 
 void showMenu() {
+  if (currentScreen == Screen::LightsOut && lightsOutSaved) {
+    LOG.println("[games] auto-saving Lights Out");
+  }
   currentScreen = Screen::Menu;
+  saveResumeState();
   drawMenu();
   refreshRegion(kFullScreen, "menu");
 }
 
-void showLightsOut(bool newPuzzle) {
-  if (newPuzzle) startNewPuzzle();
+void showLightsOut() {
+  if (!lightsOutSaved) startNewPuzzle();
   currentScreen = Screen::LightsOut;
   drawLightsOut();
   refreshRegion(kFullScreen, "lights-out screen");
@@ -401,7 +526,7 @@ void updateLightsOut(const char* action) {
 
 void handleMenuTouch(const Gt911Touch::Point& point) {
   if (kMenuGameCard.contains(point.x, point.y)) {
-    showLightsOut(true);
+    showLightsOut();
   }
 }
 
@@ -451,8 +576,10 @@ void pollTouch() {
   }
 }
 
-void powerDownAndSleep() {
+void powerDownAndSleep(SleepScreen screen = SleepScreen::Resume,
+                       int batteryPercent = -1) {
   disableLightSleepWake();
+  while (digitalRead(board::PIN_BUTTON_0) == LOW) delay(10);
   const bool wakePinReady = hardware::configureWakePin(board::PIN_BUTTON_0);
   const uint64_t wakeMask = 1ULL << board::PIN_BUTTON_0;
   const esp_err_t wakeResult =
@@ -468,9 +595,14 @@ void powerDownAndSleep() {
   }
 
   saveResumeState();
-  drawSleepSplash();
+  if (screen == SleepScreen::Charge) {
+    drawChargeSplash(batteryPercent);
+  } else {
+    drawSleepSplash();
+  }
   hardware::beep();
-  LOG.println("[games] entering deep sleep");
+  LOG.printf("[games] entering deep sleep (%s)\n",
+             screen == SleepScreen::Charge ? "low battery" : "requested");
   epaper.update();
   touch.end();
   fastRefresh.end();
@@ -486,23 +618,53 @@ void powerDownAndSleep() {
   peripheral_power::disableSd();
   peripheral_power::disable();
   power_latch::holdDuringDeepSleep();
+  while (digitalRead(board::PIN_BUTTON_0) == LOW) delay(10);
   esp_deep_sleep_start();
 }
 
-void handleButton(ButtonState& button) {
-  LOG.printf("[games] %s pressed\n", button.name);
-  if (button.pin == board::PIN_BUTTON_0) {
+void handleButton(const ButtonEvent& event) {
+  ButtonState& button = *event.button;
+  LOG.printf("[games] %s %s press\n", button.name,
+             event.type == ButtonPressType::Long ? "long" : "short");
+
+  if (button.pin != board::PIN_BUTTON_0) {
+    LOG.printf("[games] ignoring %s button\n", button.name);
+    return;
+  }
+  if (event.type == ButtonPressType::Long) {
     while (digitalRead(button.pin) == LOW) delay(10);
     powerDownAndSleep();
-  } else if (button.pin == board::PIN_BUTTON_1) {
-    if (currentScreen == Screen::Menu) {
-      showLightsOut(true);
-    } else {
-      startNewPuzzle();
-      updateLightsOut("new puzzle");
-    }
   } else if (currentScreen == Screen::LightsOut) {
     showMenu();
+  } else {
+    LOG.println("[games] ignoring OK on game selection");
+  }
+}
+
+void checkBatteryAndSleepIfNeeded() {
+  const uint32_t now = millis();
+  if (nextBatteryCheckAtMs != 0 &&
+      static_cast<int32_t>(now - nextBatteryCheckAtMs) < 0) {
+    return;
+  }
+  nextBatteryCheckAtMs = now + kBatteryCheckIntervalMs;
+
+  const battery::FuelGaugeReading gauge = battery::readBq27220();
+  pinMode(board::PIN_EXTERNAL_POWER, INPUT);
+  const bool externalPower =
+      digitalRead(board::PIN_EXTERNAL_POWER) == HIGH;
+  if (!gauge.valid) {
+    LOG.println("[battery] BQ27220 battery gauge unavailable");
+    return;
+  }
+
+  LOG.printf("[battery] %d%% (%.3fV), external_power=%s\n", gauge.percent,
+             gauge.voltage, externalPower ? "yes" : "no");
+  if (low_battery::shouldWarn(true, gauge.valid, externalPower, gauge.percent,
+                              kLowBatteryThresholdPct)) {
+    LOG.printf("[battery] below %d%%; requesting recharge\n",
+               kLowBatteryThresholdPct);
+    powerDownAndSleep(SleepScreen::Charge, gauge.percent);
   }
 }
 
@@ -524,6 +686,7 @@ void setup() {
   delay(board::SD_POWER_SETTLE_MS);
 
   epaper_setup::begin(epaper);
+  checkBatteryAndSleepIfNeeded();
   const bool sdReady = sd_card::mount(epaper.getSPIinstance(), "/games");
   if (sdReady && sd_ota::hasUpdate()) {
     drawStatus("UPDATING FIRMWARE", "DO NOT POWER OFF");
@@ -571,9 +734,11 @@ void setup() {
 }
 
 void loop() {
+  checkBatteryAndSleepIfNeeded();
   pollTouch();
-  if (ButtonState* button = pollButtonPress()) {
-    handleButton(*button);
+  ButtonEvent event = {};
+  if (pollButtonEvent(event)) {
+    handleButton(event);
   }
   idleInLightSleep();
 }
