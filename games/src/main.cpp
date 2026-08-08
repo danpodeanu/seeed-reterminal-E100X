@@ -715,9 +715,9 @@ void drawMinesweeperMenuCard() {
   drawMineSymbol(gridLeft + kPreviewCellSize * 3 / 2,
                  gridTop + kPreviewCellSize * 3 / 2, TFT_BLACK);
   drawCenteredNumber(1, gridLeft + kPreviewCellSize / 2,
-                     gridTop + kPreviewCellSize / 2, 6, TFT_BLACK, TFT_WHITE);
+                     gridTop + kPreviewCellSize / 2, 4, TFT_BLACK, TFT_WHITE);
   drawCenteredNumber(2, gridLeft + kPreviewCellSize * 5 / 2,
-                     gridTop + kPreviewCellSize / 2, 6, TFT_BLACK, TFT_WHITE);
+                     gridTop + kPreviewCellSize / 2, 4, TFT_BLACK, TFT_WHITE);
   epaper.fillRect(gridLeft, gridTop + kPreviewCellSize * 2,
                   kPreviewCellSize, kPreviewCellSize, TFT_BLACK);
   epaper.drawRect(gridLeft + 4, gridTop + kPreviewCellSize * 2 + 4,
@@ -946,7 +946,7 @@ void drawMinesweeperCell(int row, int column) {
   epaper.drawRect(x, y, kMinesCellSize, kMinesCellSize, TFT_BLACK);
   const int adjacent = minesweeper.adjacentMines(row, column);
   if (adjacent > 0) {
-    drawCenteredNumber(adjacent, centerX, centerY, 6, TFT_BLACK, TFT_WHITE);
+    drawCenteredNumber(adjacent, centerX, centerY, 4, TFT_BLACK, TFT_WHITE);
   }
 }
 
