@@ -3,6 +3,7 @@
 [![XKCD Viewer build](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/xkcd-viewer-build.yml/badge.svg?branch=main&event=push)](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/xkcd-viewer-build.yml)
 [![Weather Viewer build](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/weather-viewer-build.yml/badge.svg?branch=main&event=push)](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/weather-viewer-build.yml)
 [![Photo Viewer build](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/photo-viewer-build.yml/badge.svg?branch=main&event=push)](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/photo-viewer-build.yml)
+[![Games build](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/games-build.yml/badge.svg?branch=main&event=push)](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/games-build.yml)
 [![Repository checks](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/repository-checks.yml/badge.svg?branch=main&event=push)](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/repository-checks.yml)
 [![CodeQL](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/codeql.yml/badge.svg?branch=main&event=push)](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/codeql.yml)
 [![Release firmware](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/release.yml/badge.svg)](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/release.yml)
@@ -29,6 +30,7 @@ details.
 | [XKCD Viewer](xkcd-viewer/) | A battery-powered random XKCD display with model-aware scaling, optional SD caching, Unicode titles, environmental readings, and deep sleep. | Available |
 | [Weather Viewer](weather-viewer/) | A low-power current-conditions and three-day forecast display using QWeather or Open-Meteo, with local environmental readings, severe-weather alerts, Unicode location names, and deep sleep. | Available |
 | [Photo Viewer](photo-viewer/) | A private, SD-card photo frame with panel-native preprocessing, full model-specific color, quiet hours, daily time sync, and deep sleep. | Available |
+| [Games](games/) | Touch-friendly meeting games for the E1005, with a game selector and Lights Out as the first game. | Available on E1005 |
 
 ## XKCD Viewer example
 
@@ -66,6 +68,7 @@ different framework or architecture where that better suits their use case.
 ├── xkcd-viewer/          # Standalone XKCD display firmware
 ├── weather-viewer/       # Standalone weather display firmware
 ├── photo-viewer/         # SD-card photo-frame firmware and preparation tool
+├── games/                # E1005 touch games, starting with Lights Out
 ├── tools/                # Hardware utilities (i2c-scan, panel-test, sd-web)
 └── README.md             # This project index
 ```
@@ -84,7 +87,8 @@ uploading firmware.
 
 All three viewer applications support E1001-E1005, including the monochrome
 Seeed reTerminal E1005 ("Seeed Sticky") in portrait and both landscape
-directions. E1005 hardware tools live under `tools/`.
+directions. The Games app is intentionally E1005-only because it depends on
+the integrated touch screen. E1005 hardware tools live under `tools/`.
 Model-specific firmware for supported combinations is included in releases.
 
 ## Getting started
@@ -143,7 +147,7 @@ pio test -c platformio-test.ini -e native_test
 Use the same command inside `weather-viewer` or `photo-viewer`. Their GitHub
 Actions workflows run these tests on every relevant push and pull request.
 
-Release qualification builds all 15 application/board combinations.
+Release qualification builds all 16 supported application/board combinations.
 
 ## Contributing
 

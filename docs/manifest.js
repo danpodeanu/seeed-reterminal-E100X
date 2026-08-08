@@ -19,6 +19,7 @@ const E1005_BOARD = "reterminal_e1005";
 
 const boardSel = document.getElementById("board");
 const appSel = document.getElementById("app");
+const gamesOption = appSel.querySelector('option[value="games"]');
 const installer = document.getElementById("installer");
 const status = document.getElementById("status");
 
@@ -136,12 +137,23 @@ async function refresh() {
   );
 }
 
+function updateAppAvailability() {
+  gamesOption.disabled = boardSel.value !== E1005_BOARD;
+  if (gamesOption.disabled && appSel.value === "games") {
+    appSel.value = "weather-viewer";
+  }
+}
+
 async function boot() {
   releaseTag = await fetchLatestTag();
+  updateAppAvailability();
   await refresh();
 }
 
-boardSel.addEventListener("change", refresh);
+boardSel.addEventListener("change", async () => {
+  updateAppAvailability();
+  await refresh();
+});
 appSel.addEventListener("change", refresh);
 
 boot();

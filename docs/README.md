@@ -14,7 +14,8 @@ Hosted at:
 
 - Presents two dropdowns: board (E1001 / E1002 / E1003 / E1004 /
   E1005 "Seeed Sticky") and
-  application (XKCD Viewer / Weather Viewer / Photo Viewer).
+  application (XKCD Viewer / Weather Viewer / Photo Viewer / Games). Games is
+  enabled only when E1005 is selected.
 - Looks up the repository's latest GitHub Release through the public API
   so the version tag can be displayed in the status line.
 - Builds an ESP Web Tools manifest from the E1001-E1004 shared boot-chain
@@ -49,7 +50,7 @@ the flasher and the binaries share an origin.
 Two workflows cooperate:
 
 1. `.github/workflows/release.yml` runs on tag pushes (`v*`). For every
-   application x board combination it builds the firmware with
+   supported application x board combination it builds the firmware with
    PlatformIO, merges the bootloader, partition table, OTA selector, and
    application into a single image with `esptool merge_bin`, and
    attaches both flavours to the GitHub Release:

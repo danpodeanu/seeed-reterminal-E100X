@@ -1,6 +1,6 @@
 name: Release firmware
 
-# Builds every app x board combination, merges each into a single
+# Builds every supported app x board combination, merges each into a single
 # flashable binary, and attaches the results to the GitHub Release.
 # The web flasher in docs/ reads the release assets by name.
 #
@@ -30,13 +30,22 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        app: [xkcd-viewer, weather-viewer, photo-viewer]
+        app: [xkcd-viewer, weather-viewer, photo-viewer, games]
         board:
           - reterminal_e1001
           - reterminal_e1002
           - reterminal_e1003
           - reterminal_e1004
           - reterminal_e1005
+        exclude:
+          - app: games
+            board: reterminal_e1001
+          - app: games
+            board: reterminal_e1002
+          - app: games
+            board: reterminal_e1003
+          - app: games
+            board: reterminal_e1004
 
     steps:
       - name: Check out repository
@@ -51,6 +60,7 @@ jobs:
         run: python -m pip install --upgrade platformio esptool intelhex resvg_py Pillow
 
       - name: Create placeholder credentials
+        if: matrix.app != 'games'
         working-directory: ${{ matrix.app }}
         run: cp include/secrets.h.example include/secrets.h
 

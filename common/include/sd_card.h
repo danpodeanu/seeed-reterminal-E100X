@@ -5,9 +5,9 @@
 #include <SPI.h>
 #include <stddef.h>
 
-// SD-card helpers shared by every viewer app: mount + safe read/write.
-// All three apps repeat the same mount sequence (shared peripheral rail
-// enabled, share the e-paper SPI bus, create a cache directory), and two repeat
+// SD-card helpers shared by the firmware apps: mount + safe read/write.
+// The apps repeat the same mount sequence (shared peripheral rail enabled,
+// shared e-paper SPI bus, cache directory creation), and several repeat
 // a bounded-size read plus an atomic write. Keep the retry/error paths
 // in one place so future changes need only touch one file.
 //

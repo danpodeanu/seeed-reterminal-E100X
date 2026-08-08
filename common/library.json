@@ -1,7 +1,7 @@
 {
   "name": "reterminal_common",
   "version": "0.1.0",
-  "description": "Shared helpers used by every reTerminal viewer app.",
+  "description": "Shared helpers used by the reTerminal firmware apps.",
   "build": {
     "srcDir": "src",
     "libArchive": false

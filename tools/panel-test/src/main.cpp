@@ -25,7 +25,6 @@
 // button enters deep sleep; any front button wakes, beeps, and redraws.
 
 #include <Arduino.h>
-#include <SPI.h>
 #include <TFT_eSPI.h>
 #include <Wire.h>
 #include <driver/rtc_io.h>
@@ -34,6 +33,7 @@
 #include "app_logger.h"
 #include "board_pins.h"
 #include "driver.h"
+#include "e1005_fast_refresh.h"
 #include "epaper_setup.h"
 #include "hardware.h"
 #include "gt911_touch.h"
@@ -313,6 +313,7 @@ void renderPattern() {
 #if RETERMINAL_MODEL == 1005
 TwoWire touchWire(0);
 Gt911Touch touch;
+E1005FastRefresh fastRefresh(epaper);
 bool touchReady = false;
 bool touchActive = false;
 
@@ -321,20 +322,6 @@ struct PatternRegion {
   int top;
   int width;
   int height;
-};
-
-struct NativeRegion {
-  int left;
-  int top;
-  int width;
-  int height;
-};
-
-struct RefreshTiming {
-  uint32_t transferUs = 0;
-  uint32_t panelUs = 0;
-  uint32_t reseedUs = 0;
-  uint32_t totalUs = 0;
 };
 
 PatternRegion columnRegion(int x, int top, int height, int columnCount) {
@@ -367,14 +354,6 @@ PatternRegion touchedPatternRegion(const Gt911Touch::Point& point) {
   return columnRegion(point.x, rampTop, PANEL_HEIGHT - rampTop, RAMP_COUNT);
 }
 
-NativeRegion nativeRegion(const PatternRegion& region) {
-  const int unalignedLeft = PANEL_HEIGHT - region.top - region.height;
-  const int unalignedRight = unalignedLeft + region.height;
-  const int left = unalignedLeft & ~7;
-  const int right = (unalignedRight + 7) & ~7;
-  return {left, region.left, right - left, region.width};
-}
-
 bool invertTouchRegion(int left, int top, int width, int height) {
   auto* framebuffer = static_cast<uint8_t*>(epaper.getPointer());
   if (!framebuffer) return false;
@@ -391,215 +370,33 @@ bool invertTouchRegion(int left, int top, int width, int height) {
   return true;
 }
 
-uint8_t reverseBits(uint8_t value) {
-  value = static_cast<uint8_t>((value >> 4) | (value << 4));
-  value = static_cast<uint8_t>(((value & 0xCCU) >> 2) |
-                               ((value & 0x33U) << 2));
-  return static_cast<uint8_t>(((value & 0xAAU) >> 1) |
-                              ((value & 0x55U) << 1));
-}
-
-constexpr size_t FRAMEBUFFER_SIZE =
-    static_cast<size_t>(PANEL_HEIGHT / 8) * PANEL_WIDTH;
-constexpr uint32_t PARTIAL_REFRESH_SPI_HZ = 40000000;
-
-void buildDisplayPlane(const uint8_t* framebuffer, uint8_t* destination) {
-  constexpr int kNativeStrideBytes = PANEL_HEIGHT / 8;
-  for (int row = 0; row < PANEL_WIDTH; ++row) {
-    const uint8_t* source = framebuffer + row * kNativeStrideBytes;
-    for (int column = kNativeStrideBytes - 1; column >= 0; --column) {
-      *destination++ = reverseBits(source[column]);
-    }
-  }
-}
-
-void writePanelCommand(uint8_t command, const uint8_t* data = nullptr,
-                       size_t length = 0) {
-  SPIClass& panelSpi = epaper.getSPIinstance();
-  panelSpi.beginTransaction(
-      SPISettings(PARTIAL_REFRESH_SPI_HZ, MSBFIRST, SPI_MODE0));
-  digitalWrite(board::PIN_SD_CS, HIGH);
-  digitalWrite(TFT_CS, LOW);
-  digitalWrite(TFT_DC, LOW);
-  panelSpi.transfer(command);
-  if (data && length > 0) {
-    digitalWrite(TFT_DC, HIGH);
-    panelSpi.writeBytes(data, length);
-  }
-  digitalWrite(TFT_CS, HIGH);
-  digitalWrite(TFT_DC, HIGH);
-  panelSpi.endTransaction();
-}
-
-void writeDisplayPlaneWindow(uint8_t command, const uint8_t* data,
-                             const NativeRegion& region) {
-  constexpr int kDisplayStrideBytes = PANEL_HEIGHT / 8;
-  const int left = PANEL_HEIGHT - region.left - region.width;
-  const int leftByte = left / 8;
-  const size_t rowBytes = static_cast<size_t>(region.width / 8);
-
-  SPIClass& panelSpi = epaper.getSPIinstance();
-  panelSpi.beginTransaction(
-      SPISettings(PARTIAL_REFRESH_SPI_HZ, MSBFIRST, SPI_MODE0));
-  digitalWrite(board::PIN_SD_CS, HIGH);
-  digitalWrite(TFT_CS, LOW);
-  digitalWrite(TFT_DC, LOW);
-  panelSpi.transfer(command);
-  digitalWrite(TFT_DC, HIGH);
-  for (int row = region.top; row < region.top + region.height; ++row) {
-    panelSpi.writeBytes(data + row * kDisplayStrideBytes + leftByte,
-                        rowBytes);
-  }
-  digitalWrite(TFT_CS, HIGH);
-  digitalWrite(TFT_DC, HIGH);
-  panelSpi.endTransaction();
-}
-
-void setPartialWindow(const NativeRegion& region) {
-  const uint16_t left = static_cast<uint16_t>(
-      PANEL_HEIGHT - region.left - region.width);
-  const uint16_t right =
-      static_cast<uint16_t>(PANEL_HEIGHT - region.left - 1);
-  const uint16_t top = static_cast<uint16_t>(region.top);
-  const uint16_t bottom =
-      static_cast<uint16_t>(region.top + region.height - 1);
-
-  const uint8_t xRange[] = {
-      static_cast<uint8_t>(left & 0xFFU),
-      static_cast<uint8_t>(left >> 8),
-      static_cast<uint8_t>(right & 0xFFU),
-      static_cast<uint8_t>(right >> 8),
-  };
-  const uint8_t yRange[] = {
-      static_cast<uint8_t>(top & 0xFFU),
-      static_cast<uint8_t>(top >> 8),
-      static_cast<uint8_t>(bottom & 0xFFU),
-      static_cast<uint8_t>(bottom >> 8),
-  };
-  const uint8_t xCounter[] = {
-      static_cast<uint8_t>(left & 0xFFU),
-      static_cast<uint8_t>(left >> 8),
-  };
-  const uint8_t yCounter[] = {
-      static_cast<uint8_t>(top & 0xFFU),
-      static_cast<uint8_t>(top >> 8),
-  };
-
-  writePanelCommand(0x44, xRange, sizeof(xRange));
-  writePanelCommand(0x45, yRange, sizeof(yRange));
-  writePanelCommand(0x4E, xCounter, sizeof(xCounter));
-  writePanelCommand(0x4F, yCounter, sizeof(yCounter));
-}
-
-bool seedPartialRefreshBaseline() {
-  const auto* framebuffer = static_cast<const uint8_t*>(epaper.getPointer());
-  auto* displayPlane = static_cast<uint8_t*>(malloc(FRAMEBUFFER_SIZE));
-  if (!framebuffer || !displayPlane) {
-    free(displayPlane);
-    return false;
-  }
-
-  buildDisplayPlane(framebuffer, displayPlane);
-  const NativeRegion fullPanel = {0, 0, PANEL_HEIGHT, PANEL_WIDTH};
-  setPartialWindow(fullPanel);
-  writeDisplayPlaneWindow(0x24, displayPlane, fullPanel);
-  setPartialWindow(fullPanel);
-  writeDisplayPlaneWindow(0x26, displayPlane, fullPanel);
-  free(displayPlane);
-  return true;
-}
-
-bool refreshPartialRegion(const NativeRegion& region, const uint8_t* oldPlane,
-                          const uint8_t* newPlane, RefreshTiming& timing) {
-  const uint32_t refreshStartedUs = micros();
-  epaper.wake();
-  const uint8_t internalTemperature = 0x80;
-  const uint8_t fastBorderWaveform = 0x80;
-  const uint8_t normalRamComparison = 0x00;
-  const uint8_t fastUpdateSequence = 0xFF;
-  writePanelCommand(0x18, &internalTemperature, 1);
-  writePanelCommand(0x3C, &fastBorderWaveform, 1);
-  setPartialWindow(region);
-  writeDisplayPlaneWindow(0x26, oldPlane, region);
-  setPartialWindow(region);
-  writeDisplayPlaneWindow(0x24, newPlane, region);
-  setPartialWindow(region);
-  writePanelCommand(0x21, &normalRamComparison, 1);
-  writePanelCommand(0x22, &fastUpdateSequence, 1);
-  const uint32_t panelStartedUs = micros();
-  writePanelCommand(0x20);
-
-  constexpr uint32_t kRefreshTimeoutMs = 10000;
-  constexpr uint32_t kBusyAssertTimeoutUs = 20000;
-  timing.transferUs = micros() - refreshStartedUs;
-  while (digitalRead(TFT_BUSY) == LOW &&
-         micros() - panelStartedUs < kBusyAssertTimeoutUs) {
-    delayMicroseconds(50);
-  }
-  if (digitalRead(TFT_BUSY) == LOW) {
-    const uint32_t nowUs = micros();
-    timing.panelUs = nowUs - panelStartedUs;
-    timing.totalUs = nowUs - refreshStartedUs;
-    LOG.println("[panel-test] partial refresh did not assert BUSY");
-    return false;
-  }
-  while (digitalRead(TFT_BUSY) == HIGH) {
-    const uint32_t nowUs = micros();
-    if (nowUs - panelStartedUs >= kRefreshTimeoutMs * 1000U) {
-      timing.panelUs = nowUs - panelStartedUs;
-      timing.totalUs = nowUs - refreshStartedUs;
-      LOG.println("[panel-test] partial refresh timed out");
-      return false;
-    }
-    delay(1);
-  }
-  const uint32_t completedUs = micros();
-  timing.panelUs = completedUs - panelStartedUs;
-  setPartialWindow(region);
-  writeDisplayPlaneWindow(0x24, newPlane, region);
-  setPartialWindow(region);
-  writeDisplayPlaneWindow(0x26, newPlane, region);
-  const uint32_t reseededUs = micros();
-  timing.reseedUs = reseededUs - completedUs;
-  timing.totalUs = reseededUs - refreshStartedUs;
-  return true;
-}
-
 void showTouchFeedback(const Gt911Touch::Point& point,
                        uint32_t touchDetectedUs) {
   const PatternRegion region = touchedPatternRegion(point);
-  const NativeRegion native = nativeRegion(region);
-  auto* framebuffer = static_cast<uint8_t*>(epaper.getPointer());
-  auto* originalPlane = static_cast<uint8_t*>(malloc(FRAMEBUFFER_SIZE));
-  auto* invertedPlane = static_cast<uint8_t*>(malloc(FRAMEBUFFER_SIZE));
-  if (!framebuffer || !originalPlane || !invertedPlane) {
-    free(originalPlane);
-    free(invertedPlane);
-    LOG.printf("[panel-test] cannot allocate two %u-byte partial buffers\n",
-               static_cast<unsigned>(FRAMEBUFFER_SIZE));
-    return;
-  }
-
-  buildDisplayPlane(framebuffer, originalPlane);
+  const E1005FastRefresh::Region refreshRegion = {
+      region.left, region.top, region.width, region.height};
   invertTouchRegion(region.left, region.top, region.width, region.height);
-  buildDisplayPlane(framebuffer, invertedPlane);
-  const uint32_t preparedUs = micros();
-  RefreshTiming invertedTiming;
-  const bool invertedOk = refreshPartialRegion(
-      native, originalPlane, invertedPlane, invertedTiming);
+  E1005FastRefresh::Timing invertedTiming;
+  const E1005FastRefresh::Result invertedResult =
+      fastRefresh.refresh(refreshRegion, invertedTiming);
+  const bool invertedOk =
+      invertedResult == E1005FastRefresh::Result::Ok;
   const uint32_t invertedCompleteUs = micros();
 
-  RefreshTiming restoredTiming;
+  E1005FastRefresh::Timing restoredTiming;
   const uint32_t restoreStartedUs = micros();
-  const bool restoredOk = invertedOk && refreshPartialRegion(
-                                           native, invertedPlane,
-                                           originalPlane, restoredTiming);
+  invertTouchRegion(region.left, region.top, region.width, region.height);
+  const E1005FastRefresh::Result restoredResult =
+      invertedOk ? fastRefresh.refresh(refreshRegion, restoredTiming)
+                 : invertedResult;
+  const bool restoredOk =
+      restoredResult == E1005FastRefresh::Result::Ok;
   const uint32_t restoredCompleteUs = micros();
   LOG.printf(
       "[touch] invert latency=%lu us "
       "(prepare=%lu transfer=%lu panel=%lu reseed=%lu)\n",
       static_cast<unsigned long>(invertedCompleteUs - touchDetectedUs),
-      static_cast<unsigned long>(preparedUs - touchDetectedUs),
+      static_cast<unsigned long>(invertedTiming.prepareUs),
       static_cast<unsigned long>(invertedTiming.transferUs),
       static_cast<unsigned long>(invertedTiming.panelUs),
       static_cast<unsigned long>(invertedTiming.reseedUs));
@@ -614,15 +411,13 @@ void showTouchFeedback(const Gt911Touch::Point& point,
         static_cast<unsigned long>(restoredTiming.reseedUs),
         static_cast<unsigned long>(restoredCompleteUs - touchDetectedUs));
   }
-  invertTouchRegion(region.left, region.top, region.width, region.height);
-  free(originalPlane);
-  free(invertedPlane);
   if (!restoredOk) {
+    LOG.printf("[panel-test] partial refresh failed: %s\n",
+               E1005FastRefresh::resultMessage(restoredResult));
     LOG.println("[panel-test] restoring pattern with a full refresh");
     epaper.sleep();
     epaper.update();
-    epaper.wake();
-    if (!seedPartialRefreshBaseline()) {
+    if (fastRefresh.begin() != E1005FastRefresh::Result::Ok) {
       touchReady = false;
       LOG.println("[panel-test] cannot restore partial refresh baseline");
     }
@@ -735,10 +530,9 @@ void setup() {
 #if RETERMINAL_MODEL == 1005
   // The initial full refresh sleeps the controller. Wake it now so touch
   // latency excludes reset, then seed both RAM planes for differential updates.
-  epaper.wake();
-  LOG.printf("[panel-test] E1005 partial refresh SPI=%lu MHz\n",
-             static_cast<unsigned long>(PARTIAL_REFRESH_SPI_HZ / 1000000U));
-  const bool baselineReady = seedPartialRefreshBaseline();
+  LOG.println("[panel-test] E1005 partial refresh SPI=40 MHz");
+  const bool baselineReady =
+      fastRefresh.begin() == E1005FastRefresh::Result::Ok;
   touchReady = baselineReady && touch.begin(touchWire);
   if (!baselineReady) {
     LOG.println("[panel-test] cannot allocate partial refresh baseline");

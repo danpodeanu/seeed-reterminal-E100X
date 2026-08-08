@@ -34,6 +34,11 @@ jobs:
             test -f "$project/test/test_app_logic/test_main.cpp"
             test -f "$project/include/secrets.h.example"
           done
+          test -f games/README.md
+          test -f games/platformio.ini
+          test -f games/platformio-test.ini
+          test -f games/src/lights_out_game.h
+          test -f games/test/test_lights_out/test_main.cpp
           test -f photo-viewer/tools/prepare_photos.py
           test -f photo-viewer/requirements.txt
           test -f xkcd-viewer/assets/e1003-xkcd-screenshot.png
