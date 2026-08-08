@@ -42,9 +42,9 @@ This frame was captured directly from a reTerminal E1003 running the
 
 ## Weather Viewer example
 
-![Weather Viewer showing current conditions and a three-day forecast on a reTerminal E1003](weather-viewer/assets/e1003-weather-screenshot.png)
+![Weather Viewer showing current conditions and a three-day forecast on a reTerminal E1001](weather-viewer/assets/e1001-weather-screenshot.png)
 
-This frame was captured directly from a reTerminal E1003 running the
+This frame was captured directly from a reTerminal E1001 running the
 [Weather Viewer](weather-viewer/).
 
 ## Future ideas
