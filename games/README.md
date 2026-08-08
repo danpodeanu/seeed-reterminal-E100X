@@ -17,7 +17,7 @@ Included games:
 - Nonogram / Picross
 - Reversi / Othello
 - Dots and Boxes
-- Sokoban
+- Sokoban (155 Microban I levels)
 - Peg Solitaire
 - Slitherlink
 
@@ -127,15 +127,26 @@ Touch controls:
 
 ### Sokoban
 
-Push every crate onto a target in a set of compact, curated warehouse puzzles.
-Crates can be pushed but not pulled, so plan ahead to avoid trapping one against
-a wall.
+Push every crate onto a target across all 155 levels of David W. Skinner's
+Microban I collection. Crates can be pushed but not pulled, so plan ahead to
+avoid trapping one against a wall. The board scales automatically to fit levels
+up to 30 columns by 17 rows.
 
 Touch controls:
 
-- Tap a floor cell directly beside the worker to step or push a crate.
+- Tap anywhere on the board in the direction you want the worker to move. The
+  worker steps once or pushes one crate, making even the smallest scaled boards
+  easy to control.
 - Tap **NEW** for the next level or **RESET** to restart the current level.
 - Tap the back arrow to save and return to the selection screen.
+
+Microban I is copyright David W. Skinner and is redistributed with permission
+and credit. See the
+[author's redistribution notice](http://www.abelmartin.com/rj/sokobanJS/Skinner/David%20W.%20Skinner%20-%20Sokoban.htm)
+and the [source level file](https://github.com/OMerkel/Sokoban/blob/master/3rdParty/Levels/Microban.txt).
+The highest level opened is saved to non-volatile memory only when it advances.
+After a power loss or firmware update, a new Sokoban session starts from that
+level instead of level 1.
 
 ### Peg Solitaire
 
@@ -162,8 +173,8 @@ Touch controls:
 - Tap the back arrow to save and return to the selection screen.
 
 The selector uses two two-column pages. The first page retains the original six
-games and the second page contains the four additions. Solid **PREV** and
-**NEXT** buttons at the bottom switch pages.
+games and the second page contains the four additions. Solid black arrow buttons
+in the bottom-left and bottom-right corners switch pages.
 
 Front buttons:
 

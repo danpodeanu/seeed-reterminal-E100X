@@ -65,7 +65,7 @@ Included games:
 - Nonogram / Picross
 - Reversi / Othello
 - Dots and Boxes
-- Sokoban
+- Sokoban (155 Microban I levels)
 - Peg Solitaire
 - Slitherlink
 

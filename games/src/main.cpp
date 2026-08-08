@@ -18,6 +18,7 @@
 #include "e1005_fast_refresh.h"
 #include "epaper_setup.h"
 #include "game_2048.h"
+#include "game_progress_store.h"
 #include "gt911_touch.h"
 #include "hardware.h"
 #include "lights_out_game.h"
@@ -80,8 +81,7 @@ constexpr int kDotsGridTop = 155;
 constexpr int kDotsSpacing = 80;
 constexpr int kDotsGridSize = kDotsSpacing * DotsAndBoxesGame::kBoxSize;
 constexpr int kSokobanGridTop = 140;
-constexpr int kSokobanCellSize = 56;
-constexpr int kSokobanGridSize = kSokobanCellSize * SokobanGame::kSize;
+constexpr int kSokobanMaxBoardPixels = 420;
 constexpr int kPegGridLeft = 44;
 constexpr int kPegGridTop = 140;
 constexpr int kPegCellSize = 56;
@@ -105,7 +105,7 @@ constexpr uint32_t kBatteryCheckIntervalMs = 60000;
 constexpr uint32_t kInactivitySleepMs = 5UL * 60UL * 1000UL;
 constexpr int kLowBatteryThresholdPct = 10;
 constexpr uint32_t kPersistedStateMagic = 0x47414D45;
-constexpr uint16_t kPersistedStateVersion = 9;
+constexpr uint16_t kPersistedStateVersion = 10;
 constexpr uint16_t kLightsOutSavedFlag = 1U << 0;
 constexpr uint16_t k2048SavedFlag = 1U << 1;
 constexpr uint16_t kPipeConnectSavedFlag = 1U << 2;
@@ -116,6 +116,7 @@ constexpr uint16_t kDotsAndBoxesSavedFlag = 1U << 6;
 constexpr uint16_t kSokobanSavedFlag = 1U << 7;
 constexpr uint16_t kPegSolitaireSavedFlag = 1U << 8;
 constexpr uint16_t kSlitherlinkSavedFlag = 1U << 9;
+constexpr char kSokobanProgressKey[] = "sokoban_level";
 
 constexpr uint32_t makeNonogramSolution(uint8_t row0, uint8_t row1,
                                         uint8_t row2, uint8_t row3,
@@ -161,24 +162,24 @@ constexpr Rect kDotsAndBoxesMenuCard = kLightsOutMenuCard;
 constexpr Rect kSokobanMenuCard = k2048MenuCard;
 constexpr Rect kPegSolitaireMenuCard = kPipeConnectMenuCard;
 constexpr Rect kSlitherlinkMenuCard = kMinesweeperMenuCard;
-constexpr Rect kPreviousPageButton = {40, 736, 190, 52};
-constexpr Rect kNextPageButton = {250, 736, 190, 52};
+constexpr Rect kPreviousPageButton = {8, 756, 48, 36};
+constexpr Rect kNextPageButton = {424, 756, 48, 36};
 constexpr Rect kBackButton = {8, 6, 48, 36};
 constexpr Rect kNewButton = {30, 688, 190, 66};
 constexpr Rect kResetButton = {260, 688, 190, 66};
 constexpr Rect kCenteredNewButton = {145, 688, 190, 66};
 constexpr E1005FastRefresh::Region kBatteryStatusRegion = {390, 0, 90, 48};
-constexpr E1005FastRefresh::Region kBoardRegion = {30, 130, 420, 550};
-constexpr E1005FastRefresh::Region k2048BoardRegion = {30, 112, 420, 553};
-constexpr E1005FastRefresh::Region kPipeBoardRegion = {25, 112, 430, 553};
-constexpr E1005FastRefresh::Region kMinesBoardRegion = {25, 112, 430, 553};
+constexpr E1005FastRefresh::Region kBoardRegion = {30, 80, 420, 600};
+constexpr E1005FastRefresh::Region k2048BoardRegion = {30, 80, 420, 585};
+constexpr E1005FastRefresh::Region kPipeBoardRegion = {25, 80, 430, 585};
+constexpr E1005FastRefresh::Region kMinesBoardRegion = {25, 80, 430, 585};
 constexpr E1005FastRefresh::Region kNonogramBoardRegion = {20, 64, 440, 584};
-constexpr E1005FastRefresh::Region kReversiBoardRegion = {25, 104, 430, 560};
-constexpr E1005FastRefresh::Region kReversiModeRegion = {25, 104, 430, 650};
-constexpr E1005FastRefresh::Region kDotsBoardRegion = {25, 104, 430, 560};
-constexpr E1005FastRefresh::Region kSokobanBoardRegion = {25, 104, 430, 560};
-constexpr E1005FastRefresh::Region kPegBoardRegion = {25, 104, 430, 560};
-constexpr E1005FastRefresh::Region kSlitherlinkBoardRegion = {25, 104, 430, 560};
+constexpr E1005FastRefresh::Region kReversiBoardRegion = {25, 80, 430, 584};
+constexpr E1005FastRefresh::Region kReversiModeRegion = {25, 80, 430, 674};
+constexpr E1005FastRefresh::Region kDotsBoardRegion = {25, 80, 430, 584};
+constexpr E1005FastRefresh::Region kSokobanBoardRegion = {25, 80, 430, 584};
+constexpr E1005FastRefresh::Region kPegBoardRegion = {25, 80, 430, 584};
+constexpr E1005FastRefresh::Region kSlitherlinkBoardRegion = {25, 80, 430, 584};
 
 enum class Screen {
   Menu,
@@ -315,6 +316,7 @@ DotsAndBoxesGame dotsAndBoxes;
 SokobanGame sokoban;
 PegSolitaireGame pegSolitaire;
 SlitherlinkGame slitherlink;
+uint16_t sokobanHighestLevel = 0;
 ReversiMode reversiMode = ReversiMode::SinglePlayer;
 Screen currentScreen = Screen::Menu;
 MenuPage currentMenuPage = MenuPage::First;
@@ -1208,17 +1210,27 @@ void drawStatusBar() {
   epaper.drawFastHLine(0, kStatusDividerY, kScreenWidth, TFT_BLACK);
 }
 
-void drawBackIndicator() {
-  epaper.fillRoundRect(kBackButton.x, kBackButton.y, kBackButton.width,
-                       kBackButton.height, 8, TFT_BLACK);
-  const int centerY = kBackButton.y + kBackButton.height / 2;
-  const int tipX = kBackButton.x + 9;
-  const int headBaseX = tipX + 13;
-  const int tailX = kBackButton.x + kBackButton.width - 9;
+void drawArrowButton(const Rect& button, bool pointsRight) {
+  epaper.fillRoundRect(button.x, button.y, button.width, button.height, 8,
+                      TFT_BLACK);
+  const int centerY = button.y + button.height / 2;
+  const int tipX =
+      pointsRight ? button.x + button.width - 9 : button.x + 9;
+  const int headBaseX = pointsRight ? tipX - 13 : tipX + 13;
+  const int tailX =
+      pointsRight ? button.x + 9 : button.x + button.width - 9;
   epaper.fillTriangle(tipX, centerY, headBaseX, centerY - 11, headBaseX,
-                      centerY + 11, TFT_WHITE);
-  epaper.fillRect(headBaseX - 1, centerY - 3, tailX - headBaseX + 1, 7,
-                  TFT_WHITE);
+                     centerY + 11, TFT_WHITE);
+  if (pointsRight) {
+    epaper.fillRect(tailX, centerY - 3, headBaseX - tailX + 1, 7, TFT_WHITE);
+  } else {
+    epaper.fillRect(headBaseX - 1, centerY - 3, tailX - headBaseX + 1, 7,
+                   TFT_WHITE);
+  }
+}
+
+void drawBackIndicator() {
+  drawArrowButton(kBackButton, false);
 }
 
 void drawGameStatusBar(const char* title) {
@@ -1243,8 +1255,10 @@ void drawMenu() {
     drawPegSolitaireMenuCard();
     drawSlitherlinkMenuCard();
   }
-  drawButton(kPreviousPageButton, "< PREV");
-  drawButton(kNextPageButton, "NEXT >");
+  drawArrowButton(kPreviousPageButton, false);
+  drawArrowButton(kNextPageButton, true);
+  drawCentered(currentMenuPage == MenuPage::First ? "1 / 2" : "2 / 2",
+               kScreenWidth / 2, 774, 4);
   drawStatusBar();
 }
 
@@ -1620,43 +1634,61 @@ void drawDotsAndBoxes() {
   drawGameStatusBar("DOTS + BOXES");
 }
 
+int sokobanCellSize() {
+  const int horizontal = kSokobanMaxBoardPixels / sokoban.width();
+  const int vertical = kSokobanMaxBoardPixels / sokoban.height();
+  return std::min(56, std::min(horizontal, vertical));
+}
+
 int sokobanGridLeft() {
-  return (kScreenWidth - sokoban.width() * kSokobanCellSize) / 2;
+  return (kScreenWidth - sokoban.width() * sokobanCellSize()) / 2;
 }
 
 void drawSokobanCell(int row, int column) {
-  const int x = sokobanGridLeft() + column * kSokobanCellSize;
-  const int y = kSokobanGridTop + row * kSokobanCellSize;
-  epaper.fillRect(x, y, kSokobanCellSize, kSokobanCellSize, TFT_WHITE);
-  if (sokoban.isWall(row, column)) {
-    epaper.fillRect(x, y, kSokobanCellSize, kSokobanCellSize, TFT_BLACK);
-    epaper.drawRect(x + 4, y + 4, kSokobanCellSize - 8,
-                    kSokobanCellSize - 8, TFT_WHITE);
+  const SokobanGame::Cell cell = sokoban.cellAt(row, column);
+  if (cell == SokobanGame::Cell::Outside) return;
+
+  const int cellSize = sokobanCellSize();
+  const int x = sokobanGridLeft() + column * cellSize;
+  const int y = kSokobanGridTop + row * cellSize;
+  if (cell == SokobanGame::Cell::Wall) {
+    epaper.fillRect(x, y, cellSize, cellSize, TFT_BLACK);
+    if (cellSize >= 28) {
+      epaper.drawRect(x + 3, y + 3, cellSize - 6, cellSize - 6, TFT_WHITE);
+    }
     return;
   }
-  epaper.drawRect(x, y, kSokobanCellSize, kSokobanCellSize, TFT_BLACK);
-  const int centerX = x + kSokobanCellSize / 2;
-  const int centerY = y + kSokobanCellSize / 2;
+
+  epaper.fillRect(x, y, cellSize, cellSize, TFT_WHITE);
+  if (cellSize >= 28) epaper.drawRect(x, y, cellSize, cellSize, TFT_BLACK);
+  const int centerX = x + cellSize / 2;
+  const int centerY = y + cellSize / 2;
   if (sokoban.isTarget(row, column)) {
-    epaper.drawCircle(centerX, centerY, 12, TFT_BLACK);
-    epaper.fillCircle(centerX, centerY, 4, TFT_BLACK);
+    const int targetRadius = std::max(2, cellSize / 5);
+    epaper.drawCircle(centerX, centerY, targetRadius, TFT_BLACK);
+    epaper.fillCircle(centerX, centerY, std::max(1, targetRadius / 3),
+                      TFT_BLACK);
   }
   if (sokoban.hasBox(row, column)) {
-    constexpr int kInset = 7;
-    epaper.fillRect(x + kInset, y + kInset,
-                    kSokobanCellSize - kInset * 2,
-                    kSokobanCellSize - kInset * 2, TFT_BLACK);
-    epaper.drawLine(x + kInset + 5, y + kInset + 5,
-                    x + kSokobanCellSize - kInset - 6,
-                    y + kSokobanCellSize - kInset - 6, TFT_WHITE);
-    epaper.drawLine(x + kSokobanCellSize - kInset - 6, y + kInset + 5,
-                    x + kInset + 5, y + kSokobanCellSize - kInset - 6,
-                    TFT_WHITE);
+    const int inset = std::max(2, cellSize / 8);
+    const int far = cellSize - inset - 1;
+    epaper.fillRect(x + inset, y + inset, cellSize - inset * 2,
+                    cellSize - inset * 2, TFT_BLACK);
+    if (cell == SokobanGame::Cell::BoxOnTarget) {
+      epaper.drawCircle(centerX, centerY, std::max(2, cellSize / 5),
+                        TFT_WHITE);
+    } else {
+      epaper.drawLine(x + inset + 2, y + inset + 2, x + far - 2,
+                      y + far - 2, TFT_WHITE);
+      epaper.drawLine(x + far - 2, y + inset + 2, x + inset + 2,
+                      y + far - 2, TFT_WHITE);
+    }
   }
   if (sokoban.playerRow() == row && sokoban.playerColumn() == column) {
-    epaper.fillCircle(centerX, centerY, 16, TFT_BLACK);
-    epaper.fillCircle(centerX, centerY - 4, 5, TFT_WHITE);
-    epaper.fillRect(centerX - 7, centerY + 3, 14, 8, TFT_WHITE);
+    const int radius = std::max(3, cellSize / 3);
+    epaper.fillCircle(centerX, centerY, radius, TFT_BLACK);
+    epaper.fillCircle(centerX, centerY - std::max(1, radius / 4),
+                      std::max(1, radius / 3), TFT_WHITE);
   }
 }
 
@@ -1851,7 +1883,7 @@ void startNewDotsAndBoxes() {
 }
 
 void startNewSokoban() {
-  sokoban.start(0);
+  sokoban.start(sokobanHighestLevel);
   sokobanSaved = true;
 }
 
@@ -2123,6 +2155,7 @@ void updateSlitherlink(const char* action) {
 }
 
 void showMenuPage(MenuPage page) {
+  hardware::beep();
   currentMenuPage = page;
   saveResumeState();
   drawMenu();
@@ -2386,6 +2419,22 @@ void handleSokobanTouch(const Gt911Touch::Point& point) {
   if (kNewButton.contains(point.x, point.y)) {
     sokoban.nextLevel();
     sokobanSaved = true;
+    const uint16_t candidate = sokoban.levelIndex();
+    if (candidate > sokobanHighestLevel) {
+      sokobanHighestLevel = candidate;
+      const game_progress::SaveResult result =
+          game_progress::saveHighestCheckpoint(
+              kSokobanProgressKey, sokobanHighestLevel,
+              SokobanGame::kLevelCount);
+      if (result.status != game_progress::Status::Ok) {
+        LOG.printf("[games] could not save Sokoban progress: %s\n",
+                   game_progress::statusMessage(result.status));
+      } else {
+        LOG.printf("[games] saved Sokoban highest level: %u/%u\n",
+                   static_cast<unsigned>(sokobanHighestLevel + 1),
+                   static_cast<unsigned>(SokobanGame::kLevelCount));
+      }
+    }
     updateSokoban("next Sokoban level");
     return;
   }
@@ -2395,29 +2444,37 @@ void handleSokobanTouch(const Gt911Touch::Point& point) {
     return;
   }
 
+  const int cellSize = sokobanCellSize();
   const int gridLeft = sokobanGridLeft();
-  const int gridWidth = sokoban.width() * kSokobanCellSize;
-  const int gridHeight = sokoban.height() * kSokobanCellSize;
+  const int gridWidth = sokoban.width() * cellSize;
+  const int gridHeight = sokoban.height() * cellSize;
   if (point.x < gridLeft || point.x >= gridLeft + gridWidth ||
       point.y < kSokobanGridTop ||
       point.y >= kSokobanGridTop + gridHeight) {
     return;
   }
-  const int column = (point.x - gridLeft) / kSokobanCellSize;
-  const int row = (point.y - kSokobanGridTop) / kSokobanCellSize;
-  const int rowDelta = row - sokoban.playerRow();
-  const int columnDelta = column - sokoban.playerColumn();
-  SokobanGame::Direction direction;
-  if (rowDelta == -1 && columnDelta == 0) {
-    direction = SokobanGame::Direction::Up;
-  } else if (rowDelta == 1 && columnDelta == 0) {
-    direction = SokobanGame::Direction::Down;
-  } else if (rowDelta == 0 && columnDelta == -1) {
-    direction = SokobanGame::Direction::Left;
-  } else if (rowDelta == 0 && columnDelta == 1) {
-    direction = SokobanGame::Direction::Right;
-  } else {
+  const int playerCenterX =
+      gridLeft + sokoban.playerColumn() * cellSize + cellSize / 2;
+  const int playerCenterY =
+      kSokobanGridTop + sokoban.playerRow() * cellSize + cellSize / 2;
+  const int horizontalDistance = point.x - playerCenterX;
+  const int verticalDistance = point.y - playerCenterY;
+  const int absoluteHorizontal =
+      horizontalDistance < 0 ? -horizontalDistance : horizontalDistance;
+  const int absoluteVertical =
+      verticalDistance < 0 ? -verticalDistance : verticalDistance;
+  if (absoluteHorizontal < cellSize / 2 &&
+      absoluteVertical < cellSize / 2) {
     return;
+  }
+
+  SokobanGame::Direction direction;
+  if (absoluteHorizontal > absoluteVertical) {
+    direction = horizontalDistance < 0 ? SokobanGame::Direction::Left
+                                       : SokobanGame::Direction::Right;
+  } else {
+    direction = verticalDistance < 0 ? SokobanGame::Direction::Up
+                                     : SokobanGame::Direction::Down;
   }
   if (sokoban.move(direction)) updateSokoban("Sokoban move");
 }
@@ -2801,7 +2858,31 @@ void setup() {
   LOG.println();
   LOG.println("[games] reTerminal E1005 Games");
   hardware::beep();
+  const game_progress::LoadResult sokobanProgress =
+      game_progress::loadHighestCheckpoint(kSokobanProgressKey,
+                                           SokobanGame::kLevelCount);
+  if (sokobanProgress.status == game_progress::Status::Ok) {
+    sokobanHighestLevel = sokobanProgress.checkpoint;
+    LOG.printf("[games] Sokoban highest level: %u/%u\n",
+               static_cast<unsigned>(sokobanHighestLevel + 1),
+               static_cast<unsigned>(SokobanGame::kLevelCount));
+  } else {
+    LOG.printf("[games] could not load Sokoban progress: %s\n",
+               game_progress::statusMessage(sokobanProgress.status));
+  }
   const bool resumed = restoreResumeState();
+  if (resumed && sokobanSaved &&
+      sokoban.levelIndex() > sokobanHighestLevel) {
+    sokobanHighestLevel = sokoban.levelIndex();
+    const game_progress::SaveResult result =
+        game_progress::saveHighestCheckpoint(
+            kSokobanProgressKey, sokobanHighestLevel,
+            SokobanGame::kLevelCount);
+    if (result.status != game_progress::Status::Ok) {
+      LOG.printf("[games] could not synchronize Sokoban progress: %s\n",
+                 game_progress::statusMessage(result.status));
+    }
+  }
   LOG.printf("[games] boot mode: %s\n", resumed ? "resume" : "cold");
 
   pinMode(board::PIN_SD_CS, OUTPUT);

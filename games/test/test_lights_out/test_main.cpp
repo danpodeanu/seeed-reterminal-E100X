@@ -2,6 +2,7 @@
 
 #include "dots_and_boxes_game.h"
 #include "game_2048.h"
+#include "game_progress_store.h"
 #include "lights_out_game.h"
 #include "mini_minesweeper_game.h"
 #include "nonogram_game.h"
@@ -846,22 +847,30 @@ void test_peg_solitaire_invalid_snapshot_is_rejected() {
   TEST_ASSERT_FALSE(game.restore({1ULL, PegSolitaireGame::kNoSelection}));
 }
 
-void test_sokoban_tutorial_push_solves_first_level() {
+void test_sokoban_first_microban_level_has_known_solution() {
   SokobanGame game;
   game.start(0);
+  constexpr char kSolution[] = "DLURRRDLULLDDRULURUULDRDDRRULDLUU";
 
   TEST_ASSERT_FALSE(game.solved());
-  TEST_ASSERT_TRUE(game.move(SokobanGame::Direction::Up));
+  for (const char move : kSolution) {
+    if (move == '\0') break;
+    const SokobanGame::Direction direction =
+        move == 'U'   ? SokobanGame::Direction::Up
+        : move == 'R' ? SokobanGame::Direction::Right
+        : move == 'D' ? SokobanGame::Direction::Down
+                      : SokobanGame::Direction::Left;
+    TEST_ASSERT_TRUE(game.move(direction));
+  }
   TEST_ASSERT_TRUE(game.solved());
-  TEST_ASSERT_EQUAL_UINT16(1, game.moveCount());
-  TEST_ASSERT_EQUAL_UINT16(1, game.pushCount());
+  TEST_ASSERT_EQUAL_UINT16(sizeof(kSolution) - 1, game.moveCount());
 }
 
 void test_sokoban_rejects_wall_and_resets_progress() {
   SokobanGame game;
   game.start(0);
 
-  TEST_ASSERT_FALSE(game.move(SokobanGame::Direction::Down));
+  TEST_ASSERT_FALSE(game.move(SokobanGame::Direction::Left));
   TEST_ASSERT_TRUE(game.move(SokobanGame::Direction::Up));
   game.reset();
   TEST_ASSERT_FALSE(game.solved());
@@ -873,12 +882,12 @@ void test_sokoban_next_level_and_snapshot_restore() {
   SokobanGame original;
   original.start(0);
   original.nextLevel();
-  TEST_ASSERT_EQUAL_UINT8(1, original.levelIndex());
-  TEST_ASSERT_TRUE(original.move(SokobanGame::Direction::Down));
+  TEST_ASSERT_EQUAL_UINT16(1, original.levelIndex());
+  TEST_ASSERT_TRUE(original.move(SokobanGame::Direction::Right));
 
   SokobanGame restored;
   TEST_ASSERT_TRUE(restored.restore(original.snapshot()));
-  TEST_ASSERT_EQUAL_UINT8(original.levelIndex(), restored.levelIndex());
+  TEST_ASSERT_EQUAL_UINT16(original.levelIndex(), restored.levelIndex());
   TEST_ASSERT_EQUAL_INT(original.playerRow(), restored.playerRow());
   TEST_ASSERT_EQUAL_INT(original.playerColumn(), restored.playerColumn());
   TEST_ASSERT_EQUAL_UINT16(original.moveCount(), restored.moveCount());
@@ -893,29 +902,57 @@ void test_sokoban_invalid_snapshot_is_rejected() {
   invalid.pushes = 2;
   invalid.moves = 1;
   TEST_ASSERT_FALSE(game.restore(invalid));
+  invalid = game.snapshot();
+  invalid.boxes[0] |= 1ULL;
+  TEST_ASSERT_FALSE(game.restore(invalid));
 }
 
-void test_every_sokoban_level_has_a_verified_solution() {
-  static constexpr const char* kSolutions[SokobanGame::kLevelCount] = {
-      "U",
-      "RDDLULDLU",
-      "DLLLULDDD",
-      "RRRUULURULDDDRDLLL",
-      "DDRDRUDRUULDLU",
-  };
-  for (uint8_t level = 0; level < SokobanGame::kLevelCount; ++level) {
+void test_all_microban_sokoban_levels_are_structurally_valid() {
+  for (uint16_t level = 0; level < SokobanGame::kLevelCount; ++level) {
     SokobanGame game;
     game.start(level);
-    for (const char* move = kSolutions[level]; *move != '\0'; ++move) {
-      const SokobanGame::Direction direction =
-          *move == 'U'   ? SokobanGame::Direction::Up
-          : *move == 'R' ? SokobanGame::Direction::Right
-          : *move == 'D' ? SokobanGame::Direction::Down
-                         : SokobanGame::Direction::Left;
-      TEST_ASSERT_TRUE(game.move(direction));
+    TEST_ASSERT_TRUE_MESSAGE(game.valid(), "Microban level failed to load");
+    TEST_ASSERT_TRUE(game.width() > 0);
+    TEST_ASSERT_TRUE(game.width() <= SokobanGame::kMaxWidth);
+    TEST_ASSERT_TRUE(game.height() > 0);
+    TEST_ASSERT_TRUE(game.height() <= SokobanGame::kMaxHeight);
+    TEST_ASSERT_TRUE(game.isPlayable(game.playerRow(), game.playerColumn()));
+
+    int boxes = 0;
+    int targets = 0;
+    for (int row = 0; row < game.height(); ++row) {
+      for (int column = 0; column < game.width(); ++column) {
+        if (game.hasBox(row, column)) ++boxes;
+        if (game.isTarget(row, column)) ++targets;
+      }
     }
-    TEST_ASSERT_TRUE_MESSAGE(game.solved(), "curated Sokoban level is unsolved");
+    TEST_ASSERT_TRUE(boxes > 0);
+    TEST_ASSERT_EQUAL_INT(boxes, targets);
   }
+
+  SokobanGame largest;
+  largest.start(SokobanGame::kLevelCount - 1);
+  TEST_ASSERT_EQUAL_INT(30, largest.width());
+  TEST_ASSERT_EQUAL_INT(17, largest.height());
+  largest.nextLevel();
+  TEST_ASSERT_EQUAL_UINT16(0, largest.levelIndex());
+}
+
+void test_long_game_progress_only_advances_with_valid_checkpoints() {
+  game_progress::Advancement result =
+      game_progress::evaluateAdvancement(7, 8, 155);
+  TEST_ASSERT_TRUE(result.valid);
+  TEST_ASSERT_TRUE(result.changed);
+  TEST_ASSERT_EQUAL_UINT16(8, result.checkpoint);
+
+  result = game_progress::evaluateAdvancement(8, 3, 155);
+  TEST_ASSERT_TRUE(result.valid);
+  TEST_ASSERT_FALSE(result.changed);
+  TEST_ASSERT_EQUAL_UINT16(8, result.checkpoint);
+
+  TEST_ASSERT_FALSE(
+      game_progress::evaluateAdvancement(8, 155, 155).valid);
+  TEST_ASSERT_FALSE(game_progress::evaluateAdvancement(0, 0, 0).valid);
 }
 
 void test_slitherlink_edges_cycle_blank_line_cross_blank() {
@@ -1102,11 +1139,12 @@ int main(int, char**) {
   RUN_TEST(test_peg_solitaire_rejects_invalid_jump);
   RUN_TEST(test_peg_solitaire_one_center_peg_is_solved);
   RUN_TEST(test_peg_solitaire_invalid_snapshot_is_rejected);
-  RUN_TEST(test_sokoban_tutorial_push_solves_first_level);
+  RUN_TEST(test_sokoban_first_microban_level_has_known_solution);
   RUN_TEST(test_sokoban_rejects_wall_and_resets_progress);
   RUN_TEST(test_sokoban_next_level_and_snapshot_restore);
   RUN_TEST(test_sokoban_invalid_snapshot_is_rejected);
-  RUN_TEST(test_every_sokoban_level_has_a_verified_solution);
+  RUN_TEST(test_all_microban_sokoban_levels_are_structurally_valid);
+  RUN_TEST(test_long_game_progress_only_advances_with_valid_checkpoints);
   RUN_TEST(test_slitherlink_edges_cycle_blank_line_cross_blank);
   RUN_TEST(test_slitherlink_clue_counts_only_line_edges);
   RUN_TEST(test_slitherlink_next_puzzle_clears_edges);

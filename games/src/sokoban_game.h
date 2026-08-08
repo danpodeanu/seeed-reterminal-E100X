@@ -2,12 +2,17 @@
 
 #include <stdint.h>
 
+#include "microban_levels.h"
+
 class SokobanGame {
  public:
-  static constexpr int kSize = 7;
-  static constexpr int kMaxSize = 7;
-  static constexpr int kMaxCells = kMaxSize * kMaxSize;
-  static constexpr uint8_t kLevelCount = 5;
+  static constexpr int kMaxWidth = 30;
+  static constexpr int kMaxHeight = 17;
+  static constexpr int kMaxCells = kMaxWidth * kMaxHeight;
+  static constexpr int kWordCount = (kMaxCells + 63) / 64;
+  static constexpr int kSize = kMaxWidth;
+  static constexpr uint16_t kLevelCount = microban_levels::kLevelCount;
+  static constexpr uint16_t kInvalidCell = 0xFFFFU;
 
   enum class Direction : uint8_t {
     Up = 0,
@@ -28,46 +33,42 @@ class SokobanGame {
   };
 
   struct Snapshot {
-    uint64_t boxes;
+    uint64_t boxes[kWordCount];
     uint16_t moves;
     uint16_t pushes;
-    uint8_t levelIndex;
-    uint8_t playerIndex;
+    uint16_t levelIndex;
+    uint16_t playerIndex;
   };
 
   SokobanGame() { loadLevel(0); }
 
-  void start(uint8_t levelIndex = 0) {
+  void start(uint16_t levelIndex = 0) {
     loadLevel(levelIndex < kLevelCount ? levelIndex : 0);
   }
 
   bool move(Direction direction) {
-    if (solved()) return false;
-
-    const LevelDef& level = kLevels[levelIndex_];
-    const int row = playerIndex_ / level.width;
-    const int column = playerIndex_ % level.width;
+    if (!levelValid_ || solved()) return false;
     const int directionIndex = static_cast<int>(direction);
+    if (directionIndex < 0 || directionIndex >= 4) return false;
+
+    const int row = playerIndex_ / width_;
+    const int column = playerIndex_ % width_;
     const int nextRow = row + kRowOffsets[directionIndex];
     const int nextColumn = column + kColumnOffsets[directionIndex];
-    if (!validCell(level, nextRow, nextColumn)) return false;
+    if (!isPlayable(nextRow, nextColumn)) return false;
 
-    const uint8_t nextIndex =
-        static_cast<uint8_t>(nextRow * level.width + nextColumn);
-    const uint64_t nextBit = cellBit(nextIndex);
-    if ((level.walls & nextBit) != 0) return false;
-
-    if ((boxes_ & nextBit) != 0) {
+    const uint16_t nextIndex =
+        static_cast<uint16_t>(nextRow * width_ + nextColumn);
+    if (bitAt(boxes_, nextIndex)) {
       const int pushRow = nextRow + kRowOffsets[directionIndex];
       const int pushColumn = nextColumn + kColumnOffsets[directionIndex];
-      if (!validCell(level, pushRow, pushColumn)) return false;
+      if (!isPlayable(pushRow, pushColumn)) return false;
 
-      const uint8_t pushIndex =
-          static_cast<uint8_t>(pushRow * level.width + pushColumn);
-      const uint64_t pushBit = cellBit(pushIndex);
-      if ((level.walls & pushBit) != 0 || (boxes_ & pushBit) != 0) return false;
-
-      boxes_ = (boxes_ & ~nextBit) | pushBit;
+      const uint16_t pushIndex =
+          static_cast<uint16_t>(pushRow * width_ + pushColumn);
+      if (bitAt(boxes_, pushIndex)) return false;
+      clearBit(boxes_, nextIndex);
+      setBit(boxes_, pushIndex);
       playerIndex_ = nextIndex;
       saturatingIncrement(moveCount_);
       saturatingIncrement(pushCount_);
@@ -82,48 +83,46 @@ class SokobanGame {
   void reset() { loadLevel(levelIndex_); }
 
   void nextLevel() {
-    loadLevel(static_cast<uint8_t>((levelIndex_ + 1U) % kLevelCount));
+    loadLevel(static_cast<uint16_t>((levelIndex_ + 1U) % kLevelCount));
   }
 
-  uint8_t levelIndex() const { return levelIndex_; }
-  static constexpr uint8_t levelCount() { return kLevelCount; }
+  uint16_t levelIndex() const { return levelIndex_; }
+  static constexpr uint16_t levelCount() { return kLevelCount; }
 
-  uint8_t width() const { return kLevels[levelIndex_].width; }
-  uint8_t height() const { return kLevels[levelIndex_].height; }
-  int playerRow() const { return playerIndex_ / kLevels[levelIndex_].width; }
-  int playerColumn() const { return playerIndex_ % kLevels[levelIndex_].width; }
+  uint8_t width() const { return width_; }
+  uint8_t height() const { return height_; }
+  int playerRow() const { return playerIndex_ / width_; }
+  int playerColumn() const { return playerIndex_ % width_; }
+  bool valid() const { return levelValid_; }
+
+  bool isPlayable(int row, int column) const {
+    return validCell(row, column) &&
+           bitAt(playable_, static_cast<uint16_t>(row * width_ + column));
+  }
 
   bool isWall(int row, int column) const {
-    const LevelDef& level = kLevels[levelIndex_];
-    if (!validCell(level, row, column)) return false;
-    return (level.walls & cellBit(static_cast<uint8_t>(row * level.width +
-                                                       column))) != 0;
+    return validCell(row, column) &&
+           bitAt(walls_, static_cast<uint16_t>(row * width_ + column));
   }
 
   bool isTarget(int row, int column) const {
-    const LevelDef& level = kLevels[levelIndex_];
-    if (!validCell(level, row, column)) return false;
-    return (level.targets & cellBit(static_cast<uint8_t>(row * level.width +
-                                                         column))) != 0;
+    return validCell(row, column) &&
+           bitAt(targets_, static_cast<uint16_t>(row * width_ + column));
   }
 
   bool hasBox(int row, int column) const {
-    const LevelDef& level = kLevels[levelIndex_];
-    if (!validCell(level, row, column)) return false;
-    return (boxes_ & cellBit(static_cast<uint8_t>(row * level.width + column))) !=
-           0;
+    return validCell(row, column) &&
+           bitAt(boxes_, static_cast<uint16_t>(row * width_ + column));
   }
 
   Cell cellAt(int row, int column) const {
-    const LevelDef& level = kLevels[levelIndex_];
-    if (!validCell(level, row, column)) return Cell::Outside;
+    if (!validCell(row, column) || !isPlayable(row, column)) {
+      return isWall(row, column) ? Cell::Wall : Cell::Outside;
+    }
 
-    const uint8_t index = static_cast<uint8_t>(row * level.width + column);
-    const uint64_t bit = cellBit(index);
-    if ((level.walls & bit) != 0) return Cell::Wall;
-
-    const bool target = (level.targets & bit) != 0;
-    const bool box = (boxes_ & bit) != 0;
+    const uint16_t index = static_cast<uint16_t>(row * width_ + column);
+    const bool target = bitAt(targets_, index);
+    const bool box = bitAt(boxes_, index);
     const bool player = playerIndex_ == index;
     if (player) return target ? Cell::PlayerOnTarget : Cell::Player;
     if (box) return target ? Cell::BoxOnTarget : Cell::Box;
@@ -133,71 +132,100 @@ class SokobanGame {
   uint16_t moveCount() const { return moveCount_; }
   uint16_t pushCount() const { return pushCount_; }
 
-  bool solved() const { return boxes_ == kLevels[levelIndex_].targets; }
+  bool solved() const {
+    return levelValid_ && equalBits(boxes_, targets_);
+  }
 
   Snapshot snapshot() const {
-    return {boxes_, moveCount_, pushCount_, levelIndex_, playerIndex_};
+    Snapshot result = {};
+    copyBits(result.boxes, boxes_);
+    result.moves = moveCount_;
+    result.pushes = pushCount_;
+    result.levelIndex = levelIndex_;
+    result.playerIndex = playerIndex_;
+    return result;
   }
 
   bool restore(const Snapshot& snapshot) {
-    if (snapshot.levelIndex >= kLevelCount) return false;
-
-    const LevelDef& level = kLevels[snapshot.levelIndex];
-    if (!validateLevel(level) || snapshot.pushes > snapshot.moves ||
-        !validateDynamicState(level, snapshot.boxes, snapshot.playerIndex)) {
+    if (snapshot.levelIndex >= kLevelCount ||
+        snapshot.pushes > snapshot.moves) {
       return false;
     }
 
-    boxes_ = snapshot.boxes;
-    moveCount_ = snapshot.moves;
-    pushCount_ = snapshot.pushes;
-    levelIndex_ = snapshot.levelIndex;
-    playerIndex_ = snapshot.playerIndex;
+    SokobanGame restored;
+    restored.loadLevel(snapshot.levelIndex);
+    if (!restored.levelValid_ ||
+        !restored.validateDynamicState(snapshot.boxes,
+                                       snapshot.playerIndex)) {
+      return false;
+    }
+    copyBits(restored.boxes_, snapshot.boxes);
+    restored.moveCount_ = snapshot.moves;
+    restored.pushCount_ = snapshot.pushes;
+    restored.playerIndex_ = snapshot.playerIndex;
+    *this = restored;
     return true;
   }
 
  private:
-  struct LevelDef {
-    uint64_t walls;
-    uint64_t targets;
-    uint64_t boxes;
-    uint8_t width;
-    uint8_t height;
-    uint8_t player;
-  };
-
   inline static constexpr int8_t kRowOffsets[4] = {-1, 0, 1, 0};
   inline static constexpr int8_t kColumnOffsets[4] = {0, 1, 0, -1};
-  inline static constexpr LevelDef kLevels[kLevelCount] = {
-      {0x1F8C63FULL, 0x80ULL, 0x1000ULL, 5, 5, 17},
-      {0xFE186187FULL, 0x4000080ULL, 0x204000ULL, 6, 6, 9},
-      {0x1FE4C983064FFULL, 0x1000000000ULL, 0x20000ULL, 7, 7, 12},
-      {0x1FE0C5932E0FFULL, 0x1000000400ULL, 0x100040000ULL, 7, 7, 37},
-      {0xFE186187FULL, 0x2000500ULL, 0x602000ULL, 6, 6, 7},
-  };
 
-  uint64_t boxes_ = 0;
+  uint64_t walls_[kWordCount] = {};
+  uint64_t targets_[kWordCount] = {};
+  uint64_t playable_[kWordCount] = {};
+  uint64_t boxes_[kWordCount] = {};
   uint16_t moveCount_ = 0;
   uint16_t pushCount_ = 0;
-  uint8_t levelIndex_ = 0;
-  uint8_t playerIndex_ = 0;
+  uint16_t levelIndex_ = 0;
+  uint16_t playerIndex_ = kInvalidCell;
+  uint8_t width_ = 0;
+  uint8_t height_ = 0;
+  bool levelValid_ = false;
 
-  static uint64_t boardMask(const LevelDef& level) {
-    return (1ULL << (level.width * level.height)) - 1ULL;
+  bool validCell(int row, int column) const {
+    return row >= 0 && row < height_ && column >= 0 && column < width_;
   }
 
-  static uint64_t cellBit(uint8_t index) { return 1ULL << index; }
-
-  static bool validCell(const LevelDef& level, int row, int column) {
-    return row >= 0 && row < level.height && column >= 0 &&
-           column < level.width;
+  static bool bitAt(const uint64_t (&bits)[kWordCount], uint16_t index) {
+    return (bits[index / 64] & (1ULL << (index % 64))) != 0;
   }
 
-  static int bitCount(uint64_t value) {
+  static void setBit(uint64_t (&bits)[kWordCount], uint16_t index) {
+    bits[index / 64] |= 1ULL << (index % 64);
+  }
+
+  static void clearBit(uint64_t (&bits)[kWordCount], uint16_t index) {
+    bits[index / 64] &= ~(1ULL << (index % 64));
+  }
+
+  static void clearBits(uint64_t (&bits)[kWordCount]) {
+    for (int word = 0; word < kWordCount; ++word) bits[word] = 0;
+  }
+
+  static void copyBits(uint64_t (&destination)[kWordCount],
+                       const uint64_t (&source)[kWordCount]) {
+    for (int word = 0; word < kWordCount; ++word) {
+      destination[word] = source[word];
+    }
+  }
+
+  static bool equalBits(const uint64_t (&first)[kWordCount],
+                        const uint64_t (&second)[kWordCount]) {
+    for (int word = 0; word < kWordCount; ++word) {
+      if (first[word] != second[word]) return false;
+    }
+    return true;
+  }
+
+  static int bitCount(const uint64_t (&bits)[kWordCount]) {
     int count = 0;
-    while (value != 0) {
-      count += static_cast<int>(value & 1ULL);
-      value >>= 1;
+    for (int word = 0; word < kWordCount; ++word) {
+      uint64_t remaining = bits[word];
+      while (remaining != 0) {
+        remaining &= remaining - 1;
+        ++count;
+      }
     }
     return count;
   }
@@ -206,42 +234,119 @@ class SokobanGame {
     if (value != 0xFFFFU) ++value;
   }
 
-  static bool validateDynamicState(const LevelDef& level, uint64_t boxes,
-                                   uint8_t player) {
-    const int cellCount = level.width * level.height;
-    const uint64_t validBits = boardMask(level);
-    const uint64_t playerBit = player < cellCount ? cellBit(player) : 0ULL;
-    if (player >= cellCount || (boxes & ~validBits) != 0 ||
-        (boxes & level.walls) != 0 || playerBit == 0 ||
-        (playerBit & level.walls) != 0 || (playerBit & boxes) != 0) {
-      return false;
+  void buildPlayableArea() {
+    clearBits(playable_);
+    uint64_t outside[kWordCount] = {};
+    uint16_t queue[kMaxCells] = {};
+    int readIndex = 0;
+    int writeIndex = 0;
+
+    for (int row = 0; row < height_; ++row) {
+      for (int column = 0; column < width_; ++column) {
+        if (row != 0 && row != height_ - 1 && column != 0 &&
+            column != width_ - 1) {
+          continue;
+        }
+        const uint16_t index =
+            static_cast<uint16_t>(row * width_ + column);
+        if (bitAt(walls_, index) || bitAt(outside, index)) continue;
+        setBit(outside, index);
+        queue[writeIndex++] = index;
+      }
     }
-    return bitCount(boxes) == bitCount(level.targets);
+
+    while (readIndex < writeIndex) {
+      const uint16_t index = queue[readIndex++];
+      const int row = index / width_;
+      const int column = index % width_;
+      for (int direction = 0; direction < 4; ++direction) {
+        const int nextRow = row + kRowOffsets[direction];
+        const int nextColumn = column + kColumnOffsets[direction];
+        if (!validCell(nextRow, nextColumn)) continue;
+        const uint16_t nextIndex =
+            static_cast<uint16_t>(nextRow * width_ + nextColumn);
+        if (bitAt(walls_, nextIndex) || bitAt(outside, nextIndex)) continue;
+        setBit(outside, nextIndex);
+        queue[writeIndex++] = nextIndex;
+      }
+    }
+
+    for (int row = 0; row < height_; ++row) {
+      for (int column = 0; column < width_; ++column) {
+        const uint16_t index =
+            static_cast<uint16_t>(row * width_ + column);
+        if (!bitAt(walls_, index) && !bitAt(outside, index)) {
+          setBit(playable_, index);
+        }
+      }
+    }
   }
 
-  static bool validateLevel(const LevelDef& level) {
-    if (level.width == 0 || level.width > kMaxSize || level.height == 0 ||
-        level.height > kMaxSize) {
+  bool validateDynamicState(const uint64_t (&boxes)[kWordCount],
+                            uint16_t playerIndex) const {
+    const int cellCount = width_ * height_;
+    if (playerIndex >= cellCount || !bitAt(playable_, playerIndex) ||
+        bitAt(boxes, playerIndex)) {
       return false;
     }
-
-    const uint64_t validBits = boardMask(level);
-    if ((level.walls & ~validBits) != 0 || (level.targets & ~validBits) != 0 ||
-        (level.boxes & ~validBits) != 0 || (level.targets & level.walls) != 0 ||
-        bitCount(level.targets) == 0 ||
-        bitCount(level.targets) != bitCount(level.boxes)) {
-      return false;
+    for (int word = 0; word < kWordCount; ++word) {
+      if ((boxes[word] & ~playable_[word]) != 0 ||
+          (targets_[word] & ~playable_[word]) != 0) {
+        return false;
+      }
     }
-    return validateDynamicState(level, level.boxes, level.player);
+    const int targetCount = bitCount(targets_);
+    return targetCount > 0 && bitCount(boxes) == targetCount;
   }
 
-  void loadLevel(uint8_t levelIndex) {
-    const uint8_t validLevelIndex = levelIndex < kLevelCount ? levelIndex : 0;
-    const LevelDef& level = kLevels[validLevelIndex];
-    levelIndex_ = validateLevel(level) ? validLevelIndex : 0;
-    boxes_ = kLevels[levelIndex_].boxes;
-    playerIndex_ = kLevels[levelIndex_].player;
+  bool parseLevel(uint16_t levelIndex) {
+    clearBits(walls_);
+    clearBits(targets_);
+    clearBits(playable_);
+    clearBits(boxes_);
+    playerIndex_ = kInvalidCell;
+
+    const microban_levels::Level& level =
+        microban_levels::kLevels[levelIndex];
+    width_ = level.width;
+    height_ = level.height;
+    for (int row = 0; row < height_; ++row) {
+      for (int column = 0; column < width_; ++column) {
+        const uint16_t index =
+            static_cast<uint16_t>(row * width_ + column);
+        const char tile =
+            microban_levels::kCells[level.offset + index];
+        if (tile == '#') {
+          setBit(walls_, index);
+        } else if (tile == '.') {
+          setBit(targets_, index);
+        } else if (tile == '$') {
+          setBit(boxes_, index);
+        } else if (tile == '*') {
+          setBit(targets_, index);
+          setBit(boxes_, index);
+        } else if (tile == '@') {
+          if (playerIndex_ != kInvalidCell) return false;
+          playerIndex_ = index;
+        } else if (tile == '+') {
+          if (playerIndex_ != kInvalidCell) return false;
+          setBit(targets_, index);
+          playerIndex_ = index;
+        } else if (tile != ' ') {
+          return false;
+        }
+      }
+    }
+
+    buildPlayableArea();
+    return playerIndex_ != kInvalidCell &&
+           validateDynamicState(boxes_, playerIndex_);
+  }
+
+  void loadLevel(uint16_t levelIndex) {
+    levelIndex_ = levelIndex < kLevelCount ? levelIndex : 0;
     moveCount_ = 0;
     pushCount_ = 0;
+    levelValid_ = parseLevel(levelIndex_);
   }
 };
