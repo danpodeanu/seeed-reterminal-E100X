@@ -177,7 +177,7 @@ constexpr E1005FastRefresh::Region kNonogramBoardRegion = {20, 64, 440, 584};
 constexpr E1005FastRefresh::Region kReversiBoardRegion = {25, 80, 430, 584};
 constexpr E1005FastRefresh::Region kReversiModeRegion = {25, 80, 430, 674};
 constexpr E1005FastRefresh::Region kDotsBoardRegion = {25, 80, 430, 584};
-constexpr E1005FastRefresh::Region kSokobanBoardRegion = {25, 80, 430, 584};
+constexpr E1005FastRefresh::Region kSokobanBoardRegion = {25, 80, 430, 674};
 constexpr E1005FastRefresh::Region kPegBoardRegion = {25, 80, 430, 584};
 constexpr E1005FastRefresh::Region kSlitherlinkBoardRegion = {25, 80, 430, 584};
 
@@ -316,7 +316,8 @@ DotsAndBoxesGame dotsAndBoxes;
 SokobanGame sokoban;
 PegSolitaireGame pegSolitaire;
 SlitherlinkGame slitherlink;
-uint16_t sokobanHighestLevel = 0;
+uint16_t sokobanCompletedLevelCount = 0;
+bool sokobanProgressSaveFailed = false;
 ReversiMode reversiMode = ReversiMode::SinglePlayer;
 Screen currentScreen = Screen::Menu;
 MenuPage currentMenuPage = MenuPage::First;
@@ -1699,6 +1700,13 @@ void drawSokobanBoard() {
   epaper.fillRect(kSokobanBoardRegion.x, kSokobanBoardRegion.y,
                   kSokobanBoardRegion.width, kSokobanBoardRegion.height,
                   TFT_WHITE);
+  if (sokobanCompletedLevelCount == SokobanGame::kLevelCount) {
+    drawCentered("155 / 155 LEVELS", kScreenWidth / 2, 250, 4);
+    drawCentered("ALL COMPLETE", kScreenWidth / 2, 330, 6);
+    drawCentered("PROGRESS SAVED", kScreenWidth / 2, 410, 4);
+    return;
+  }
+
   drawCentered("LEVEL " + String(sokoban.levelIndex() + 1) + "/" +
                    String(SokobanGame::kLevelCount),
                kScreenWidth / 2, 112, 4);
@@ -1708,7 +1716,9 @@ void drawSokobanBoard() {
     }
   }
   if (sokoban.solved()) {
-    drawCentered("SOLVED - TAP NEW", kScreenWidth / 2, 590, 4);
+    drawCentered(sokobanProgressSaveFailed ? "SAVE FAILED - TAP NEXT"
+                                          : "LEVEL COMPLETE",
+                 kScreenWidth / 2, 590, 4);
   } else {
     drawCentered(String(sokoban.moveCount()) + " MOVES  " +
                      String(sokoban.pushCount()) + " PUSHES",
@@ -1716,11 +1726,16 @@ void drawSokobanBoard() {
   }
 }
 
+void drawSokobanControls() {
+  if (sokobanCompletedLevelCount < SokobanGame::kLevelCount) {
+    drawButton(kCenteredNewButton, sokoban.solved() ? "NEXT" : "RESTART");
+  }
+}
+
 void drawSokoban() {
   epaper.fillSprite(TFT_WHITE);
   drawSokobanBoard();
-  drawButton(kNewButton, "NEW");
-  drawButton(kResetButton, "RESET");
+  drawSokobanControls();
   drawGameStatusBar("SOKOBAN");
 }
 
@@ -1886,8 +1901,44 @@ void startNewDotsAndBoxes() {
 }
 
 void startNewSokoban() {
-  sokoban.start(sokobanHighestLevel);
+  const uint16_t level =
+      sokobanCompletedLevelCount < SokobanGame::kLevelCount
+          ? sokobanCompletedLevelCount
+          : SokobanGame::kLevelCount - 1;
+  sokoban.start(level);
   sokobanSaved = true;
+  sokobanProgressSaveFailed = false;
+}
+
+bool saveSokobanCompletion() {
+  const uint16_t completedLevelCount = sokoban.levelIndex() + 1;
+  if (completedLevelCount <= sokobanCompletedLevelCount) return true;
+
+  const game_progress::SaveResult result =
+      game_progress::saveHighestCheckpoint(
+          kSokobanProgressKey, completedLevelCount,
+          SokobanGame::kLevelCount + 1);
+  if (result.status != game_progress::Status::Ok) {
+    sokobanProgressSaveFailed = true;
+    LOG.printf("[games] could not save Sokoban completion: %s\n",
+               game_progress::statusMessage(result.status));
+    return false;
+  }
+
+  sokobanCompletedLevelCount = result.checkpoint;
+  sokobanProgressSaveFailed = false;
+  LOG.printf("[games] saved Sokoban completion: %u/%u levels\n",
+             static_cast<unsigned>(sokobanCompletedLevelCount),
+             static_cast<unsigned>(SokobanGame::kLevelCount));
+  return true;
+}
+
+void openNextUnfinishedSokobanLevel() {
+  if (sokobanCompletedLevelCount >= SokobanGame::kLevelCount) return;
+  if (sokoban.levelIndex() != sokobanCompletedLevelCount) {
+    sokoban.start(sokobanCompletedLevelCount);
+    sokobanProgressSaveFailed = false;
+  }
 }
 
 void startNewPegSolitaire() {
@@ -2046,6 +2097,7 @@ void showDotsAndBoxes() {
 
 void showSokoban() {
   if (!sokobanSaved) startNewSokoban();
+  openNextUnfinishedSokobanLevel();
   currentScreen = Screen::Sokoban;
   drawSokoban();
   refreshScreen("Sokoban screen");
@@ -2144,6 +2196,7 @@ void updateDotsAndBoxes(const char* action) {
 
 void updateSokoban(const char* action) {
   drawSokobanBoard();
+  drawSokobanControls();
   refreshRegion(kSokobanBoardRegion, action);
 }
 
@@ -2423,31 +2476,22 @@ void handleSokobanTouch(const Gt911Touch::Point& point) {
     showMenu();
     return;
   }
-  if (kNewButton.contains(point.x, point.y)) {
-    sokoban.nextLevel();
-    sokobanSaved = true;
-    const uint16_t candidate = sokoban.levelIndex();
-    if (candidate > sokobanHighestLevel) {
-      sokobanHighestLevel = candidate;
-      const game_progress::SaveResult result =
-          game_progress::saveHighestCheckpoint(
-              kSokobanProgressKey, sokobanHighestLevel,
-              SokobanGame::kLevelCount);
-      if (result.status != game_progress::Status::Ok) {
-        LOG.printf("[games] could not save Sokoban progress: %s\n",
-                   game_progress::statusMessage(result.status));
-      } else {
-        LOG.printf("[games] saved Sokoban highest level: %u/%u\n",
-                   static_cast<unsigned>(sokobanHighestLevel + 1),
-                   static_cast<unsigned>(SokobanGame::kLevelCount));
+  if (sokobanCompletedLevelCount == SokobanGame::kLevelCount) return;
+  if (kCenteredNewButton.contains(point.x, point.y)) {
+    if (sokoban.solved()) {
+      if (!saveSokobanCompletion()) {
+        updateSokoban("retry Sokoban progress save");
+        return;
       }
+      if (sokobanCompletedLevelCount < SokobanGame::kLevelCount) {
+        sokoban.start(sokobanCompletedLevelCount);
+      }
+      updateSokoban("next Sokoban level");
+    } else {
+      sokoban.reset();
+      sokobanProgressSaveFailed = false;
+      updateSokoban("restart Sokoban level");
     }
-    updateSokoban("next Sokoban level");
-    return;
-  }
-  if (kResetButton.contains(point.x, point.y)) {
-    sokoban.reset();
-    updateSokoban("reset Sokoban level");
     return;
   }
 
@@ -2483,7 +2527,10 @@ void handleSokobanTouch(const Gt911Touch::Point& point) {
     direction = verticalDistance < 0 ? SokobanGame::Direction::Up
                                      : SokobanGame::Direction::Down;
   }
-  if (sokoban.move(direction)) updateSokoban("Sokoban move");
+  if (sokoban.move(direction)) {
+    if (sokoban.solved()) saveSokobanCompletion();
+    updateSokoban("Sokoban move");
+  }
 }
 
 void handlePegSolitaireTouch(const Gt911Touch::Point& point) {
@@ -2867,28 +2914,20 @@ void setup() {
   hardware::beep();
   const game_progress::LoadResult sokobanProgress =
       game_progress::loadHighestCheckpoint(kSokobanProgressKey,
-                                           SokobanGame::kLevelCount);
+                                           SokobanGame::kLevelCount + 1);
   if (sokobanProgress.status == game_progress::Status::Ok) {
-    sokobanHighestLevel = sokobanProgress.checkpoint;
-    LOG.printf("[games] Sokoban highest level: %u/%u\n",
-               static_cast<unsigned>(sokobanHighestLevel + 1),
+    sokobanCompletedLevelCount = sokobanProgress.checkpoint;
+    LOG.printf("[games] Sokoban completed levels: %u/%u\n",
+               static_cast<unsigned>(sokobanCompletedLevelCount),
                static_cast<unsigned>(SokobanGame::kLevelCount));
   } else {
     LOG.printf("[games] could not load Sokoban progress: %s\n",
                game_progress::statusMessage(sokobanProgress.status));
   }
   const bool resumed = restoreResumeState();
-  if (resumed && sokobanSaved &&
-      sokoban.levelIndex() > sokobanHighestLevel) {
-    sokobanHighestLevel = sokoban.levelIndex();
-    const game_progress::SaveResult result =
-        game_progress::saveHighestCheckpoint(
-            kSokobanProgressKey, sokobanHighestLevel,
-            SokobanGame::kLevelCount);
-    if (result.status != game_progress::Status::Ok) {
-      LOG.printf("[games] could not synchronize Sokoban progress: %s\n",
-                 game_progress::statusMessage(result.status));
-    }
+  if (resumed && sokobanSaved) {
+    openNextUnfinishedSokobanLevel();
+    if (sokoban.solved()) saveSokobanCompletion();
   }
   LOG.printf("[games] boot mode: %s\n", resumed ? "resume" : "cold");
 

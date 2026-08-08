@@ -130,23 +130,27 @@ Touch controls:
 Push every crate onto a target across all 155 levels of David W. Skinner's
 Microban I collection. Crates can be pushed but not pulled, so plan ahead to
 avoid trapping one against a wall. The board scales automatically to fit levels
-up to 30 columns by 17 rows.
+up to 30 columns by 17 rows. A black crate marked with a white circle is already
+sitting on a target.
 
 Touch controls:
 
 - Tap anywhere on the board in the direction you want the worker to move. The
   worker steps once or pushes one crate, making even the smallest scaled boards
   easy to control.
-- Tap **NEW** for the next level or **RESET** to restart the current level.
+- Tap **RESTART** to restart only the current attempt after a deadlock. It never
+  changes completed-level progress.
+- After solving a level, **NEXT** replaces **RESTART** and opens the next
+  unfinished level.
 - Tap the back arrow to save and return to the selection screen.
 
 Microban I is copyright David W. Skinner and is redistributed with permission
 and credit. See the
 [author's redistribution notice](http://www.abelmartin.com/rj/sokobanJS/Skinner/David%20W.%20Skinner%20-%20Sokoban.htm)
 and the [source level file](https://github.com/OMerkel/Sokoban/blob/master/3rdParty/Levels/Microban.txt).
-The highest level opened is saved to non-volatile memory only when it advances.
-After a power loss or firmware update, a new Sokoban session starts from that
-level instead of level 1.
+Each completed level is saved immediately to non-volatile memory. After a power
+loss or firmware update, Sokoban starts at the next unfinished level. Completion
+progress never moves backward and can be cleared only by erasing NVM.
 
 ### Peg Solitaire
 

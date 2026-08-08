@@ -953,6 +953,11 @@ void test_long_game_progress_only_advances_with_valid_checkpoints() {
   TEST_ASSERT_FALSE(
       game_progress::evaluateAdvancement(8, 155, 155).valid);
   TEST_ASSERT_FALSE(game_progress::evaluateAdvancement(0, 0, 0).valid);
+
+  result = game_progress::evaluateAdvancement(154, 155, 156);
+  TEST_ASSERT_TRUE(result.valid);
+  TEST_ASSERT_TRUE(result.changed);
+  TEST_ASSERT_EQUAL_UINT16(155, result.checkpoint);
 }
 
 void test_slitherlink_edges_cycle_blank_line_cross_blank() {
