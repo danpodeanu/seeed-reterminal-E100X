@@ -576,25 +576,60 @@ void drawPipeTile(int x, int y, int size, uint8_t edges) {
 
   const int centerX = x + size / 2;
   const int centerY = y + size / 2;
-  const int thickness = std::max(6, size / 9);
-  const int halfThickness = thickness / 2;
+  const int outerThickness = std::max(12, size / 4);
+  const int innerThickness = std::max(5, outerThickness / 2);
+  const int outerHalf = outerThickness / 2;
+  const int innerHalf = innerThickness / 2;
+  const int collarDepth = std::max(5, size / 9);
+  const int collarExtra = std::max(2, size / 18);
+
+  // The black casing and wider edge collars give each route the silhouette of
+  // joined pipework; the white core is drawn afterward as its highlight.
   if ((edges & PipeConnectGame::North) != 0) {
-    epaper.fillRect(centerX - halfThickness, y, thickness,
+    epaper.fillRect(centerX - outerHalf, y, outerThickness,
                    centerY - y + 1, TFT_BLACK);
+    epaper.fillRect(centerX - outerHalf - collarExtra, y,
+                    outerThickness + collarExtra * 2, collarDepth, TFT_BLACK);
   }
   if ((edges & PipeConnectGame::East) != 0) {
-    epaper.fillRect(centerX, centerY - halfThickness,
-                   x + size - centerX, thickness, TFT_BLACK);
+    epaper.fillRect(centerX, centerY - outerHalf,
+                   x + size - centerX, outerThickness, TFT_BLACK);
+    epaper.fillRect(x + size - collarDepth,
+                    centerY - outerHalf - collarExtra, collarDepth,
+                    outerThickness + collarExtra * 2, TFT_BLACK);
   }
   if ((edges & PipeConnectGame::South) != 0) {
-    epaper.fillRect(centerX - halfThickness, centerY, thickness,
+    epaper.fillRect(centerX - outerHalf, centerY, outerThickness,
                    y + size - centerY, TFT_BLACK);
+    epaper.fillRect(centerX - outerHalf - collarExtra,
+                    y + size - collarDepth,
+                    outerThickness + collarExtra * 2, collarDepth, TFT_BLACK);
   }
   if ((edges & PipeConnectGame::West) != 0) {
-    epaper.fillRect(x, centerY - halfThickness, centerX - x + 1,
-                   thickness, TFT_BLACK);
+    epaper.fillRect(x, centerY - outerHalf, centerX - x + 1,
+                   outerThickness, TFT_BLACK);
+    epaper.fillRect(x, centerY - outerHalf - collarExtra, collarDepth,
+                    outerThickness + collarExtra * 2, TFT_BLACK);
   }
-  epaper.fillCircle(centerX, centerY, thickness / 2 + 2, TFT_BLACK);
+  epaper.fillCircle(centerX, centerY, outerHalf + 2, TFT_BLACK);
+
+  if ((edges & PipeConnectGame::North) != 0) {
+    epaper.fillRect(centerX - innerHalf, y, innerThickness,
+                   centerY - y + 1, TFT_WHITE);
+  }
+  if ((edges & PipeConnectGame::East) != 0) {
+    epaper.fillRect(centerX, centerY - innerHalf,
+                   x + size - centerX, innerThickness, TFT_WHITE);
+  }
+  if ((edges & PipeConnectGame::South) != 0) {
+    epaper.fillRect(centerX - innerHalf, centerY, innerThickness,
+                   y + size - centerY, TFT_WHITE);
+  }
+  if ((edges & PipeConnectGame::West) != 0) {
+    epaper.fillRect(x, centerY - innerHalf, centerX - x + 1,
+                   innerThickness, TFT_WHITE);
+  }
+  epaper.fillCircle(centerX, centerY, innerHalf + 1, TFT_WHITE);
 }
 
 void drawPipeConnectMenuCard() {
