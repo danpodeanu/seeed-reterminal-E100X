@@ -2,6 +2,7 @@
 
 #include "game_2048.h"
 #include "lights_out_game.h"
+#include "mini_minesweeper_game.h"
 #include "pipe_connect_game.h"
 
 void setUp() {}
@@ -338,6 +339,130 @@ void test_pipe_connect_many_seeds_are_solvable_and_scrambled() {
   }
 }
 
+void test_minesweeper_first_reveal_is_safe_and_opens_area() {
+  MiniMinesweeperGame game;
+  game.start(1234);
+
+  TEST_ASSERT_EQUAL(
+      MiniMinesweeperGame::RevealResult::Revealed, game.reveal(2, 2));
+  TEST_ASSERT_TRUE(game.generated());
+  TEST_ASSERT_FALSE(game.isMine(2, 2));
+  TEST_ASSERT_TRUE(game.isRevealed(2, 2));
+  TEST_ASSERT_GREATER_THAN_INT(1, game.revealedCount());
+}
+
+void test_minesweeper_first_reveal_excludes_neighbors() {
+  MiniMinesweeperGame game;
+  game.start(5678);
+  game.reveal(3, 3);
+
+  for (int row = 2; row <= 4; ++row) {
+    for (int column = 2; column <= 4; ++column) {
+      TEST_ASSERT_FALSE(game.isMine(row, column));
+    }
+  }
+}
+
+void test_minesweeper_generates_six_mines() {
+  MiniMinesweeperGame game;
+  game.start(42);
+  game.reveal(0, 0);
+
+  int mines = 0;
+  for (int row = 0; row < MiniMinesweeperGame::kSize; ++row) {
+    for (int column = 0; column < MiniMinesweeperGame::kSize; ++column) {
+      if (game.isMine(row, column)) ++mines;
+    }
+  }
+  TEST_ASSERT_EQUAL_INT(MiniMinesweeperGame::kMineCount, mines);
+}
+
+void test_minesweeper_flag_blocks_reveal() {
+  MiniMinesweeperGame game;
+  game.start(77);
+  TEST_ASSERT_TRUE(game.toggleFlag(1, 1));
+  TEST_ASSERT_TRUE(game.isFlagged(1, 1));
+  TEST_ASSERT_EQUAL(MiniMinesweeperGame::RevealResult::NoChange,
+                    game.reveal(1, 1));
+  TEST_ASSERT_FALSE(game.isRevealed(1, 1));
+  TEST_ASSERT_TRUE(game.toggleFlag(1, 1));
+  TEST_ASSERT_FALSE(game.isFlagged(1, 1));
+}
+
+void test_minesweeper_revealing_mine_loses() {
+  MiniMinesweeperGame game;
+  game.start(2024);
+  game.reveal(0, 0);
+
+  for (int row = 0; row < MiniMinesweeperGame::kSize; ++row) {
+    for (int column = 0; column < MiniMinesweeperGame::kSize; ++column) {
+      if (!game.isMine(row, column)) continue;
+      TEST_ASSERT_EQUAL(MiniMinesweeperGame::RevealResult::Lost,
+                        game.reveal(row, column));
+      TEST_ASSERT_TRUE(game.lost());
+      TEST_ASSERT_TRUE(game.gameOver());
+      return;
+    }
+  }
+  TEST_FAIL_MESSAGE("generated board had no mine");
+}
+
+void test_minesweeper_complete_safe_board_wins() {
+  MiniMinesweeperGame game;
+  game.start(13579);
+  game.reveal(2, 2);
+  MiniMinesweeperGame::Snapshot snapshot = game.snapshot();
+  snapshot.revealed =
+      MiniMinesweeperGame::kCellMask & ~snapshot.mines;
+  snapshot.flagged = 0;
+
+  MiniMinesweeperGame won;
+  TEST_ASSERT_TRUE(won.restore(snapshot));
+  TEST_ASSERT_TRUE(won.won());
+  TEST_ASSERT_TRUE(won.gameOver());
+}
+
+void test_minesweeper_reset_keeps_board_and_clears_progress() {
+  MiniMinesweeperGame game;
+  game.start(2468);
+  game.reveal(1, 1);
+  const uint64_t mines = game.snapshot().mines;
+  game.toggleFlag(5, 5);
+  game.reset();
+
+  TEST_ASSERT_EQUAL_UINT64(mines, game.snapshot().mines);
+  TEST_ASSERT_TRUE(game.generated());
+  TEST_ASSERT_EQUAL_INT(0, game.revealedCount());
+  TEST_ASSERT_EQUAL_INT(0, game.flags());
+}
+
+void test_minesweeper_snapshot_restores_progress() {
+  MiniMinesweeperGame original;
+  original.start(999);
+  original.reveal(3, 3);
+  original.toggleFlag(0, 0);
+
+  MiniMinesweeperGame restored;
+  TEST_ASSERT_TRUE(restored.restore(original.snapshot()));
+  TEST_ASSERT_EQUAL_UINT64(original.snapshot().mines,
+                           restored.snapshot().mines);
+  TEST_ASSERT_EQUAL_UINT64(original.snapshot().revealed,
+                           restored.snapshot().revealed);
+  TEST_ASSERT_EQUAL_UINT64(original.snapshot().flagged,
+                           restored.snapshot().flagged);
+}
+
+void test_minesweeper_invalid_snapshot_is_rejected() {
+  MiniMinesweeperGame game;
+  game.start(88);
+  MiniMinesweeperGame::Snapshot snapshot = game.snapshot();
+  snapshot.revealed = 1;
+  snapshot.flagged = 1;
+
+  MiniMinesweeperGame restored;
+  TEST_ASSERT_FALSE(restored.restore(snapshot));
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_corner_press_toggles_three_cells);
@@ -363,5 +488,14 @@ int main(int, char**) {
   RUN_TEST(test_pipe_connect_snapshot_restores_progress);
   RUN_TEST(test_pipe_connect_invalid_snapshot_is_rejected);
   RUN_TEST(test_pipe_connect_many_seeds_are_solvable_and_scrambled);
+  RUN_TEST(test_minesweeper_first_reveal_is_safe_and_opens_area);
+  RUN_TEST(test_minesweeper_first_reveal_excludes_neighbors);
+  RUN_TEST(test_minesweeper_generates_six_mines);
+  RUN_TEST(test_minesweeper_flag_blocks_reveal);
+  RUN_TEST(test_minesweeper_revealing_mine_loses);
+  RUN_TEST(test_minesweeper_complete_safe_board_wins);
+  RUN_TEST(test_minesweeper_reset_keeps_board_and_clears_progress);
+  RUN_TEST(test_minesweeper_snapshot_restores_progress);
+  RUN_TEST(test_minesweeper_invalid_snapshot_is_rejected);
   return UNITY_END();
 }

@@ -21,6 +21,7 @@
 #include "hardware.h"
 #include "lights_out_game.h"
 #include "low_battery.h"
+#include "mini_minesweeper_game.h"
 #include "peripheral_power.h"
 #include "pipe_connect_game.h"
 #include "power_latch.h"
@@ -52,18 +53,26 @@ constexpr int kPipeGridLeft = 30;
 constexpr int kPipeGridTop = 130;
 constexpr int kPipeCellSize = 70;
 constexpr int kPipeGridSize = kPipeCellSize * PipeConnectGame::kSize;
+constexpr int kMinesGridLeft = 30;
+constexpr int kMinesGridTop = 130;
+constexpr int kMinesCellSize = 70;
+constexpr int kMinesGridSize =
+    kMinesCellSize * MiniMinesweeperGame::kSize;
 constexpr int kStatusDividerY = 48;
 constexpr int kSwipeThreshold = 45;
+constexpr int kMinesTouchMoveTolerance = 20;
 constexpr uint32_t kButtonDebounceMs = 30;
 constexpr uint32_t kButtonLongPressMs = 1200;
+constexpr uint32_t kMinesFlagHoldMs = 650;
 constexpr uint32_t kBatteryCheckIntervalMs = 60000;
 constexpr uint32_t kInactivitySleepMs = 5UL * 60UL * 1000UL;
 constexpr int kLowBatteryThresholdPct = 10;
 constexpr uint32_t kPersistedStateMagic = 0x47414D45;
-constexpr uint16_t kPersistedStateVersion = 4;
+constexpr uint16_t kPersistedStateVersion = 5;
 constexpr uint8_t kLightsOutSavedFlag = 1U << 0;
 constexpr uint8_t k2048SavedFlag = 1U << 1;
 constexpr uint8_t kPipeConnectSavedFlag = 1U << 2;
+constexpr uint8_t kMinesweeperSavedFlag = 1U << 3;
 
 struct Rect {
   int x;
@@ -79,7 +88,8 @@ struct Rect {
 
 constexpr Rect kLightsOutMenuCard = {40, 165, 190, 190};
 constexpr Rect k2048MenuCard = {250, 165, 190, 190};
-constexpr Rect kPipeConnectMenuCard = {145, 380, 190, 190};
+constexpr Rect kPipeConnectMenuCard = {40, 380, 190, 190};
+constexpr Rect kMinesweeperMenuCard = {250, 380, 190, 190};
 constexpr Rect kBackButton = {8, 6, 48, 36};
 constexpr Rect kNewButton = {30, 688, 190, 66};
 constexpr Rect kResetButton = {260, 688, 190, 66};
@@ -88,12 +98,14 @@ constexpr E1005FastRefresh::Region kBatteryStatusRegion = {390, 0, 90, 48};
 constexpr E1005FastRefresh::Region kBoardRegion = {30, 130, 420, 550};
 constexpr E1005FastRefresh::Region k2048BoardRegion = {30, 112, 420, 553};
 constexpr E1005FastRefresh::Region kPipeBoardRegion = {25, 112, 430, 553};
+constexpr E1005FastRefresh::Region kMinesBoardRegion = {25, 112, 430, 553};
 
 enum class Screen {
   Menu,
   LightsOut,
   Game2048,
   PipeConnect,
+  Minesweeper,
 };
 
 struct PersistedState {
@@ -104,6 +116,7 @@ struct PersistedState {
   LightsOutGame::Snapshot lightsOut;
   Game2048::Snapshot game2048;
   PipeConnectGame::Snapshot pipeConnect;
+  MiniMinesweeperGame::Snapshot minesweeper;
   uint32_t checksum;
 };
 
@@ -146,6 +159,7 @@ E1005FastRefresh fastRefresh(epaper);
 LightsOutGame lightsOut;
 Game2048 game2048;
 PipeConnectGame pipeConnect;
+MiniMinesweeperGame minesweeper;
 Screen currentScreen = Screen::Menu;
 bool touchReady = false;
 bool touchActive = false;
@@ -154,11 +168,13 @@ bool lightSleepReady = false;
 bool lightsOutSaved = false;
 bool game2048Saved = false;
 bool pipeConnectSaved = false;
+bool minesweeperSaved = false;
 bool batteryStatusSampled = false;
 bool externalPowerPresent = false;
 int batteryPercent = -1;
 uint32_t nextBatteryCheckAtMs = 0;
 uint32_t lastActivityAtMs = 0;
+uint32_t touchStartedAtMs = 0;
 Gt911Touch::Point touchStart = {};
 Gt911Touch::Point touchLast = {};
 
@@ -245,6 +261,10 @@ void saveResumeState() {
     state.flags |= kPipeConnectSavedFlag;
     state.pipeConnect = pipeConnect.snapshot();
   }
+  if (minesweeperSaved) {
+    state.flags |= kMinesweeperSavedFlag;
+    state.minesweeper = minesweeper.snapshot();
+  }
   state.checksum = stateChecksum(state);
   persistedState = state;
 }
@@ -256,9 +276,9 @@ bool restoreResumeState() {
   if (state.magic != kPersistedStateMagic ||
       state.version != kPersistedStateVersion ||
       state.checksum != stateChecksum(state) ||
-      state.screen > static_cast<uint8_t>(Screen::PipeConnect) ||
+      state.screen > static_cast<uint8_t>(Screen::Minesweeper) ||
       (state.flags & ~(kLightsOutSavedFlag | k2048SavedFlag |
-                       kPipeConnectSavedFlag)) != 0) {
+                       kPipeConnectSavedFlag | kMinesweeperSavedFlag)) != 0) {
     LOG.println("[games] saved resume state is invalid");
     return false;
   }
@@ -292,9 +312,20 @@ bool restoreResumeState() {
     LOG.println("[games] saved screen has no Pipe Connect game");
     return false;
   }
+  const bool hasMinesweeperSave =
+      (state.flags & kMinesweeperSavedFlag) != 0;
+  if (hasMinesweeperSave && !minesweeper.restore(state.minesweeper)) {
+    LOG.println("[games] saved Minesweeper state is invalid");
+    return false;
+  }
+  if (savedScreen == Screen::Minesweeper && !hasMinesweeperSave) {
+    LOG.println("[games] saved screen has no Minesweeper game");
+    return false;
+  }
   lightsOutSaved = hasLightsOutSave;
   game2048Saved = has2048Save;
   pipeConnectSaved = hasPipeConnectSave;
+  minesweeperSaved = hasMinesweeperSave;
   currentScreen = savedScreen;
   return true;
 }
@@ -597,6 +628,62 @@ void drawPipeConnectMenuCard() {
   }
 }
 
+void drawMineSymbol(int centerX, int centerY, uint16_t color) {
+  constexpr int kRadius = 11;
+  constexpr int kRayLength = 17;
+  constexpr int kRayThickness = 3;
+  epaper.fillRect(centerX - kRayLength, centerY - kRayThickness / 2,
+                  kRayLength * 2 + 1, kRayThickness, color);
+  epaper.fillRect(centerX - kRayThickness / 2, centerY - kRayLength,
+                  kRayThickness, kRayLength * 2 + 1, color);
+  epaper.drawLine(centerX - 13, centerY - 13, centerX + 13, centerY + 13,
+                  color);
+  epaper.drawLine(centerX - 13, centerY + 13, centerX + 13, centerY - 13,
+                  color);
+  epaper.fillCircle(centerX, centerY, kRadius, color);
+  epaper.fillCircle(centerX + 4, centerY - 4, 2,
+                    color == TFT_BLACK ? TFT_WHITE : TFT_BLACK);
+}
+
+void drawFlagSymbol(int centerX, int centerY, uint16_t color) {
+  const int poleX = centerX - 6;
+  epaper.fillRect(poleX, centerY - 17, 4, 31, color);
+  epaper.fillTriangle(poleX + 4, centerY - 16, poleX + 4, centerY - 2,
+                      centerX + 14, centerY - 9, color);
+  epaper.fillRect(centerX - 13, centerY + 12, 23, 4, color);
+}
+
+void drawMinesweeperMenuCard() {
+  epaper.fillRoundRect(kMinesweeperMenuCard.x, kMinesweeperMenuCard.y,
+                       kMinesweeperMenuCard.width,
+                       kMinesweeperMenuCard.height, 14, TFT_WHITE);
+  epaper.drawRoundRect(kMinesweeperMenuCard.x, kMinesweeperMenuCard.y,
+                       kMinesweeperMenuCard.width,
+                       kMinesweeperMenuCard.height, 14, TFT_BLACK);
+
+  constexpr int kPreviewCellSize = 50;
+  const int gridLeft = kMinesweeperMenuCard.x + 20;
+  const int gridTop = kMinesweeperMenuCard.y + 20;
+  for (int row = 0; row < 3; ++row) {
+    for (int column = 0; column < 3; ++column) {
+      const int x = gridLeft + column * kPreviewCellSize;
+      const int y = gridTop + row * kPreviewCellSize;
+      epaper.fillRect(x, y, kPreviewCellSize, kPreviewCellSize, TFT_WHITE);
+      epaper.drawRect(x, y, kPreviewCellSize, kPreviewCellSize, TFT_BLACK);
+    }
+  }
+  drawMineSymbol(gridLeft + kPreviewCellSize * 3 / 2,
+                 gridTop + kPreviewCellSize * 3 / 2, TFT_BLACK);
+  drawCentered("1", gridLeft + kPreviewCellSize / 2,
+               gridTop + kPreviewCellSize / 2, 4);
+  drawCentered("2", gridLeft + kPreviewCellSize * 5 / 2,
+               gridTop + kPreviewCellSize / 2, 4);
+  epaper.fillRect(gridLeft, gridTop + kPreviewCellSize * 2,
+                  kPreviewCellSize, kPreviewCellSize, TFT_BLACK);
+  epaper.drawRect(gridLeft + 4, gridTop + kPreviewCellSize * 2 + 4,
+                  kPreviewCellSize - 8, kPreviewCellSize - 8, TFT_WHITE);
+}
+
 void drawBatteryStatus() {
   constexpr int kCenterY = 24;
   constexpr int kEdgeInset = 6;
@@ -652,6 +739,7 @@ void drawMenu() {
   drawLightsOutMenuCard();
   draw2048MenuCard();
   drawPipeConnectMenuCard();
+  drawMinesweeperMenuCard();
   drawStatusBar();
 }
 
@@ -783,6 +871,72 @@ void drawPipeConnect() {
   drawGameStatusBar("PIPE CONNECT");
 }
 
+void drawMinesweeperCell(int row, int column) {
+  const int x = kMinesGridLeft + column * kMinesCellSize;
+  const int y = kMinesGridTop + row * kMinesCellSize;
+  const int centerX = x + kMinesCellSize / 2;
+  const int centerY = y + kMinesCellSize / 2;
+  const bool mine = minesweeper.isMine(row, column);
+  const bool revealed = minesweeper.isRevealed(row, column);
+  const bool flagged = minesweeper.isFlagged(row, column);
+  const bool showMine = mine && minesweeper.gameOver();
+
+  if (revealed && mine) {
+    epaper.fillRect(x, y, kMinesCellSize, kMinesCellSize, TFT_BLACK);
+    epaper.drawRect(x + 4, y + 4, kMinesCellSize - 8,
+                    kMinesCellSize - 8, TFT_WHITE);
+    drawMineSymbol(centerX, centerY, TFT_WHITE);
+    return;
+  }
+  if (showMine) {
+    epaper.fillRect(x, y, kMinesCellSize, kMinesCellSize, TFT_WHITE);
+    epaper.drawRect(x, y, kMinesCellSize, kMinesCellSize, TFT_BLACK);
+    drawMineSymbol(centerX, centerY, TFT_BLACK);
+    return;
+  }
+  if (!revealed) {
+    epaper.fillRect(x, y, kMinesCellSize, kMinesCellSize, TFT_BLACK);
+    epaper.drawRect(x + 4, y + 4, kMinesCellSize - 8,
+                    kMinesCellSize - 8, TFT_WHITE);
+    if (flagged) drawFlagSymbol(centerX, centerY, TFT_WHITE);
+    return;
+  }
+
+  epaper.fillRect(x, y, kMinesCellSize, kMinesCellSize, TFT_WHITE);
+  epaper.drawRect(x, y, kMinesCellSize, kMinesCellSize, TFT_BLACK);
+  const int adjacent = minesweeper.adjacentMines(row, column);
+  if (adjacent > 0) {
+    drawCentered(String(adjacent), centerX, centerY, 4);
+  }
+}
+
+void drawMinesweeperBoard() {
+  epaper.fillRect(kMinesBoardRegion.x, kMinesBoardRegion.y,
+                  kMinesBoardRegion.width, kMinesBoardRegion.height,
+                  TFT_WHITE);
+  for (int row = 0; row < MiniMinesweeperGame::kSize; ++row) {
+    for (int column = 0; column < MiniMinesweeperGame::kSize; ++column) {
+      drawMinesweeperCell(row, column);
+    }
+  }
+
+  if (minesweeper.won()) {
+    drawCentered("FIELD CLEARED!", kScreenWidth / 2, 610, 4);
+  } else if (minesweeper.lost()) {
+    drawCentered("MINE HIT - TAP RESET", kScreenWidth / 2, 610, 4);
+  } else {
+    drawCentered("6 MINES", kScreenWidth / 2, 610, 4);
+  }
+}
+
+void drawMinesweeper() {
+  epaper.fillSprite(TFT_WHITE);
+  drawMinesweeperBoard();
+  drawButton(kNewButton, "NEW");
+  drawButton(kResetButton, "RESET");
+  drawGameStatusBar("MINESWEEPER");
+}
+
 uint32_t randomScramble() {
   uint32_t mask = esp_random() & LightsOutGame::kCellMask;
   int pressed = 0;
@@ -806,6 +960,11 @@ void startNew2048() {
 void startNewPipeConnect() {
   pipeConnect.start(esp_random());
   pipeConnectSaved = true;
+}
+
+void startNewMinesweeper() {
+  minesweeper.start(esp_random());
+  minesweeperSaved = true;
 }
 
 bool recoverFullRefresh() {
@@ -862,6 +1021,8 @@ void showMenu() {
     LOG.println("[games] auto-saving 2048");
   } else if (currentScreen == Screen::PipeConnect && pipeConnectSaved) {
     LOG.println("[games] auto-saving Pipe Connect");
+  } else if (currentScreen == Screen::Minesweeper && minesweeperSaved) {
+    LOG.println("[games] auto-saving Minesweeper");
   }
   currentScreen = Screen::Menu;
   saveResumeState();
@@ -888,6 +1049,13 @@ void showPipeConnect() {
   currentScreen = Screen::PipeConnect;
   drawPipeConnect();
   refreshScreen("Pipe Connect screen");
+}
+
+void showMinesweeper() {
+  if (!minesweeperSaved) startNewMinesweeper();
+  currentScreen = Screen::Minesweeper;
+  drawMinesweeper();
+  refreshScreen("Minesweeper screen");
 }
 
 void updateLightsOut(const char* action) {
@@ -918,6 +1086,22 @@ void updatePipeConnectCell(int row, int column, const char* action) {
   refreshRegion(cellRegion, action);
 }
 
+void updateMinesweeper(const char* action) {
+  drawMinesweeperBoard();
+  refreshRegion(kMinesBoardRegion, action);
+}
+
+void updateMinesweeperCell(int row, int column, const char* action) {
+  drawMinesweeperCell(row, column);
+  const E1005FastRefresh::Region cellRegion = {
+      kMinesGridLeft + column * kMinesCellSize,
+      kMinesGridTop + row * kMinesCellSize,
+      kMinesCellSize,
+      kMinesCellSize,
+  };
+  refreshRegion(cellRegion, action);
+}
+
 void handleMenuTouch(const Gt911Touch::Point& point) {
   if (kLightsOutMenuCard.contains(point.x, point.y)) {
     showLightsOut();
@@ -925,6 +1109,8 @@ void handleMenuTouch(const Gt911Touch::Point& point) {
     show2048();
   } else if (kPipeConnectMenuCard.contains(point.x, point.y)) {
     showPipeConnect();
+  } else if (kMinesweeperMenuCard.contains(point.x, point.y)) {
+    showMinesweeper();
   }
 }
 
@@ -988,6 +1174,56 @@ void handlePipeConnectTouch(const Gt911Touch::Point& point) {
   }
 }
 
+bool handleMinesweeperTouchStart(const Gt911Touch::Point& point) {
+  if (kBackButton.contains(point.x, point.y)) {
+    showMenu();
+    return true;
+  }
+  if (kNewButton.contains(point.x, point.y)) {
+    startNewMinesweeper();
+    updateMinesweeper("new Minesweeper game");
+    return true;
+  }
+  if (kResetButton.contains(point.x, point.y)) {
+    minesweeper.reset();
+    updateMinesweeper("reset Minesweeper game");
+    return true;
+  }
+  return point.x < kMinesGridLeft ||
+         point.x >= kMinesGridLeft + kMinesGridSize ||
+         point.y < kMinesGridTop ||
+         point.y >= kMinesGridTop + kMinesGridSize;
+}
+
+void handleMinesweeperCellTouch(const Gt911Touch::Point& start,
+                                const Gt911Touch::Point& end,
+                                uint32_t heldMs) {
+  const int dx = static_cast<int>(end.x) - static_cast<int>(start.x);
+  const int dy = static_cast<int>(end.y) - static_cast<int>(start.y);
+  if (dx < -kMinesTouchMoveTolerance || dx > kMinesTouchMoveTolerance ||
+      dy < -kMinesTouchMoveTolerance || dy > kMinesTouchMoveTolerance) {
+    return;
+  }
+  const int column = (start.x - kMinesGridLeft) / kMinesCellSize;
+  const int row = (start.y - kMinesGridTop) / kMinesCellSize;
+  if (heldMs >= kMinesFlagHoldMs) {
+    if (minesweeper.toggleFlag(row, column)) {
+      updateMinesweeperCell(row, column, "Minesweeper flag");
+    }
+    return;
+  }
+
+  const MiniMinesweeperGame::RevealResult result =
+      minesweeper.reveal(row, column);
+  if (result != MiniMinesweeperGame::RevealResult::NoChange) {
+    updateMinesweeper(result == MiniMinesweeperGame::RevealResult::Won
+                          ? "Minesweeper won"
+                          : result == MiniMinesweeperGame::RevealResult::Lost
+                                ? "Minesweeper mine"
+                                : "Minesweeper reveal");
+  }
+}
+
 bool handle2048TouchStart(const Gt911Touch::Point& point) {
   if (kBackButton.contains(point.x, point.y)) {
     showMenu();
@@ -1040,6 +1276,10 @@ void pollTouch() {
     if (touchActive && currentScreen == Screen::Game2048 &&
         !touchActionHandled) {
       handle2048Swipe(touchStart, touchLast);
+    } else if (touchActive && currentScreen == Screen::Minesweeper &&
+               !touchActionHandled) {
+      handleMinesweeperCellTouch(touchStart, touchLast,
+                                 millis() - touchStartedAtMs);
     }
     touchActive = false;
     touchActionHandled = false;
@@ -1056,6 +1296,7 @@ void pollTouch() {
   touchActionHandled = false;
   touchStart = point;
   touchLast = point;
+  touchStartedAtMs = millis();
   if (currentScreen == Screen::Menu) {
     handleMenuTouch(point);
     touchActionHandled = true;
@@ -1065,6 +1306,8 @@ void pollTouch() {
   } else if (currentScreen == Screen::PipeConnect) {
     handlePipeConnectTouch(point);
     touchActionHandled = true;
+  } else if (currentScreen == Screen::Minesweeper) {
+    touchActionHandled = handleMinesweeperTouchStart(point);
   } else if (currentScreen == Screen::Game2048) {
     touchActionHandled = handle2048TouchStart(point);
   }
@@ -1228,6 +1471,8 @@ void setup() {
     draw2048();
   } else if (resumed && currentScreen == Screen::PipeConnect) {
     drawPipeConnect();
+  } else if (resumed && currentScreen == Screen::Minesweeper) {
+    drawMinesweeper();
   } else {
     currentScreen = Screen::Menu;
     drawMenu();
@@ -1239,7 +1484,9 @@ void setup() {
                 ? "saved 2048"
                 : currentScreen == Screen::PipeConnect
                       ? "saved Pipe Connect"
-                      : "menu";
+                      : currentScreen == Screen::Minesweeper
+                            ? "saved Minesweeper"
+                            : "menu";
   LOG.printf("[games] refreshing %s\n", screenName);
   epaper.update();
   sd_ota::confirmRunningImage();

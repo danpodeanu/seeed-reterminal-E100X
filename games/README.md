@@ -48,6 +48,20 @@ Touch controls:
 - Tap **NEW** for another network or **RESET** to restore the current scramble.
 - Tap the back arrow to save and return to the selection screen.
 
+### Mini Minesweeper
+
+Clear a six-by-six field containing six mines. The first revealed tile and its
+neighbours are always safe. Empty areas open automatically, and the board,
+flags, and win or loss state persist across menu returns and deep sleep.
+
+Touch controls:
+
+- Tap the Minesweeper icon on the game-selection screen to play or resume.
+- Tap a covered tile to reveal it.
+- Hold a covered tile for 650 ms, then release, to add or remove a flag.
+- Tap **NEW** for another field or **RESET** to replay the current field.
+- Tap the back arrow to save and return to the selection screen.
+
 Front buttons:
 
 - On the selection screen, a short **OK** press does nothing.
