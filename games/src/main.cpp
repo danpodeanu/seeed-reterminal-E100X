@@ -22,6 +22,7 @@
 #include "lights_out_game.h"
 #include "low_battery.h"
 #include "peripheral_power.h"
+#include "pipe_connect_game.h"
 #include "power_latch.h"
 #include "repo_qr.h"
 #include "sd_card.h"
@@ -47,6 +48,10 @@ constexpr int k2048GridLeft = 40;
 constexpr int k2048GridTop = 150;
 constexpr int k2048CellSize = 100;
 constexpr int k2048GridSize = k2048CellSize * Game2048::kSize;
+constexpr int kPipeGridLeft = 30;
+constexpr int kPipeGridTop = 130;
+constexpr int kPipeCellSize = 70;
+constexpr int kPipeGridSize = kPipeCellSize * PipeConnectGame::kSize;
 constexpr int kStatusDividerY = 48;
 constexpr int kSwipeThreshold = 45;
 constexpr uint32_t kButtonDebounceMs = 30;
@@ -55,9 +60,10 @@ constexpr uint32_t kBatteryCheckIntervalMs = 60000;
 constexpr uint32_t kInactivitySleepMs = 5UL * 60UL * 1000UL;
 constexpr int kLowBatteryThresholdPct = 10;
 constexpr uint32_t kPersistedStateMagic = 0x47414D45;
-constexpr uint16_t kPersistedStateVersion = 3;
+constexpr uint16_t kPersistedStateVersion = 4;
 constexpr uint8_t kLightsOutSavedFlag = 1U << 0;
 constexpr uint8_t k2048SavedFlag = 1U << 1;
+constexpr uint8_t kPipeConnectSavedFlag = 1U << 2;
 
 struct Rect {
   int x;
@@ -73,6 +79,7 @@ struct Rect {
 
 constexpr Rect kLightsOutMenuCard = {40, 165, 190, 190};
 constexpr Rect k2048MenuCard = {250, 165, 190, 190};
+constexpr Rect kPipeConnectMenuCard = {145, 380, 190, 190};
 constexpr Rect kBackButton = {8, 6, 48, 36};
 constexpr Rect kNewButton = {30, 688, 190, 66};
 constexpr Rect kResetButton = {260, 688, 190, 66};
@@ -80,11 +87,13 @@ constexpr Rect k2048NewButton = {145, 688, 190, 66};
 constexpr E1005FastRefresh::Region kBatteryStatusRegion = {390, 0, 90, 48};
 constexpr E1005FastRefresh::Region kBoardRegion = {30, 130, 420, 550};
 constexpr E1005FastRefresh::Region k2048BoardRegion = {30, 112, 420, 553};
+constexpr E1005FastRefresh::Region kPipeBoardRegion = {25, 112, 430, 553};
 
 enum class Screen {
   Menu,
   LightsOut,
   Game2048,
+  PipeConnect,
 };
 
 struct PersistedState {
@@ -94,6 +103,7 @@ struct PersistedState {
   uint8_t flags;
   LightsOutGame::Snapshot lightsOut;
   Game2048::Snapshot game2048;
+  PipeConnectGame::Snapshot pipeConnect;
   uint32_t checksum;
 };
 
@@ -135,6 +145,7 @@ Gt911Touch touch;
 E1005FastRefresh fastRefresh(epaper);
 LightsOutGame lightsOut;
 Game2048 game2048;
+PipeConnectGame pipeConnect;
 Screen currentScreen = Screen::Menu;
 bool touchReady = false;
 bool touchActive = false;
@@ -142,6 +153,7 @@ bool touchActionHandled = false;
 bool lightSleepReady = false;
 bool lightsOutSaved = false;
 bool game2048Saved = false;
+bool pipeConnectSaved = false;
 bool batteryStatusSampled = false;
 bool externalPowerPresent = false;
 int batteryPercent = -1;
@@ -229,6 +241,10 @@ void saveResumeState() {
     state.flags |= k2048SavedFlag;
     state.game2048 = game2048.snapshot();
   }
+  if (pipeConnectSaved) {
+    state.flags |= kPipeConnectSavedFlag;
+    state.pipeConnect = pipeConnect.snapshot();
+  }
   state.checksum = stateChecksum(state);
   persistedState = state;
 }
@@ -240,8 +256,9 @@ bool restoreResumeState() {
   if (state.magic != kPersistedStateMagic ||
       state.version != kPersistedStateVersion ||
       state.checksum != stateChecksum(state) ||
-      state.screen > static_cast<uint8_t>(Screen::Game2048) ||
-      (state.flags & ~(kLightsOutSavedFlag | k2048SavedFlag)) != 0) {
+      state.screen > static_cast<uint8_t>(Screen::PipeConnect) ||
+      (state.flags & ~(kLightsOutSavedFlag | k2048SavedFlag |
+                       kPipeConnectSavedFlag)) != 0) {
     LOG.println("[games] saved resume state is invalid");
     return false;
   }
@@ -265,8 +282,19 @@ bool restoreResumeState() {
     LOG.println("[games] saved screen has no 2048 game");
     return false;
   }
+  const bool hasPipeConnectSave =
+      (state.flags & kPipeConnectSavedFlag) != 0;
+  if (hasPipeConnectSave && !pipeConnect.restore(state.pipeConnect)) {
+    LOG.println("[games] saved Pipe Connect state is invalid");
+    return false;
+  }
+  if (savedScreen == Screen::PipeConnect && !hasPipeConnectSave) {
+    LOG.println("[games] saved screen has no Pipe Connect game");
+    return false;
+  }
   lightsOutSaved = hasLightsOutSave;
   game2048Saved = has2048Save;
+  pipeConnectSaved = hasPipeConnectSave;
   currentScreen = savedScreen;
   return true;
 }
@@ -511,6 +539,64 @@ void draw2048MenuCard() {
 
 }
 
+void drawPipeTile(int x, int y, int size, uint8_t edges) {
+  epaper.fillRect(x, y, size, size, TFT_WHITE);
+  epaper.drawRect(x, y, size, size, TFT_BLACK);
+
+  const int centerX = x + size / 2;
+  const int centerY = y + size / 2;
+  const int thickness = std::max(6, size / 9);
+  const int halfThickness = thickness / 2;
+  if ((edges & PipeConnectGame::North) != 0) {
+    epaper.fillRect(centerX - halfThickness, y, thickness,
+                   centerY - y + 1, TFT_BLACK);
+  }
+  if ((edges & PipeConnectGame::East) != 0) {
+    epaper.fillRect(centerX, centerY - halfThickness,
+                   x + size - centerX, thickness, TFT_BLACK);
+  }
+  if ((edges & PipeConnectGame::South) != 0) {
+    epaper.fillRect(centerX - halfThickness, centerY, thickness,
+                   y + size - centerY, TFT_BLACK);
+  }
+  if ((edges & PipeConnectGame::West) != 0) {
+    epaper.fillRect(x, centerY - halfThickness, centerX - x + 1,
+                   thickness, TFT_BLACK);
+  }
+  epaper.fillCircle(centerX, centerY, thickness / 2 + 2, TFT_BLACK);
+}
+
+void drawPipeConnectMenuCard() {
+  epaper.fillRoundRect(kPipeConnectMenuCard.x, kPipeConnectMenuCard.y,
+                       kPipeConnectMenuCard.width,
+                       kPipeConnectMenuCard.height, 14, TFT_WHITE);
+  epaper.drawRoundRect(kPipeConnectMenuCard.x, kPipeConnectMenuCard.y,
+                       kPipeConnectMenuCard.width,
+                       kPipeConnectMenuCard.height, 14, TFT_BLACK);
+
+  constexpr uint8_t pipes[3][3] = {
+      {PipeConnectGame::East,
+       PipeConnectGame::East | PipeConnectGame::West,
+       PipeConnectGame::South | PipeConnectGame::West},
+      {PipeConnectGame::East | PipeConnectGame::South,
+       PipeConnectGame::East | PipeConnectGame::West,
+       PipeConnectGame::North | PipeConnectGame::West},
+      {PipeConnectGame::North | PipeConnectGame::East,
+       PipeConnectGame::East | PipeConnectGame::West,
+       PipeConnectGame::West},
+  };
+  constexpr int kPreviewCellSize = 50;
+  const int gridLeft = kPipeConnectMenuCard.x + 20;
+  const int gridTop = kPipeConnectMenuCard.y + 20;
+  for (int row = 0; row < 3; ++row) {
+    for (int column = 0; column < 3; ++column) {
+      drawPipeTile(gridLeft + column * kPreviewCellSize,
+                   gridTop + row * kPreviewCellSize, kPreviewCellSize,
+                   pipes[row][column]);
+    }
+  }
+}
+
 void drawBatteryStatus() {
   constexpr int kCenterY = 24;
   constexpr int kEdgeInset = 6;
@@ -565,6 +651,7 @@ void drawMenu() {
   drawGamesLogo(kScreenWidth / 2, 105, 110);
   drawLightsOutMenuCard();
   draw2048MenuCard();
+  drawPipeConnectMenuCard();
   drawStatusBar();
 }
 
@@ -669,6 +756,33 @@ void draw2048() {
   drawGameStatusBar("2048");
 }
 
+void drawPipeConnectBoard() {
+  epaper.fillRect(kPipeBoardRegion.x, kPipeBoardRegion.y,
+                  kPipeBoardRegion.width, kPipeBoardRegion.height, TFT_WHITE);
+  for (int row = 0; row < PipeConnectGame::kSize; ++row) {
+    for (int column = 0; column < PipeConnectGame::kSize; ++column) {
+      drawPipeTile(kPipeGridLeft + column * kPipeCellSize,
+                   kPipeGridTop + row * kPipeCellSize, kPipeCellSize,
+                   pipeConnect.at(row, column));
+    }
+  }
+
+  if (pipeConnect.solved()) {
+    drawCentered("CONNECTED IN " + String(pipeConnect.moves()) + " TAPS",
+                 kScreenWidth / 2, 610, 4);
+  } else {
+    drawCentered("CONNECT EVERY PIPE", kScreenWidth / 2, 610, 4);
+  }
+}
+
+void drawPipeConnect() {
+  epaper.fillSprite(TFT_WHITE);
+  drawPipeConnectBoard();
+  drawButton(kNewButton, "NEW");
+  drawButton(kResetButton, "RESET");
+  drawGameStatusBar("PIPE CONNECT");
+}
+
 uint32_t randomScramble() {
   uint32_t mask = esp_random() & LightsOutGame::kCellMask;
   int pressed = 0;
@@ -687,6 +801,11 @@ void startNewPuzzle() {
 void startNew2048() {
   game2048.start(esp_random(), esp_random());
   game2048Saved = true;
+}
+
+void startNewPipeConnect() {
+  pipeConnect.start(esp_random());
+  pipeConnectSaved = true;
 }
 
 bool recoverFullRefresh() {
@@ -741,6 +860,8 @@ void showMenu() {
     LOG.println("[games] auto-saving Lights Out");
   } else if (currentScreen == Screen::Game2048 && game2048Saved) {
     LOG.println("[games] auto-saving 2048");
+  } else if (currentScreen == Screen::PipeConnect && pipeConnectSaved) {
+    LOG.println("[games] auto-saving Pipe Connect");
   }
   currentScreen = Screen::Menu;
   saveResumeState();
@@ -762,6 +883,13 @@ void show2048() {
   refreshScreen("2048 screen");
 }
 
+void showPipeConnect() {
+  if (!pipeConnectSaved) startNewPipeConnect();
+  currentScreen = Screen::PipeConnect;
+  drawPipeConnect();
+  refreshScreen("Pipe Connect screen");
+}
+
 void updateLightsOut(const char* action) {
   drawLightsOutBoard();
   refreshRegion(kBoardRegion, action);
@@ -772,11 +900,31 @@ void update2048(const char* action) {
   refreshRegion(k2048BoardRegion, action);
 }
 
+void updatePipeConnect(const char* action) {
+  drawPipeConnectBoard();
+  refreshRegion(kPipeBoardRegion, action);
+}
+
+void updatePipeConnectCell(int row, int column, const char* action) {
+  const int x = kPipeGridLeft + column * kPipeCellSize;
+  const int y = kPipeGridTop + row * kPipeCellSize;
+  drawPipeTile(x, y, kPipeCellSize, pipeConnect.at(row, column));
+  const E1005FastRefresh::Region cellRegion = {
+      static_cast<uint16_t>(x),
+      static_cast<uint16_t>(y),
+      static_cast<uint16_t>(kPipeCellSize),
+      static_cast<uint16_t>(kPipeCellSize),
+  };
+  refreshRegion(cellRegion, action);
+}
+
 void handleMenuTouch(const Gt911Touch::Point& point) {
   if (kLightsOutMenuCard.contains(point.x, point.y)) {
     showLightsOut();
   } else if (k2048MenuCard.contains(point.x, point.y)) {
     show2048();
+  } else if (kPipeConnectMenuCard.contains(point.x, point.y)) {
+    showPipeConnect();
   }
 }
 
@@ -804,6 +952,39 @@ void handleLightsOutTouch(const Gt911Touch::Point& point) {
   const int row = (point.y - kGridTop) / kCellSize;
   if (lightsOut.press(row, column)) {
     updateLightsOut("move");
+  }
+}
+
+void handlePipeConnectTouch(const Gt911Touch::Point& point) {
+  if (kBackButton.contains(point.x, point.y)) {
+    showMenu();
+    return;
+  }
+  if (kNewButton.contains(point.x, point.y)) {
+    startNewPipeConnect();
+    updatePipeConnect("new Pipe Connect game");
+    return;
+  }
+  if (kResetButton.contains(point.x, point.y)) {
+    pipeConnect.reset();
+    updatePipeConnect("reset Pipe Connect game");
+    return;
+  }
+  if (point.x < kPipeGridLeft ||
+      point.x >= kPipeGridLeft + kPipeGridSize ||
+      point.y < kPipeGridTop ||
+      point.y >= kPipeGridTop + kPipeGridSize) {
+    return;
+  }
+
+  const int column = (point.x - kPipeGridLeft) / kPipeCellSize;
+  const int row = (point.y - kPipeGridTop) / kPipeCellSize;
+  if (pipeConnect.rotate(row, column)) {
+    if (pipeConnect.solved()) {
+      updatePipeConnect("Pipe Connect solved");
+    } else {
+      updatePipeConnectCell(row, column, "Pipe Connect rotation");
+    }
   }
 }
 
@@ -881,7 +1062,10 @@ void pollTouch() {
   } else if (currentScreen == Screen::LightsOut) {
     handleLightsOutTouch(point);
     touchActionHandled = true;
-  } else {
+  } else if (currentScreen == Screen::PipeConnect) {
+    handlePipeConnectTouch(point);
+    touchActionHandled = true;
+  } else if (currentScreen == Screen::Game2048) {
     touchActionHandled = handle2048TouchStart(point);
   }
 }
@@ -1042,6 +1226,8 @@ void setup() {
     drawLightsOut();
   } else if (resumed && currentScreen == Screen::Game2048) {
     draw2048();
+  } else if (resumed && currentScreen == Screen::PipeConnect) {
+    drawPipeConnect();
   } else {
     currentScreen = Screen::Menu;
     drawMenu();
@@ -1049,7 +1235,11 @@ void setup() {
   const char* screenName =
       currentScreen == Screen::LightsOut
           ? "saved Lights Out"
-          : currentScreen == Screen::Game2048 ? "saved 2048" : "menu";
+          : currentScreen == Screen::Game2048
+                ? "saved 2048"
+                : currentScreen == Screen::PipeConnect
+                      ? "saved Pipe Connect"
+                      : "menu";
   LOG.printf("[games] refreshing %s\n", screenName);
   epaper.update();
   sd_ota::confirmRunningImage();

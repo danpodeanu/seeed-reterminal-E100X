@@ -2,6 +2,7 @@
 
 #include "game_2048.h"
 #include "lights_out_game.h"
+#include "pipe_connect_game.h"
 
 void setUp() {}
 void tearDown() {}
@@ -232,6 +233,111 @@ void test_2048_invalid_snapshot_is_rejected() {
   TEST_ASSERT_FALSE(game.restore(snapshot2048With(cells)));
 }
 
+void test_pipe_connect_generation_creates_scrambled_tree() {
+  PipeConnectGame game;
+  game.start(0x12345678UL);
+
+  int edgeEnds = 0;
+  for (int row = 0; row < PipeConnectGame::kSize; ++row) {
+    for (int column = 0; column < PipeConnectGame::kSize; ++column) {
+      uint8_t mask = game.solutionAt(row, column);
+      TEST_ASSERT_NOT_EQUAL_UINT8(0, mask);
+      while (mask != 0) {
+        edgeEnds += mask & 1U;
+        mask >>= 1;
+      }
+    }
+  }
+  TEST_ASSERT_EQUAL_INT((PipeConnectGame::kCellCount - 1) * 2, edgeEnds);
+  TEST_ASSERT_FALSE(game.solved());
+}
+
+void test_pipe_connect_four_rotations_restore_tile() {
+  PipeConnectGame game;
+  game.start(7);
+  const uint8_t original = game.at(2, 3);
+
+  for (int turn = 0; turn < 4; ++turn) {
+    TEST_ASSERT_TRUE(game.rotate(2, 3));
+  }
+
+  TEST_ASSERT_EQUAL_UINT8(original, game.at(2, 3));
+  TEST_ASSERT_EQUAL_UINT16(4, game.moves());
+}
+
+void test_pipe_connect_solution_connects_every_tile() {
+  PipeConnectGame game;
+  game.start(0xCAFEBABEUL);
+  PipeConnectGame::Snapshot snapshot = game.snapshot();
+  for (int index = 0; index < PipeConnectGame::kCellCount; ++index) {
+    snapshot.cells[index] = snapshot.solutionCells[index];
+  }
+
+  PipeConnectGame solved;
+  TEST_ASSERT_TRUE(solved.restore(snapshot));
+  TEST_ASSERT_TRUE(solved.solved());
+}
+
+void test_pipe_connect_reset_restores_scramble() {
+  PipeConnectGame game;
+  game.start(99);
+  const PipeConnectGame::Snapshot initial = game.snapshot();
+  game.rotate(0, 0);
+  game.rotate(4, 5);
+  game.reset();
+
+  for (int index = 0; index < PipeConnectGame::kCellCount; ++index) {
+    TEST_ASSERT_EQUAL_UINT8(initial.cells[index],
+                            game.snapshot().cells[index]);
+  }
+  TEST_ASSERT_EQUAL_UINT16(0, game.moves());
+  TEST_ASSERT_FALSE(game.solved());
+}
+
+void test_pipe_connect_snapshot_restores_progress() {
+  PipeConnectGame original;
+  original.start(314159);
+  original.rotate(1, 1);
+  original.rotate(3, 4);
+  const PipeConnectGame::Snapshot snapshot = original.snapshot();
+
+  PipeConnectGame restored;
+  TEST_ASSERT_TRUE(restored.restore(snapshot));
+  TEST_ASSERT_EQUAL_UINT16(original.moves(), restored.moves());
+  for (int row = 0; row < PipeConnectGame::kSize; ++row) {
+    for (int column = 0; column < PipeConnectGame::kSize; ++column) {
+      TEST_ASSERT_EQUAL_UINT8(original.at(row, column),
+                              restored.at(row, column));
+    }
+  }
+}
+
+void test_pipe_connect_invalid_snapshot_is_rejected() {
+  PipeConnectGame game;
+  game.start(42);
+  PipeConnectGame::Snapshot snapshot = game.snapshot();
+  snapshot.solutionCells[0] = 0;
+
+  PipeConnectGame restored;
+  TEST_ASSERT_FALSE(restored.restore(snapshot));
+}
+
+void test_pipe_connect_many_seeds_are_solvable_and_scrambled() {
+  for (uint32_t seed = 0; seed < 100; ++seed) {
+    PipeConnectGame game;
+    game.start(seed);
+    TEST_ASSERT_FALSE(game.solved());
+
+    PipeConnectGame::Snapshot snapshot = game.snapshot();
+    for (int index = 0; index < PipeConnectGame::kCellCount; ++index) {
+      snapshot.cells[index] = snapshot.solutionCells[index];
+    }
+    PipeConnectGame solved;
+    TEST_ASSERT_TRUE(solved.restore(snapshot));
+    TEST_ASSERT_TRUE(solved.solved());
+  }
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_corner_press_toggles_three_cells);
@@ -250,5 +356,12 @@ int main(int, char**) {
   RUN_TEST(test_2048_full_board_without_merges_is_game_over);
   RUN_TEST(test_2048_snapshot_restores_score_and_win);
   RUN_TEST(test_2048_invalid_snapshot_is_rejected);
+  RUN_TEST(test_pipe_connect_generation_creates_scrambled_tree);
+  RUN_TEST(test_pipe_connect_four_rotations_restore_tile);
+  RUN_TEST(test_pipe_connect_solution_connects_every_tile);
+  RUN_TEST(test_pipe_connect_reset_restores_scramble);
+  RUN_TEST(test_pipe_connect_snapshot_restores_progress);
+  RUN_TEST(test_pipe_connect_invalid_snapshot_is_rejected);
+  RUN_TEST(test_pipe_connect_many_seeds_are_solvable_and_scrambled);
   return UNITY_END();
 }

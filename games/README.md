@@ -34,11 +34,25 @@ Touch controls:
 - Tap **NEW** to start over while retaining the best score.
 - Tap the back arrow to save and return to the selection screen.
 
+### Pipe Connect
+
+Tap tiles to rotate their pipes until all 36 tiles form one connected network.
+Every generated board starts from a connected spanning tree, so it always has a
+solution. The current board and tap count persist across menu returns and deep
+sleep.
+
+Touch controls:
+
+- Tap the Pipe Connect icon on the game-selection screen to play or resume.
+- Tap a tile to rotate it clockwise.
+- Tap **NEW** for another network or **RESET** to restore the current scramble.
+- Tap the back arrow to save and return to the selection screen.
+
 Front buttons:
 
 - On the selection screen, a short **OK** press does nothing.
 - While playing, a short **OK** press saves the game and returns to the
-  selection screen from either game.
+  selection screen from any game.
 - Hold **OK** for 1.2 seconds anywhere to save and enter deep sleep. The beep
   confirms that the long press has registered, so the button can be released.
   Press **OK** again to resume.
