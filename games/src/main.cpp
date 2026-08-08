@@ -61,7 +61,7 @@ struct Rect {
   }
 };
 
-constexpr Rect kMenuGameCard = {40, 215, 400, 190};
+constexpr Rect kMenuGameCard = {40, 165, 190, 190};
 constexpr Rect kBackButton = {24, 24, 104, 54};
 constexpr Rect kNewButton = {30, 688, 190, 66};
 constexpr Rect kResetButton = {260, 688, 190, 66};
@@ -385,17 +385,60 @@ void drawButton(const Rect& rect, const char* label) {
                     rect.y + rect.height / 2, 4);
 }
 
+void drawLightsOutCell(int x, int y, bool on) {
+  const int inset = 4;
+  const int size = kCellSize - inset * 2;
+  x += inset;
+  y += inset;
+  if (on) {
+    epaper.fillRoundRect(x, y, size, size, 8, TFT_BLACK);
+    epaper.drawCircle(x + size / 2, y + size / 2, 12, TFT_WHITE);
+    epaper.fillCircle(x + size / 2, y + size / 2, 5, TFT_WHITE);
+  } else {
+    epaper.fillRoundRect(x, y, size, size, 8, TFT_WHITE);
+    epaper.drawRoundRect(x, y, size, size, 8, TFT_BLACK);
+    epaper.drawRoundRect(x + 1, y + 1, size - 2, size - 2, 7, TFT_BLACK);
+  }
+}
+
+void drawMenuGameCard() {
+  epaper.fillRoundRect(kMenuGameCard.x, kMenuGameCard.y,
+                      kMenuGameCard.width, kMenuGameCard.height, 14,
+                      TFT_WHITE);
+  epaper.drawRoundRect(kMenuGameCard.x, kMenuGameCard.y,
+                      kMenuGameCard.width, kMenuGameCard.height, 14,
+                      TFT_BLACK);
+
+  constexpr bool lights[2][2] = {
+      {true, false},
+      {false, true},
+  };
+  const int gridLeft = kMenuGameCard.x + 15;
+  const int gridTop = kMenuGameCard.y + 15;
+  for (int row = 0; row < 2; ++row) {
+    for (int column = 0; column < 2; ++column) {
+      drawLightsOutCell(gridLeft + column * kCellSize,
+                        gridTop + row * kCellSize, lights[row][column]);
+    }
+  }
+
+  const Rect title = {
+      kMenuGameCard.x + 8,
+      kMenuGameCard.y + kMenuGameCard.height / 2 - 27,
+      kMenuGameCard.width - 16,
+      54,
+  };
+  fillDarkGrayRoundRect(title, 8);
+  epaper.setTextColor(TFT_WHITE);
+  epaper.setTextDatum(MC_DATUM);
+  epaper.drawString("LIGHTS OUT", kMenuGameCard.x + kMenuGameCard.width / 2,
+                    kMenuGameCard.y + kMenuGameCard.height / 2, 4);
+}
+
 void drawMenu() {
   epaper.fillSprite(TFT_WHITE);
   drawGamesLogo(kScreenWidth / 2, 60, 110);
-
-  fillDarkGrayRoundRect(kMenuGameCard, 14);
-  epaper.drawRoundRect(kMenuGameCard.x + 8, kMenuGameCard.y + 8,
-                      kMenuGameCard.width - 16, kMenuGameCard.height - 16,
-                      10, TFT_WHITE);
-  epaper.setTextColor(TFT_WHITE);
-  epaper.setTextDatum(MC_DATUM);
-  epaper.drawString("LIGHTS OUT", kScreenWidth / 2, 300, 4);
+  drawMenuGameCard();
 }
 
 void drawStatus(const char* title, const char* detail) {
@@ -426,18 +469,9 @@ void drawLightsOutBoard() {
 
   for (int row = 0; row < LightsOutGame::kSize; ++row) {
     for (int column = 0; column < LightsOutGame::kSize; ++column) {
-      const int x = kGridLeft + column * kCellSize + 4;
-      const int y = kGridTop + row * kCellSize + 4;
-      const int size = kCellSize - 8;
-      if (lightsOut.isOn(row, column)) {
-        epaper.fillRoundRect(x, y, size, size, 8, TFT_BLACK);
-        epaper.drawCircle(x + size / 2, y + size / 2, 12, TFT_WHITE);
-        epaper.fillCircle(x + size / 2, y + size / 2, 5, TFT_WHITE);
-      } else {
-        epaper.fillRoundRect(x, y, size, size, 8, TFT_WHITE);
-        epaper.drawRoundRect(x, y, size, size, 8, TFT_BLACK);
-        epaper.drawRoundRect(x + 1, y + 1, size - 2, size - 2, 7, TFT_BLACK);
-      }
+      drawLightsOutCell(kGridLeft + column * kCellSize,
+                        kGridTop + row * kCellSize,
+                        lightsOut.isOn(row, column));
     }
   }
 
