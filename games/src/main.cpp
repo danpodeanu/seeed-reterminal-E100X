@@ -422,9 +422,10 @@ void drawCentered(const String& text, int x, int y, int font) {
 
 void drawCenteredNumber(uint32_t value, int x, int y, int font,
                         uint16_t foreground, uint16_t background) {
+  const int opticalYOffset = font == 6 ? 6 : font == 4 ? 3 : 0;
   epaper.setTextDatum(MC_DATUM);
   epaper.setTextColor(foreground, background, true);
-  epaper.drawNumber(static_cast<long>(value), x, y, font);
+  epaper.drawNumber(static_cast<long>(value), x, y + opticalYOffset, font);
 }
 
 void drawGamesLogo(int centerX, int centerY, int width) {
