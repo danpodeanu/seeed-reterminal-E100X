@@ -406,8 +406,6 @@ void drawStatus(const char* title, const char* detail) {
 
 void drawSleepSplash() {
   epaper.fillSprite(TFT_WHITE);
-  drawCentered("Resume", kScreenWidth / 2, 130, 4);
-  drawCentered("PRESS OK", kScreenWidth / 2, 172, 4);
   drawGamesLogo(kScreenWidth / 2, 390, 280);
 }
 
