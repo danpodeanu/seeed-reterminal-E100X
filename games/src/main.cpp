@@ -1255,8 +1255,11 @@ void drawMenu() {
     drawPegSolitaireMenuCard();
     drawSlitherlinkMenuCard();
   }
-  drawArrowButton(kPreviousPageButton, false);
-  drawArrowButton(kNextPageButton, true);
+  if (currentMenuPage == MenuPage::First) {
+    drawArrowButton(kNextPageButton, true);
+  } else {
+    drawArrowButton(kPreviousPageButton, false);
+  }
   drawCentered(currentMenuPage == MenuPage::First ? "1 / 2" : "2 / 2",
                kScreenWidth / 2, 774, 4);
   drawStatusBar();
@@ -2163,10 +2166,14 @@ void showMenuPage(MenuPage page) {
 }
 
 void handleMenuTouch(const Gt911Touch::Point& point) {
-  if (kPreviousPageButton.contains(point.x, point.y) ||
+  if (currentMenuPage == MenuPage::First &&
       kNextPageButton.contains(point.x, point.y)) {
-    showMenuPage(currentMenuPage == MenuPage::First ? MenuPage::Second
-                                                    : MenuPage::First);
+    showMenuPage(MenuPage::Second);
+    return;
+  }
+  if (currentMenuPage == MenuPage::Second &&
+      kPreviousPageButton.contains(point.x, point.y)) {
+    showMenuPage(MenuPage::First);
     return;
   }
   if (currentMenuPage == MenuPage::Second) {

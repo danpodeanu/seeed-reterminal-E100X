@@ -173,8 +173,9 @@ Touch controls:
 - Tap the back arrow to save and return to the selection screen.
 
 The selector uses two two-column pages. The first page retains the original six
-games and the second page contains the four additions. Solid black arrow buttons
-in the bottom-left and bottom-right corners switch pages.
+games and the second page contains the four additions. A solid black next arrow
+appears in the first page's bottom-right corner; a matching previous arrow
+appears in the second page's bottom-left corner.
 
 Front buttons:
 
