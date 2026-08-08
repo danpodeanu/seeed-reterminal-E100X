@@ -52,7 +52,11 @@ slow memory, so normal sleep/resume cycles do not write to flash or the SD
 card. The same saved deep sleep starts automatically after five minutes without
 touch or button input. Below 10% battery, the app saves its state, displays a
 recharge screen, and enters deep sleep unless USB-C power is connected. The
-normal sleep screen includes a QR code for this repository.
+normal sleep screen includes a QR code for this repository. All active screens
+show the current battery percentage and the shared battery gauge used by the
+other viewer apps; the gauge displays a charging bolt while USB-C power is
+connected. A full-width rule separates this status bar from the content, and
+each game screen shows its game name as the title below the rule.
 
 The SSD1677 path uses 40 MHz window transfers and reseeds both differential RAM
 planes after every refresh. This keeps normal moves near the panel's physical

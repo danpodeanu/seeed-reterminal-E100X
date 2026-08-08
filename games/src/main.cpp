@@ -26,6 +26,7 @@
 #include "repo_qr.h"
 #include "sd_card.h"
 #include "sd_ota.h"
+#include "text_render.h"
 
 #if RETERMINAL_MODEL != 1005
 #error "The Games app supports only reTerminal E1005"
@@ -46,6 +47,7 @@ constexpr int k2048GridLeft = 40;
 constexpr int k2048GridTop = 150;
 constexpr int k2048CellSize = 100;
 constexpr int k2048GridSize = k2048CellSize * Game2048::kSize;
+constexpr int kStatusDividerY = 48;
 constexpr int kSwipeThreshold = 45;
 constexpr uint32_t kButtonDebounceMs = 30;
 constexpr uint32_t kButtonLongPressMs = 1200;
@@ -71,12 +73,13 @@ struct Rect {
 
 constexpr Rect kLightsOutMenuCard = {40, 165, 190, 190};
 constexpr Rect k2048MenuCard = {250, 165, 190, 190};
-constexpr Rect kBackButton = {24, 24, 104, 54};
+constexpr Rect kBackButton = {24, 58, 104, 48};
 constexpr Rect kNewButton = {30, 688, 190, 66};
 constexpr Rect kResetButton = {260, 688, 190, 66};
 constexpr Rect k2048NewButton = {145, 688, 190, 66};
+constexpr E1005FastRefresh::Region kBatteryStatusRegion = {390, 0, 90, 48};
 constexpr E1005FastRefresh::Region kBoardRegion = {30, 130, 420, 550};
-constexpr E1005FastRefresh::Region k2048BoardRegion = {30, 95, 420, 570};
+constexpr E1005FastRefresh::Region k2048BoardRegion = {30, 112, 420, 553};
 
 enum class Screen {
   Menu,
@@ -139,6 +142,9 @@ bool touchActionHandled = false;
 bool lightSleepReady = false;
 bool lightsOutSaved = false;
 bool game2048Saved = false;
+bool batteryStatusSampled = false;
+bool externalPowerPresent = false;
+int batteryPercent = -1;
 uint32_t nextBatteryCheckAtMs = 0;
 uint32_t lastActivityAtMs = 0;
 Gt911Touch::Point touchStart = {};
@@ -505,11 +511,43 @@ void draw2048MenuCard() {
 
 }
 
+void drawBatteryStatus() {
+  constexpr int kCenterY = 24;
+  constexpr int kEdgeInset = 6;
+  constexpr int kGaugeWidth = 22;
+  constexpr int kGaugeHeight = 12;
+  constexpr int kTerminalWidth = 5;
+  constexpr int kTerminalHeight = 5;
+  constexpr int kOutline = 1;
+  const int gaugeX =
+      kScreenWidth - kEdgeInset - kTerminalWidth - kGaugeWidth;
+  const int gaugeY = kCenterY + 2 - kGaugeHeight / 2;
+  const String percent =
+      batteryPercent >= 0 ? String(batteryPercent) + "%" : "--%";
+
+  epaper.setFreeFont(&FreeSansBold9pt7b);
+  epaper.setTextColor(TFT_BLACK, TFT_WHITE, true);
+  epaper.setTextDatum(MR_DATUM);
+  epaper.drawString(percent, gaugeX - 9, kCenterY, 1);
+  text_render::drawBatteryGauge(
+      epaper, gaugeX, gaugeY, kGaugeWidth, kGaugeHeight, batteryPercent,
+      kOutline, kTerminalWidth, kTerminalHeight, TFT_BLACK, TFT_WHITE,
+      externalPowerPresent);
+  epaper.setFreeFont(nullptr);
+  epaper.setTextFont(2);
+}
+
+void drawStatusBar() {
+  drawBatteryStatus();
+  epaper.drawFastHLine(0, kStatusDividerY, kScreenWidth, TFT_BLACK);
+}
+
 void drawMenu() {
   epaper.fillSprite(TFT_WHITE);
-  drawGamesLogo(kScreenWidth / 2, 60, 110);
+  drawGamesLogo(kScreenWidth / 2, 105, 110);
   drawLightsOutMenuCard();
   draw2048MenuCard();
+  drawStatusBar();
 }
 
 void drawStatus(const char* title, const char* detail) {
@@ -580,17 +618,18 @@ void drawLightsOutBoard() {
 void drawLightsOut() {
   epaper.fillSprite(TFT_WHITE);
   drawButton(kBackButton, "GAMES");
-  drawCentered("LIGHTS OUT", 292, 51, 4);
+  drawCentered("LIGHTS OUT", 292, 82, 4);
   drawLightsOutBoard();
   drawButton(kNewButton, "NEW");
   drawButton(kResetButton, "RESET");
+  drawStatusBar();
 }
 
 void draw2048Board() {
   epaper.fillRect(k2048BoardRegion.x, k2048BoardRegion.y,
                   k2048BoardRegion.width, k2048BoardRegion.height, TFT_WHITE);
-  drawCentered("SCORE " + String(game2048.score()), 135, 110, 4);
-  drawCentered("BEST " + String(game2048.bestScore()), 350, 110, 4);
+  drawCentered("SCORE " + String(game2048.score()), 135, 128, 4);
+  drawCentered("BEST " + String(game2048.bestScore()), 350, 128, 4);
 
   for (int row = 0; row < Game2048::kSize; ++row) {
     for (int column = 0; column < Game2048::kSize; ++column) {
@@ -610,9 +649,10 @@ void draw2048Board() {
 void draw2048() {
   epaper.fillSprite(TFT_WHITE);
   drawButton(kBackButton, "GAMES");
-  drawCentered("2048", 292, 51, 4);
+  drawCentered("2048", 292, 82, 4);
   draw2048Board();
   drawButton(k2048NewButton, "NEW");
+  drawStatusBar();
 }
 
 uint32_t randomScramble() {
@@ -911,18 +951,33 @@ void checkBatteryAndSleepIfNeeded() {
   pinMode(board::PIN_EXTERNAL_POWER, INPUT);
   const bool externalPower =
       digitalRead(board::PIN_EXTERNAL_POWER) == HIGH;
+  const int updatedPercent = gauge.valid ? gauge.percent : -1;
+  const bool statusChanged =
+      !batteryStatusSampled || batteryPercent != updatedPercent ||
+      externalPowerPresent != externalPower;
+  batteryStatusSampled = true;
+  batteryPercent = updatedPercent;
+  externalPowerPresent = externalPower;
+
   if (!gauge.valid) {
     LOG.println("[battery] BQ27220 battery gauge unavailable");
-    return;
+  } else {
+    LOG.printf("[battery] %d%% (%.3fV), external_power=%s\n", gauge.percent,
+               gauge.voltage, externalPower ? "yes" : "no");
+    if (low_battery::shouldWarn(true, gauge.valid, externalPower,
+                                gauge.percent, kLowBatteryThresholdPct)) {
+      LOG.printf("[battery] below %d%%; requesting recharge\n",
+                 kLowBatteryThresholdPct);
+      powerDownAndSleep(SleepScreen::Charge, gauge.percent);
+    }
   }
 
-  LOG.printf("[battery] %d%% (%.3fV), external_power=%s\n", gauge.percent,
-             gauge.voltage, externalPower ? "yes" : "no");
-  if (low_battery::shouldWarn(true, gauge.valid, externalPower, gauge.percent,
-                              kLowBatteryThresholdPct)) {
-    LOG.printf("[battery] below %d%%; requesting recharge\n",
-               kLowBatteryThresholdPct);
-    powerDownAndSleep(SleepScreen::Charge, gauge.percent);
+  if (statusChanged && fastRefresh.ready()) {
+    epaper.fillRect(kBatteryStatusRegion.x, kBatteryStatusRegion.y,
+                   kBatteryStatusRegion.width, kBatteryStatusRegion.height,
+                   TFT_WHITE);
+    drawBatteryStatus();
+    refreshRegion(kBatteryStatusRegion, "battery status");
   }
 }
 
