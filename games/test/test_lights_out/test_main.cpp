@@ -1,5 +1,6 @@
 #include <unity.h>
 
+#include "crossword_game.h"
 #include "dots_and_boxes_game.h"
 #include "game_2048.h"
 #include "game_progress_store.h"
@@ -11,6 +12,7 @@
 #include "reversi_game.h"
 #include "slitherlink_game.h"
 #include "sokoban_game.h"
+#include "sudoku_game.h"
 
 void setUp() {}
 void tearDown() {}
@@ -960,6 +962,108 @@ void test_long_game_progress_only_advances_with_valid_checkpoints() {
   TEST_ASSERT_EQUAL_UINT16(155, result.checkpoint);
 }
 
+void test_every_sudoku_puzzle_has_a_valid_solution() {
+  for (uint8_t puzzle = 0; puzzle < SudokuGame::kPuzzleCount; ++puzzle) {
+    SudokuGame game;
+    game.start(puzzle);
+    int givens = 0;
+    for (int row = 0; row < SudokuGame::kSize; ++row) {
+      for (int column = 0; column < SudokuGame::kSize; ++column) {
+        if (game.given(row, column)) {
+          ++givens;
+          continue;
+        }
+        TEST_ASSERT_TRUE(game.select(row, column));
+        TEST_ASSERT_TRUE(game.setDigit(
+            sudoku_puzzles::kPuzzles[puzzle].solution[row][column]));
+      }
+    }
+    TEST_ASSERT_EQUAL_INT(38, givens);
+    TEST_ASSERT_TRUE(game.solved());
+  }
+}
+
+void test_sudoku_rejects_conflicts_and_restores_progress() {
+  SudokuGame game;
+  game.start(0);
+  int editableRow = -1;
+  int editableColumn = -1;
+  for (int row = 0; row < SudokuGame::kSize && editableRow < 0; ++row) {
+    for (int column = 0; column < SudokuGame::kSize; ++column) {
+      if (!game.given(row, column)) {
+        editableRow = row;
+        editableColumn = column;
+        break;
+      }
+    }
+  }
+  TEST_ASSERT_TRUE(game.select(editableRow, editableColumn));
+  uint8_t conflict = 0;
+  for (int column = 0; column < SudokuGame::kSize; ++column) {
+    if (game.given(editableRow, column)) {
+      conflict = game.at(editableRow, column);
+      break;
+    }
+  }
+  TEST_ASSERT_TRUE(conflict > 0);
+  TEST_ASSERT_FALSE(game.setDigit(conflict));
+  const uint8_t solution =
+      sudoku_puzzles::kPuzzles[0].solution[editableRow][editableColumn];
+  TEST_ASSERT_TRUE(game.setDigit(solution));
+
+  SudokuGame restored;
+  TEST_ASSERT_TRUE(restored.restore(game.snapshot()));
+  TEST_ASSERT_EQUAL_UINT8(solution,
+                          restored.at(editableRow, editableColumn));
+  restored.reset();
+  TEST_ASSERT_EQUAL_UINT8(0, restored.at(editableRow, editableColumn));
+}
+
+void test_every_crossword_puzzle_can_be_completed() {
+  for (uint8_t puzzle = 0; puzzle < CrosswordGame::kPuzzleCount; ++puzzle) {
+    CrosswordGame game;
+    game.start(puzzle);
+    TEST_ASSERT_TRUE(game.width() <= CrosswordGame::kMaxSize);
+    TEST_ASSERT_TRUE(game.height() <= CrosswordGame::kMaxSize);
+    for (int row = 0; row < game.height(); ++row) {
+      for (int column = 0; column < game.width(); ++column) {
+        if (game.blocked(row, column)) continue;
+        TEST_ASSERT_TRUE(game.cellNumber(row, column) >= 0);
+        TEST_ASSERT_TRUE(game.select(row, column));
+        TEST_ASSERT_TRUE(game.setLetter(game.solutionAt(row, column)));
+      }
+    }
+    TEST_ASSERT_TRUE(game.solved());
+  }
+}
+
+void test_crossword_selection_toggles_direction_and_restores() {
+  CrosswordGame game;
+  game.start(0);
+  TEST_ASSERT_TRUE(game.select(0, 0));
+  const CrosswordGame::Direction firstDirection = game.direction();
+  TEST_ASSERT_TRUE(game.select(0, 0));
+  TEST_ASSERT_NOT_EQUAL(static_cast<uint8_t>(firstDirection),
+                        static_cast<uint8_t>(game.direction()));
+  TEST_ASSERT_TRUE(game.currentClueNumber() > 0);
+  TEST_ASSERT_TRUE(game.currentClueText()[0] != '\0');
+  TEST_ASSERT_TRUE(game.setLetter('s'));
+
+  CrosswordGame restored;
+  TEST_ASSERT_TRUE(restored.restore(game.snapshot()));
+  TEST_ASSERT_EQUAL_CHAR('S', restored.entryAt(0, 0));
+}
+
+void test_crossword_rejects_invalid_snapshot() {
+  CrosswordGame game;
+  CrosswordGame::Snapshot invalid = game.snapshot();
+  invalid.puzzleIndex = CrosswordGame::kPuzzleCount;
+  TEST_ASSERT_FALSE(game.restore(invalid));
+  invalid = game.snapshot();
+  invalid.entries[6] = 'A';
+  TEST_ASSERT_FALSE(game.restore(invalid));
+}
+
 void test_slitherlink_edges_cycle_blank_line_cross_blank() {
   SlitherlinkGame game;
   game.start(0);
@@ -1150,6 +1254,11 @@ int main(int, char**) {
   RUN_TEST(test_sokoban_invalid_snapshot_is_rejected);
   RUN_TEST(test_all_microban_sokoban_levels_are_structurally_valid);
   RUN_TEST(test_long_game_progress_only_advances_with_valid_checkpoints);
+  RUN_TEST(test_every_sudoku_puzzle_has_a_valid_solution);
+  RUN_TEST(test_sudoku_rejects_conflicts_and_restores_progress);
+  RUN_TEST(test_every_crossword_puzzle_can_be_completed);
+  RUN_TEST(test_crossword_selection_toggles_direction_and_restores);
+  RUN_TEST(test_crossword_rejects_invalid_snapshot);
   RUN_TEST(test_slitherlink_edges_cycle_blank_line_cross_blank);
   RUN_TEST(test_slitherlink_clue_counts_only_line_edges);
   RUN_TEST(test_slitherlink_next_puzzle_clears_edges);

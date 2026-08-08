@@ -30,7 +30,7 @@ details.
 | [XKCD Viewer](xkcd-viewer/) | A battery-powered random XKCD display with model-aware scaling, optional SD caching, Unicode titles, environmental readings, and deep sleep. | Available |
 | [Weather Viewer](weather-viewer/) | A low-power current-conditions and three-day forecast display using QWeather or Open-Meteo, with local environmental readings, severe-weather alerts, Unicode location names, and deep sleep. | Available |
 | [Photo Viewer](photo-viewer/) | A private, SD-card photo frame with panel-native preprocessing, full model-specific color, quiet hours, daily time sync, and deep sleep. | Available |
-| [Games](games/) | Ten touch-friendly E1005 games with fast refresh, two selector pages, and resumable state: Lights Out, 2048, Pipe Connect, Mini Minesweeper, Nonogram, Reversi, Dots and Boxes, Sokoban, Peg Solitaire, and Slitherlink. | Available on E1005 |
+| [Games](games/) | Twelve touch-friendly E1005 games with fast refresh, two selector pages, and resumable state: Lights Out, 2048, Pipe Connect, Mini Minesweeper, Nonogram, Reversi, Dots and Boxes, Sokoban, Peg Solitaire, Slitherlink, Sudoku, and Crossword. | Available on E1005 |
 
 ## XKCD Viewer example
 
@@ -56,18 +56,26 @@ This frame was captured directly from a reTerminal E1001 running the
 These frames were captured directly from a reTerminal E1005 running
 [Games](games/).
 
-Included games:
+The selector presents six games per page:
 
-- Lights Out
-- 2048
-- Pipe Connect
-- Mini Minesweeper
-- Nonogram / Picross
-- Reversi / Othello
-- Dots and Boxes
-- Sokoban (155 Microban I levels)
-- Peg Solitaire
-- Slitherlink
+| Game | Page | Description |
+| --- | ---: | --- |
+| Lights Out | 1 | Toggle a square and its neighbours until the 5x5 board is dark. |
+| 2048 | 1 | Swipe and merge matching tiles while preserving the best score. |
+| Pipe Connect | 1 | Rotate 36 pipe tiles into one connected network. |
+| Mini Minesweeper | 1 | Clear a first-tap-safe 6x6 field containing six mines. |
+| Nonogram / Picross | 1 | Use row and column clues to reveal a hidden 5x5 picture. |
+| Reversi / Othello | 1 | Play against the built-in AI or use two-player pass-and-play. |
+| Dots and Boxes | 2 | Draw edges, complete boxes, and keep the turn after scoring. |
+| Sokoban | 2 | Push crates through all 155 Microban I levels with durable completion progress. |
+| Peg Solitaire | 2 | Jump and remove pegs from the classic cross-shaped board. |
+| Slitherlink | 2 | Draw one loop whose edges satisfy every numbered clue. |
+| Sudoku | 2 | Complete a randomly selected, uniquely solvable easy 9x9 puzzle. |
+| Crossword | 2 | Solve one of 12 easy mini crosswords with an on-screen QWERTY keyboard. |
+
+All games preserve their current state across selector visits and deep sleep.
+See the [Games README](games/) for complete rules, controls, persistence
+details, and puzzle-source attribution.
 
 ## Future ideas
 
@@ -90,7 +98,7 @@ different framework or architecture where that better suits their use case.
 ├── xkcd-viewer/          # Standalone XKCD display firmware
 ├── weather-viewer/       # Standalone weather display firmware
 ├── photo-viewer/         # SD-card photo-frame firmware and preparation tool
-├── games/                # Ten touch games for the E1005
+├── games/                # Twelve touch games for the E1005
 ├── tools/                # Hardware utilities (i2c-scan, panel-test, sd-web)
 └── README.md             # This project index
 ```

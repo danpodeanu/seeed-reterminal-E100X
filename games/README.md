@@ -1,6 +1,6 @@
 # Games
 
-Touch-friendly, silent meeting games for the Seeed reTerminal E1005
+Touch-friendly games for the Seeed reTerminal E1005
 ("Seeed Sticky"). The app opens on a game-selection screen so additional games
 can be added without installing separate firmware.
 
@@ -8,18 +8,22 @@ can be added without installing separate firmware.
 | --- | --- |
 | ![First Games selector page on a reTerminal E1005](assets/e1005-games-menu.png) | ![Mini Minesweeper running on a reTerminal E1005](assets/e1005-minesweeper.png) |
 
-Included games:
+The two selector pages contain:
 
-- Lights Out
-- 2048
-- Pipe Connect
-- Mini Minesweeper
-- Nonogram / Picross
-- Reversi / Othello
-- Dots and Boxes
-- Sokoban (155 Microban I levels)
-- Peg Solitaire
-- Slitherlink
+| Game | Page | Board or collection |
+| --- | ---: | --- |
+| Lights Out | 1 | Solvable generated 5x5 puzzles |
+| 2048 | 1 | 4x4 sliding-tile board |
+| Pipe Connect | 1 | Solvable generated 6x6 networks |
+| Mini Minesweeper | 1 | First-tap-safe 6x6 fields with six mines |
+| Nonogram / Picross | 1 | Generated 5x5 pictures |
+| Reversi / Othello | 1 | 8x8, one-player AI or two-player mode |
+| Dots and Boxes | 2 | Two-player 5x5 box board |
+| Sokoban | 2 | All 155 Microban I levels |
+| Peg Solitaire | 2 | Classic 33-hole English board |
+| Slitherlink | 2 | Bundled 5x5 logic puzzles |
+| Sudoku | 2 | 12 uniquely solvable easy 9x9 puzzles |
+| Crossword | 2 | 12 easy 5x5 mini crosswords; engine supports up to 9x9 |
 
 ## Included games
 
@@ -176,10 +180,39 @@ Touch controls:
 - Tap **NEW** for the next puzzle or **RESET** to clear the current puzzle.
 - Tap the back arrow to save and return to the selection screen.
 
-The selector uses two two-column pages. The first page retains the original six
-games and the second page contains the four additions. A solid black next arrow
-appears in the first page's bottom-right corner; a matching previous arrow
-appears in the second page's bottom-left corner.
+### Sudoku
+
+Complete a randomly selected easy 9x9 Sudoku. Every row, column, and thick
+three-by-three box must contain the digits 1 through 9 exactly once. All bundled
+puzzles have one verified solution.
+
+Touch controls:
+
+- Tap an empty square, then tap a solid black **1**-**9** key.
+- Tap **X** to clear the selected square. Conflicting digits are rejected.
+- Tap **NEW** for another random puzzle or **RESET** to clear your entries.
+- Tap the back arrow to save and return to the selection screen.
+
+### Crossword
+
+Solve one of 12 randomly selected easy 5x5 mini crosswords. The model and
+renderer support crossword grids up to 9x9. The word database comes from
+[cout/minicross](https://github.com/cout/minicross) under its bundled MIT
+license; the short text clues are original to this project.
+
+Touch controls:
+
+- Tap a white square to select it and open the QWERTY keyboard overlay.
+- Tap an intersecting square again to switch between its Across and Down clues.
+- Tap letters to enter answers, **DEL** to erase, or **OK** to close the
+  keyboard.
+- Tap **NEW** for another random crossword or **RESET** to clear the grid.
+- Tap the back arrow to save and return to the selection screen.
+
+The selector uses two two-column pages with six games each. Sudoku and
+Crossword occupy the bottom row of the second page, below Peg Solitaire and
+Slitherlink. Previous and next arrows appear only when a page exists in that
+direction.
 
 Front buttons:
 
@@ -192,6 +225,9 @@ Front buttons:
   **OK** continuously for 5 seconds to save the current screen as
   `/screenshot.bmp` on the SD card. A beep confirms the capture gesture.
 - **UP** and **DOWN** are unused.
+
+Every actionable on-screen button and every front-button press gives an
+immediate confirmation beep. Ordinary board-cell taps remain silent.
 
 The app beeps once at startup and when a game is opened from the selector.
 While the app is open,
