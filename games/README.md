@@ -340,7 +340,8 @@ Front buttons:
   **OK** again to resume.
 - Hold **OK** for 2–5 seconds and release it to open the language selection
   screen.
-- Holding **OK** for more than 5 seconds has no action.
+- Hold **OK** continuously for 5 seconds to save the current display to the SD
+  card as `/screenshot-<unix epoch>.bmp`. The release is ignored after capture.
 
 Every actionable on-screen or front-button press gives an immediate
 confirmation beep. Ordinary board-cell taps and ignored holds over 5 seconds

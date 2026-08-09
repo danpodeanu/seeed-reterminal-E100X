@@ -159,7 +159,7 @@ inline bool saveScreenshotBmp(EPaper& epaper, uint32_t width, uint32_t height,
 
   sd_card::removeFile(screenshotPath);
   if (!sd_card::renameFile(temporaryPath, screenshotPath)) {
-    LOG.println("[screenshot] could not install /screenshot.bmp");
+    LOG.printf("[screenshot] could not install %s\n", screenshotPath);
     sd_card::removeFile(temporaryPath);
     return false;
   }

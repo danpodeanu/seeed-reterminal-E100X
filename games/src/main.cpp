@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstring>
+#include <ctime>
 #include <utility>
 
 #include "app_logger.h"
@@ -46,9 +47,11 @@
 #include "power_latch.h"
 #include "repo_qr.h"
 #include "reversi_game.h"
+#include "rtc_sync.h"
 #include "sd_card.h"
 #include "sd_ota.h"
 #include "sd_readonly_browser.h"
+#include "screenshot_bmp.h"
 #include "slitherlink_game.h"
 #include "sokoban_game.h"
 #include "sudoku_game.h"
@@ -134,6 +137,7 @@ constexpr int kSwipeThreshold = 45;
 constexpr int kMinesTouchMoveTolerance = 20;
 constexpr int kReversiAiDepth = 3;
 constexpr uint32_t kButtonDebounceMs = 30;
+constexpr uint32_t kScreenshotHoldMs = 5000;
 constexpr uint32_t kMinesFlagHoldMs = 650;
 constexpr uint32_t kKlondikeDoubleTapMs = 800;
 constexpr uint16_t kKlondikeWasteTapTarget = 0x100;
@@ -173,6 +177,7 @@ constexpr int kReaderLineHeight = 32;
 constexpr int kBrowserRowsPerPage = 8;
 constexpr int kBrowserRowTop = 96;
 constexpr int kBrowserRowHeight = 82;
+constexpr int kMenuPreviewSize = 190;
 
 constexpr uint32_t makeNonogramSolution(uint8_t row0, uint8_t row1,
                                         uint8_t row2, uint8_t row3,
@@ -209,9 +214,9 @@ struct Rect {
 };
 
 constexpr Rect kMenuCardSlots[] = {
-    {40, 112, 190, 190},  {250, 112, 190, 190},
-    {40, 320, 190, 190},  {250, 320, 190, 190},
-    {40, 528, 190, 190},  {250, 528, 190, 190},
+    {40, 62, 190, 218},  {250, 62, 190, 218},
+    {40, 292, 190, 218}, {250, 292, 190, 218},
+    {40, 522, 190, 218}, {250, 522, 190, 218},
 };
 constexpr Rect kLanguageButtons[] = {
     {60, 145, 360, 72},
@@ -401,12 +406,13 @@ struct ButtonState {
   int sampledLevel;
   uint32_t changedAtMs;
   uint32_t pressedAtMs;
+  bool screenshotReported;
 };
 
 ButtonState buttons[] = {
-    {board::PIN_BUTTON_0, "OK / power", HIGH, HIGH, 0, 0},
-    {board::PIN_BUTTON_1, "UP", HIGH, HIGH, 0, 0},
-    {board::PIN_BUTTON_2, "DOWN", HIGH, HIGH, 0, 0},
+    {board::PIN_BUTTON_0, "OK / power", HIGH, HIGH, 0, 0, false},
+    {board::PIN_BUTTON_1, "UP", HIGH, HIGH, 0, 0, false},
+    {board::PIN_BUTTON_2, "DOWN", HIGH, HIGH, 0, 0, false},
 };
 
 struct ButtonEvent {
@@ -499,6 +505,7 @@ void configureButtons() {
     button.changedAtMs = millis();
     button.pressedAtMs =
         button.stableLevel == LOW ? button.changedAtMs : 0;
+    button.screenshotReported = false;
   }
 }
 
@@ -512,11 +519,21 @@ bool pollButtonEvent(ButtonEvent& event) {
     }
     if (level == button.stableLevel ||
         now - button.changedAtMs < kButtonDebounceMs) {
+      if (button.pin == board::PIN_BUTTON_0 && level == LOW &&
+          button.stableLevel == LOW && !button.screenshotReported &&
+          now - button.pressedAtMs >= kScreenshotHoldMs) {
+        button.screenshotReported = true;
+        event = {&button, now - button.pressedAtMs};
+        return true;
+      }
       continue;
     }
     button.stableLevel = level;
     if (level == LOW) {
       button.pressedAtMs = now;
+      button.screenshotReported = false;
+    } else if (button.screenshotReported) {
+      button.screenshotReported = false;
     } else {
       event = {&button, now - button.pressedAtMs};
       return true;
@@ -578,6 +595,57 @@ const char* gameName(GameId game) {
       break;
   }
   return "unknown";
+}
+
+const char* shortEnglishGameName(GameId game) {
+  switch (game) {
+    case GameId::DotsAndBoxes:
+      return "Dots + Boxes";
+    case GameId::PegSolitaire:
+      return "Peg Solo";
+    case GameId::MahjongSolitaire:
+      return "Mahjong";
+    default:
+      return gameName(game);
+  }
+}
+
+TextId gameTextId(GameId game) {
+  switch (game) {
+    case GameId::LightsOut:
+      return TextId::LightsOut;
+    case GameId::Game2048:
+      return TextId::Game2048;
+    case GameId::PipeConnect:
+      return TextId::PipeConnect;
+    case GameId::Minesweeper:
+      return TextId::Minesweeper;
+    case GameId::Nonogram:
+      return TextId::Nonogram;
+    case GameId::Reversi:
+      return TextId::Reversi;
+    case GameId::DotsAndBoxes:
+      return TextId::DotsAndBoxes;
+    case GameId::Sokoban:
+      return TextId::Sokoban;
+    case GameId::PegSolitaire:
+      return TextId::PegSolitaire;
+    case GameId::Slitherlink:
+      return TextId::Slitherlink;
+    case GameId::Sudoku:
+      return TextId::Sudoku;
+    case GameId::Crossword:
+      return TextId::Crossword;
+    case GameId::Klondike:
+      return TextId::Klondike;
+    case GameId::MahjongSolitaire:
+      return TextId::MahjongSolitaire;
+    case GameId::EpubReader:
+      return TextId::EpubReader;
+    case GameId::Count:
+      break;
+  }
+  return TextId::LightsOut;
 }
 
 GameId rankedGameAt(size_t rank) {
@@ -1085,8 +1153,10 @@ void drawButton(const Rect& rect, const char* label) {
 }
 
 void drawMenuCardFrame(const Rect& card) {
-  epaper.fillRoundRect(card.x, card.y, card.width, card.height, 14, TFT_WHITE);
-  epaper.drawRoundRect(card.x, card.y, card.width, card.height, 14, TFT_BLACK);
+  epaper.fillRoundRect(card.x, card.y, card.width, kMenuPreviewSize, 14,
+                      TFT_WHITE);
+  epaper.drawRoundRect(card.x, card.y, card.width, kMenuPreviewSize, 14,
+                      TFT_BLACK);
 }
 
 Rect& menuCardFor(GameId game) {
@@ -1244,10 +1314,10 @@ void drawLightsOutCell(int x, int y, bool on) {
 
 void drawLightsOutMenuCard() {
   epaper.fillRoundRect(kLightsOutMenuCard.x, kLightsOutMenuCard.y,
-                      kLightsOutMenuCard.width, kLightsOutMenuCard.height, 14,
+                      kLightsOutMenuCard.width, kMenuPreviewSize, 14,
                       TFT_WHITE);
   epaper.drawRoundRect(kLightsOutMenuCard.x, kLightsOutMenuCard.y,
-                      kLightsOutMenuCard.width, kLightsOutMenuCard.height, 14,
+                      kLightsOutMenuCard.width, kMenuPreviewSize, 14,
                       TFT_BLACK);
 
   constexpr bool lights[2][2] = {
@@ -1293,9 +1363,9 @@ void draw2048Tile(int x, int y, int slotSize, uint32_t value) {
 
 void draw2048MenuCard() {
   epaper.fillRoundRect(k2048MenuCard.x, k2048MenuCard.y, k2048MenuCard.width,
-                      k2048MenuCard.height, 14, TFT_WHITE);
+                      kMenuPreviewSize, 14, TFT_WHITE);
   epaper.drawRoundRect(k2048MenuCard.x, k2048MenuCard.y, k2048MenuCard.width,
-                      k2048MenuCard.height, 14, TFT_BLACK);
+                      kMenuPreviewSize, 14, TFT_BLACK);
 
   constexpr uint32_t tiles[2][2] = {
       {2, 4},
@@ -1377,11 +1447,11 @@ void drawPipeTile(int x, int y, int size, uint8_t edges) {
 
 void drawPipeConnectMenuCard() {
   epaper.fillRoundRect(kPipeConnectMenuCard.x, kPipeConnectMenuCard.y,
-                       kPipeConnectMenuCard.width,
-                       kPipeConnectMenuCard.height, 14, TFT_WHITE);
+                       kPipeConnectMenuCard.width, kMenuPreviewSize, 14,
+                       TFT_WHITE);
   epaper.drawRoundRect(kPipeConnectMenuCard.x, kPipeConnectMenuCard.y,
-                       kPipeConnectMenuCard.width,
-                       kPipeConnectMenuCard.height, 14, TFT_BLACK);
+                       kPipeConnectMenuCard.width, kMenuPreviewSize, 14,
+                       TFT_BLACK);
 
   constexpr uint8_t pipes[3][3] = {
       {PipeConnectGame::East,
@@ -1433,11 +1503,11 @@ void drawFlagSymbol(int centerX, int centerY, uint16_t color) {
 
 void drawMinesweeperMenuCard() {
   epaper.fillRoundRect(kMinesweeperMenuCard.x, kMinesweeperMenuCard.y,
-                       kMinesweeperMenuCard.width,
-                       kMinesweeperMenuCard.height, 14, TFT_WHITE);
+                       kMinesweeperMenuCard.width, kMenuPreviewSize, 14,
+                       TFT_WHITE);
   epaper.drawRoundRect(kMinesweeperMenuCard.x, kMinesweeperMenuCard.y,
-                       kMinesweeperMenuCard.width,
-                       kMinesweeperMenuCard.height, 14, TFT_BLACK);
+                       kMinesweeperMenuCard.width, kMenuPreviewSize, 14,
+                       TFT_BLACK);
 
   constexpr int kPreviewCellSize = 50;
   const int gridLeft = kMinesweeperMenuCard.x + 20;
@@ -1483,10 +1553,10 @@ void drawNonogramMarkCell(int x, int y, int size,
 
 void drawNonogramMenuCard() {
   epaper.fillRoundRect(kNonogramMenuCard.x, kNonogramMenuCard.y,
-                       kNonogramMenuCard.width, kNonogramMenuCard.height, 14,
+                       kNonogramMenuCard.width, kMenuPreviewSize, 14,
                        TFT_WHITE);
   epaper.drawRoundRect(kNonogramMenuCard.x, kNonogramMenuCard.y,
-                       kNonogramMenuCard.width, kNonogramMenuCard.height, 14,
+                       kNonogramMenuCard.width, kMenuPreviewSize, 14,
                        TFT_BLACK);
 
   constexpr int kPreviewCellSize = 30;
@@ -1526,10 +1596,10 @@ void drawReversiMarkCell(int x, int y, int size, ReversiGame::Disc disc,
 
 void drawReversiMenuCard() {
   epaper.fillRoundRect(kReversiMenuCard.x, kReversiMenuCard.y,
-                       kReversiMenuCard.width, kReversiMenuCard.height, 14,
+                       kReversiMenuCard.width, kMenuPreviewSize, 14,
                        TFT_WHITE);
   epaper.drawRoundRect(kReversiMenuCard.x, kReversiMenuCard.y,
-                       kReversiMenuCard.width, kReversiMenuCard.height, 14,
+                       kReversiMenuCard.width, kMenuPreviewSize, 14,
                        TFT_BLACK);
 
   constexpr int kPreviewCellSize = 36;
@@ -1749,52 +1819,64 @@ void drawGameMenuCard(GameId game) {
   switch (game) {
     case GameId::LightsOut:
       drawLightsOutMenuCard();
-      return;
+      break;
     case GameId::Game2048:
       draw2048MenuCard();
-      return;
+      break;
     case GameId::PipeConnect:
       drawPipeConnectMenuCard();
-      return;
+      break;
     case GameId::Minesweeper:
       drawMinesweeperMenuCard();
-      return;
+      break;
     case GameId::Nonogram:
       drawNonogramMenuCard();
-      return;
+      break;
     case GameId::Reversi:
       drawReversiMenuCard();
-      return;
+      break;
     case GameId::DotsAndBoxes:
       drawDotsAndBoxesMenuCard();
-      return;
+      break;
     case GameId::Sokoban:
       drawSokobanMenuCard();
-      return;
+      break;
     case GameId::PegSolitaire:
       drawPegSolitaireMenuCard();
-      return;
+      break;
     case GameId::Slitherlink:
       drawSlitherlinkMenuCard();
-      return;
+      break;
     case GameId::Sudoku:
       drawSudokuMenuCard();
-      return;
+      break;
     case GameId::Crossword:
       drawCrosswordMenuCard();
-      return;
+      break;
     case GameId::Klondike:
       drawKlondikeMenuCard();
-      return;
+      break;
     case GameId::MahjongSolitaire:
       drawMahjongMenuCard();
-      return;
+      break;
     case GameId::EpubReader:
       drawEpubReaderMenuCard();
-      return;
+      break;
     case GameId::Count:
       return;
   }
+
+  const Rect& card = menuCardFor(game);
+  String label = currentLanguage == Language::English
+                     ? gameName(game)
+                     : tr(gameTextId(game));
+  if (currentLanguage == Language::English &&
+      epaper.textWidth(label, 4) > card.width - 16) {
+    label = shortEnglishGameName(game);
+  }
+  drawCenteredText(label, card.x + card.width / 2,
+                   card.y + kMenuPreviewSize + 18, 4, TFT_BLACK, TFT_WHITE,
+                   card.width - 16, currentLanguage != Language::English);
 }
 
 void drawBatteryStatus() {
@@ -4963,6 +5045,27 @@ void handleButton(const ButtonEvent& event) {
   LOG.printf("[games] %s released after %lu ms\n", button.name,
              static_cast<unsigned long>(event.heldMs));
 
+  if (button.pin == board::PIN_BUTTON_0 &&
+      event.heldMs >= kScreenshotHoldMs) {
+    hardware::beep();
+    if (!sdCardReady) {
+      LOG.println("[screenshot] request ignored: SD card is unavailable");
+      return;
+    }
+    const time_t epoch = time(nullptr);
+    char screenshotPath[48];
+    char temporaryPath[56];
+    snprintf(screenshotPath, sizeof(screenshotPath), "/screenshot-%lld.bmp",
+             static_cast<long long>(epoch));
+    snprintf(temporaryPath, sizeof(temporaryPath),
+             "/screenshot-%lld.bmp.part", static_cast<long long>(epoch));
+    if (!screenshot::saveScreenshotBmp(epaper, kScreenWidth, kScreenHeight,
+                                       screenshotPath, temporaryPath)) {
+      LOG.println("[screenshot] capture failed");
+    }
+    return;
+  }
+
   if (button.pin == board::PIN_BUTTON_0) {
     switch (ok_button::actionForHold(event.heldMs)) {
       case ok_button::Action::DeepSleep:
@@ -5102,6 +5205,7 @@ void setup() {
   LOG.println();
   LOG.println("[games] reTerminal E1005 Games");
   hardware::beep();
+  rtc_sync::restoreSystemClock();
   const game_language_store::LoadResult languageResult =
       game_language_store::load();
   if (languageResult.status == game_language_store::Status::Ok) {
