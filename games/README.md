@@ -8,22 +8,23 @@ can be added without installing separate firmware.
 | --- | --- |
 | ![First Games selector page on a reTerminal E1005](assets/e1005-games-menu.png) | ![Mini Minesweeper running on a reTerminal E1005](assets/e1005-minesweeper.png) |
 
-The two selector pages contain:
+The selector shows six games per page, ordered from most played to least played.
+Games with equal play counts retain this default order:
 
-| Game | Page | Board or collection |
-| --- | ---: | --- |
-| Lights Out | 1 | Solvable generated 5x5 puzzles |
-| 2048 | 1 | 4x4 sliding-tile board |
-| Pipe Connect | 1 | Solvable generated 6x6 networks |
-| Mini Minesweeper | 1 | First-tap-safe 6x6 fields with six mines |
-| Nonogram / Picross | 1 | Generated 5x5 pictures |
-| Reversi / Othello | 1 | 8x8, one-player AI or two-player mode |
-| Dots and Boxes | 2 | Two-player 5x5 box board |
-| Sokoban | 2 | All 155 Microban I levels |
-| Peg Solitaire | 2 | Classic 33-hole English board |
-| Slitherlink | 2 | Bundled 5x5 logic puzzles |
-| Sudoku | 2 | 12 uniquely solvable easy 9x9 puzzles |
-| Crossword | 2 | 12 easy 5x5 mini crosswords; engine supports up to 9x9 |
+| Game | Board or collection |
+| --- | --- |
+| Lights Out | Solvable generated 5x5 puzzles |
+| 2048 | 4x4 sliding-tile board |
+| Pipe Connect | Solvable generated 6x6 networks |
+| Mini Minesweeper | First-tap-safe 6x6 fields with six mines |
+| Nonogram / Picross | Generated 5x5 pictures |
+| Reversi / Othello | 8x8, one-player AI or two-player mode |
+| Dots and Boxes | Two-player 5x5 box board |
+| Sokoban | All 155 Microban I levels |
+| Peg Solitaire | Classic 33-hole English board |
+| Slitherlink | Bundled 5x5 logic puzzles |
+| Sudoku | 12 uniquely solvable easy 9x9 puzzles |
+| Crossword | 100 easy 5x5 mini crosswords; engine supports up to 9x9 |
 
 ## Included games
 
@@ -195,7 +196,7 @@ Touch controls:
 
 ### Crossword
 
-Solve one of 12 randomly selected easy 5x5 mini crosswords. The model and
+Solve one of 100 randomly selected easy 5x5 mini crosswords. The model and
 renderer support crossword grids up to 9x9. The word database comes from
 [cout/minicross](https://github.com/cout/minicross) under its bundled MIT
 license; the short text clues are original to this project.
@@ -209,40 +210,50 @@ Touch controls:
 - Tap **NEW** for another random crossword or **RESET** to clear the grid.
 - Tap the back arrow to save and return to the selection screen.
 
-The selector uses two two-column pages with six games each. Sudoku and
-Crossword occupy the bottom row of the second page, below Peg Solitaire and
-Slitherlink. Previous and next arrows appear only when a page exists in that
-direction.
+The selector uses two two-column pages with six games each. It automatically
+orders the games by play count, from most played to least played, and preserves
+the default order for ties. Counts are retained in RTC memory through deep
+sleep, but reset after power loss, RTC memory loss, or reflashing. Previous and
+next arrows appear only when a page exists in that direction.
 
 Front buttons:
 
-- On the selection screen, a short **OK** press does nothing.
-- While playing, a short **OK** press saves the game and returns to the
-  selection screen from any game.
-- Hold **OK** for at least 1.2 seconds, then release before 5 seconds, to save
-  and enter deep sleep. Press **OK** again to resume.
-- With the temporary `ENABLE_SCREENSHOT_GESTURE` build flag enabled, hold
-  **OK** continuously for 5 seconds to save the current screen as
-  `/screenshot.bmp` on the SD card. A beep confirms the capture gesture.
-- **UP** and **DOWN** are unused.
+- On the selection screen, **UP** opens the previous selector page and
+  **DOWN** opens the next selector page. Pressing either at the corresponding
+  first or last page boundary has no effect.
+- While playing, **UP** saves the game and returns to the selection screen.
+  **DOWN** has no in-game action.
+- Release **OK** in under 2 seconds to save and enter deep sleep. Press
+  **OK** again to resume.
+- Hold **OK** for 2–5 seconds and release it to open the language selection
+  screen.
+- Holding **OK** for more than 5 seconds has no action.
 
-Every actionable on-screen button and every front-button press gives an
-immediate confirmation beep. Ordinary board-cell taps remain silent.
+Every actionable on-screen or front-button press gives an immediate
+confirmation beep. Ordinary board-cell taps and ignored holds over 5 seconds
+remain silent.
+
+The interface supports English, Spanish, French, German, and Simplified
+Chinese. The language screen appears on first boot until a language is saved
+in NVM, and can be reopened with the 2–5 second **OK** gesture. Its Unicode
+fonts are embedded in firmware flash, so language support does not require an
+SD card. Crossword clues and answers remain in English.
 
 The app beeps once at startup and when a game is opened from the selector.
 While the app is open,
 the ESP32-S3 enters light sleep between touch and button events, then wakes
-immediately for input and logs each light-sleep entry and exit. A long **OK**
-press uses deep sleep for longer idle periods. Resume state is stored in RTC
-slow memory, so normal sleep/resume cycles do not write to flash or the SD
-card. The same saved deep sleep starts automatically after five minutes without
-touch or button input. Below 10% battery, the app saves its state, displays a
-recharge screen, and enters deep sleep unless USB-C power is connected. The
-normal sleep screen includes a QR code for this repository. All active screens
-show the current battery percentage and the shared battery gauge used by the
-other viewer apps; the gauge displays a charging bolt while USB-C power is
-connected. On each game screen, the back arrow, game title, and battery status
-share the top bar above a full-width divider.
+immediately for input and logs each light-sleep entry and exit. Releasing
+**OK** in under 2 seconds uses deep sleep for longer idle periods. Resume state
+is stored in RTC slow memory, so normal sleep/resume cycles do not write to
+flash or the SD card. The selected language and Sokoban completion are stored
+in internal flash. The same saved deep sleep starts automatically after five
+minutes without touch or button input. Below 10% battery, the app saves its
+state, displays a recharge screen, and enters deep sleep unless USB-C power is
+connected. The normal sleep screen includes a QR code for this repository. All
+active screens show the current battery percentage and the shared battery
+gauge used by the other viewer apps; the gauge displays a charging bolt while
+USB-C power is connected. On each game screen, the back arrow, game title, and
+battery status share the top bar above a full-width divider.
 
 The SSD1677 path uses 40 MHz window transfers and reseeds both differential RAM
 planes after every refresh. This keeps normal moves near the panel's physical

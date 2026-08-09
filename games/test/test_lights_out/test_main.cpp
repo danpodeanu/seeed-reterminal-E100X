@@ -3,10 +3,13 @@
 #include "crossword_game.h"
 #include "dots_and_boxes_game.h"
 #include "game_2048.h"
+#include "game_localization.h"
 #include "game_progress_store.h"
+#include "game_ranking.h"
 #include "lights_out_game.h"
 #include "mini_minesweeper_game.h"
 #include "nonogram_game.h"
+#include "ok_button_action.h"
 #include "peg_solitaire_game.h"
 #include "pipe_connect_game.h"
 #include "reversi_game.h"
@@ -962,6 +965,57 @@ void test_long_game_progress_only_advances_with_valid_checkpoints() {
   TEST_ASSERT_EQUAL_UINT16(155, result.checkpoint);
 }
 
+void test_game_ranking_sorts_counts_and_preserves_ties() {
+  const uint32_t counts[] = {2, 9, 9, 0, 4, 1, 0, 4, 2, 9, 0, 1};
+  uint8_t ranking[12] = {};
+  game_ranking::rankByPlayCount(counts, ranking);
+  const uint8_t expected[] = {1, 2, 9, 4, 7, 0, 8, 5, 11, 3, 6, 10};
+  TEST_ASSERT_EQUAL_UINT8_ARRAY(expected, ranking, 12);
+}
+
+void test_game_play_count_saturates() {
+  TEST_ASSERT_EQUAL_UINT32(1, game_ranking::nextPlayCount(0));
+  TEST_ASSERT_EQUAL_UINT32(UINT32_MAX,
+                           game_ranking::nextPlayCount(UINT32_MAX - 1));
+  TEST_ASSERT_EQUAL_UINT32(UINT32_MAX,
+                           game_ranking::nextPlayCount(UINT32_MAX));
+}
+
+void test_every_game_translation_is_present() {
+  for (size_t text = 0; text < game_localization::kTextCount; ++text) {
+    for (size_t language = 0;
+         language < game_localization::kLanguageCount; ++language) {
+      const char* translated = game_localization::text(
+          static_cast<game_localization::Language>(language),
+          static_cast<game_localization::TextId>(text));
+      TEST_ASSERT_NOT_NULL(translated);
+      TEST_ASSERT_NOT_EQUAL('\0', translated[0]);
+    }
+  }
+  TEST_ASSERT_EQUAL_STRING(
+      u8"简体中文",
+      game_localization::languageName(
+          game_localization::Language::ChineseSimplified));
+}
+
+void test_ok_hold_duration_selects_requested_action() {
+  TEST_ASSERT_EQUAL_INT(
+      static_cast<int>(ok_button::Action::DeepSleep),
+      static_cast<int>(ok_button::actionForHold(0)));
+  TEST_ASSERT_EQUAL_INT(
+      static_cast<int>(ok_button::Action::DeepSleep),
+      static_cast<int>(ok_button::actionForHold(1999)));
+  TEST_ASSERT_EQUAL_INT(
+      static_cast<int>(ok_button::Action::LanguageSelection),
+      static_cast<int>(ok_button::actionForHold(2000)));
+  TEST_ASSERT_EQUAL_INT(
+      static_cast<int>(ok_button::Action::LanguageSelection),
+      static_cast<int>(ok_button::actionForHold(5000)));
+  TEST_ASSERT_EQUAL_INT(
+      static_cast<int>(ok_button::Action::None),
+      static_cast<int>(ok_button::actionForHold(5001)));
+}
+
 void test_every_sudoku_puzzle_has_a_valid_solution() {
   for (uint8_t puzzle = 0; puzzle < SudokuGame::kPuzzleCount; ++puzzle) {
     SudokuGame game;
@@ -1052,6 +1106,20 @@ void test_crossword_selection_toggles_direction_and_restores() {
   CrosswordGame restored;
   TEST_ASSERT_TRUE(restored.restore(game.snapshot()));
   TEST_ASSERT_EQUAL_CHAR('S', restored.entryAt(0, 0));
+}
+
+void test_crossword_numbers_only_answer_starts() {
+  CrosswordGame game;
+  game.start(0);
+  TEST_ASSERT_EQUAL_INT(1, game.cellNumber(0, 0));
+  TEST_ASSERT_EQUAL_INT(0, game.cellNumber(0, 1));
+  TEST_ASSERT_EQUAL_INT(2, game.cellNumber(0, 2));
+  TEST_ASSERT_EQUAL_INT(3, game.cellNumber(0, 4));
+  TEST_ASSERT_EQUAL_INT(0, game.cellNumber(1, 0));
+  TEST_ASSERT_EQUAL_INT(4, game.cellNumber(2, 0));
+  TEST_ASSERT_EQUAL_INT(5, game.cellNumber(2, 3));
+  TEST_ASSERT_EQUAL_INT(6, game.cellNumber(3, 2));
+  TEST_ASSERT_EQUAL_INT(7, game.cellNumber(4, 0));
 }
 
 void test_crossword_rejects_invalid_snapshot() {
@@ -1254,10 +1322,15 @@ int main(int, char**) {
   RUN_TEST(test_sokoban_invalid_snapshot_is_rejected);
   RUN_TEST(test_all_microban_sokoban_levels_are_structurally_valid);
   RUN_TEST(test_long_game_progress_only_advances_with_valid_checkpoints);
+  RUN_TEST(test_game_ranking_sorts_counts_and_preserves_ties);
+  RUN_TEST(test_game_play_count_saturates);
+  RUN_TEST(test_every_game_translation_is_present);
+  RUN_TEST(test_ok_hold_duration_selects_requested_action);
   RUN_TEST(test_every_sudoku_puzzle_has_a_valid_solution);
   RUN_TEST(test_sudoku_rejects_conflicts_and_restores_progress);
   RUN_TEST(test_every_crossword_puzzle_can_be_completed);
   RUN_TEST(test_crossword_selection_toggles_direction_and_restores);
+  RUN_TEST(test_crossword_numbers_only_answer_starts);
   RUN_TEST(test_crossword_rejects_invalid_snapshot);
   RUN_TEST(test_slitherlink_edges_cycle_blank_line_cross_blank);
   RUN_TEST(test_slitherlink_clue_counts_only_line_edges);

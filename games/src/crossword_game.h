@@ -102,8 +102,10 @@ class CrosswordGame {
 
   int cellNumber(int row, int column) const {
     if (!validCell(row, column) || blocked(row, column)) return 0;
+    const int cellIndex = row * width() + column;
+    if (!clueStartsAt(cellIndex)) return 0;
     int number = 0;
-    for (int index = 0; index <= row * width() + column; ++index) {
+    for (int index = 0; index <= cellIndex; ++index) {
       if (clueStartsAt(index)) ++number;
     }
     return number;

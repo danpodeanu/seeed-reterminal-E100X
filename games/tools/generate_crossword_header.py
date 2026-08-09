@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import random
 from pathlib import Path
 
 
@@ -8,7 +9,11 @@ ROOT = Path(__file__).resolve().parents[1]
 SOURCE = ROOT / "levels" / "minicross_emoji_clues.json"
 OUTPUT = ROOT / "src" / "crossword_puzzles.h"
 
-GRIDS = [
+GRID_SIZE = 5
+PUZZLE_COUNT = 100
+RANDOM_SEED = 0xC2055
+
+CURATED_GRIDS = [
     ["SWEEP", "A#N#A", "WATER", "##EAT", "BERRY"],
     ["CLUBS", "###E#", "STEAK", "SWAN#", "HORSE"],
     ["B#SSH", "ELK#M", "A#AIM", "NOT##", "SHELL"],
@@ -102,6 +107,179 @@ CLUES = {
 }
 
 
+def slot_cells(slot: tuple[int, int, int, int]) -> list[tuple[int, int]]:
+    direction, row, column, length = slot
+    return [
+        (row + index if direction else row, column if direction else column + index)
+        for index in range(length)
+    ]
+
+
+def pattern_is_connected_and_covered(pattern: list[list[bool]]) -> bool:
+    open_cells = {
+        (row, column)
+        for row in range(GRID_SIZE)
+        for column in range(GRID_SIZE)
+        if pattern[row][column]
+    }
+    pattern_slots = slots(
+        ["".join("." if cell else "#" for cell in row) for row in pattern]
+    )
+    covered_cells = {
+        cell for slot in pattern_slots for cell in slot_cells(slot[:3] + (len(slot[3]),))
+    }
+    if len(pattern_slots) < 6 or not open_cells or covered_cells != open_cells:
+        return False
+
+    connected = {next(iter(open_cells))}
+    pending = list(connected)
+    while pending:
+        row, column = pending.pop()
+        for neighbor in (
+            (row - 1, column),
+            (row + 1, column),
+            (row, column - 1),
+            (row, column + 1),
+        ):
+            if neighbor in open_cells and neighbor not in connected:
+                connected.add(neighbor)
+                pending.append(neighbor)
+    return connected == open_cells
+
+
+def solve_pattern(
+    pattern: list[list[bool]],
+    words_by_length: dict[int, list[str]],
+    rng: random.Random,
+    max_backtracks: int = 100_000,
+) -> dict[tuple[int, int, int, int], str] | None:
+    pattern_grid = [
+        "".join("." if cell else "#" for cell in row) for row in pattern
+    ]
+    pattern_slots = [
+        (direction, row, column, len(answer))
+        for direction, row, column, answer in slots(pattern_grid)
+    ]
+    candidates = {
+        slot: set(words_by_length.get(slot[3], [])) for slot in pattern_slots
+    }
+    intersections: dict[
+        tuple[int, int, int, int],
+        list[tuple[tuple[int, int, int, int], int, int]],
+    ] = {slot: [] for slot in pattern_slots}
+    cells_to_slots: dict[
+        tuple[int, int], list[tuple[tuple[int, int, int, int], int]]
+    ] = {}
+    for slot in pattern_slots:
+        for position, cell in enumerate(slot_cells(slot)):
+            cells_to_slots.setdefault(cell, []).append((slot, position))
+    for crossing in cells_to_slots.values():
+        if len(crossing) != 2:
+            continue
+        (first, first_position), (second, second_position) = crossing
+        intersections[first].append((second, first_position, second_position))
+        intersections[second].append((first, second_position, first_position))
+
+    assignment: dict[tuple[int, int, int, int], str] = {}
+    backtracks = 0
+
+    def backtrack() -> bool:
+        nonlocal backtracks
+        backtracks += 1
+        if backtracks > max_backtracks:
+            return False
+        if len(assignment) == len(pattern_slots):
+            return True
+
+        unfilled = [slot for slot in pattern_slots if slot not in assignment]
+        rng.shuffle(unfilled)
+        slot = min(unfilled, key=lambda candidate: len(candidates[candidate]))
+        available = sorted(candidates[slot] - set(assignment.values()))
+        rng.shuffle(available)
+        for word in available:
+            saved_candidates: dict[tuple[int, int, int, int], set[str]] = {}
+            assignment[slot] = word
+            failed = False
+            for other, word_position, other_position in intersections[slot]:
+                if other in assignment:
+                    if assignment[other][other_position] != word[word_position]:
+                        failed = True
+                        break
+                    continue
+                matching = {
+                    candidate
+                    for candidate in candidates[other]
+                    if candidate[other_position] == word[word_position]
+                }
+                if not matching:
+                    failed = True
+                    break
+                saved_candidates[other] = candidates[other]
+                candidates[other] = matching
+            if not failed and backtrack():
+                return True
+            for other, previous in saved_candidates.items():
+                candidates[other] = previous
+            del assignment[slot]
+        return False
+
+    return assignment if backtrack() else None
+
+
+def fill_grid(
+    pattern: list[list[bool]],
+    assignment: dict[tuple[int, int, int, int], str],
+) -> list[str]:
+    grid = [
+        ["?" if pattern[row][column] else "#" for column in range(GRID_SIZE)]
+        for row in range(GRID_SIZE)
+    ]
+    for slot, word in assignment.items():
+        for (row, column), letter in zip(slot_cells(slot), word):
+            grid[row][column] = letter
+    if any("?" in row for row in grid):
+        raise ValueError("generated crossword contains an unfilled cell")
+    return ["".join(row) for row in grid]
+
+
+def build_grids() -> list[list[str]]:
+    grids = [list(grid) for grid in CURATED_GRIDS]
+    seen = {"".join(grid) for grid in grids}
+    words_by_length = {
+        length: sorted(word for word in CLUES if len(word) == length)
+        for length in range(2, GRID_SIZE + 1)
+    }
+    rng = random.Random(RANDOM_SEED)
+    attempts = 0
+    while len(grids) < PUZZLE_COUNT and attempts < 500_000:
+        attempts += 1
+        black_count = rng.randint(3, 9)
+        black_cells = set(rng.sample(range(GRID_SIZE * GRID_SIZE), black_count))
+        pattern = [
+            [
+                row * GRID_SIZE + column not in black_cells
+                for column in range(GRID_SIZE)
+            ]
+            for row in range(GRID_SIZE)
+        ]
+        if not pattern_is_connected_and_covered(pattern):
+            continue
+        assignment = solve_pattern(pattern, words_by_length, rng)
+        if assignment is None:
+            continue
+        grid = fill_grid(pattern, assignment)
+        serialized = "".join(grid)
+        if serialized in seen:
+            continue
+        seen.add(serialized)
+        grids.append(grid)
+    if len(grids) != PUZZLE_COUNT:
+        raise RuntimeError(
+            f"generated only {len(grids)} of {PUZZLE_COUNT} crossword puzzles"
+        )
+    return grids
+
+
 def slots(grid: list[str]) -> list[tuple[int, int, int, str]]:
     height = len(grid)
     width = len(grid[0])
@@ -143,7 +321,8 @@ def generate() -> str:
     puzzle_lines: list[str] = []
     clue_lines: list[str] = []
     clue_offset = 0
-    for number, grid in enumerate(GRIDS, start=1):
+    grids = build_grids()
+    for number, grid in enumerate(grids, start=1):
         width = len(grid[0])
         if not 1 <= len(grid) <= 9 or not 1 <= width <= 9:
             raise ValueError(f"puzzle {number}: dimensions exceed 9x9")
@@ -208,7 +387,7 @@ inline constexpr Clue kClues[] = {{
 
 inline constexpr uint8_t kPuzzleCount =
     sizeof(kPuzzles) / sizeof(kPuzzles[0]);
-static_assert(kPuzzleCount == {len(GRIDS)}, "crossword puzzle count changed");
+static_assert(kPuzzleCount == {len(grids)}, "crossword puzzle count changed");
 
 }}  // namespace crossword_puzzles
 """

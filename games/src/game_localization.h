@@ -1,0 +1,257 @@
+#pragma once
+
+#include <stddef.h>
+#include <stdint.h>
+
+namespace game_localization {
+
+enum class Language : uint8_t {
+  English,
+  Spanish,
+  French,
+  German,
+  ChineseSimplified,
+  Count,
+};
+
+enum class TextId : uint8_t {
+  SelectLanguage,
+  NewGame,
+  Reset,
+  Next,
+  Restart,
+  DeleteKey,
+  OkKey,
+  BatteryLow,
+  Remaining,
+  PleaseCharge,
+  ConnectUsbC,
+  PressOkAfterCharging,
+  UpdatingFirmware,
+  DoNotPowerOff,
+  UpdateFailed,
+  CurrentFirmwareSafe,
+  LightsOut,
+  Game2048,
+  PipeConnect,
+  Minesweeper,
+  Nonogram,
+  Reversi,
+  DotsAndBoxes,
+  Sokoban,
+  PegSolitaire,
+  Slitherlink,
+  Sudoku,
+  Crossword,
+  Solved,
+  Moves,
+  TapNew,
+  Score,
+  Best,
+  NoMoves,
+  KeepGoing,
+  ConnectedIn,
+  Taps,
+  ConnectEveryPipe,
+  FieldCleared,
+  MineHit,
+  Mines,
+  PuzzleSolved,
+  Black,
+  White,
+  BlackWins,
+  WhiteWins,
+  Draw,
+  BlackToMove,
+  WhiteToMove,
+  OnePlayer,
+  TwoPlayers,
+  WhitePassesBlackAgain,
+  BlackPassesWhiteAgain,
+  Player,
+  Wins,
+  ToMove,
+  Levels,
+  AllComplete,
+  ProgressSaved,
+  Level,
+  SaveFailedTapNext,
+  LevelComplete,
+  Pushes,
+  Pegs,
+  PerfectCenterFinish,
+  Puzzle,
+  LoopComplete,
+  MakeOneLoop,
+  PuzzleComplete,
+  TapEmptyCell,
+  ChooseOneToNineOrX,
+  TapWhiteSquare,
+  AcrossAbbreviation,
+  DownAbbreviation,
+  Count,
+};
+
+constexpr size_t kLanguageCount = static_cast<size_t>(Language::Count);
+constexpr size_t kTextCount = static_cast<size_t>(TextId::Count);
+
+#if defined(__cpp_char8_t)
+using Utf8Char = char8_t;
+#else
+using Utf8Char = char;
+#endif
+
+inline constexpr const Utf8Char* kLanguageNames[kLanguageCount] = {
+    u8"English",
+    u8"Español",
+    u8"Français",
+    u8"Deutsch",
+    u8"简体中文",
+};
+
+inline constexpr const Utf8Char*
+    kTranslations[kTextCount][kLanguageCount] = {
+    {u8"SELECT LANGUAGE", u8"SELECCIONAR IDIOMA", u8"CHOISIR LA LANGUE",
+     u8"SPRACHE WÄHLEN", u8"选择语言"},
+    {u8"NEW", u8"NUEVO", u8"NOUVEAU", u8"NEU", u8"新游戏"},
+    {u8"RESET", u8"REINICIAR", u8"RÉINITIALISER", u8"ZURÜCKSETZEN", u8"重置"},
+    {u8"NEXT", u8"SIGUIENTE", u8"SUIVANT", u8"WEITER", u8"下一关"},
+    {u8"RESTART", u8"REINICIAR", u8"RECOMMENCER", u8"NEUSTART", u8"重新开始"},
+    {u8"DEL", u8"BORRAR", u8"EFF.", u8"LÖSCH.", u8"删除"},
+    {u8"OK", u8"OK", u8"OK", u8"OK", u8"确定"},
+    {u8"BATTERY LOW", u8"BATERÍA BAJA", u8"BATTERIE FAIBLE", u8"AKKU SCHWACH",
+     u8"电量低"},
+    {u8"REMAINING", u8"RESTANTE", u8"RESTANTS", u8"VERBLEIBEND", u8"剩余"},
+    {u8"PLEASE CHARGE", u8"CARGUE EL DISPOSITIVO", u8"VEUILLEZ RECHARGER",
+     u8"BITTE AUFLADEN", u8"请充电"},
+    {u8"CONNECT USB-C", u8"CONECTE USB-C", u8"BRANCHEZ USB-C",
+     u8"USB-C ANSCHLIESSEN", u8"连接 USB-C"},
+    {u8"PRESS OK AFTER CHARGING", u8"PULSE OK TRAS CARGAR",
+     u8"APPUYEZ OK APRÈS CHARGE", u8"NACH LADEN OK DRÜCKEN", u8"充电后按 OK"},
+    {u8"UPDATING FIRMWARE", u8"ACTUALIZANDO FIRMWARE",
+     u8"MISE À JOUR DU FIRMWARE", u8"FIRMWARE WIRD AKTUALISIERT", u8"正在更新固件"},
+    {u8"DO NOT POWER OFF", u8"NO APAGAR", u8"NE PAS ÉTEINDRE",
+     u8"NICHT AUSSCHALTEN", u8"请勿关机"},
+    {u8"UPDATE FAILED", u8"FALLO DE ACTUALIZACIÓN", u8"ÉCHEC DE LA MISE À JOUR",
+     u8"AKTUALISIERUNG FEHLGESCHLAGEN", u8"更新失败"},
+    {u8"CURRENT FIRMWARE IS SAFE", u8"EL FIRMWARE ACTUAL ESTÁ SEGURO",
+     u8"LE FIRMWARE ACTUEL EST INTACT", u8"AKTUELLE FIRMWARE IST SICHER",
+     u8"当前固件安全"},
+    {u8"LIGHTS OUT", u8"APAGA LUCES", u8"ÉTEINS TOUT", u8"LICHTER AUS", u8"熄灯游戏"},
+    {u8"2048", u8"2048", u8"2048", u8"2048", u8"2048"},
+    {u8"PIPE CONNECT", u8"CONECTAR TUBOS", u8"RELIER LES TUYAUX",
+     u8"ROHRE VERBINDEN", u8"连接管道"},
+    {u8"MINESWEEPER", u8"BUSCAMINAS", u8"DÉMINEUR", u8"MINESWEEPER", u8"扫雷"},
+    {u8"NONOGRAM", u8"NONOGRAMA", u8"NONOGRAMME", u8"NONOGRAMM", u8"数织"},
+    {u8"REVERSI", u8"REVERSI", u8"REVERSI", u8"REVERSI", u8"黑白棋"},
+    {u8"DOTS + BOXES", u8"PUNTOS + CAJAS", u8"POINTS + CARRÉS",
+     u8"PUNKTE + KÄSTCHEN", u8"点格棋"},
+    {u8"SOKOBAN", u8"SOKOBAN", u8"SOKOBAN", u8"SOKOBAN", u8"推箱子"},
+    {u8"PEG SOLITAIRE", u8"SOLITARIO DE CLAVIJAS", u8"SOLITAIRE À PIONS",
+     u8"STECKHALMA", u8"孔明棋"},
+    {u8"SLITHERLINK", u8"SLITHERLINK", u8"SLITHERLINK", u8"SLITHERLINK", u8"数回"},
+    {u8"SUDOKU", u8"SUDOKU", u8"SUDOKU", u8"SUDOKU", u8"数独"},
+    {u8"CROSSWORD", u8"CRUCIGRAMA", u8"MOTS CROISÉS", u8"KREUZWORTRÄTSEL",
+     u8"填字游戏"},
+    {u8"SOLVED!", u8"¡RESUELTO!", u8"RÉSOLU !", u8"GELÖST!", u8"已解开！"},
+    {u8"MOVES", u8"MOVIMIENTOS", u8"COUPS", u8"ZÜGE", u8"步"},
+    {u8"TAP NEW", u8"TOCA NUEVO", u8"TOUCHEZ NOUVEAU", u8"NEU ANTIPPEN",
+     u8"点击新游戏"},
+    {u8"SCORE", u8"PUNTOS", u8"SCORE", u8"PUNKTE", u8"得分"},
+    {u8"BEST", u8"MEJOR", u8"RECORD", u8"REKORD", u8"最佳"},
+    {u8"NO MOVES", u8"SIN MOVIMIENTOS", u8"PLUS DE COUPS", u8"KEINE ZÜGE",
+     u8"无路可走"},
+    {u8"KEEP GOING", u8"SIGUE", u8"CONTINUEZ", u8"WEITERMACHEN", u8"继续"},
+    {u8"CONNECTED IN", u8"CONECTADO EN", u8"RELIÉ EN", u8"VERBUNDEN IN",
+     u8"已连接，用"},
+    {u8"TAPS", u8"TOQUES", u8"TOUCHES", u8"ZÜGEN", u8"次点击"},
+    {u8"CONNECT EVERY PIPE", u8"CONECTA TODOS LOS TUBOS",
+     u8"RELIEZ TOUS LES TUYAUX", u8"ALLE ROHRE VERBINDEN", u8"连接所有管道"},
+    {u8"FIELD CLEARED!", u8"¡CAMPO DESPEJADO!", u8"TERRAIN DÉMINÉ !",
+     u8"FELD GERÄUMT!", u8"雷区已清除！"},
+    {u8"MINE HIT", u8"MINA TOCADA", u8"MINE TOUCHÉE", u8"MINE GETROFFEN",
+     u8"踩到地雷"},
+    {u8"MINES", u8"MINAS", u8"MINES", u8"MINEN", u8"颗地雷"},
+    {u8"PUZZLE SOLVED!", u8"¡PUZLE RESUELTO!", u8"GRILLE RÉSOLUE !",
+     u8"RÄTSEL GELÖST!", u8"谜题已解开！"},
+    {u8"BLACK", u8"NEGRAS", u8"NOIRS", u8"SCHWARZ", u8"黑方"},
+    {u8"WHITE", u8"BLANCAS", u8"BLANCS", u8"WEISS", u8"白方"},
+    {u8"BLACK WINS", u8"GANAN NEGRAS", u8"LES NOIRS GAGNENT",
+     u8"SCHWARZ GEWINNT", u8"黑方获胜"},
+    {u8"WHITE WINS", u8"GANAN BLANCAS", u8"LES BLANCS GAGNENT",
+     u8"WEISS GEWINNT", u8"白方获胜"},
+    {u8"DRAW", u8"EMPATE", u8"ÉGALITÉ", u8"UNENTSCHIEDEN", u8"平局"},
+    {u8"BLACK TO MOVE", u8"TURNO DE NEGRAS", u8"AUX NOIRS DE JOUER",
+     u8"SCHWARZ AM ZUG", u8"黑方回合"},
+    {u8"WHITE TO MOVE", u8"TURNO DE BLANCAS", u8"AUX BLANCS DE JOUER",
+     u8"WEISS AM ZUG", u8"白方回合"},
+    {u8"1 PLAYER", u8"1 JUGADOR", u8"1 JOUEUR", u8"1 SPIELER", u8"单人"},
+    {u8"2 PLAYERS", u8"2 JUGADORES", u8"2 JOUEURS", u8"2 SPIELER", u8"双人"},
+    {u8"WHITE PASSES - BLACK AGAIN", u8"BLANCAS PASAN - NEGRAS OTRA VEZ",
+     u8"LES BLANCS PASSENT - AUX NOIRS",
+     u8"WEISS PASST - SCHWARZ NOCHMAL", u8"白方跳过，黑方继续"},
+    {u8"BLACK PASSES - WHITE AGAIN", u8"NEGRAS PASAN - BLANCAS OTRA VEZ",
+     u8"LES NOIRS PASSENT - AUX BLANCS",
+     u8"SCHWARZ PASST - WEISS NOCHMAL", u8"黑方跳过，白方继续"},
+    {u8"PLAYER", u8"JUGADOR", u8"JOUEUR", u8"SPIELER", u8"玩家"},
+    {u8"WINS", u8"GANA", u8"GAGNE", u8"GEWINNT", u8"获胜"},
+    {u8"TO MOVE", u8"JUEGA", u8"À JOUER", u8"AM ZUG", u8"回合"},
+    {u8"LEVELS", u8"NIVELES", u8"NIVEAUX", u8"LEVEL", u8"关"},
+    {u8"ALL COMPLETE", u8"TODO COMPLETADO", u8"TOUT TERMINÉ",
+     u8"ALLES GESCHAFFT", u8"全部完成"},
+    {u8"PROGRESS SAVED", u8"PROGRESO GUARDADO", u8"PROGRESSION SAUVEGARDÉE",
+     u8"FORTSCHRITT GESPEICHERT", u8"进度已保存"},
+    {u8"LEVEL", u8"NIVEL", u8"NIVEAU", u8"LEVEL", u8"关卡"},
+    {u8"SAVE FAILED - TAP NEXT", u8"FALLO AL GUARDAR - TOCA SIGUIENTE",
+     u8"ÉCHEC DE SAUVEGARDE - SUIVANT",
+     u8"SPEICHERN FEHLGESCHLAGEN - WEITER", u8"保存失败，请点下一关"},
+    {u8"LEVEL COMPLETE", u8"NIVEL COMPLETADO", u8"NIVEAU TERMINÉ",
+     u8"LEVEL GESCHAFFT", u8"关卡完成"},
+    {u8"PUSHES", u8"EMPUJES", u8"POUSSÉES", u8"SCHÜBE", u8"推动"},
+    {u8"PEGS", u8"FICHAS", u8"PIONS", u8"STEINE", u8"棋子"},
+    {u8"PERFECT CENTER FINISH!", u8"¡FINAL PERFECTO EN EL CENTRO!",
+     u8"FIN PARFAITE AU CENTRE !", u8"PERFEKT IN DER MITTE!", u8"完美中心收官！"},
+    {u8"PUZZLE", u8"PUZLE", u8"GRILLE", u8"RÄTSEL", u8"谜题"},
+    {u8"LOOP COMPLETE!", u8"¡BUCLE COMPLETO!", u8"BOUCLE TERMINÉE !",
+     u8"SCHLEIFE GESCHLOSSEN!", u8"回路完成！"},
+    {u8"MAKE ONE LOOP", u8"FORMA UN SOLO BUCLE", u8"FORMEZ UNE SEULE BOUCLE",
+     u8"EINE SCHLEIFE BILDEN", u8"画出一条回路"},
+    {u8"PUZZLE COMPLETE!", u8"¡PUZLE COMPLETADO!", u8"GRILLE TERMINÉE !",
+     u8"RÄTSEL GESCHAFFT!", u8"谜题完成！"},
+    {u8"TAP AN EMPTY CELL", u8"TOCA UNA CASILLA VACÍA",
+     u8"TOUCHEZ UNE CASE VIDE", u8"LEERES FELD ANTIPPEN", u8"点击空白格"},
+    {u8"CHOOSE 1-9 OR X", u8"ELIGE 1-9 O X", u8"CHOISISSEZ 1-9 OU X",
+     u8"1-9 ODER X WÄHLEN", u8"选择 1-9 或 X"},
+    {u8"TAP A WHITE SQUARE", u8"TOCA UNA CASILLA BLANCA",
+     u8"TOUCHEZ UNE CASE BLANCHE", u8"WEISSES FELD ANTIPPEN", u8"点击白色方格"},
+    {u8"A", u8"H", u8"H", u8"W", u8"横"},
+    {u8"D", u8"V", u8"V", u8"S", u8"竖"},
+};
+
+constexpr bool validLanguageValue(uint8_t value) {
+  return value < static_cast<uint8_t>(Language::Count);
+}
+
+inline const char* utf8Text(const Utf8Char* value) {
+#if defined(__cpp_char8_t)
+  return reinterpret_cast<const char*>(value);
+#else
+  return value;
+#endif
+}
+
+inline const char* languageName(Language language) {
+  const size_t index = static_cast<size_t>(language);
+  return utf8Text(index < kLanguageCount ? kLanguageNames[index]
+                                         : kLanguageNames[0]);
+}
+
+inline const char* text(Language language, TextId id) {
+  const size_t languageIndex = static_cast<size_t>(language);
+  const size_t textIndex = static_cast<size_t>(id);
+  return utf8Text(
+      kTranslations[textIndex < kTextCount ? textIndex : 0]
+                   [languageIndex < kLanguageCount ? languageIndex : 0]);
+}
+
+}  // namespace game_localization

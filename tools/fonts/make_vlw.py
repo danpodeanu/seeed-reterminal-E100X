@@ -113,13 +113,22 @@ def render_glyph(font, codepoint: int):
     return (data, width, height, gdX, gdY, x_advance)
 
 
-def build_vlw(ttf_path: Path, pixel_size: int) -> bytes:
+def build_vlw(
+    ttf_path: Path,
+    pixel_size: int,
+    codepoints: Iterable[int] | None = None,
+    family_name: str | None = None,
+) -> bytes:
     from PIL import ImageFont
     font = ImageFont.truetype(str(ttf_path), pixel_size)
     ascent_px, descent_px = font.getmetrics()
 
     entries: list[tuple[int, bytes, int, int, int, int, int]] = []
-    for cp in enumerate_codepoints(ttf_path):
+    available = set(enumerate_codepoints(ttf_path))
+    selected = sorted(
+        available if codepoints is None else available.intersection(codepoints)
+    )
+    for cp in selected:
         rendered = render_glyph(font, cp)
         if rendered is None:
             continue
@@ -144,7 +153,9 @@ def build_vlw(ttf_path: Path, pixel_size: int) -> bytes:
     for _, data, w, h, *_ in entries:
         bitmaps += data
 
-    name = f"DejaVuSansBold_{pixel_size}".encode("ascii")
+    source_name = family_name or ttf_path.stem
+    family = "".join(character for character in source_name if character.isalnum())
+    name = f"{family}_{pixel_size}".encode("ascii")
     ps_name = name
     trailer = bytearray()
     trailer.append(len(name))

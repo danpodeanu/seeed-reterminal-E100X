@@ -19,13 +19,18 @@
 #include "e1005_fast_refresh.h"
 #include "epaper_setup.h"
 #include "game_2048.h"
+#include "game_language_store.h"
+#include "game_localization.h"
 #include "game_progress_store.h"
+#include "game_ranking.h"
+#include "game_ui_fonts.h"
 #include "gt911_touch.h"
 #include "hardware.h"
 #include "lights_out_game.h"
 #include "low_battery.h"
 #include "mini_minesweeper_game.h"
 #include "nonogram_game.h"
+#include "ok_button_action.h"
 #include "peg_solitaire_game.h"
 #include "peripheral_power.h"
 #include "pipe_connect_game.h"
@@ -37,9 +42,6 @@
 #include "slitherlink_game.h"
 #include "sokoban_game.h"
 #include "sudoku_game.h"
-#ifdef ENABLE_SCREENSHOT_GESTURE
-#include "screenshot_bmp.h"
-#endif
 #include "text_render.h"
 
 #if RETERMINAL_MODEL != 1005
@@ -50,6 +52,9 @@ TimestampedLogger appLog(Serial1);
 EPaper epaper;
 
 namespace {
+
+using game_localization::Language;
+using game_localization::TextId;
 
 constexpr int kScreenWidth = 480;
 constexpr int kScreenHeight = 800;
@@ -107,16 +112,12 @@ constexpr int kSwipeThreshold = 45;
 constexpr int kMinesTouchMoveTolerance = 20;
 constexpr int kReversiAiDepth = 3;
 constexpr uint32_t kButtonDebounceMs = 30;
-constexpr uint32_t kButtonLongPressMs = 1200;
-#ifdef ENABLE_SCREENSHOT_GESTURE
-constexpr uint32_t kScreenshotHoldMs = 5000;
-#endif
 constexpr uint32_t kMinesFlagHoldMs = 650;
 constexpr uint32_t kBatteryCheckIntervalMs = 60000;
 constexpr uint32_t kInactivitySleepMs = 5UL * 60UL * 1000UL;
 constexpr int kLowBatteryThresholdPct = 10;
 constexpr uint32_t kPersistedStateMagic = 0x47414D45;
-constexpr uint16_t kPersistedStateVersion = 11;
+constexpr uint16_t kPersistedStateVersion = 12;
 constexpr uint16_t kLightsOutSavedFlag = 1U << 0;
 constexpr uint16_t k2048SavedFlag = 1U << 1;
 constexpr uint16_t kPipeConnectSavedFlag = 1U << 2;
@@ -165,18 +166,30 @@ struct Rect {
   }
 };
 
-constexpr Rect kLightsOutMenuCard = {40, 112, 190, 190};
-constexpr Rect k2048MenuCard = {250, 112, 190, 190};
-constexpr Rect kPipeConnectMenuCard = {40, 320, 190, 190};
-constexpr Rect kMinesweeperMenuCard = {250, 320, 190, 190};
-constexpr Rect kNonogramMenuCard = {40, 528, 190, 190};
-constexpr Rect kReversiMenuCard = {250, 528, 190, 190};
-constexpr Rect kDotsAndBoxesMenuCard = kLightsOutMenuCard;
-constexpr Rect kSokobanMenuCard = k2048MenuCard;
-constexpr Rect kPegSolitaireMenuCard = kPipeConnectMenuCard;
-constexpr Rect kSlitherlinkMenuCard = kMinesweeperMenuCard;
-constexpr Rect kSudokuMenuCard = kNonogramMenuCard;
-constexpr Rect kCrosswordMenuCard = kReversiMenuCard;
+constexpr Rect kMenuCardSlots[] = {
+    {40, 112, 190, 190},  {250, 112, 190, 190},
+    {40, 320, 190, 190},  {250, 320, 190, 190},
+    {40, 528, 190, 190},  {250, 528, 190, 190},
+};
+constexpr Rect kLanguageButtons[] = {
+    {60, 145, 360, 72},
+    {60, 245, 360, 72},
+    {60, 345, 360, 72},
+    {60, 445, 360, 72},
+    {60, 545, 360, 72},
+};
+Rect kLightsOutMenuCard = kMenuCardSlots[0];
+Rect k2048MenuCard = kMenuCardSlots[1];
+Rect kPipeConnectMenuCard = kMenuCardSlots[2];
+Rect kMinesweeperMenuCard = kMenuCardSlots[3];
+Rect kNonogramMenuCard = kMenuCardSlots[4];
+Rect kReversiMenuCard = kMenuCardSlots[5];
+Rect kDotsAndBoxesMenuCard = kMenuCardSlots[0];
+Rect kSokobanMenuCard = kMenuCardSlots[1];
+Rect kPegSolitaireMenuCard = kMenuCardSlots[2];
+Rect kSlitherlinkMenuCard = kMenuCardSlots[3];
+Rect kSudokuMenuCard = kMenuCardSlots[4];
+Rect kCrosswordMenuCard = kMenuCardSlots[5];
 constexpr Rect kPreviousPageButton = {8, 756, 48, 36};
 constexpr Rect kNextPageButton = {424, 756, 48, 36};
 constexpr Rect kBackButton = {8, 6, 48, 36};
@@ -219,6 +232,26 @@ enum class MenuPage : uint8_t {
   Second,
 };
 
+enum class GameId : uint8_t {
+  LightsOut,
+  Game2048,
+  PipeConnect,
+  Minesweeper,
+  Nonogram,
+  Reversi,
+  DotsAndBoxes,
+  Sokoban,
+  PegSolitaire,
+  Slitherlink,
+  Sudoku,
+  Crossword,
+  Count,
+};
+
+constexpr size_t kGameCount = static_cast<size_t>(GameId::Count);
+constexpr size_t kGamesPerMenuPage =
+    sizeof(kMenuCardSlots) / sizeof(kMenuCardSlots[0]);
+static_assert(kGameCount == kGamesPerMenuPage * 2);
 const char* screenName(Screen screen) {
   switch (screen) {
     case Screen::Menu:
@@ -275,6 +308,7 @@ struct PersistedState {
   SlitherlinkGame::Snapshot slitherlink;
   SudokuGame::Snapshot sudoku;
   CrosswordGame::Snapshot crossword;
+  uint32_t gamePlayCounts[kGameCount];
   uint32_t checksum;
 };
 
@@ -287,40 +321,17 @@ struct ButtonState {
   int sampledLevel;
   uint32_t changedAtMs;
   uint32_t pressedAtMs;
-  bool longPressReported;
 };
 
 ButtonState buttons[] = {
-    {board::PIN_BUTTON_0, "OK / power", HIGH, HIGH, 0, 0, false},
-    {board::PIN_BUTTON_1, "UP", HIGH, HIGH, 0, 0, false},
-    {board::PIN_BUTTON_2, "DOWN", HIGH, HIGH, 0, 0, false},
+    {board::PIN_BUTTON_0, "OK / power", HIGH, HIGH, 0, 0},
+    {board::PIN_BUTTON_1, "UP", HIGH, HIGH, 0, 0},
+    {board::PIN_BUTTON_2, "DOWN", HIGH, HIGH, 0, 0},
 };
-
-enum class ButtonPressType {
-  Short,
-  Long,
-#ifdef ENABLE_SCREENSHOT_GESTURE
-  Screenshot,
-#endif
-};
-
-const char* buttonPressTypeName(ButtonPressType type) {
-  switch (type) {
-    case ButtonPressType::Short:
-      return "short";
-    case ButtonPressType::Long:
-      return "long";
-#ifdef ENABLE_SCREENSHOT_GESTURE
-    case ButtonPressType::Screenshot:
-      return "screenshot";
-#endif
-  }
-  return "unknown";
-}
 
 struct ButtonEvent {
   ButtonState* button;
-  ButtonPressType type;
+  uint32_t heldMs;
 };
 
 enum class SleepScreen {
@@ -345,6 +356,8 @@ SudokuGame sudoku;
 CrosswordGame crossword;
 uint16_t sokobanCompletedLevelCount = 0;
 bool sokobanProgressSaveFailed = false;
+uint32_t gamePlayCounts[kGameCount] = {};
+uint8_t gameRanking[kGameCount] = {};
 ReversiMode reversiMode = ReversiMode::SinglePlayer;
 Screen currentScreen = Screen::Menu;
 MenuPage currentMenuPage = MenuPage::First;
@@ -352,9 +365,9 @@ bool touchReady = false;
 bool touchActive = false;
 bool touchActionHandled = false;
 bool lightSleepReady = false;
-#ifdef ENABLE_SCREENSHOT_GESTURE
-bool sdReady = false;
-#endif
+Language currentLanguage = Language::English;
+bool languageSelected = false;
+bool languageSelectionVisible = false;
 bool lightsOutSaved = false;
 bool game2048Saved = false;
 bool pipeConnectSaved = false;
@@ -385,7 +398,6 @@ void configureButtons() {
     button.changedAtMs = millis();
     button.pressedAtMs =
         button.stableLevel == LOW ? button.changedAtMs : 0;
-    button.longPressReported = false;
   }
 }
 
@@ -399,44 +411,13 @@ bool pollButtonEvent(ButtonEvent& event) {
     }
     if (level == button.stableLevel ||
         now - button.changedAtMs < kButtonDebounceMs) {
-#ifdef ENABLE_SCREENSHOT_GESTURE
-      const uint32_t holdThreshold =
-          button.pin == board::PIN_BUTTON_0 ? kScreenshotHoldMs
-                                            : kButtonLongPressMs;
-      if (level == LOW && button.stableLevel == LOW &&
-          !button.longPressReported &&
-          now - button.pressedAtMs >= holdThreshold) {
-        button.longPressReported = true;
-        event = {&button, button.pin == board::PIN_BUTTON_0
-                              ? ButtonPressType::Screenshot
-                              : ButtonPressType::Long};
-        return true;
-      }
-#else
-      if (level == LOW && button.stableLevel == LOW &&
-         !button.longPressReported &&
-         now - button.pressedAtMs >= kButtonLongPressMs) {
-        button.longPressReported = true;
-        event = {&button, ButtonPressType::Long};
-        return true;
-      }
-#endif
       continue;
     }
     button.stableLevel = level;
     if (level == LOW) {
       button.pressedAtMs = now;
-      button.longPressReported = false;
-    } else if (!button.longPressReported) {
-#ifdef ENABLE_SCREENSHOT_GESTURE
-      const bool longPress =
-          button.pin == board::PIN_BUTTON_0 &&
-          now - button.pressedAtMs >= kButtonLongPressMs;
-      event = {&button, longPress ? ButtonPressType::Long
-                                  : ButtonPressType::Short};
-#else
-      event = {&button, ButtonPressType::Short};
-#endif
+    } else {
+      event = {&button, now - button.pressedAtMs};
       return true;
     }
   }
@@ -456,6 +437,61 @@ bool inputHandlingActive() {
 
 void recordActivity() { lastActivityAtMs = millis(); }
 
+const char* tr(TextId id) {
+  return game_localization::text(currentLanguage, id);
+}
+
+const char* gameName(GameId game) {
+  switch (game) {
+    case GameId::LightsOut:
+      return "Lights Out";
+    case GameId::Game2048:
+      return "2048";
+    case GameId::PipeConnect:
+      return "Pipe Connect";
+    case GameId::Minesweeper:
+      return "Minesweeper";
+    case GameId::Nonogram:
+      return "Nonogram";
+    case GameId::Reversi:
+      return "Reversi";
+    case GameId::DotsAndBoxes:
+      return "Dots and Boxes";
+    case GameId::Sokoban:
+      return "Sokoban";
+    case GameId::PegSolitaire:
+      return "Peg Solitaire";
+    case GameId::Slitherlink:
+      return "Slitherlink";
+    case GameId::Sudoku:
+      return "Sudoku";
+    case GameId::Crossword:
+      return "Crossword";
+    case GameId::Count:
+      break;
+  }
+  return "unknown";
+}
+
+GameId rankedGameAt(size_t rank) {
+  return static_cast<GameId>(gameRanking[rank]);
+}
+
+void updateGameRanking() {
+  game_ranking::rankByPlayCount(gamePlayCounts, gameRanking);
+}
+
+void recordGameLaunch(GameId game) {
+  const size_t index = static_cast<size_t>(game);
+  const uint32_t updated = game_ranking::nextPlayCount(gamePlayCounts[index]);
+  if (updated != gamePlayCounts[index]) {
+    gamePlayCounts[index] = updated;
+    updateGameRanking();
+  }
+  LOG.printf("[games] %s play count: %lu\n", gameName(game),
+             static_cast<unsigned long>(gamePlayCounts[index]));
+}
+
 uint32_t stateChecksum(const PersistedState& state) {
   const auto* bytes = reinterpret_cast<const uint8_t*>(&state);
   uint32_t checksum = 2166136261UL;
@@ -473,6 +509,9 @@ void saveResumeState() {
   state.screen = static_cast<uint8_t>(currentScreen);
   state.menuPage = static_cast<uint8_t>(currentMenuPage);
   state.reversiMode = static_cast<uint8_t>(reversiMode);
+  for (size_t index = 0; index < kGameCount; ++index) {
+    state.gamePlayCounts[index] = gamePlayCounts[index];
+  }
   if (lightsOutSaved) {
     state.flags |= kLightsOutSavedFlag;
     state.lightsOut = lightsOut.snapshot();
@@ -674,6 +713,9 @@ bool restoreResumeState() {
   slitherlinkSaved = hasSlitherlinkSave;
   sudokuSaved = hasSudokuSave;
   crosswordSaved = hasCrosswordSave;
+  for (size_t index = 0; index < kGameCount; ++index) {
+    gamePlayCounts[index] = state.gamePlayCounts[index];
+  }
   crosswordKeyboardVisible = false;
   reversiMode = static_cast<ReversiMode>(state.reversiMode);
   currentMenuPage = static_cast<MenuPage>(state.menuPage);
@@ -765,10 +807,51 @@ void idleInLightSleep() {
   esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_TIMER);
 }
 
-void drawCentered(const String& text, int x, int y, int font) {
+bool containsNonAscii(const String& text) {
+  for (size_t index = 0; index < text.length(); ++index) {
+    if (static_cast<uint8_t>(text[index]) >= 0x80) return true;
+  }
+  return false;
+}
+
+const uint8_t* smoothFontFor(int pixelSize) {
+  if (pixelSize >= 32) return game_ui_fonts::kGameUiFont32;
+  if (pixelSize >= 24) return game_ui_fonts::kGameUiFont24;
+  return game_ui_fonts::kGameUiFont16;
+}
+
+void drawCenteredText(const String& text, int x, int y, int font,
+                      uint16_t foreground, uint16_t background, int maxWidth,
+                      bool forceSmoothFont = false) {
   epaper.setTextDatum(MC_DATUM);
-  epaper.setTextColor(TFT_BLACK, TFT_WHITE, true);
-  epaper.drawString(text, x, y, font);
+  epaper.setTextColor(foreground, background, true);
+  if (!forceSmoothFont && !containsNonAscii(text)) {
+    int selectedFont = font == 6 ? 4 : font;
+    if (selectedFont == 4 && epaper.textWidth(text, selectedFont) > maxWidth) {
+      selectedFont = 2;
+    }
+    epaper.drawString(text, x, y, selectedFont);
+    return;
+  }
+
+  int pixelSize = font >= 6 ? 32 : font >= 4 ? 24 : 16;
+  epaper.loadFont(smoothFontFor(pixelSize));
+  if (pixelSize > 16 && epaper.textWidth(text) > maxWidth) {
+    epaper.unloadFont();
+    pixelSize = pixelSize > 24 ? 24 : 16;
+    epaper.loadFont(smoothFontFor(pixelSize));
+    if (pixelSize > 16 && epaper.textWidth(text) > maxWidth) {
+      epaper.unloadFont();
+      epaper.loadFont(smoothFontFor(16));
+    }
+  }
+  epaper.drawString(text, x, y);
+  epaper.unloadFont();
+}
+
+void drawCentered(const String& text, int x, int y, int font) {
+  drawCenteredText(text, x, y, font, TFT_BLACK, TFT_WHITE,
+                   kScreenWidth - 16);
 }
 
 void drawCenteredNumber(uint32_t value, int x, int y, int font,
@@ -805,16 +888,49 @@ void drawGamesLogo(int centerX, int centerY, int width) {
 }
 
 void drawButton(const Rect& rect, const char* label) {
+  const bool smoothFont = languageSelectionVisible ||
+                          currentLanguage != Language::English;
   epaper.fillRoundRect(rect.x, rect.y, rect.width, rect.height, 8, TFT_BLACK);
-  epaper.setTextDatum(MC_DATUM);
-  epaper.setTextColor(TFT_WHITE, TFT_BLACK, true);
-  epaper.drawString(label, rect.x + rect.width / 2,
-                    rect.y + rect.height / 2 + 3, 4);
+  drawCenteredText(label, rect.x + rect.width / 2,
+                   rect.y + rect.height / 2 + (smoothFont ? -2 : 3), 4,
+                   TFT_WHITE, TFT_BLACK, rect.width - 12, smoothFont);
 }
 
 void drawMenuCardFrame(const Rect& card) {
   epaper.fillRoundRect(card.x, card.y, card.width, card.height, 14, TFT_WHITE);
   epaper.drawRoundRect(card.x, card.y, card.width, card.height, 14, TFT_BLACK);
+}
+
+Rect& menuCardFor(GameId game) {
+  switch (game) {
+    case GameId::LightsOut:
+      return kLightsOutMenuCard;
+    case GameId::Game2048:
+      return k2048MenuCard;
+    case GameId::PipeConnect:
+      return kPipeConnectMenuCard;
+    case GameId::Minesweeper:
+      return kMinesweeperMenuCard;
+    case GameId::Nonogram:
+      return kNonogramMenuCard;
+    case GameId::Reversi:
+      return kReversiMenuCard;
+    case GameId::DotsAndBoxes:
+      return kDotsAndBoxesMenuCard;
+    case GameId::Sokoban:
+      return kSokobanMenuCard;
+    case GameId::PegSolitaire:
+      return kPegSolitaireMenuCard;
+    case GameId::Slitherlink:
+      return kSlitherlinkMenuCard;
+    case GameId::Sudoku:
+      return kSudokuMenuCard;
+    case GameId::Crossword:
+      return kCrosswordMenuCard;
+    case GameId::Count:
+      break;
+  }
+  return kLightsOutMenuCard;
 }
 
 void drawLightsOutCell(int x, int y, bool on) {
@@ -1294,6 +1410,55 @@ void drawCrosswordMenuCard() {
   }
 }
 
+void arrangeMenuCards() {
+  for (size_t rank = 0; rank < kGameCount; ++rank) {
+    menuCardFor(rankedGameAt(rank)) = kMenuCardSlots[rank % kGamesPerMenuPage];
+  }
+}
+
+void drawGameMenuCard(GameId game) {
+  switch (game) {
+    case GameId::LightsOut:
+      drawLightsOutMenuCard();
+      return;
+    case GameId::Game2048:
+      draw2048MenuCard();
+      return;
+    case GameId::PipeConnect:
+      drawPipeConnectMenuCard();
+      return;
+    case GameId::Minesweeper:
+      drawMinesweeperMenuCard();
+      return;
+    case GameId::Nonogram:
+      drawNonogramMenuCard();
+      return;
+    case GameId::Reversi:
+      drawReversiMenuCard();
+      return;
+    case GameId::DotsAndBoxes:
+      drawDotsAndBoxesMenuCard();
+      return;
+    case GameId::Sokoban:
+      drawSokobanMenuCard();
+      return;
+    case GameId::PegSolitaire:
+      drawPegSolitaireMenuCard();
+      return;
+    case GameId::Slitherlink:
+      drawSlitherlinkMenuCard();
+      return;
+    case GameId::Sudoku:
+      drawSudokuMenuCard();
+      return;
+    case GameId::Crossword:
+      drawCrosswordMenuCard();
+      return;
+    case GameId::Count:
+      return;
+  }
+}
+
 void drawBatteryStatus() {
   constexpr int kCenterY = 24;
   constexpr int kEdgeInset = 6;
@@ -1357,20 +1522,11 @@ void drawGameStatusBar(const char* title) {
 void drawMenu() {
   epaper.fillSprite(TFT_WHITE);
   drawGamesLogo(kScreenWidth / 2, 80, 72);
-  if (currentMenuPage == MenuPage::First) {
-    drawLightsOutMenuCard();
-    draw2048MenuCard();
-    drawPipeConnectMenuCard();
-    drawMinesweeperMenuCard();
-    drawNonogramMenuCard();
-    drawReversiMenuCard();
-  } else {
-    drawDotsAndBoxesMenuCard();
-    drawSokobanMenuCard();
-    drawPegSolitaireMenuCard();
-    drawSlitherlinkMenuCard();
-    drawSudokuMenuCard();
-    drawCrosswordMenuCard();
+  arrangeMenuCards();
+  const size_t firstRank =
+      currentMenuPage == MenuPage::First ? 0 : kGamesPerMenuPage;
+  for (size_t slot = 0; slot < kGamesPerMenuPage; ++slot) {
+    drawGameMenuCard(rankedGameAt(firstRank + slot));
   }
   if (currentMenuPage == MenuPage::First) {
     drawArrowButton(kNextPageButton, true);
@@ -1380,6 +1536,16 @@ void drawMenu() {
   const char* pageLabel =
       currentMenuPage == MenuPage::First ? "1 / 2" : "2 / 2";
   drawCentered(pageLabel, kScreenWidth / 2, 774, 4);
+  drawStatusBar();
+}
+
+void drawLanguageSelection() {
+  epaper.fillSprite(TFT_WHITE);
+  drawCentered(tr(TextId::SelectLanguage), kScreenWidth / 2, 72, 4);
+  for (size_t index = 0; index < game_localization::kLanguageCount; ++index) {
+    drawButton(kLanguageButtons[index],
+               game_localization::languageName(static_cast<Language>(index)));
+  }
   drawStatusBar();
 }
 
@@ -1417,13 +1583,13 @@ void drawSleepSplash() {
 
 void drawChargeSplash(int batteryPercent) {
   epaper.fillSprite(TFT_WHITE);
-  drawCentered("BATTERY LOW", kScreenWidth / 2, 130, 4);
-  drawCentered(String(batteryPercent) + "% remaining", kScreenWidth / 2, 180,
-               4);
+  drawCentered(tr(TextId::BatteryLow), kScreenWidth / 2, 130, 4);
+  drawCentered(String(batteryPercent) + "% " + tr(TextId::Remaining),
+               kScreenWidth / 2, 180, 4);
   drawGamesLogo(kScreenWidth / 2, 390, 280);
-  drawCentered("PLEASE CHARGE", kScreenWidth / 2, 545, 4);
-  drawCentered("Connect USB-C", kScreenWidth / 2, 595, 4);
-  drawCentered("Press OK after charging", kScreenWidth / 2, 645, 4);
+  drawCentered(tr(TextId::PleaseCharge), kScreenWidth / 2, 545, 4);
+  drawCentered(tr(TextId::ConnectUsbC), kScreenWidth / 2, 595, 4);
+  drawCentered(tr(TextId::PressOkAfterCharging), kScreenWidth / 2, 645, 4);
 }
 
 void drawLightsOutBoard() {
@@ -1439,28 +1605,31 @@ void drawLightsOutBoard() {
   }
 
   if (lightsOut.solved()) {
-    drawCentered("SOLVED!", kScreenWidth / 2, 590, 4);
-    drawCentered(String(lightsOut.moves()) + " moves - tap NEW",
+    drawCentered(tr(TextId::Solved), kScreenWidth / 2, 590, 4);
+    drawCentered(String(lightsOut.moves()) + " " + tr(TextId::Moves) + " - " +
+                     tr(TextId::TapNew),
                  kScreenWidth / 2, 630, 4);
   } else {
-    drawCentered(String(lightsOut.moves()) + " moves", kScreenWidth / 2,
-                 590, 4);
+    drawCentered(String(lightsOut.moves()) + " " + tr(TextId::Moves),
+                 kScreenWidth / 2, 590, 4);
   }
 }
 
 void drawLightsOut() {
   epaper.fillSprite(TFT_WHITE);
   drawLightsOutBoard();
-  drawButton(kNewButton, "NEW");
-  drawButton(kResetButton, "RESET");
-  drawGameStatusBar("LIGHTS OUT");
+  drawButton(kNewButton, tr(TextId::NewGame));
+  drawButton(kResetButton, tr(TextId::Reset));
+  drawGameStatusBar(tr(TextId::LightsOut));
 }
 
 void draw2048Board() {
   epaper.fillRect(k2048BoardRegion.x, k2048BoardRegion.y,
                   k2048BoardRegion.width, k2048BoardRegion.height, TFT_WHITE);
-  drawCentered("SCORE " + String(game2048.score()), 135, 128, 4);
-  drawCentered("BEST " + String(game2048.bestScore()), 350, 128, 4);
+  drawCentered(String(tr(TextId::Score)) + " " + String(game2048.score()),
+               135, 128, 4);
+  drawCentered(String(tr(TextId::Best)) + " " + String(game2048.bestScore()),
+               350, 128, 4);
 
   for (int row = 0; row < Game2048::kSize; ++row) {
     for (int column = 0; column < Game2048::kSize; ++column) {
@@ -1471,17 +1640,19 @@ void draw2048Board() {
   }
 
   if (game2048.gameOver()) {
-    drawCentered("NO MOVES - TAP NEW", kScreenWidth / 2, 610, 4);
+    drawCentered(String(tr(TextId::NoMoves)) + " - " + tr(TextId::TapNew),
+                 kScreenWidth / 2, 610, 4);
   } else if (game2048.won()) {
-    drawCentered("2048! KEEP GOING", kScreenWidth / 2, 610, 4);
+    drawCentered(String("2048! ") + tr(TextId::KeepGoing), kScreenWidth / 2,
+                 610, 4);
   }
 }
 
 void draw2048() {
   epaper.fillSprite(TFT_WHITE);
   draw2048Board();
-  drawButton(kCenteredNewButton, "NEW");
-  drawGameStatusBar("2048");
+  drawButton(kCenteredNewButton, tr(TextId::NewGame));
+  drawGameStatusBar(tr(TextId::Game2048));
 }
 
 void drawPipeConnectBoard() {
@@ -1496,19 +1667,20 @@ void drawPipeConnectBoard() {
   }
 
   if (pipeConnect.solved()) {
-    drawCentered("CONNECTED IN " + String(pipeConnect.moves()) + " TAPS",
+    drawCentered(String(tr(TextId::ConnectedIn)) + " " +
+                     String(pipeConnect.moves()) + " " + tr(TextId::Taps),
                  kScreenWidth / 2, 610, 4);
   } else {
-    drawCentered("CONNECT EVERY PIPE", kScreenWidth / 2, 610, 4);
+    drawCentered(tr(TextId::ConnectEveryPipe), kScreenWidth / 2, 610, 4);
   }
 }
 
 void drawPipeConnect() {
   epaper.fillSprite(TFT_WHITE);
   drawPipeConnectBoard();
-  drawButton(kNewButton, "NEW");
-  drawButton(kResetButton, "RESET");
-  drawGameStatusBar("PIPE CONNECT");
+  drawButton(kNewButton, tr(TextId::NewGame));
+  drawButton(kResetButton, tr(TextId::Reset));
+  drawGameStatusBar(tr(TextId::PipeConnect));
 }
 
 void drawMinesweeperCell(int row, int column) {
@@ -1561,19 +1733,20 @@ void drawMinesweeperBoard() {
   }
 
   if (minesweeper.won()) {
-    drawCentered("FIELD CLEARED!", kScreenWidth / 2, 610, 4);
+    drawCentered(tr(TextId::FieldCleared), kScreenWidth / 2, 610, 4);
   } else if (minesweeper.lost()) {
-    drawCentered("MINE HIT - TAP NEW", kScreenWidth / 2, 610, 4);
+    drawCentered(String(tr(TextId::MineHit)) + " - " + tr(TextId::TapNew),
+                 kScreenWidth / 2, 610, 4);
   } else {
-    drawCentered("6 MINES", kScreenWidth / 2, 610, 4);
+    drawCentered(String("6 ") + tr(TextId::Mines), kScreenWidth / 2, 610, 4);
   }
 }
 
 void drawMinesweeper() {
   epaper.fillSprite(TFT_WHITE);
   drawMinesweeperBoard();
-  drawButton(kCenteredNewButton, "NEW");
-  drawGameStatusBar("MINESWEEPER");
+  drawButton(kCenteredNewButton, tr(TextId::NewGame));
+  drawGameStatusBar(tr(TextId::Minesweeper));
 }
 
 void drawNonogramCell(int row, int column) {
@@ -1622,16 +1795,16 @@ void drawNonogramBoard() {
     }
   }
   if (nonogram.solved()) {
-    drawCentered("PUZZLE SOLVED!", kScreenWidth / 2, 590, 4);
+    drawCentered(tr(TextId::PuzzleSolved), kScreenWidth / 2, 590, 4);
   }
 }
 
 void drawNonogram() {
   epaper.fillSprite(TFT_WHITE);
   drawNonogramBoard();
-  drawButton(kNewButton, "NEW");
-  drawButton(kResetButton, "RESET");
-  drawGameStatusBar("NONOGRAM");
+  drawButton(kNewButton, tr(TextId::NewGame));
+  drawButton(kResetButton, tr(TextId::Reset));
+  drawGameStatusBar(tr(TextId::Nonogram));
 }
 
 void drawReversiCell(int row, int column) {
@@ -1645,8 +1818,9 @@ void drawReversiBoard(const char* status = nullptr) {
   epaper.fillRect(kReversiBoardRegion.x, kReversiBoardRegion.y,
                   kReversiBoardRegion.width, kReversiBoardRegion.height,
                   TFT_WHITE);
-  drawCentered("BLACK " + String(reversi.score(ReversiGame::Disc::Black)) +
-                   "    WHITE " +
+  drawCentered(String(tr(TextId::Black)) + " " +
+                   String(reversi.score(ReversiGame::Disc::Black)) + "    " +
+                   tr(TextId::White) + " " +
                    String(reversi.score(ReversiGame::Disc::White)),
                kScreenWidth / 2, 120, 4);
   for (int row = 0; row < ReversiGame::kSize; ++row) {
@@ -1659,35 +1833,39 @@ void drawReversiBoard(const char* status = nullptr) {
     const ReversiGame::Disc winner = reversi.winner();
     const String result =
         winner == ReversiGame::Disc::Black
-            ? "BLACK WINS"
-            : winner == ReversiGame::Disc::White ? "WHITE WINS" : "DRAW";
+            ? tr(TextId::BlackWins)
+            : winner == ReversiGame::Disc::White ? tr(TextId::WhiteWins)
+                                                  : tr(TextId::Draw);
     drawCentered(result, kScreenWidth / 2, 610, 4);
   } else if (status != nullptr) {
     drawCentered(status, kScreenWidth / 2, 610, 4);
   } else {
     drawCentered(reversi.currentPlayer() == ReversiGame::Disc::Black
-                     ? "BLACK TO MOVE"
-                     : "WHITE TO MOVE",
+                     ? tr(TextId::BlackToMove)
+                     : tr(TextId::WhiteToMove),
                  kScreenWidth / 2, 610, 4);
   }
 }
 
 const char* reversiModeLabel() {
-  return reversiMode == ReversiMode::SinglePlayer ? "1 PLAYER" : "2 PLAYERS";
+  return reversiMode == ReversiMode::SinglePlayer ? tr(TextId::OnePlayer)
+                                                   : tr(TextId::TwoPlayers);
 }
 
 void drawReversi() {
   epaper.fillSprite(TFT_WHITE);
   drawReversiBoard();
-  drawButton(kNewButton, "NEW");
+  drawButton(kNewButton, tr(TextId::NewGame));
   drawButton(kResetButton, reversiModeLabel());
-  drawGameStatusBar("REVERSI");
+  drawGameStatusBar(tr(TextId::Reversi));
 }
 
 void drawDotsAndBoxesBoard() {
   epaper.fillRect(kDotsBoardRegion.x, kDotsBoardRegion.y,
                   kDotsBoardRegion.width, kDotsBoardRegion.height, TFT_WHITE);
-  drawCentered("P1 " + String(dotsAndBoxes.player1Score()) + "    P2 " +
+  drawCentered(String(tr(TextId::Player)) + " 1 " +
+                   String(dotsAndBoxes.player1Score()) + "    " +
+                   tr(TextId::Player) + " 2 " +
                    String(dotsAndBoxes.player2Score()),
                kScreenWidth / 2, 112, 4);
 
@@ -1736,14 +1914,15 @@ void drawDotsAndBoxesBoard() {
 
   if (dotsAndBoxes.gameOver()) {
     const int winner = static_cast<int>(dotsAndBoxes.winner());
-    drawCentered(winner == 0 ? "DRAW"
-                             : winner == 1 ? "PLAYER 1 WINS"
-                                           : "PLAYER 2 WINS",
+    drawCentered(winner == 0
+                     ? String(tr(TextId::Draw))
+                     : String(tr(TextId::Player)) + " " + String(winner) +
+                           " " + tr(TextId::Wins),
                  kScreenWidth / 2, 590, 4);
   } else {
-    drawCentered("PLAYER " +
+    drawCentered(String(tr(TextId::Player)) + " " +
                      String(static_cast<int>(dotsAndBoxes.currentPlayer())) +
-                     " TO MOVE",
+                     " " + tr(TextId::ToMove),
                  kScreenWidth / 2, 590, 4);
   }
 }
@@ -1751,8 +1930,8 @@ void drawDotsAndBoxesBoard() {
 void drawDotsAndBoxes() {
   epaper.fillSprite(TFT_WHITE);
   drawDotsAndBoxesBoard();
-  drawButton(kCenteredNewButton, "NEW");
-  drawGameStatusBar("DOTS + BOXES");
+  drawButton(kCenteredNewButton, tr(TextId::NewGame));
+  drawGameStatusBar(tr(TextId::DotsAndBoxes));
 }
 
 int sokobanCellSize() {
@@ -1818,13 +1997,15 @@ void drawSokobanBoard() {
                   kSokobanBoardRegion.width, kSokobanBoardRegion.height,
                   TFT_WHITE);
   if (sokobanCompletedLevelCount == SokobanGame::kLevelCount) {
-    drawCentered("155 / 155 LEVELS", kScreenWidth / 2, 250, 4);
-    drawCentered("ALL COMPLETE", kScreenWidth / 2, 330, 6);
-    drawCentered("PROGRESS SAVED", kScreenWidth / 2, 410, 4);
+    drawCentered(String("155 / 155 ") + tr(TextId::Levels),
+                 kScreenWidth / 2, 250, 4);
+    drawCentered(tr(TextId::AllComplete), kScreenWidth / 2, 330, 6);
+    drawCentered(tr(TextId::ProgressSaved), kScreenWidth / 2, 410, 4);
     return;
   }
 
-  drawCentered("LEVEL " + String(sokoban.levelIndex() + 1) + "/" +
+  drawCentered(String(tr(TextId::Level)) + " " +
+                   String(sokoban.levelIndex() + 1) + "/" +
                    String(SokobanGame::kLevelCount),
                kScreenWidth / 2, 112, 4);
   for (int row = 0; row < sokoban.height(); ++row) {
@@ -1833,19 +2014,21 @@ void drawSokobanBoard() {
     }
   }
   if (sokoban.solved()) {
-    drawCentered(sokobanProgressSaveFailed ? "SAVE FAILED - TAP NEXT"
-                                          : "LEVEL COMPLETE",
+    drawCentered(sokobanProgressSaveFailed ? tr(TextId::SaveFailedTapNext)
+                                           : tr(TextId::LevelComplete),
                  kScreenWidth / 2, 590, 4);
   } else {
-    drawCentered(String(sokoban.moveCount()) + " MOVES  " +
-                     String(sokoban.pushCount()) + " PUSHES",
+    drawCentered(String(sokoban.moveCount()) + " " + tr(TextId::Moves) +
+                     "  " + String(sokoban.pushCount()) + " " +
+                     tr(TextId::Pushes),
                  kScreenWidth / 2, 590, 4);
   }
 }
 
 void drawSokobanControls() {
   if (sokobanCompletedLevelCount < SokobanGame::kLevelCount) {
-    drawButton(kCenteredNewButton, sokoban.solved() ? "NEXT" : "RESTART");
+    drawButton(kCenteredNewButton,
+               sokoban.solved() ? tr(TextId::Next) : tr(TextId::Restart));
   }
 }
 
@@ -1853,14 +2036,14 @@ void drawSokoban() {
   epaper.fillSprite(TFT_WHITE);
   drawSokobanBoard();
   drawSokobanControls();
-  drawGameStatusBar("SOKOBAN");
+  drawGameStatusBar(tr(TextId::Sokoban));
 }
 
 void drawPegSolitaireBoard() {
   epaper.fillRect(kPegBoardRegion.x, kPegBoardRegion.y, kPegBoardRegion.width,
                   kPegBoardRegion.height, TFT_WHITE);
-  drawCentered(String(pegSolitaire.pegCount()) + " PEGS", kScreenWidth / 2,
-               112, 4);
+  drawCentered(String(pegSolitaire.pegCount()) + " " + tr(TextId::Pegs),
+               kScreenWidth / 2, 112, 4);
   for (int row = 0; row < PegSolitaireGame::kSize; ++row) {
     for (int column = 0; column < PegSolitaireGame::kSize; ++column) {
       if (!pegSolitaire.validCell(row, column)) continue;
@@ -1880,28 +2063,30 @@ void drawPegSolitaireBoard() {
     }
   }
   if (pegSolitaire.solved()) {
-    drawCentered("PERFECT CENTER FINISH!", kScreenWidth / 2, 590, 4);
+    drawCentered(tr(TextId::PerfectCenterFinish), kScreenWidth / 2, 590, 4);
   } else if (!pegSolitaire.hasAvailableMove()) {
-    drawCentered("NO MOVES - " + String(pegSolitaire.pegCount()) + " PEGS",
+    drawCentered(String(tr(TextId::NoMoves)) + " - " +
+                     String(pegSolitaire.pegCount()) + " " + tr(TextId::Pegs),
                  kScreenWidth / 2, 590, 4);
   } else {
-    drawCentered(String(pegSolitaire.moves()) + " MOVES", kScreenWidth / 2,
-                 590, 4);
+    drawCentered(String(pegSolitaire.moves()) + " " + tr(TextId::Moves),
+                 kScreenWidth / 2, 590, 4);
   }
 }
 
 void drawPegSolitaire() {
   epaper.fillSprite(TFT_WHITE);
   drawPegSolitaireBoard();
-  drawButton(kCenteredNewButton, "RESET");
-  drawGameStatusBar("PEG SOLITAIRE");
+  drawButton(kCenteredNewButton, tr(TextId::Reset));
+  drawGameStatusBar(tr(TextId::PegSolitaire));
 }
 
 void drawSlitherlinkBoard() {
   epaper.fillRect(kSlitherlinkBoardRegion.x, kSlitherlinkBoardRegion.y,
                   kSlitherlinkBoardRegion.width,
                   kSlitherlinkBoardRegion.height, TFT_WHITE);
-  drawCentered("PUZZLE " + String(slitherlink.puzzleIndex() + 1) + "/" +
+  drawCentered(String(tr(TextId::Puzzle)) + " " +
+                   String(slitherlink.puzzleIndex() + 1) + "/" +
                    String(SlitherlinkGame::kPuzzleCount),
                kScreenWidth / 2, 112, 4);
   for (int row = 0; row < SlitherlinkGame::kSize; ++row) {
@@ -1955,16 +2140,17 @@ void drawSlitherlinkBoard() {
                         TFT_BLACK);
     }
   }
-  drawCentered(slitherlink.solved() ? "LOOP COMPLETE!" : "MAKE ONE LOOP",
+  drawCentered(slitherlink.solved() ? tr(TextId::LoopComplete)
+                                    : tr(TextId::MakeOneLoop),
                kScreenWidth / 2, 590, 4);
 }
 
 void drawSlitherlink() {
   epaper.fillSprite(TFT_WHITE);
   drawSlitherlinkBoard();
-  drawButton(kNewButton, "NEW");
-  drawButton(kResetButton, "RESET");
-  drawGameStatusBar("SLITHERLINK");
+  drawButton(kNewButton, tr(TextId::NewGame));
+  drawButton(kResetButton, tr(TextId::Reset));
+  drawGameStatusBar(tr(TextId::Slitherlink));
 }
 
 Rect sudokuKeyRect(int key) {
@@ -1974,18 +2160,22 @@ Rect sudokuKeyRect(int key) {
 }
 
 void drawSmallButton(const Rect& rect, const char* label, int font = 2) {
+  const bool smoothFont = languageSelectionVisible ||
+                          currentLanguage != Language::English;
+  const int verticalOffset =
+      smoothFont ? (font >= 4 ? -2 : -1) : (font == 4 ? 3 : 1);
   epaper.fillRoundRect(rect.x, rect.y, rect.width, rect.height, 6, TFT_BLACK);
-  epaper.setTextDatum(MC_DATUM);
-  epaper.setTextColor(TFT_WHITE, TFT_BLACK, true);
-  epaper.drawString(label, rect.x + rect.width / 2,
-                    rect.y + rect.height / 2 + (font == 4 ? 3 : 1), font);
+  drawCenteredText(label, rect.x + rect.width / 2,
+                   rect.y + rect.height / 2 + verticalOffset, font, TFT_WHITE,
+                   TFT_BLACK, rect.width - 4, smoothFont);
 }
 
 void drawSudokuBoard() {
   epaper.fillRect(kSudokuBoardRegion.x, kSudokuBoardRegion.y,
                   kSudokuBoardRegion.width, kSudokuBoardRegion.height,
                   TFT_WHITE);
-  drawCentered("PUZZLE " + String(sudoku.puzzleIndex() + 1) + "/" +
+  drawCentered(String(tr(TextId::Puzzle)) + " " +
+                   String(sudoku.puzzleIndex() + 1) + "/" +
                    String(SudokuGame::kPuzzleCount),
                kScreenWidth / 2, 78, 2);
   for (int row = 0; row < SudokuGame::kSize; ++row) {
@@ -2016,10 +2206,10 @@ void drawSudokuBoard() {
     epaper.fillRect(kSudokuGridLeft, kSudokuGridTop + offset - 1,
                     kSudokuGridSize, 3, TFT_BLACK);
   }
-  drawCentered(sudoku.solved() ? "PUZZLE COMPLETE!"
+  drawCentered(sudoku.solved() ? tr(TextId::PuzzleComplete)
                                : sudoku.selectedIndex() == SudokuGame::kNoSelection
-                                     ? "TAP AN EMPTY CELL"
-                                     : "CHOOSE 1-9 OR X",
+                                     ? tr(TextId::TapEmptyCell)
+                                     : tr(TextId::ChooseOneToNineOrX),
                kScreenWidth / 2, 548, 4);
   for (int key = 0; key < 10; ++key) {
     if (key < 9) {
@@ -2034,9 +2224,9 @@ void drawSudokuBoard() {
 void drawSudoku() {
   epaper.fillSprite(TFT_WHITE);
   drawSudokuBoard();
-  drawButton(kNewButton, "NEW");
-  drawButton(kResetButton, "RESET");
-  drawGameStatusBar("SUDOKU");
+  drawButton(kNewButton, tr(TextId::NewGame));
+  drawButton(kResetButton, tr(TextId::Reset));
+  drawGameStatusBar(tr(TextId::Sudoku));
 }
 
 int crosswordCellSize() {
@@ -2068,7 +2258,7 @@ const char* crosswordKeyboardLabel(int row, int key) {
     label[0] = kRows[row][key];
     return label;
   }
-  return key == 7 ? "DEL" : "OK";
+  return key == 7 ? tr(TextId::DeleteKey) : tr(TextId::OkKey);
 }
 
 void drawCrosswordKeyboard() {
@@ -2085,9 +2275,10 @@ void drawCrosswordBoard() {
   epaper.fillRect(kCrosswordBoardRegion.x, kCrosswordBoardRegion.y,
                   kCrosswordBoardRegion.width, kCrosswordBoardRegion.height,
                   TFT_WHITE);
-  drawCentered("PUZZLE " + String(crossword.puzzleIndex() + 1) + "/" +
+  drawCentered(String(tr(TextId::Puzzle)) + " " +
+                   String(crossword.puzzleIndex() + 1) + "/" +
                    String(CrosswordGame::kPuzzleCount),
-               kScreenWidth / 2, 70, 2);
+               kScreenWidth / 2, 70, 4);
   const int cellSize = crosswordCellSize();
   const int left = crosswordGridLeft();
   for (int row = 0; row < crossword.height(); ++row) {
@@ -2107,7 +2298,7 @@ void drawCrosswordBoard() {
         epaper.setTextDatum(TL_DATUM);
         epaper.setTextColor(selected ? TFT_WHITE : TFT_BLACK,
                             selected ? TFT_BLACK : TFT_WHITE, true);
-        epaper.drawNumber(number, x + 3, y + 2, 1);
+        epaper.drawNumber(number, x + 3, y + 2, 2);
       }
       const char entry = crossword.entryAt(row, column);
       if (entry != '\0') {
@@ -2122,24 +2313,28 @@ void drawCrosswordBoard() {
 
   const int gridBottom = kCrosswordGridTop + crossword.height() * cellSize;
   if (crossword.selectedIndex() != CrosswordGame::kNoSelection) {
-    const char direction =
-        crossword.direction() == CrosswordGame::Direction::Across ? 'A' : 'D';
+    const char* direction =
+        crossword.direction() == CrosswordGame::Direction::Across
+            ? tr(TextId::AcrossAbbreviation)
+            : tr(TextId::DownAbbreviation);
     drawCentered(String(crossword.currentClueNumber()) + direction + "  " +
                      crossword.currentClueText(),
-                 kScreenWidth / 2, gridBottom + 28, 2);
+                 kScreenWidth / 2, gridBottom + 28, 4);
   } else {
-    drawCentered("TAP A WHITE SQUARE", kScreenWidth / 2, gridBottom + 28, 2);
+    drawCentered(tr(TextId::TapWhiteSquare), kScreenWidth / 2,
+                 gridBottom + 28, 4);
   }
-  drawCentered(crossword.solved() ? "PUZZLE COMPLETE!" : "EASY MINI CROSSWORD",
-               kScreenWidth / 2, 550, 4);
+  if (crossword.solved()) {
+    drawCentered(tr(TextId::PuzzleComplete), kScreenWidth / 2, 550, 4);
+  }
 }
 
 void drawCrosswordControls() {
   if (crosswordKeyboardVisible && !crossword.solved()) {
     drawCrosswordKeyboard();
   } else {
-    drawButton(kNewButton, "NEW");
-    drawButton(kResetButton, "RESET");
+    drawButton(kNewButton, tr(TextId::NewGame));
+    drawButton(kResetButton, tr(TextId::Reset));
   }
 }
 
@@ -2147,7 +2342,7 @@ void drawCrossword() {
   epaper.fillSprite(TFT_WHITE);
   drawCrosswordBoard();
   drawCrosswordControls();
-  drawGameStatusBar("CROSSWORD");
+  drawGameStatusBar(tr(TextId::Crossword));
 }
 
 uint32_t randomScramble() {
@@ -2336,6 +2531,75 @@ bool refreshScreen(const char* action) {
   return true;
 }
 
+void drawCurrentScreen() {
+  switch (currentScreen) {
+    case Screen::Menu:
+      drawMenu();
+      return;
+    case Screen::LightsOut:
+      drawLightsOut();
+      return;
+    case Screen::Game2048:
+      draw2048();
+      return;
+    case Screen::PipeConnect:
+      drawPipeConnect();
+      return;
+    case Screen::Minesweeper:
+      drawMinesweeper();
+      return;
+    case Screen::Nonogram:
+      drawNonogram();
+      return;
+    case Screen::Reversi:
+      drawReversi();
+      return;
+    case Screen::DotsAndBoxes:
+      drawDotsAndBoxes();
+      return;
+    case Screen::Sokoban:
+      drawSokoban();
+      return;
+    case Screen::PegSolitaire:
+      drawPegSolitaire();
+      return;
+    case Screen::Slitherlink:
+      drawSlitherlink();
+      return;
+    case Screen::Sudoku:
+      drawSudoku();
+      return;
+    case Screen::Crossword:
+      drawCrossword();
+      return;
+  }
+}
+
+void showLanguageSelection() {
+  saveResumeState();
+  languageSelectionVisible = true;
+  drawLanguageSelection();
+  refreshScreen("language selection");
+}
+
+void selectLanguage(Language language) {
+  const game_language_store::Status status =
+      game_language_store::save(language);
+  if (status != game_language_store::Status::Ok) {
+    LOG.printf("[games] could not save language: %s\n",
+               game_language_store::statusMessage(status));
+    return;
+  }
+
+  currentLanguage = language;
+  languageSelected = true;
+  languageSelectionVisible = false;
+  LOG.printf("[games] language selected: %s\n",
+             game_localization::languageName(language));
+  drawCurrentScreen();
+  refreshScreen("language changed");
+}
+
 void showMenu() {
   if (currentScreen == Screen::LightsOut && lightsOutSaved) {
     LOG.println("[games] auto-saving Lights Out");
@@ -2522,7 +2786,7 @@ void updateReversi(const char* action, const char* status = nullptr) {
 
 void updateReversiMode(const char* action) {
   drawReversiBoard();
-  drawButton(kNewButton, "NEW");
+  drawButton(kNewButton, tr(TextId::NewGame));
   drawButton(kResetButton, reversiModeLabel());
   refreshRegion(kReversiModeRegion, action);
 }
@@ -2559,12 +2823,67 @@ void updateCrossword(const char* action) {
   refreshRegion(kCrosswordBoardRegion, action);
 }
 
-void showMenuPage(MenuPage page) {
+void launchGame(GameId game) {
   hardware::beep();
+  recordGameLaunch(game);
+  switch (game) {
+    case GameId::LightsOut:
+      showLightsOut();
+      break;
+    case GameId::Game2048:
+      show2048();
+      break;
+    case GameId::PipeConnect:
+      showPipeConnect();
+      break;
+    case GameId::Minesweeper:
+      showMinesweeper();
+      break;
+    case GameId::Nonogram:
+      showNonogram();
+      break;
+    case GameId::Reversi:
+      showReversi();
+      break;
+    case GameId::DotsAndBoxes:
+      showDotsAndBoxes();
+      break;
+    case GameId::Sokoban:
+      showSokoban();
+      break;
+    case GameId::PegSolitaire:
+      showPegSolitaire();
+      break;
+    case GameId::Slitherlink:
+      showSlitherlink();
+      break;
+    case GameId::Sudoku:
+      showSudoku();
+      break;
+    case GameId::Crossword:
+      showCrossword();
+      break;
+    case GameId::Count:
+      return;
+  }
+  saveResumeState();
+}
+
+void showMenuPage(MenuPage page, bool beep = true) {
+  if (beep) hardware::beep();
   currentMenuPage = page;
   saveResumeState();
   drawMenu();
   refreshScreen(page == MenuPage::First ? "menu page 1" : "menu page 2");
+}
+
+void handleLanguageTouch(const Gt911Touch::Point& point) {
+  for (size_t index = 0; index < game_localization::kLanguageCount; ++index) {
+    if (!kLanguageButtons[index].contains(point.x, point.y)) continue;
+    hardware::beep();
+    selectLanguage(static_cast<Language>(index));
+    return;
+  }
 }
 
 void handleMenuTouch(const Gt911Touch::Point& point) {
@@ -2578,46 +2897,13 @@ void handleMenuTouch(const Gt911Touch::Point& point) {
     showMenuPage(MenuPage::First);
     return;
   }
-  if (currentMenuPage == MenuPage::Second) {
-    if (kDotsAndBoxesMenuCard.contains(point.x, point.y)) {
-      hardware::beep();
-      showDotsAndBoxes();
-    } else if (kSokobanMenuCard.contains(point.x, point.y)) {
-      hardware::beep();
-      showSokoban();
-    } else if (kPegSolitaireMenuCard.contains(point.x, point.y)) {
-      hardware::beep();
-      showPegSolitaire();
-    } else if (kSlitherlinkMenuCard.contains(point.x, point.y)) {
-      hardware::beep();
-      showSlitherlink();
-    } else if (kSudokuMenuCard.contains(point.x, point.y)) {
-      hardware::beep();
-      showSudoku();
-    } else if (kCrosswordMenuCard.contains(point.x, point.y)) {
-      hardware::beep();
-      showCrossword();
+  const size_t firstRank =
+      currentMenuPage == MenuPage::First ? 0 : kGamesPerMenuPage;
+  for (size_t slot = 0; slot < kGamesPerMenuPage; ++slot) {
+    if (kMenuCardSlots[slot].contains(point.x, point.y)) {
+      launchGame(rankedGameAt(firstRank + slot));
+      return;
     }
-    return;
-  }
-  if (kLightsOutMenuCard.contains(point.x, point.y)) {
-    hardware::beep();
-    showLightsOut();
-  } else if (k2048MenuCard.contains(point.x, point.y)) {
-    hardware::beep();
-    show2048();
-  } else if (kPipeConnectMenuCard.contains(point.x, point.y)) {
-    hardware::beep();
-    showPipeConnect();
-  } else if (kMinesweeperMenuCard.contains(point.x, point.y)) {
-    hardware::beep();
-    showMinesweeper();
-  } else if (kNonogramMenuCard.contains(point.x, point.y)) {
-    hardware::beep();
-    showNonogram();
-  } else if (kReversiMenuCard.contains(point.x, point.y)) {
-    hardware::beep();
-    showReversi();
   }
 }
 
@@ -2770,8 +3056,8 @@ void handleReversiTouch(const Gt911Touch::Point& point) {
     const char* passStatus =
         humanOpponentPassed
             ? reversi.currentPlayer() == ReversiGame::Disc::Black
-                  ? "WHITE PASSES - BLACK AGAIN"
-                  : "BLACK PASSES - WHITE AGAIN"
+                  ? tr(TextId::WhitePassesBlackAgain)
+                  : tr(TextId::BlackPassesWhiteAgain)
             : nullptr;
     updateReversi(result == ReversiGame::MoveResult::GameOver
                        ? "Reversi game over"
@@ -3218,7 +3504,10 @@ void pollTouch() {
   touchStart = point;
   touchLast = point;
   touchStartedAtMs = millis();
-  if (currentScreen == Screen::Menu) {
+  if (languageSelectionVisible) {
+    handleLanguageTouch(point);
+    touchActionHandled = true;
+  } else if (currentScreen == Screen::Menu) {
     handleMenuTouch(point);
     touchActionHandled = true;
   } else if (currentScreen == Screen::LightsOut) {
@@ -3306,32 +3595,54 @@ void powerDownAndSleep(SleepScreen screen = SleepScreen::Resume,
 void handleButton(const ButtonEvent& event) {
   ButtonState& button = *event.button;
   recordActivity();
-  LOG.printf("[games] %s %s press\n", button.name,
-             buttonPressTypeName(event.type));
-  hardware::beep();
+  LOG.printf("[games] %s released after %lu ms\n", button.name,
+             static_cast<unsigned long>(event.heldMs));
 
-  if (button.pin != board::PIN_BUTTON_0) {
-    LOG.printf("[games] ignoring %s button\n", button.name);
+  if (button.pin == board::PIN_BUTTON_0) {
+    switch (ok_button::actionForHold(event.heldMs)) {
+      case ok_button::Action::DeepSleep:
+        hardware::beep();
+        powerDownAndSleep();
+        return;
+      case ok_button::Action::LanguageSelection:
+        hardware::beep();
+        showLanguageSelection();
+        return;
+      case ok_button::Action::None:
+        LOG.println("[games] ignoring OK hold over five seconds");
+        return;
+    }
+  }
+
+  hardware::beep();
+  if (languageSelectionVisible) {
+    LOG.println("[games] ignoring navigation button on language selection");
     return;
   }
-#ifdef ENABLE_SCREENSHOT_GESTURE
-  if (event.type == ButtonPressType::Screenshot) {
-    if (!sdReady) {
-      LOG.println("[screenshot] request ignored: SD card is unavailable");
-    } else if (!screenshot::saveScreenshotBmp(
-                   epaper, kScreenWidth, kScreenHeight)) {
-      LOG.println("[screenshot] capture failed");
+  if (button.pin == board::PIN_BUTTON_1) {
+    if (currentScreen != Screen::Menu) {
+      showMenu();
+    } else if (currentMenuPage == MenuPage::Second) {
+      showMenuPage(MenuPage::First, false);
+    } else {
+      LOG.println("[games] already on first menu page");
     }
     return;
   }
-#endif
-  if (event.type == ButtonPressType::Long) {
-    while (digitalRead(button.pin) == LOW) delay(10);
-    powerDownAndSleep();
-  } else if (currentScreen != Screen::Menu) {
-    showMenu();
-  } else {
-    LOG.println("[games] ignoring OK on game selection");
+  if (button.pin == board::PIN_BUTTON_2) {
+    if (currentScreen == Screen::Menu &&
+        currentMenuPage == MenuPage::First) {
+      showMenuPage(MenuPage::Second, false);
+    } else if (currentScreen == Screen::Menu) {
+      LOG.println("[games] already on last menu page");
+    } else {
+      LOG.println("[games] ignoring DOWN while playing");
+    }
+    return;
+  }
+  if (button.pin != board::PIN_BUTTON_0) {
+    LOG.printf("[games] ignoring %s button\n", button.name);
+    return;
   }
 }
 
@@ -3396,6 +3707,17 @@ void setup() {
   LOG.println();
   LOG.println("[games] reTerminal E1005 Games");
   hardware::beep();
+  const game_language_store::LoadResult languageResult =
+      game_language_store::load();
+  if (languageResult.status == game_language_store::Status::Ok) {
+    currentLanguage = languageResult.language;
+    languageSelected = true;
+    LOG.printf("[games] language: %s\n",
+               game_localization::languageName(currentLanguage));
+  } else {
+    LOG.printf("[games] language selection required: %s\n",
+               game_language_store::statusMessage(languageResult.status));
+  }
   const game_progress::LoadResult sokobanProgress =
       game_progress::loadHighestCheckpoint(kSokobanProgressKey,
                                            SokobanGame::kLevelCount + 1);
@@ -3409,6 +3731,7 @@ void setup() {
                game_progress::statusMessage(sokobanProgress.status));
   }
   const bool resumed = restoreResumeState();
+  updateGameRanking();
   if (resumed && sokobanSaved) {
     openNextUnfinishedSokobanLevel();
     if (sokoban.solved()) saveSokobanCompletion();
@@ -3422,54 +3745,33 @@ void setup() {
 
   epaper_setup::begin(epaper);
   checkBatteryAndSleepIfNeeded();
-#ifdef ENABLE_SCREENSHOT_GESTURE
-  sdReady = sd_card::mount(epaper.getSPIinstance(), "/games");
-#else
   const bool sdReady = sd_card::mount(epaper.getSPIinstance(), "/games");
-#endif
   if (sdReady && sd_ota::hasUpdate()) {
-    drawStatus("UPDATING FIRMWARE", "DO NOT POWER OFF");
+    drawStatus(tr(TextId::UpdatingFirmware), tr(TextId::DoNotPowerOff));
     epaper.update();
     const sd_ota::Result updateResult = sd_ota::apply();
     if (updateResult == sd_ota::Result::Applied) {
       delay(1000);
       ESP.restart();
     }
-    drawStatus("UPDATE FAILED", "CURRENT FIRMWARE IS SAFE");
+    drawStatus(tr(TextId::UpdateFailed), tr(TextId::CurrentFirmwareSafe));
     epaper.update();
     delay(2500);
   }
 
-  if (resumed && currentScreen == Screen::LightsOut) {
-    drawLightsOut();
-  } else if (resumed && currentScreen == Screen::Game2048) {
-    draw2048();
-  } else if (resumed && currentScreen == Screen::PipeConnect) {
-    drawPipeConnect();
-  } else if (resumed && currentScreen == Screen::Minesweeper) {
-    drawMinesweeper();
-  } else if (resumed && currentScreen == Screen::Nonogram) {
-    drawNonogram();
-  } else if (resumed && currentScreen == Screen::Reversi) {
+  if (!resumed) currentScreen = Screen::Menu;
+  if (resumed && currentScreen == Screen::Reversi) {
     playReversiComputerTurns();
-    drawReversi();
-  } else if (resumed && currentScreen == Screen::DotsAndBoxes) {
-    drawDotsAndBoxes();
-  } else if (resumed && currentScreen == Screen::Sokoban) {
-    drawSokoban();
-  } else if (resumed && currentScreen == Screen::PegSolitaire) {
-    drawPegSolitaire();
-  } else if (resumed && currentScreen == Screen::Slitherlink) {
-    drawSlitherlink();
-  } else if (resumed && currentScreen == Screen::Sudoku) {
-    drawSudoku();
-  } else if (resumed && currentScreen == Screen::Crossword) {
-    drawCrossword();
-  } else {
-    currentScreen = Screen::Menu;
-    drawMenu();
   }
-  LOG.printf("[games] refreshing %s\n", screenName(currentScreen));
+  if (languageSelected) {
+    drawCurrentScreen();
+  } else {
+    languageSelectionVisible = true;
+    drawLanguageSelection();
+  }
+  LOG.printf("[games] refreshing %s\n",
+             languageSelectionVisible ? "language selection"
+                                      : screenName(currentScreen));
   epaper.update();
   sd_ota::confirmRunningImage();
 

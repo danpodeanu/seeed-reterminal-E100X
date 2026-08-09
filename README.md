@@ -56,26 +56,30 @@ This frame was captured directly from a reTerminal E1001 running the
 These frames were captured directly from a reTerminal E1005 running
 [Games](games/).
 
-The selector presents six games per page:
+The selector presents six games per page and automatically orders them from
+most played to least played. Equal play counts retain the default order below:
 
-| Game | Page | Description |
-| --- | ---: | --- |
-| Lights Out | 1 | Toggle a square and its neighbours until the 5x5 board is dark. |
-| 2048 | 1 | Swipe and merge matching tiles while preserving the best score. |
-| Pipe Connect | 1 | Rotate 36 pipe tiles into one connected network. |
-| Mini Minesweeper | 1 | Clear a first-tap-safe 6x6 field containing six mines. |
-| Nonogram / Picross | 1 | Use row and column clues to reveal a hidden 5x5 picture. |
-| Reversi / Othello | 1 | Play against the built-in AI or use two-player pass-and-play. |
-| Dots and Boxes | 2 | Draw edges, complete boxes, and keep the turn after scoring. |
-| Sokoban | 2 | Push crates through all 155 Microban I levels with durable completion progress. |
-| Peg Solitaire | 2 | Jump and remove pegs from the classic cross-shaped board. |
-| Slitherlink | 2 | Draw one loop whose edges satisfy every numbered clue. |
-| Sudoku | 2 | Complete a randomly selected, uniquely solvable easy 9x9 puzzle. |
-| Crossword | 2 | Solve one of 12 easy mini crosswords with an on-screen QWERTY keyboard. |
+| Game | Description |
+| --- | --- |
+| Lights Out | Toggle a square and its neighbours until the 5x5 board is dark. |
+| 2048 | Swipe and merge matching tiles while preserving the best score. |
+| Pipe Connect | Rotate 36 pipe tiles into one connected network. |
+| Mini Minesweeper | Clear a first-tap-safe 6x6 field containing six mines. |
+| Nonogram / Picross | Use row and column clues to reveal a hidden 5x5 picture. |
+| Reversi / Othello | Play against the built-in AI or use two-player pass-and-play. |
+| Dots and Boxes | Draw edges, complete boxes, and keep the turn after scoring. |
+| Sokoban | Push crates through all 155 Microban I levels with durable completion progress. |
+| Peg Solitaire | Jump and remove pegs from the classic cross-shaped board. |
+| Slitherlink | Draw one loop whose edges satisfy every numbered clue. |
+| Sudoku | Complete a randomly selected, uniquely solvable easy 9x9 puzzle. |
+| Crossword | Solve one of 100 easy mini crosswords with an on-screen QWERTY keyboard. |
 
 All games preserve their current state across selector visits and deep sleep.
-See the [Games README](games/) for complete rules, controls, persistence
-details, and puzzle-source attribution.
+Play counts are kept in RTC memory across deep sleep and reset after power loss
+or reflashing. The interface supports English, Spanish, French, German, and
+Simplified Chinese using fonts embedded in firmware flash. See the
+[Games README](games/) for complete rules, controls, persistence details, and
+puzzle-source attribution.
 
 ## Future ideas
 
