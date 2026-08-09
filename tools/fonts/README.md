@@ -31,8 +31,10 @@ License 1.1; see `LICENSE.noto`.
 ## EPUB CJK font
 
 The Games EPUB reader can load the same Noto source from the SD card as a
-complete 16px Basic Multilingual Plane font. After downloading and verifying
-the source above, generate the reader font directly onto a mounted SD card:
+complete 16px Basic Multilingual Plane font. The generated font is committed
+under `fonts/` and included in the `fonts.zip` attached to every tagged
+release. To regenerate it after downloading and verifying the source above,
+write it directly onto a mounted SD card:
 
 ```bash
 python games/tools/generate_epub_cjk_font.py /path/to/sd-card
@@ -42,4 +44,4 @@ On Windows, use the drive root, for example
 `python games\tools\generate_epub_cjk_font.py E:\`. The script verifies the
 pinned source SHA-256 and writes `fonts/epub_cjk_16.vlw` beneath the supplied
 root. Its output is approximately 12 MB with 42,220 glyphs. Only the generated
-VLW file belongs on the SD card.
+VLW file and its `LICENSE.noto` belong on the SD card.

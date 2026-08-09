@@ -275,8 +275,12 @@ Touch controls:
   in RTC memory. Waking from deep sleep reopens the same page when the SD card
   and book are still available; otherwise the reader returns to the browser.
 
-For CJK books, generate `/fonts/epub_cjk_16.vlw` on the SD card from the pinned
-Noto Sans CJK SC Bold source:
+For CJK books, download `fonts.zip` from the
+[latest release](https://github.com/danpodeanu/seeed-reterminal-E100X/releases)
+and unzip it at the SD-card root. This installs `/fonts/epub_cjk_16.vlw` plus
+the shared Latin fonts.
+
+To regenerate the CJK font from its pinned Noto Sans CJK SC Bold source:
 
 ```powershell
 # Download once, from the repository root.

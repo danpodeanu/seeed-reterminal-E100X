@@ -57,7 +57,8 @@ Two workflows cooperate:
    `firmware-<app>-<board>-full.bin` (merged, for direct USB flashing) and
    `firmware-<app>-<board>-ota.bin` (app-only, for SD OTA and the web
    flasher). It also publishes the shared E1001-E1004 three-part boot chain,
-   the E1005-specific boot chain, and `sans_bold_fonts.zip`.
+   the E1005-specific boot chain, the complete `fonts.zip`, and the legacy
+   DejaVu-only `sans_bold_fonts.zip`.
 2. After all release assets are uploaded, `release.yml` dispatches
    `.github/workflows/pages.yml` on `main`. The Pages workflow also runs
    for changes under `docs/` and on manual dispatch. It downloads every

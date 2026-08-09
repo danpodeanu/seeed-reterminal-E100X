@@ -1,8 +1,10 @@
-# Prebuilt Unicode fonts
+# Prebuilt Unicode and CJK fonts
 
 TFT_eSPI `.vlw` smooth fonts derived from **DejaVu Sans Bold**, shared
 by the xkcd, weather, and photo viewers to render non-ASCII characters
 (e.g. `München`, `São Paulo`, `forté`, em dashes, curly quotes).
+The Games EPUB reader also uses **Noto Sans CJK SC Bold** for common Chinese,
+Japanese, and Korean text.
 
 ## What's here
 
@@ -10,8 +12,11 @@ by the xkcd, weather, and photo viewers to render non-ASCII characters
   (~65 MB total). Each firmware selects a subset per panel; the full
   set is included so future firmware tweaks don't require regenerating
   the card.
+- `epub_cjk_16.vlw` — a complete 16px Basic Multilingual Plane font for
+  EPUB content (~12 MB, 42,220 glyphs).
 - `LICENSE.dejavu` — the Bitstream Vera Fonts License, which covers
   redistribution of the `.vlw` derivatives.
+- `LICENSE.noto` — the SIL Open Font License 1.1 for the CJK derivative.
 
 ## Installing on the device
 
@@ -25,10 +30,11 @@ Two convenient ways to get them onto the card:
 
 - **From this repository.** After cloning, copy `fonts/*.vlw` (and
   optionally `LICENSE.dejavu`) into `/fonts/` on the SD card.
-- **From a GitHub release.** Every tagged release attaches a
-  `sans_bold_fonts.zip` bundle to the release page. Download it from
+- **From a GitHub release.** Every tagged release attaches a complete
+  `fonts.zip` bundle to the release page. Download it from
   <https://github.com/danpodeanu/seeed-reterminal-E100X/releases>,
-  unzip it, and copy the `.vlw` files into `/fonts/` on the SD card.
+  then unzip it at the SD-card root. The archive already contains the
+  top-level `fonts` folder.
 
 ## Regenerating from source
 
@@ -43,8 +49,12 @@ Defaults to `tools/fonts/DejaVuSans-Bold.ttf` and every size 12–48.
 Pass `--ttf <path>` to use a different face, or `--size <n>`
 (repeatable) to restrict the set.
 
+The CJK font has a separate reproducible generator documented in
+[`tools/fonts/README.md`](../tools/fonts/README.md).
+
 ## License
 
 DejaVu Sans is distributed under the Bitstream Vera Fonts License.
-See `LICENSE.dejavu` for the full text; it must accompany any
-redistribution of the `.vlw` derivatives.
+Noto Sans CJK is distributed under the SIL Open Font License 1.1.
+See `LICENSE.dejavu` and `LICENSE.noto`; both must accompany redistribution
+of their corresponding `.vlw` derivatives.

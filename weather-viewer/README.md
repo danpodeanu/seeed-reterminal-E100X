@@ -142,11 +142,10 @@ or via `tools/fonts/make_vlw.py` directly.
 
 **Prebuilt fonts (no Python needed).** The repository ships the
 prebuilt `.vlw` set under [`../fonts/`](../fonts/), and every tagged
-release attaches a `sans_bold_fonts.zip` bundle to the release page.
-Copy `fonts/*.vlw` from a clone, or download and unzip the release
-bundle from
-<https://github.com/danpodeanu/seeed-reterminal-E100X/releases>, into
-`/fonts/` on the SD card.
+release attaches a `fonts.zip` bundle to the release page. Copy
+`fonts/*.vlw` from a clone, or download the bundle from
+<https://github.com/danpodeanu/seeed-reterminal-E100X/releases> and unzip
+it at the SD-card root.
 
 ## Using the viewer
 
@@ -311,7 +310,7 @@ from `/fonts/sans_bold_<size>.vlw` on the SD card. Those files are
 shared with the xkcd viewer; grab the prebuilt bundle from
 [`../fonts/`](../fonts/) or a
 [release](https://github.com/danpodeanu/seeed-reterminal-E100X/releases)
-(look for `sans_bold_fonts.zip`), or regenerate with
+(look for `fonts.zip`), or regenerate with
 `xkcd-viewer/tools/preload_sd.py --with-fonts` or
 `tools/fonts/make_vlw.py`. Without the SD card (or the font file),
 those strings fall back to the built-in GFX FreeSansBold font and any
