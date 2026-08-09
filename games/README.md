@@ -278,7 +278,7 @@ Touch controls:
 For CJK books, download `fonts.zip` from the
 [latest release](https://github.com/danpodeanu/seeed-reterminal-E100X/releases)
 and unzip it at the SD-card root. This installs `/fonts/epub_cjk_16.vlw` plus
-the shared Latin fonts.
+the 24px CJK browser font and shared Latin fonts.
 
 To regenerate the CJK font from its pinned Noto Sans CJK SC Bold source:
 
@@ -293,18 +293,20 @@ python games\tools\generate_epub_cjk_font.py E:\
 ```
 
 The generator verifies the pinned source font, creates the SD card's `fonts`
-folder when needed, and writes only `epub_cjk_16.vlw`. The generated file is
-about 12 MB and contains 42,220 BMP glyphs covering common Simplified and
+folder when needed, and writes `epub_cjk_16.vlw` for book text plus
+`epub_cjk_24.vlw` for SD filenames. They are about 12 MB and 24.5 MB,
+respectively, with 42,220 BMP glyphs each, covering common Simplified and
 Traditional Chinese characters, Japanese kana and kanji, and Korean Hangul.
-The source `.otf` does not need to be copied to the SD card. Rare supplementary
-CJK Extension B and later characters above `U+FFFF` are not supported by the
-display renderer.
+The source `.otf` does not need to be copied to the SD card. Rare
+supplementary CJK Extension B and later characters above `U+FFFF` are not
+supported by the display renderer.
 
-If the CJK file is absent, the reader uses `/fonts/sans_bold_16.vlw` when
-available, then falls back to the flash-backed interface font. A CJK chapter
-shows a localized **CJK FONT REQUIRED** message instead of blank text when the
-required SD font is missing. CJK characters are treated as full-width during
-pagination.
+If the 16px CJK file is absent, the reader uses `/fonts/sans_bold_16.vlw`
+when available, then falls back to the flash-backed interface font. A CJK
+chapter shows a localized **CJK FONT REQUIRED** message instead of blank text
+when the required SD font is missing. The browser falls back to the 16px CJK
+font if the 24px file is absent. CJK characters are treated as full-width
+during pagination.
 
 The selector uses three two-column pages with up to six activities each. It
 automatically orders them by use count, from most used to least used,

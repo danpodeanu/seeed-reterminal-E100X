@@ -57,6 +57,8 @@ bool SdReadonlyBrowser::open(const String& requestedPath) {
     if (!name.isEmpty() && name != "." && name != "..") {
       if (count_ >= kMaximumEntries) {
         truncated_ = true;
+        file.close();
+        break;
       } else {
         Entry& entry = entries_[count_++];
         entry.name = name;

@@ -12,8 +12,9 @@ Japanese, and Korean text.
   (~65 MB total). Each firmware selects a subset per panel; the full
   set is included so future firmware tweaks don't require regenerating
   the card.
-- `epub_cjk_16.vlw` — a complete 16px Basic Multilingual Plane font for
-  EPUB content (~12 MB, 42,220 glyphs).
+- `epub_cjk_16.vlw` and `epub_cjk_24.vlw` — complete Basic Multilingual
+  Plane fonts for EPUB content and readable SD filenames (~12 MB and
+  ~24.5 MB, 42,220 glyphs each).
 - `LICENSE.dejavu` — the Bitstream Vera Fonts License, which covers
   redistribution of the `.vlw` derivatives.
 - `LICENSE.noto` — the SIL Open Font License 1.1 for the CJK derivative.

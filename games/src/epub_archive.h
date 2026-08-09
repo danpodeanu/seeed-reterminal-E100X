@@ -1,10 +1,34 @@
 #pragma once
 
 #include <Arduino.h>
+#include <FS.h>
 
 #include <string>
 
 #include "miniz.h"
+
+class EpubChapterText {
+ public:
+  EpubChapterText() = default;
+  ~EpubChapterText();
+  EpubChapterText(const EpubChapterText&) = delete;
+  EpubChapterText& operator=(const EpubChapterText&) = delete;
+  EpubChapterText(EpubChapterText&& other) noexcept;
+  EpubChapterText& operator=(EpubChapterText&& other) noexcept;
+
+  const char* c_str() const { return data_ == nullptr ? "" : data_; }
+  size_t length() const { return length_; }
+  bool empty() const { return length_ == 0; }
+  void clear();
+
+ private:
+  friend class EpubArchive;
+
+  char* data_ = nullptr;
+  size_t length_ = 0;
+
+  void adopt(char* data, size_t length);
+};
 
 class EpubArchive {
  public:
@@ -16,7 +40,7 @@ class EpubArchive {
 
   bool open(const String& sdPath);
   void close();
-  bool loadChapter(int index, String& text);
+  bool loadChapter(int index, EpubChapterText& text);
 
   bool isOpen() const { return open_; }
   int chapterCount() const { return chapterCount_; }
@@ -31,6 +55,7 @@ class EpubArchive {
   };
 
   mz_zip_archive archive_ = {};
+  File archiveFile_;
   bool open_ = false;
   String sdPath_;
   String title_;
@@ -40,6 +65,8 @@ class EpubArchive {
 
   bool extract(const String& archivePath, std::string& output,
                size_t maximumBytes);
+  bool extractBuffer(const String& archivePath, char*& output, size_t& length,
+                     size_t maximumBytes);
   bool parsePackage(const std::string& package, const String& packagePath);
   void setError(const char* message);
 };

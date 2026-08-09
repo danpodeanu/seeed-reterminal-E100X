@@ -1456,6 +1456,17 @@ void test_epub_html_to_text_preserves_blocks_and_decodes_entities() {
                            text.c_str());
 }
 
+void test_epub_html_to_text_can_reuse_the_extraction_buffer() {
+  char html[] =
+      "<body><p>First&nbsp;line</p><script>drop me</script>"
+      "<p>&#x7532;&#20057;</p></body>";
+  const size_t length = epub_text::htmlToPlainTextInPlace(
+      html, sizeof(html) - 1);
+  TEST_ASSERT_EQUAL_STRING("First line\n甲乙", html);
+  TEST_ASSERT_EQUAL_UINT32(sizeof("First line\n甲乙") - 1, length);
+  TEST_ASSERT_LESS_THAN_UINT32(sizeof(html) - 1, length);
+}
+
 void test_epub_xml_helpers_parse_attributes_and_resolve_paths() {
   const char tag[] =
       "rootfile media-type=\"application/oebps-package+xml\" "
@@ -1517,6 +1528,13 @@ void test_epub_pagination_treats_cjk_as_full_width() {
   TEST_ASSERT_TRUE(epub_text::containsCjk(text.data(), text.size()));
   const std::string korean = u8"한글";
   TEST_ASSERT_TRUE(epub_text::containsCjk(korean.data(), korean.size()));
+  const std::string halfwidthKatakana = u8"\uFF76\uFF80\uFF76\uFF85";
+  TEST_ASSERT_TRUE(epub_text::containsCjk(halfwidthKatakana.data(),
+                                         halfwidthKatakana.size()));
+  const std::string halfwidthHangul = u8"\uFFA1\uFFB2";
+  TEST_ASSERT_TRUE(epub_text::containsCjk(halfwidthHangul.data(),
+                                         halfwidthHangul.size()));
+  TEST_ASSERT_EQUAL_UINT32(1, epub_text::displayColumns(0xFF76));
   TEST_ASSERT_FALSE(epub_text::containsCjk("Café", 5));
 }
 
@@ -1618,6 +1636,7 @@ int main(int, char**) {
   RUN_TEST(test_mahjong_snapshot_restores_selection_and_removed_pair);
   RUN_TEST(test_mahjong_rejects_inconsistent_snapshot);
   RUN_TEST(test_epub_html_to_text_preserves_blocks_and_decodes_entities);
+  RUN_TEST(test_epub_html_to_text_can_reuse_the_extraction_buffer);
   RUN_TEST(test_epub_xml_helpers_parse_attributes_and_resolve_paths);
   RUN_TEST(test_epub_pagination_wraps_utf8_without_splitting_characters);
   RUN_TEST(test_epub_pagination_treats_cjk_as_full_width);

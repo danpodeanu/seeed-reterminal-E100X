@@ -156,8 +156,14 @@ constexpr uint16_t kCrosswordSavedFlag = 1U << 11;
 constexpr uint16_t kKlondikeSavedFlag = 1U << 12;
 constexpr uint16_t kMahjongSavedFlag = 1U << 13;
 constexpr char kSokobanProgressKey[] = "sokoban_level";
-constexpr char kReaderCjkFontPath[] = "/fonts/epub_cjk_16.vlw";
-constexpr char kReaderCjkFontName[] = "fonts/epub_cjk_16";
+constexpr char kReaderCjkFont16Path[] = "/fonts/epub_cjk_16.vlw";
+constexpr char kReaderCjkFont16Name[] = "fonts/epub_cjk_16";
+constexpr char kReaderCjkFont24Path[] = "/fonts/epub_cjk_24.vlw";
+constexpr char kReaderCjkFont24Name[] = "fonts/epub_cjk_24";
+constexpr char kReaderLatinFont16Path[] = "/fonts/sans_bold_16.vlw";
+constexpr char kReaderLatinFont16Name[] = "fonts/sans_bold_16";
+constexpr char kReaderLatinFont24Path[] = "/fonts/sans_bold_24.vlw";
+constexpr char kReaderLatinFont24Name[] = "fonts/sans_bold_24";
 constexpr size_t kReaderPathCapacity = 192;
 constexpr size_t kReaderColumns = 45;
 constexpr size_t kReaderLinesPerPage = 24;
@@ -252,6 +258,7 @@ constexpr E1005FastRefresh::Region kSudokuBoardRegion = {20, 64, 440, 610};
 constexpr E1005FastRefresh::Region kCrosswordBoardRegion = {20, 64, 440, 690};
 constexpr E1005FastRefresh::Region kKlondikeBoardRegion = {5, 56, 470, 620};
 constexpr E1005FastRefresh::Region kMahjongBoardRegion = {8, 64, 464, 612};
+constexpr E1005FastRefresh::Region kReaderRegion = {0, 48, 480, 706};
 
 enum class Screen {
   Menu,
@@ -458,11 +465,17 @@ bool crosswordSaved = false;
 bool klondikeSaved = false;
 bool mahjongSaved = false;
 bool sdCardReady = false;
+bool readerCjkFont16Available = false;
+bool readerCjkFont24Available = false;
+bool readerLatinFont16Available = false;
+bool readerLatinFont24Available = false;
 int browserPageStart = 0;
 String browserMessage;
 String readerBrowserPath = "/";
 String readerBookPath;
-String readerChapterText;
+EpubChapterText readerChapterText;
+bool readerChapterRequiresNonAscii = false;
+bool readerChapterRequiresCjk = false;
 int readerChapterIndex = 0;
 size_t readerPageStart = 0;
 bool crosswordKeyboardVisible = false;
@@ -974,6 +987,13 @@ void idleInLightSleep() {
 
 bool containsNonAscii(const String& text) {
   for (size_t index = 0; index < text.length(); ++index) {
+    if (static_cast<uint8_t>(text[index]) >= 0x80) return true;
+  }
+  return false;
+}
+
+bool containsNonAscii(const char* text, size_t length) {
+  for (size_t index = 0; index < length; ++index) {
     if (static_cast<uint8_t>(text[index]) >= 0x80) return true;
   }
   return false;
@@ -2807,11 +2827,14 @@ void drawMahjong() {
   drawGameStatusBar(tr(TextId::MahjongSolitaire));
 }
 
-String fitReaderText(String text, int maximumWidth) {
-  if (epaper.textWidth(text) <= maximumWidth) return text;
+String fitReaderText(String text, int maximumWidth, int builtInFont = 0) {
+  const auto textWidth = [builtInFont](const String& value) {
+    return builtInFont > 0 ? epaper.textWidth(value, builtInFont)
+                           : epaper.textWidth(value);
+  };
+  if (textWidth(text) <= maximumWidth) return text;
   constexpr char kEllipsis[] = "...";
-  while (!text.isEmpty() &&
-         epaper.textWidth(text + kEllipsis) > maximumWidth) {
+  while (!text.isEmpty() && textWidth(text + kEllipsis) > maximumWidth) {
     size_t offset = text.length() - 1;
     while (offset > 0 &&
            (static_cast<uint8_t>(text[offset]) & 0xC0) == 0x80) {
@@ -2822,15 +2845,84 @@ String fitReaderText(String text, int maximumWidth) {
   return text + kEllipsis;
 }
 
-bool loadReaderFont() {
-  if (sdCardReady && sd_card::fileExists(kReaderCjkFontPath)) {
-    epaper.loadFont(kReaderCjkFontName, SD);
+void drawReaderString(const String& text, int x, int y, int builtInFont = 0) {
+  if (builtInFont > 0) {
+    epaper.drawString(text, x, y, builtInFont);
+  } else {
+    epaper.drawString(text, x, y);
+  }
+}
+
+void detectReaderFonts() {
+  if (!sdCardReady) {
+    readerCjkFont16Available = false;
+    readerCjkFont24Available = false;
+    readerLatinFont16Available = false;
+    readerLatinFont24Available = false;
+    return;
+  }
+  readerCjkFont16Available =
+      readerCjkFont16Available || sd_card::fileExists(kReaderCjkFont16Path);
+  readerCjkFont24Available =
+      readerCjkFont24Available || sd_card::fileExists(kReaderCjkFont24Path);
+  readerLatinFont16Available =
+      readerLatinFont16Available || sd_card::fileExists(kReaderLatinFont16Path);
+  readerLatinFont24Available =
+      readerLatinFont24Available || sd_card::fileExists(kReaderLatinFont24Path);
+  LOG.printf(
+      "[games] reader fonts: CJK 16=%s 24=%s, Latin 16=%s 24=%s\n",
+      readerCjkFont16Available ? "yes" : "no",
+      readerCjkFont24Available ? "yes" : "no",
+      readerLatinFont16Available ? "yes" : "no",
+      readerLatinFont24Available ? "yes" : "no");
+}
+
+bool loadReaderFont(int pixelSize, bool cjkRequired) {
+  if (cjkRequired) {
+    if (pixelSize >= 24 && readerCjkFont24Available) {
+      epaper.loadFont(kReaderCjkFont24Name, SD);
+      return true;
+    }
+    if (readerCjkFont16Available) {
+      epaper.loadFont(kReaderCjkFont16Name, SD);
+      return true;
+    }
+    epaper.loadFont(smoothFontFor(pixelSize));
+    return false;
+  }
+
+  if (pixelSize >= 24 && readerLatinFont24Available) {
+    epaper.loadFont(kReaderLatinFont24Name, SD);
+  } else if (readerLatinFont16Available) {
+    epaper.loadFont(kReaderLatinFont16Name, SD);
+  } else {
+    epaper.loadFont(smoothFontFor(pixelSize));
+  }
+  return true;
+}
+
+bool browserPageRequiresCjk() {
+  if (epub_text::containsCjk(readerBrowserPath.c_str(),
+                             readerBrowserPath.length())) {
     return true;
   }
-  if (sdCardReady && sd_card::fileExists("/fonts/sans_bold_16.vlw")) {
-    epaper.loadFont("fonts/sans_bold_16", SD);
-  } else {
-    epaper.loadFont(game_ui_fonts::kGameUiFont16);
+  for (int row = 0; row < kBrowserRowsPerPage; ++row) {
+    const SdReadonlyBrowser::Entry* entry =
+        sdBrowser.entry(browserPageStart + row);
+    if (entry != nullptr &&
+        epub_text::containsCjk(entry->name.c_str(), entry->name.length())) {
+      return true;
+    }
+  }
+  return false;
+}
+
+bool browserPageRequiresNonAscii() {
+  if (containsNonAscii(readerBrowserPath)) return true;
+  for (int row = 0; row < kBrowserRowsPerPage; ++row) {
+    const SdReadonlyBrowser::Entry* entry =
+        sdBrowser.entry(browserPageStart + row);
+    if (entry != nullptr && containsNonAscii(entry->name)) return true;
   }
   return false;
 }
@@ -2863,13 +2955,17 @@ void drawEpubBrowser() {
     return;
   }
 
-  loadReaderFont();
+  const bool smoothBrowserFont = browserPageRequiresNonAscii();
+  const bool browserFontReady =
+      !smoothBrowserFont || loadReaderFont(24, browserPageRequiresCjk());
+  const int builtInFont = smoothBrowserFont ? 0 : 4;
   epaper.setTextColor(TFT_BLACK, TFT_WHITE, true);
   epaper.setTextDatum(MC_DATUM);
-  epaper.drawString(fitReaderText(readerBrowserPath, kScreenWidth - 36),
-                    kScreenWidth / 2, 72);
+  drawReaderString(
+      fitReaderText(readerBrowserPath, kScreenWidth - 36, builtInFont),
+      kScreenWidth / 2, 72, builtInFont);
   if (sdBrowser.count() == 0) {
-    epaper.unloadFont();
+    if (smoothBrowserFont) epaper.unloadFont();
     drawCentered(tr(TextId::EmptyFolder), kScreenWidth / 2, 350, 4);
   } else {
     browserPageStart =
@@ -2884,10 +2980,10 @@ void drawEpubBrowser() {
       epaper.drawFastHLine(18, top + kBrowserRowHeight - 1,
                           kScreenWidth - 36, TFT_BLACK);
       drawBrowserEntryIcon(*entry, 22, top + 16);
-      const String name = fitReaderText(entry->name, 365);
-      epaper.drawString(name, 82, top + kBrowserRowHeight / 2);
+      const String name = fitReaderText(entry->name, 365, builtInFont);
+      drawReaderString(name, 82, top + kBrowserRowHeight / 2, builtInFont);
     }
-    epaper.unloadFont();
+    if (smoothBrowserFont) epaper.unloadFont();
   }
 
   if (browserPageStart > 0) {
@@ -2896,8 +2992,10 @@ void drawEpubBrowser() {
   if (browserPageStart + kBrowserRowsPerPage < sdBrowser.count()) {
     drawButton(kResetButton, tr(TextId::Next));
   }
-  String footer = browserMessage.isEmpty() ? tr(TextId::ReadOnly)
-                                           : browserMessage;
+  String footer = browserMessage.isEmpty()
+                      ? (browserFontReady ? tr(TextId::ReadOnly)
+                                          : tr(TextId::CjkFontRequired))
+                      : browserMessage;
   if (browserMessage.isEmpty() && sdBrowser.truncated()) footer += " - 96+";
   drawCentered(footer, kScreenWidth / 2, 668, 2);
 }
@@ -2925,24 +3023,30 @@ uint32_t readerPageNumber() {
 void drawEpubReading() {
   epaper.fillSprite(TFT_WHITE);
   const epub_text::TextPage page = currentReaderPage();
-  const bool cjkFontReady = loadReaderFont();
-  epaper.setTextColor(TFT_BLACK, TFT_WHITE, true);
-  epaper.setTextDatum(MC_DATUM);
-  epaper.drawString(fitReaderText(epubArchive.title(), kScreenWidth - 36),
-                    kScreenWidth / 2, 76);
-  epaper.setTextDatum(TL_DATUM);
+  const bool nonAsciiRequired =
+      readerChapterRequiresNonAscii ||
+      containsNonAscii(epubArchive.title());
   const bool cjkRequired =
-      epub_text::containsCjk(readerChapterText.c_str(),
-                             readerChapterText.length()) ||
+      readerChapterRequiresCjk ||
       epub_text::containsCjk(epubArchive.title().c_str(),
                              epubArchive.title().length());
+  const bool smoothReaderFont = nonAsciiRequired;
+  const bool cjkFontReady =
+      !smoothReaderFont || loadReaderFont(16, cjkRequired);
+  const int builtInFont = smoothReaderFont ? 0 : 2;
+  epaper.setTextColor(TFT_BLACK, TFT_WHITE, true);
+  epaper.setTextDatum(MC_DATUM);
+  drawReaderString(
+      fitReaderText(epubArchive.title(), kScreenWidth - 36, builtInFont),
+      kScreenWidth / 2, 76, builtInFont);
+  epaper.setTextDatum(TL_DATUM);
   if (!cjkRequired || cjkFontReady) {
     for (size_t index = 0; index < page.lines.size(); ++index) {
-      epaper.drawString(page.lines[index].c_str(), 18,
-                        104 + static_cast<int>(index) * 23);
+      drawReaderString(page.lines[index].c_str(), 18,
+                       104 + static_cast<int>(index) * 23, builtInFont);
     }
   }
-  epaper.unloadFont();
+  if (smoothReaderFont) epaper.unloadFont();
   if (cjkRequired && !cjkFontReady) {
     drawCentered(tr(TextId::CjkFontRequired), kScreenWidth / 2, 360, 4);
   }
@@ -3095,7 +3199,9 @@ void startNewMahjong() {
 
 bool openReaderBrowserPath(const String& path) {
   epubArchive.close();
-  readerChapterText = "";
+  readerChapterText.clear();
+  readerChapterRequiresNonAscii = false;
+  readerChapterRequiresCjk = false;
   readerBookPath = "";
   readerPageStart = 0;
   readerChapterIndex = 0;
@@ -3103,7 +3209,14 @@ bool openReaderBrowserPath(const String& path) {
   browserMessage = "";
   readerBrowserPath = path.isEmpty() ? "/" : path;
   if (!sdCardReady) return false;
-  if (sdBrowser.open(readerBrowserPath)) return true;
+  const uint32_t startedAtMs = millis();
+  if (sdBrowser.open(readerBrowserPath)) {
+    LOG.printf("[games] listed %s: %d entries in %lu ms%s\n",
+               readerBrowserPath.c_str(), sdBrowser.count(),
+               static_cast<unsigned long>(millis() - startedAtMs),
+               sdBrowser.truncated() ? " (truncated)" : "");
+    return true;
+  }
   LOG.printf("[games] could not open SD directory: %s\n",
              readerBrowserPath.c_str());
   readerBrowserPath = "/";
@@ -3112,9 +3225,15 @@ bool openReaderBrowserPath(const String& path) {
 }
 
 bool loadReaderChapter(int chapter, size_t pageStart = 0) {
-  String text;
+  EpubChapterText text;
   if (!epubArchive.loadChapter(chapter, text)) return false;
   readerChapterText = std::move(text);
+  readerChapterRequiresNonAscii =
+      containsNonAscii(readerChapterText.c_str(),
+                       readerChapterText.length());
+  readerChapterRequiresCjk =
+      epub_text::containsCjk(readerChapterText.c_str(),
+                             readerChapterText.length());
   readerChapterIndex = chapter;
   readerPageStart =
       pageStart < readerChapterText.length() ? pageStart : 0;
@@ -3123,11 +3242,25 @@ bool loadReaderChapter(int chapter, size_t pageStart = 0) {
 
 bool openReaderBook(const String& path, int chapter = 0,
                     size_t pageStart = 0, bool skipUnreadable = true) {
-  if (!sdCardReady || !epubArchive.open(path)) {
+  readerChapterText.clear();
+  readerChapterRequiresNonAscii = false;
+  readerChapterRequiresCjk = false;
+  LOG.printf(
+      "[games] opening EPUB %s (heap=%lu KiB, PSRAM=%lu KiB)\n",
+      path.c_str(), static_cast<unsigned long>(ESP.getFreeHeap() / 1024),
+      static_cast<unsigned long>(ESP.getFreePsram() / 1024));
+  if (!sdCardReady) {
+    LOG.println("[games] cannot open EPUB without an SD card");
+    return false;
+  }
+  detectReaderFonts();
+  if (!epubArchive.open(path)) {
     LOG.printf("[games] could not open EPUB %s: %s\n", path.c_str(),
                epubArchive.error().c_str());
     return false;
   }
+  LOG.printf("[games] EPUB archive ready: %d spine items\n",
+             epubArchive.chapterCount());
   const int firstChapter =
       std::max(0, std::min(chapter, epubArchive.chapterCount() - 1));
   const int lastChapter =
@@ -3139,6 +3272,13 @@ bool openReaderBook(const String& path, int chapter = 0,
       continue;
     }
     readerBookPath = path;
+    LOG.printf(
+        "[games] EPUB ready: chapter=%d bytes=%lu heap=%lu KiB PSRAM=%lu "
+        "KiB\n",
+        readerChapterIndex + 1,
+        static_cast<unsigned long>(readerChapterText.length()),
+        static_cast<unsigned long>(ESP.getFreeHeap() / 1024),
+        static_cast<unsigned long>(ESP.getFreePsram() / 1024));
     return true;
   }
   const String savedError = epubArchive.error();
@@ -3330,7 +3470,9 @@ void showMenu() {
   if (currentScreen == Screen::EpubBrowser ||
       currentScreen == Screen::EpubReading) {
     epubArchive.close();
-    readerChapterText = "";
+    readerChapterText.clear();
+    readerChapterRequiresNonAscii = false;
+    readerChapterRequiresCjk = false;
   }
   currentScreen = Screen::Menu;
   saveResumeState();
@@ -3439,18 +3581,23 @@ void showMahjong() {
   refreshScreen("Mahjong Solitaire screen");
 }
 
-void showEpubBrowser() {
+void showEpubBrowser(bool fullRefresh = true) {
   currentScreen = Screen::EpubBrowser;
+  detectReaderFonts();
   openReaderBrowserPath(readerBrowserPath);
   drawEpubBrowser();
-  refreshScreen("EPUB browser");
+  if (fullRefresh) {
+    refreshScreen("EPUB browser");
+  } else {
+    refreshRegion(kReaderRegion, "EPUB browser");
+  }
 }
 
 void showEpubReading() {
   currentScreen = Screen::EpubReading;
   saveResumeState();
   drawEpubReading();
-  refreshScreen("EPUB page");
+  refreshRegion(kReaderRegion, "EPUB page");
 }
 
 void updateLightsOut(const char* action) {
@@ -4329,7 +4476,7 @@ void handleEpubBrowserTouch(const Gt911Touch::Point& point) {
       openReaderBrowserPath(
           SdReadonlyBrowser::parentPath(readerBrowserPath));
       drawEpubBrowser();
-      refreshScreen("EPUB parent folder");
+      refreshRegion(kReaderRegion, "EPUB parent folder");
     }
     return;
   }
@@ -4340,7 +4487,7 @@ void handleEpubBrowserTouch(const Gt911Touch::Point& point) {
     browserPageStart = std::max(0, browserPageStart - kBrowserRowsPerPage);
     browserMessage = "";
     drawEpubBrowser();
-    refreshScreen("EPUB previous files");
+    refreshRegion(kReaderRegion, "EPUB previous files");
     return;
   }
   if (browserPageStart + kBrowserRowsPerPage < sdBrowser.count() &&
@@ -4349,7 +4496,7 @@ void handleEpubBrowserTouch(const Gt911Touch::Point& point) {
     browserPageStart += kBrowserRowsPerPage;
     browserMessage = "";
     drawEpubBrowser();
-    refreshScreen("EPUB next files");
+    refreshRegion(kReaderRegion, "EPUB next files");
     return;
   }
   if (point.y < kBrowserRowTop ||
@@ -4365,7 +4512,7 @@ void handleEpubBrowserTouch(const Gt911Touch::Point& point) {
     hardware::beep();
     openReaderBrowserPath(entry->path);
     drawEpubBrowser();
-    refreshScreen("EPUB folder");
+    refreshRegion(kReaderRegion, "EPUB folder");
     return;
   }
   if (!entry->epub) return;
@@ -4377,14 +4524,14 @@ void handleEpubBrowserTouch(const Gt911Touch::Point& point) {
   } else {
     browserMessage = tr(TextId::OpenFailed);
     drawEpubBrowser();
-    refreshScreen("EPUB open failed");
+    refreshRegion(kReaderRegion, "EPUB open failed");
   }
 }
 
 void handleEpubReadingTouch(const Gt911Touch::Point& point) {
   if (kBackButton.contains(point.x, point.y)) {
     hardware::beep();
-    showEpubBrowser();
+    showEpubBrowser(false);
     return;
   }
   if ((readerPageStart > 0 || readerChapterIndex > 0) &&
@@ -4794,6 +4941,7 @@ void setup() {
     epaper.update();
     delay(2500);
   }
+  detectReaderFonts();
 
   if (!resumed) currentScreen = Screen::Menu;
   if (resumed && currentScreen == Screen::Reversi) {

@@ -12,7 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_FONT = ROOT / "tools" / "fonts" / "NotoSansCJKsc-Bold.otf"
 EXPECTED_SHA256 = "b5f0d1a190a7f9b43c310a8850630af12553df32c4c050543f9059732d9b4c0a"
-OUTPUT_NAME = "epub_cjk_16.vlw"
+OUTPUT_SIZES = (16, 24)
 
 
 def load_vlw_module():
@@ -67,17 +67,18 @@ def main() -> int:
 
     output_dir = args.sd_root / "fonts"
     output_dir.mkdir(parents=True, exist_ok=True)
-    output = output_dir / OUTPUT_NAME
-    temporary = output.with_suffix(".tmp")
-    blob = make_vlw.build_vlw(
-        args.font, 16, codepoints=codepoints, family_name="EpubCjk"
-    )
-    temporary.write_bytes(blob)
-    temporary.replace(output)
-    print(
-        f"wrote {output} ({len(blob):,} bytes, "
-        f"{len(codepoints):,} BMP glyphs)"
-    )
+    for size in OUTPUT_SIZES:
+        output = output_dir / f"epub_cjk_{size}.vlw"
+        temporary = output.with_suffix(".tmp")
+        blob = make_vlw.build_vlw(
+            args.font, size, codepoints=codepoints, family_name="EpubCjk"
+        )
+        temporary.write_bytes(blob)
+        temporary.replace(output)
+        print(
+            f"wrote {output} ({len(blob):,} bytes, "
+            f"{len(codepoints):,} BMP glyphs)"
+        )
     return 0
 
 

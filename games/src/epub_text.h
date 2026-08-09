@@ -108,26 +108,29 @@ inline bool blockTag(const char* tag, size_t length) {
   return false;
 }
 
-inline void appendSpace(std::string& output) {
-  if (!output.empty() && output.back() != ' ' && output.back() != '\n') {
-    output.push_back(' ');
+inline void appendSpaceInPlace(char* output, size_t& length) {
+  if (length > 0 && output[length - 1] != ' ' &&
+      output[length - 1] != '\n') {
+    output[length++] = ' ';
   }
 }
 
-inline void appendParagraph(std::string& output) {
-  while (!output.empty() && output.back() == ' ') output.pop_back();
-  if (output.empty() || output.back() == '\n') return;
-  output.push_back('\n');
+inline void appendParagraphInPlace(char* output, size_t& length) {
+  while (length > 0 && output[length - 1] == ' ') --length;
+  if (length == 0 || output[length - 1] == '\n') return;
+  output[length++] = '\n';
 }
 
-inline std::string htmlToPlainText(const char* html, size_t length,
-                                   size_t maximumOutput = 512 * 1024) {
-  std::string output;
-  output.reserve(length < maximumOutput ? length : maximumOutput);
+inline size_t htmlToPlainTextInPlace(char* html, size_t length,
+                                     size_t maximumOutput = 512 * 1024) {
+  if (html == nullptr || length == 0 || maximumOutput == 0) return 0;
+  if (maximumOutput > length) maximumOutput = length;
+  size_t outputLength = 0;
   bool inScript = false;
   bool inStyle = false;
 
-  for (size_t index = 0; index < length && output.size() < maximumOutput;) {
+  for (size_t index = 0;
+       index < length && outputLength < maximumOutput;) {
     if (html[index] == '<') {
       size_t close = index + 1;
       while (close < length && html[close] != '>') ++close;
@@ -139,7 +142,7 @@ inline std::string htmlToPlainText(const char* html, size_t length,
       if (startsWithIgnoreCase(tag, tagLength, "style")) inStyle = true;
       if (startsWithIgnoreCase(tag, tagLength, "/style")) inStyle = false;
       if (!inScript && !inStyle && blockTag(tag, tagLength)) {
-        appendParagraph(output);
+        appendParagraphInPlace(html, outputLength);
       }
       index = close + 1;
       continue;
@@ -154,29 +157,44 @@ inline std::string htmlToPlainText(const char* html, size_t length,
              html[semicolon] != ';') {
         ++semicolon;
       }
-      if (semicolon < length && html[semicolon] == ';' &&
-          decodeEntity(html + index + 1, semicolon - index - 1, output)) {
-        index = semicolon + 1;
-        continue;
+      if (semicolon < length && html[semicolon] == ';') {
+        std::string decoded;
+        if (decodeEntity(html + index + 1, semicolon - index - 1, decoded)) {
+          if (outputLength + decoded.length() > maximumOutput) break;
+          for (char character : decoded) html[outputLength++] = character;
+          index = semicolon + 1;
+          continue;
+        }
       }
     }
     const unsigned char character = static_cast<unsigned char>(html[index++]);
     if (character == '\r' || character == '\n' || character == '\t' ||
         character == '\f') {
-      appendSpace(output);
+      appendSpaceInPlace(html, outputLength);
     } else if (character < 0x20) {
       continue;
     } else if (character == ' ') {
-      appendSpace(output);
+      appendSpaceInPlace(html, outputLength);
     } else {
-      output.push_back(static_cast<char>(character));
+      html[outputLength++] = static_cast<char>(character);
     }
   }
 
-  while (!output.empty() &&
-         (output.back() == ' ' || output.back() == '\n')) {
-    output.pop_back();
+  while (outputLength > 0 &&
+         (html[outputLength - 1] == ' ' ||
+          html[outputLength - 1] == '\n')) {
+    --outputLength;
   }
+  html[outputLength] = '\0';
+  return outputLength;
+}
+
+inline std::string htmlToPlainText(const char* html, size_t length,
+                                   size_t maximumOutput = 512 * 1024) {
+  if (html == nullptr || length == 0) return {};
+  std::string output(html, length);
+  output.resize(htmlToPlainTextInPlace(&output[0], output.length(),
+                                       maximumOutput));
   return output;
 }
 
@@ -365,6 +383,11 @@ inline bool isCjkCodepoint(uint32_t codepoint) {
          (codepoint >= 0xFFE0 && codepoint <= 0xFFE6);
 }
 
+inline bool requiresCjkFont(uint32_t codepoint) {
+  return isCjkCodepoint(codepoint) ||
+         (codepoint >= 0xFF61 && codepoint <= 0xFFDC);
+}
+
 inline size_t displayColumns(uint32_t codepoint) {
   if ((codepoint >= 0x0300 && codepoint <= 0x036F) ||
       (codepoint >= 0xFE00 && codepoint <= 0xFE0F)) {
@@ -375,7 +398,7 @@ inline size_t displayColumns(uint32_t codepoint) {
 
 inline bool containsCjk(const char* text, size_t length) {
   for (size_t offset = 0; offset < length;) {
-    if (isCjkCodepoint(utf8Codepoint(text, length, offset))) return true;
+    if (requiresCjkFont(utf8Codepoint(text, length, offset))) return true;
     offset += utf8CharacterBytes(text, length, offset);
   }
   return false;
