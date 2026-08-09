@@ -1859,7 +1859,7 @@ void drawGameStatusBar(const char* title) {
 
 void drawMenu() {
   epaper.fillSprite(TFT_WHITE);
-  drawGamesLogo(kScreenWidth / 2, 80, 72);
+  drawGamesLogo(kScreenWidth / 2, 24, 64);
   arrangeMenuCards();
   const size_t pageIndex = static_cast<size_t>(currentMenuPage);
   const size_t firstRank = pageIndex * kGamesPerMenuPage;
