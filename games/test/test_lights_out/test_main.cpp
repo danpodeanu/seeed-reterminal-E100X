@@ -1452,7 +1452,7 @@ void test_epub_html_to_text_preserves_blocks_and_decodes_entities() {
       "<script>ignored()</script><p>&#x00E9;lan</p></body></html>";
   const std::string text =
       epub_text::htmlToPlainText(html, sizeof(html) - 1);
-  TEST_ASSERT_EQUAL_STRING("One & Two\nHello world.\nNext line.\nélan",
+  TEST_ASSERT_EQUAL_STRING("One & Two\n\nHello world.\nNext line.\n\nélan",
                            text.c_str());
 }
 
@@ -1462,9 +1462,55 @@ void test_epub_html_to_text_can_reuse_the_extraction_buffer() {
       "<p>&#x7532;&#20057;</p></body>";
   const size_t length = epub_text::htmlToPlainTextInPlace(
       html, sizeof(html) - 1);
-  TEST_ASSERT_EQUAL_STRING("First line\n甲乙", html);
-  TEST_ASSERT_EQUAL_UINT32(sizeof("First line\n甲乙") - 1, length);
+  TEST_ASSERT_EQUAL_STRING("First line\n\n甲乙", html);
+  TEST_ASSERT_EQUAL_UINT32(sizeof("First line\n\n甲乙") - 1, length);
   TEST_ASSERT_LESS_THAN_UINT32(sizeof(html) - 1, length);
+}
+
+void test_epub_html_to_text_separates_chapter_intro_from_body() {
+  char html[] =
+      "<body><div class='chapter-number'>Chapter 1</div>"
+      "<h1>Arrival</h1><p>The story begins.</p></body>";
+  epub_text::htmlToPlainTextInPlace(html, sizeof(html) - 1);
+  TEST_ASSERT_EQUAL_STRING("Chapter 1\n\nArrival\n\nThe story begins.",
+                           html);
+}
+
+void test_epub_html_to_text_preserves_emphasis_when_requested() {
+  char html[] =
+      "<body><h2>Heading</h2><p>Plain <strong>bold "
+      "<em>both</em></strong> and <i>italic</i>.</p></body>";
+  const size_t length = epub_text::htmlToPlainTextInPlace(
+      html, sizeof(html) - 1, sizeof(html) - 1, true);
+  std::string expected;
+  expected += epub_text::styleMarker(epub_text::TextStyle::Bold);
+  expected += "Heading\n\n";
+  expected += epub_text::styleMarker(epub_text::TextStyle::Regular);
+  expected += "Plain ";
+  expected += epub_text::styleMarker(epub_text::TextStyle::Bold);
+  expected += "bold ";
+  expected += epub_text::styleMarker(epub_text::TextStyle::BoldItalic);
+  expected += "both";
+  expected += " ";
+  expected += epub_text::styleMarker(epub_text::TextStyle::Regular);
+  expected += "and ";
+  expected += epub_text::styleMarker(epub_text::TextStyle::Italic);
+  expected += "italic";
+  expected += epub_text::styleMarker(epub_text::TextStyle::Regular);
+  expected += ".";
+  TEST_ASSERT_EQUAL_STRING(expected.c_str(), html);
+  TEST_ASSERT_EQUAL_UINT32(expected.length(), length);
+}
+
+void test_epub_typography_normalization_keeps_style_markers() {
+  std::string text;
+  text += epub_text::styleMarker(epub_text::TextStyle::Italic);
+  text += u8"“It’s”—fine…";
+  text.resize(epub_text::normalizeTypographyInPlace(&text[0], text.length()));
+  std::string expected;
+  expected += epub_text::styleMarker(epub_text::TextStyle::Italic);
+  expected += "\"It's\"-fine...";
+  TEST_ASSERT_EQUAL_STRING(expected.c_str(), text.c_str());
 }
 
 void test_epub_xml_helpers_parse_attributes_and_resolve_paths() {
@@ -1536,6 +1582,44 @@ void test_epub_pagination_treats_cjk_as_full_width() {
                                          halfwidthHangul.size()));
   TEST_ASSERT_EQUAL_UINT32(1, epub_text::displayColumns(0xFF76));
   TEST_ASSERT_FALSE(epub_text::containsCjk("Café", 5));
+}
+
+void test_epub_pagination_carries_style_between_pages() {
+  std::string text;
+  text += epub_text::styleMarker(epub_text::TextStyle::Bold);
+  text += "one two three ";
+  text += epub_text::styleMarker(epub_text::TextStyle::Italic);
+  text += "four five";
+
+  const epub_text::TextPage first =
+      epub_text::paginate(text.data(), text.size(), 0, 7, 1);
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(epub_text::TextStyle::Bold),
+                        static_cast<int>(first.finalStyle));
+  const epub_text::TextPage second = epub_text::paginate(
+      text.data(), text.size(), first.end, 7, 1, first.finalStyle, true);
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(epub_text::TextStyle::Bold),
+                        static_cast<int>(second.initialStyle));
+  const epub_text::TextPage third = epub_text::paginate(
+      text.data(), text.size(), second.end, 7, 1, second.finalStyle, true);
+  TEST_ASSERT_EQUAL_INT(static_cast<int>(epub_text::TextStyle::Italic),
+                        static_cast<int>(third.finalStyle));
+  TEST_ASSERT_EQUAL_UINT32(
+      second.start,
+      epub_text::previousPageStart(text.data(), text.size(), third.start, 7, 1));
+}
+
+size_t test_epub_proportional_width(uint32_t codepoint,
+                                    epub_text::TextStyle) {
+  return codepoint == 'W' ? 26 : 10;
+}
+
+void test_epub_pagination_accepts_proportional_widths() {
+  const std::string text = "WWWW normal";
+  const epub_text::TextPage page = epub_text::paginate(
+      text.data(), text.size(), 0, 80, 2, epub_text::TextStyle::Regular, true,
+      test_epub_proportional_width);
+  TEST_ASSERT_EQUAL_UINT32(2, page.lines.size());
+  TEST_ASSERT_EQUAL_STRING("WWW", page.lines[0].c_str());
 }
 
 int main(int, char**) {
@@ -1637,8 +1721,13 @@ int main(int, char**) {
   RUN_TEST(test_mahjong_rejects_inconsistent_snapshot);
   RUN_TEST(test_epub_html_to_text_preserves_blocks_and_decodes_entities);
   RUN_TEST(test_epub_html_to_text_can_reuse_the_extraction_buffer);
+  RUN_TEST(test_epub_html_to_text_separates_chapter_intro_from_body);
+  RUN_TEST(test_epub_html_to_text_preserves_emphasis_when_requested);
+  RUN_TEST(test_epub_typography_normalization_keeps_style_markers);
   RUN_TEST(test_epub_xml_helpers_parse_attributes_and_resolve_paths);
   RUN_TEST(test_epub_pagination_wraps_utf8_without_splitting_characters);
   RUN_TEST(test_epub_pagination_treats_cjk_as_full_width);
+  RUN_TEST(test_epub_pagination_carries_style_between_pages);
+  RUN_TEST(test_epub_pagination_accepts_proportional_widths);
   return UNITY_END();
 }

@@ -9,6 +9,26 @@
 
 namespace epub_text {
 
+enum class TextStyle : uint8_t {
+  Regular = 0,
+  Bold = 1,
+  Italic = 2,
+  BoldItalic = 3,
+};
+
+inline char styleMarker(TextStyle style) {
+  return static_cast<char>(static_cast<uint8_t>(style) + 1);
+}
+
+inline bool isStyleMarker(char character) {
+  const uint8_t value = static_cast<uint8_t>(character);
+  return value >= 1 && value <= 4;
+}
+
+inline TextStyle styleFromMarker(char marker) {
+  return static_cast<TextStyle>(static_cast<uint8_t>(marker) - 1);
+}
+
 inline bool startsWithIgnoreCase(const char* value, size_t length,
                                  const char* expected) {
   size_t index = 0;
@@ -21,6 +41,44 @@ inline bool startsWithIgnoreCase(const char* value, size_t length,
     ++index;
   }
   return true;
+}
+
+inline bool tagNameEquals(const char* tag, size_t length, const char* expected,
+                          bool closing) {
+  size_t offset = 0;
+  while (offset < length &&
+         isspace(static_cast<unsigned char>(tag[offset]))) {
+    ++offset;
+  }
+  const bool isClosing = offset < length && tag[offset] == '/';
+  if (isClosing) ++offset;
+  if (isClosing != closing) return false;
+
+  const size_t nameLength = std::char_traits<char>::length(expected);
+  if (offset + nameLength > length ||
+      !startsWithIgnoreCase(tag + offset, length - offset, expected)) {
+    return false;
+  }
+  const size_t afterName = offset + nameLength;
+  return afterName == length ||
+         isspace(static_cast<unsigned char>(tag[afterName])) ||
+         tag[afterName] == '/';
+}
+
+inline bool headingTag(const char* tag, size_t length, bool closing) {
+  return tagNameEquals(tag, length, "h1", closing) ||
+         tagNameEquals(tag, length, "h2", closing) ||
+         tagNameEquals(tag, length, "h3", closing) ||
+         tagNameEquals(tag, length, "h4", closing) ||
+         tagNameEquals(tag, length, "h5", closing) ||
+         tagNameEquals(tag, length, "h6", closing);
+}
+
+inline TextStyle textStyle(int boldDepth, int italicDepth) {
+  if (boldDepth > 0 && italicDepth > 0) return TextStyle::BoldItalic;
+  if (boldDepth > 0) return TextStyle::Bold;
+  if (italicDepth > 0) return TextStyle::Italic;
+  return TextStyle::Regular;
 }
 
 inline void appendUtf8(std::string& output, uint32_t codepoint) {
@@ -115,19 +173,48 @@ inline void appendSpaceInPlace(char* output, size_t& length) {
   }
 }
 
-inline void appendParagraphInPlace(char* output, size_t& length) {
+inline void appendBreakInPlace(char* output, size_t& length,
+                               size_t maximumOutput, size_t lineCount) {
   while (length > 0 && output[length - 1] == ' ') --length;
-  if (length == 0 || output[length - 1] == '\n') return;
-  output[length++] = '\n';
+  if (length == 0) return;
+  size_t trailingNewlines = 0;
+  while (trailingNewlines < length &&
+         output[length - trailingNewlines - 1] == '\n') {
+    ++trailingNewlines;
+  }
+  while (trailingNewlines < lineCount && length < maximumOutput) {
+    output[length++] = '\n';
+    ++trailingNewlines;
+  }
+}
+
+inline bool paragraphBreakTag(const char* tag, size_t length) {
+  return tagNameEquals(tag, length, "p", true) ||
+         tagNameEquals(tag, length, "div", true) ||
+         headingTag(tag, length, true) ||
+         tagNameEquals(tag, length, "blockquote", true);
 }
 
 inline size_t htmlToPlainTextInPlace(char* html, size_t length,
-                                     size_t maximumOutput = 512 * 1024) {
+                                     size_t maximumOutput = 512 * 1024,
+                                     bool preserveStyles = false) {
   if (html == nullptr || length == 0 || maximumOutput == 0) return 0;
   if (maximumOutput > length) maximumOutput = length;
   size_t outputLength = 0;
   bool inScript = false;
   bool inStyle = false;
+  int boldDepth = 0;
+  int italicDepth = 0;
+  TextStyle emittedStyle = TextStyle::Regular;
+
+  const auto emitStyle = [&]() {
+    if (!preserveStyles || outputLength >= maximumOutput) return;
+    const TextStyle desiredStyle = textStyle(boldDepth, italicDepth);
+    if (desiredStyle != emittedStyle) {
+      html[outputLength++] = styleMarker(desiredStyle);
+      emittedStyle = desiredStyle;
+    }
+  };
 
   for (size_t index = 0;
        index < length && outputLength < maximumOutput;) {
@@ -141,8 +228,29 @@ inline size_t htmlToPlainTextInPlace(char* html, size_t length,
       if (startsWithIgnoreCase(tag, tagLength, "/script")) inScript = false;
       if (startsWithIgnoreCase(tag, tagLength, "style")) inStyle = true;
       if (startsWithIgnoreCase(tag, tagLength, "/style")) inStyle = false;
+      if (!inScript && !inStyle && preserveStyles) {
+        if (tagNameEquals(tag, tagLength, "b", false) ||
+            tagNameEquals(tag, tagLength, "strong", false) ||
+            headingTag(tag, tagLength, false)) {
+          ++boldDepth;
+        } else if ((tagNameEquals(tag, tagLength, "b", true) ||
+                    tagNameEquals(tag, tagLength, "strong", true) ||
+                    headingTag(tag, tagLength, true)) &&
+                   boldDepth > 0) {
+          --boldDepth;
+        }
+        if (tagNameEquals(tag, tagLength, "i", false) ||
+            tagNameEquals(tag, tagLength, "em", false)) {
+          ++italicDepth;
+        } else if ((tagNameEquals(tag, tagLength, "i", true) ||
+                    tagNameEquals(tag, tagLength, "em", true)) &&
+                   italicDepth > 0) {
+          --italicDepth;
+        }
+      }
       if (!inScript && !inStyle && blockTag(tag, tagLength)) {
-        appendParagraphInPlace(html, outputLength);
+        appendBreakInPlace(html, outputLength, maximumOutput,
+                           paragraphBreakTag(tag, tagLength) ? 2 : 1);
       }
       index = close + 1;
       continue;
@@ -160,8 +268,13 @@ inline size_t htmlToPlainTextInPlace(char* html, size_t length,
       if (semicolon < length && html[semicolon] == ';') {
         std::string decoded;
         if (decodeEntity(html + index + 1, semicolon - index - 1, decoded)) {
-          if (outputLength + decoded.length() > maximumOutput) break;
-          for (char character : decoded) html[outputLength++] = character;
+          if (decoded == " ") {
+            appendSpaceInPlace(html, outputLength);
+          } else {
+            emitStyle();
+            if (outputLength + decoded.length() > maximumOutput) break;
+            for (char character : decoded) html[outputLength++] = character;
+          }
           index = semicolon + 1;
           continue;
         }
@@ -176,6 +289,8 @@ inline size_t htmlToPlainTextInPlace(char* html, size_t length,
     } else if (character == ' ') {
       appendSpaceInPlace(html, outputLength);
     } else {
+      emitStyle();
+      if (outputLength >= maximumOutput) break;
       html[outputLength++] = static_cast<char>(character);
     }
   }
@@ -190,11 +305,12 @@ inline size_t htmlToPlainTextInPlace(char* html, size_t length,
 }
 
 inline std::string htmlToPlainText(const char* html, size_t length,
-                                   size_t maximumOutput = 512 * 1024) {
+                                   size_t maximumOutput = 512 * 1024,
+                                   bool preserveStyles = false) {
   if (html == nullptr || length == 0) return {};
   std::string output(html, length);
   output.resize(htmlToPlainTextInPlace(&output[0], output.length(),
-                                       maximumOutput));
+                                      maximumOutput, preserveStyles));
   return output;
 }
 
@@ -336,6 +452,8 @@ inline std::string resolvePath(const std::string& baseFile,
 struct TextPage {
   size_t start = 0;
   size_t end = 0;
+  TextStyle initialStyle = TextStyle::Regular;
+  TextStyle finalStyle = TextStyle::Regular;
   std::vector<std::string> lines;
 };
 
@@ -372,6 +490,61 @@ inline uint32_t utf8Codepoint(const char* text, size_t length, size_t offset) {
   return codepoint;
 }
 
+inline size_t normalizeTypographyInPlace(char* text, size_t length) {
+  size_t readOffset = 0;
+  size_t writeOffset = 0;
+  while (readOffset < length) {
+    if (isStyleMarker(text[readOffset])) {
+      text[writeOffset++] = text[readOffset++];
+      continue;
+    }
+    const size_t bytes = utf8CharacterBytes(text, length, readOffset);
+    const uint32_t codepoint = utf8Codepoint(text, length, readOffset);
+    const char* replacement = nullptr;
+    size_t replacementLength = 0;
+    switch (codepoint) {
+      case 0x00A0:
+        replacement = " ";
+        replacementLength = 1;
+        break;
+      case 0x02BC:
+      case 0x2018:
+      case 0x2019:
+        replacement = "'";
+        replacementLength = 1;
+        break;
+      case 0x201C:
+      case 0x201D:
+        replacement = "\"";
+        replacementLength = 1;
+        break;
+      case 0x2013:
+      case 0x2014:
+        replacement = "-";
+        replacementLength = 1;
+        break;
+      case 0x2026:
+        replacement = "...";
+        replacementLength = 3;
+        break;
+      default:
+        break;
+    }
+    if (replacement != nullptr) {
+      for (size_t index = 0; index < replacementLength; ++index) {
+        text[writeOffset++] = replacement[index];
+      }
+    } else {
+      for (size_t index = 0; index < bytes; ++index) {
+        text[writeOffset++] = text[readOffset + index];
+      }
+    }
+    readOffset += bytes;
+  }
+  text[writeOffset] = '\0';
+  return writeOffset;
+}
+
 inline bool isCjkCodepoint(uint32_t codepoint) {
   return (codepoint >= 0x1100 && codepoint <= 0x11FF) ||
          (codepoint >= 0x2E80 && codepoint <= 0xA4CF) ||
@@ -389,6 +562,7 @@ inline bool requiresCjkFont(uint32_t codepoint) {
 }
 
 inline size_t displayColumns(uint32_t codepoint) {
+  if (codepoint >= 1 && codepoint <= 4) return 0;
   if ((codepoint >= 0x0300 && codepoint <= 0x036F) ||
       (codepoint >= 0xFE00 && codepoint <= 0xFE0F)) {
     return 0;
@@ -404,17 +578,42 @@ inline bool containsCjk(const char* text, size_t length) {
   return false;
 }
 
+inline TextStyle styleAt(const char* text, size_t offset) {
+  TextStyle style = TextStyle::Regular;
+  for (size_t index = 0; index < offset; ++index) {
+    if (isStyleMarker(text[index])) style = styleFromMarker(text[index]);
+  }
+  return style;
+}
+
+inline TextStyle styleAfter(const char* text, size_t start, size_t end,
+                            TextStyle initialStyle) {
+  TextStyle style = initialStyle;
+  for (size_t index = start; index < end; ++index) {
+    if (isStyleMarker(text[index])) style = styleFromMarker(text[index]);
+  }
+  return style;
+}
+
+using CharacterWidth = size_t (*)(uint32_t codepoint, TextStyle style);
+
 inline TextPage paginate(const char* text, size_t length, size_t requestedStart,
-                         size_t maximumColumns, size_t maximumLines) {
+                         size_t maximumWidth, size_t maximumLines,
+                         TextStyle initialStyle = TextStyle::Regular,
+                         bool initialStyleKnown = false,
+                         CharacterWidth characterWidth = nullptr) {
   TextPage page;
   page.start = requestedStart < length ? requestedStart : length;
   page.end = page.start;
-  if (text == nullptr || maximumColumns == 0 || maximumLines == 0) return page;
+  if (text == nullptr || maximumWidth == 0 || maximumLines == 0) return page;
 
   while (page.start > 0 && page.start < length &&
          (static_cast<uint8_t>(text[page.start]) & 0xC0) == 0x80) {
     --page.start;
   }
+  page.initialStyle =
+      initialStyleKnown ? initialStyle : styleAt(text, page.start);
+  TextStyle pageStyle = page.initialStyle;
   size_t offset = page.start;
   page.lines.reserve(maximumLines);
   while (offset < length && page.lines.size() < maximumLines) {
@@ -427,7 +626,8 @@ inline TextPage paginate(const char* text, size_t length, size_t requestedStart,
     const size_t lineStart = offset;
     size_t lineEnd = offset;
     size_t lastSpace = std::string::npos;
-    size_t columns = 0;
+    size_t width = 0;
+    TextStyle lineStyle = pageStyle;
     bool endedAtNewline = false;
     while (lineEnd < length) {
       if (text[lineEnd] == '\n') {
@@ -437,12 +637,18 @@ inline TextPage paginate(const char* text, size_t length, size_t requestedStart,
       if (text[lineEnd] == ' ') lastSpace = lineEnd;
       const size_t characterBytes =
           utf8CharacterBytes(text, length, lineEnd);
-      const size_t characterColumns =
-          displayColumns(utf8Codepoint(text, length, lineEnd));
-      if (columns > 0 && columns + characterColumns > maximumColumns) break;
+      const uint32_t codepoint =
+          utf8Codepoint(text, length, lineEnd);
+      if (isStyleMarker(text[lineEnd])) {
+        lineStyle = styleFromMarker(text[lineEnd]);
+      }
+      const size_t glyphWidth =
+          characterWidth == nullptr ? displayColumns(codepoint)
+                                    : characterWidth(codepoint, lineStyle);
+      if (width > 0 && width + glyphWidth > maximumWidth) break;
       lineEnd += characterBytes;
-      columns += characterColumns;
-      if (columns >= maximumColumns) break;
+      width += glyphWidth;
+      if (glyphWidth > 0 && width >= maximumWidth) break;
     }
 
     size_t next = lineEnd;
@@ -459,23 +665,30 @@ inline TextPage paginate(const char* text, size_t length, size_t requestedStart,
     while (lineEnd > lineStart && text[lineEnd - 1] == ' ') --lineEnd;
     page.lines.emplace_back(text + lineStart, lineEnd - lineStart);
     offset = next > lineStart ? next : lineEnd;
+    pageStyle = styleAfter(text, lineStart, offset, pageStyle);
   }
   page.end = offset;
+  page.finalStyle = pageStyle;
   return page;
 }
 
 inline size_t previousPageStart(const char* text, size_t length,
-                                size_t currentStart, size_t maximumColumns,
-                                size_t maximumLines) {
+                                size_t currentStart, size_t maximumWidth,
+                                size_t maximumLines,
+                                CharacterWidth characterWidth = nullptr) {
   if (currentStart == 0) return 0;
   size_t offset = 0;
   size_t previous = 0;
+  TextStyle style = TextStyle::Regular;
   while (offset < currentStart) {
     const TextPage page =
-        paginate(text, length, offset, maximumColumns, maximumLines);
-    if (page.end >= currentStart || page.end <= offset) return previous;
+        paginate(text, length, offset, maximumWidth, maximumLines, style, true,
+                 characterWidth);
+    if (page.end <= offset) return previous;
+    if (page.end >= currentStart) return offset;
     previous = offset;
     offset = page.end;
+    style = page.finalStyle;
   }
   return previous;
 }

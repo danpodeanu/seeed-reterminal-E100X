@@ -28,6 +28,32 @@ The source font is intentionally not checked in. The generated
 16, 24, and 32 pixels. Noto Sans CJK is licensed under the SIL Open Font
 License 1.1; see `LICENSE.noto`.
 
+## EPUB styled Latin fonts
+
+The EPUB reader embeds 24px Noto Serif regular, bold, italic, and bold-italic
+subsets for Latin, Latin Extended, combining marks, punctuation, and currency
+symbols. The generator quantizes antialiased coverage at 25% so Seeed's one-bit
+sprite preserves glyph edges instead of dropping every partially covered pixel.
+Download these four files from the pinned `notofonts/noto-fonts`
+commit `ffebf8c1ee449e544955a7e813c54f9b73848eac`:
+
+```text
+hinted/ttf/NotoSerif/NotoSerif-Regular.ttf
+hinted/ttf/NotoSerif/NotoSerif-Bold.ttf
+hinted/ttf/NotoSerif/NotoSerif-Italic.ttf
+hinted/ttf/NotoSerif/NotoSerif-BoldItalic.ttf
+```
+
+Place them in one directory, then run:
+
+```bash
+python games/tools/generate_epub_latin_fonts.py /path/to/noto-serif
+```
+
+The generator verifies all four pinned SHA-256 hashes and rewrites
+`games/src/epub_latin_fonts.h`. The source TTF files are intentionally not
+checked in.
+
 ## EPUB CJK font
 
 The Games EPUB reader can load the same Noto source from the SD card as

@@ -54,7 +54,11 @@ bool SdReadonlyBrowser::open(const String& requestedPath) {
   while (file) {
     const String rawName = file.name();
     const String name = baseName(rawName);
-    if (!name.isEmpty() && name != "." && name != "..") {
+    const bool directoryEntry = file.isDirectory();
+    const bool visible =
+        !name.isEmpty() && name[0] != '.' &&
+        (directoryEntry || isEpub(name));
+    if (visible) {
       if (count_ >= kMaximumEntries) {
         truncated_ = true;
         file.close();
@@ -65,7 +69,7 @@ bool SdReadonlyBrowser::open(const String& requestedPath) {
         entry.path =
             path_ == "/" ? String("/") + name : path_ + "/" + name;
         entry.size = file.size();
-        entry.directory = file.isDirectory();
+        entry.directory = directoryEntry;
         entry.epub = !entry.directory && isEpub(name);
       }
     }

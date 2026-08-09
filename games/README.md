@@ -253,23 +253,31 @@ Touch controls:
 
 Insert an SD card and open the EPUB Reader tile to browse its folders. The
 browser does not write, rename, delete, or format files. Directories are shown
-first, followed by files in case-insensitive name order; non-EPUB files remain
-visible but cannot be opened.
+first, followed by `.epub` files in case-insensitive name order. Dot-prefixed
+entries and all other files are hidden.
 
 The reader supports standard DRM-free, reflowable EPUB 2 and EPUB 3 books. It
 uses each book's package manifest and spine, extracts XHTML chapters, decodes
-HTML entities, removes script and style content, and paginates the resulting
-text. DRM, fixed-layout books, embedded scripting, advanced CSS, images, audio,
-and video are not supported. A book may contain up to 96 spine entries, each
-extracted chapter is limited to 512 KiB, and one browser folder displays up to
-96 entries.
+HTML entities, preserves common heading, bold, and italic emphasis, removes
+script and stylesheet content, and paginates the resulting text. DRM,
+fixed-layout books, embedded scripting, advanced CSS, images, audio, and video
+are not supported. A book may contain up to 96 spine entries, each extracted
+chapter is limited to 512 KiB, and one browser folder displays up to 96 entries.
+
+Latin text uses embedded 24px Noto Serif regular, bold, italic, and bold-italic
+faces, including Latin-1 and Latin Extended characters. Their antialiased
+coverage is quantized for the one-bit panel so partial edge pixels do not
+disappear. CJK and other scripts use the installed smooth-font fallback; bold is
+reinforced and italic emphasis is underlined when that font family does not
+provide separate styled faces.
 
 Touch controls:
 
 - Tap a folder to enter it, or the back arrow to return to its parent. At the
   SD root, the back arrow returns to the activity selector.
-- Tap an `.epub` file to open it. Tap **PREVIOUS** or **NEXT** to move between
-  pages; page navigation continues across chapter boundaries.
+- Use the side **UP** and **DOWN** buttons to move between browser pages.
+- Tap an `.epub` file to open it. The same side buttons move between reading
+  pages; navigation continues across chapter boundaries.
 - Tap the reading-screen back arrow to return to the book's folder.
 - The current browser folder, book path, chapter, and page offset are retained
   in RTC memory. Waking from deep sleep reopens the same page when the SD card
@@ -278,7 +286,7 @@ Touch controls:
 For CJK books, download `fonts.zip` from the
 [latest release](https://github.com/danpodeanu/seeed-reterminal-E100X/releases)
 and unzip it at the SD-card root. This installs `/fonts/epub_cjk_16.vlw` plus
-the 24px CJK browser font and shared Latin fonts.
+the 24px CJK reading/browser font and shared Latin fonts.
 
 To regenerate the CJK font from its pinned Noto Sans CJK SC Bold source:
 
@@ -294,15 +302,16 @@ python games\tools\generate_epub_cjk_font.py E:\
 
 The generator verifies the pinned source font, creates the SD card's `fonts`
 folder when needed, and writes `epub_cjk_16.vlw` for book text plus
-`epub_cjk_24.vlw` for SD filenames. They are about 12 MB and 24.5 MB,
-respectively, with 42,220 BMP glyphs each, covering common Simplified and
-Traditional Chinese characters, Japanese kana and kanji, and Korean Hangul.
+`epub_cjk_24.vlw` for larger book text and SD filenames. They are about 12 MB
+and 24.5 MB, respectively, with 42,220 BMP glyphs each, covering common
+Simplified and Traditional Chinese characters, Japanese kana and kanji, and
+Korean Hangul.
 The source `.otf` does not need to be copied to the SD card. Rare
 supplementary CJK Extension B and later characters above `U+FFFF` are not
 supported by the display renderer.
 
-If the 16px CJK file is absent, the reader uses `/fonts/sans_bold_16.vlw`
-when available, then falls back to the flash-backed interface font. A CJK
+If the 24px CJK file is absent, the reader falls back to the 16px CJK font,
+then `/fonts/sans_bold_24.vlw` or the flash-backed interface font. A CJK
 chapter shows a localized **CJK FONT REQUIRED** message instead of blank text
 when the required SD font is missing. The browser falls back to the 16px CJK
 font if the 24px file is absent. CJK characters are treated as full-width
@@ -320,8 +329,9 @@ Front buttons:
 - On the selection screen, **UP** opens the previous selector page and
   **DOWN** opens the next selector page. Pressing either at the corresponding
   first or last page boundary has no effect.
-- While playing, **UP** saves the game and returns to the selection screen.
-  This also leaves the EPUB browser or reader. **DOWN** has no in-game action.
+- In the EPUB browser and reader, **UP** opens the previous browser or reading
+  page and **DOWN** opens the next one. In other activities, **UP** saves and
+  returns to the selection screen and **DOWN** has no in-game action.
 - Release **OK** in under 2 seconds to save and enter deep sleep. Press
   **OK** again to resume.
 - Hold **OK** for 2–5 seconds and release it to open the language selection

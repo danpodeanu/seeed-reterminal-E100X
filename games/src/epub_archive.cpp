@@ -373,8 +373,9 @@ bool EpubArchive::loadChapter(int index, EpubChapterText& text) {
                      kMaximumChapterBytes)) {
     return false;
   }
-  const size_t plainLength = epub_text::htmlToPlainTextInPlace(
-      html, htmlLength, kMaximumChapterBytes);
+  size_t plainLength = epub_text::htmlToPlainTextInPlace(
+      html, htmlLength, kMaximumChapterBytes, true);
+  plainLength = epub_text::normalizeTypographyInPlace(html, plainLength);
   if (plainLength == 0) {
     heap_caps_free(html);
     setError("EPUB chapter contains no readable text");
