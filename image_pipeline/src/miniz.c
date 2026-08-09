@@ -164,8 +164,11 @@
 // Defines to completely disable specific portions of miniz.c:
 // If all macros here are defined the only functionality remaining will be CRC-32, adler-32, tinfl, and tdefl.
 
-// Define MINIZ_NO_STDIO to disable all usage and any functions which rely on stdio for file I/O.
+// The image pipeline only needs inflate. Games additionally enables the
+// read-only ZIP APIs for EPUB files through MINIZ_ENABLE_ARCHIVE_APIS.
+#if !defined(MINIZ_ENABLE_ARCHIVE_APIS)
 #define MINIZ_NO_STDIO
+#endif
 
 // If MINIZ_NO_TIME is specified then the ZIP archive functions will not be able to get the current time, or
 // get/set file times, and the C run-time funcs that get/set times won't be called.
@@ -173,13 +176,17 @@
 #define MINIZ_NO_TIME
 
 // Define MINIZ_NO_ARCHIVE_APIS to disable all ZIP archive API's.
+#if !defined(MINIZ_ENABLE_ARCHIVE_APIS)
 #define MINIZ_NO_ARCHIVE_APIS
+#endif
 
 // Define MINIZ_NO_ARCHIVE_APIS to disable all writing related ZIP archive API's.
 #define MINIZ_NO_ARCHIVE_WRITING_APIS
 
-// Define MINIZ_NO_ZLIB_APIS to remove all ZLIB-style compression/decompression API's.
+// Archive state shares the allocator callback types declared by the zlib API.
+#if !defined(MINIZ_ENABLE_ARCHIVE_APIS)
 #define MINIZ_NO_ZLIB_APIS
+#endif
 
 // Define MINIZ_NO_ZLIB_COMPATIBLE_NAME to disable zlib names, to prevent conflicts against stock zlib.
 //#define MINIZ_NO_ZLIB_COMPATIBLE_NAMES

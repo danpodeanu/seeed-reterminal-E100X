@@ -30,7 +30,7 @@ details.
 | [XKCD Viewer](xkcd-viewer/) | A battery-powered random XKCD display with model-aware scaling, optional SD caching, Unicode titles, environmental readings, and deep sleep. | Available |
 | [Weather Viewer](weather-viewer/) | A low-power current-conditions and three-day forecast display using QWeather or Open-Meteo, with local environmental readings, severe-weather alerts, Unicode location names, and deep sleep. | Available |
 | [Photo Viewer](photo-viewer/) | A private, SD-card photo frame with panel-native preprocessing, full model-specific color, quiet hours, daily time sync, and deep sleep. | Available |
-| [Games](games/) | Twelve touch-friendly E1005 games with fast refresh, two selector pages, and resumable state: Lights Out, 2048, Pipe Connect, Mini Minesweeper, Nonogram, Reversi, Dots and Boxes, Sokoban, Peg Solitaire, Slitherlink, Sudoku, and Crossword. | Available on E1005 |
+| [Games](games/) | Fifteen ranked E1005 activities with fast refresh and resumable state: fourteen touch games plus a read-only SD browser and EPUB reader. | Available on E1005 |
 
 ## XKCD Viewer example
 
@@ -73,8 +73,13 @@ most played to least played. Equal play counts retain the default order below:
 | Slitherlink | Draw one loop whose edges satisfy every numbered clue. |
 | Sudoku | Complete a randomly selected, uniquely solvable easy 9x9 puzzle. |
 | Crossword | Solve one of 100 easy mini crosswords with an on-screen QWERTY keyboard. |
+| Klondike | Play draw-one solitaire with movable tableau runs and four foundations. |
+| Mahjong Solitaire | Match free tiles across a solvable 144-tile layered layout. |
+| EPUB Reader | Browse an SD card without modifying it and read DRM-free reflowable EPUB 2/3 books. |
 
 All games preserve their current state across selector visits and deep sleep.
+The EPUB reader resumes the same book, chapter, and page when the SD card is
+still available.
 Play counts are kept in RTC memory across deep sleep and reset after power loss
 or reflashing. The interface supports English, Spanish, French, German, and
 Simplified Chinese using fonts embedded in firmware flash. See the
@@ -102,7 +107,7 @@ different framework or architecture where that better suits their use case.
 ├── xkcd-viewer/          # Standalone XKCD display firmware
 ├── weather-viewer/       # Standalone weather display firmware
 ├── photo-viewer/         # SD-card photo-frame firmware and preparation tool
-├── games/                # Twelve touch games for the E1005
+├── games/                # Fourteen touch games and an EPUB reader for E1005
 ├── tools/                # Hardware utilities (i2c-scan, panel-test, sd-web)
 └── README.md             # This project index
 ```

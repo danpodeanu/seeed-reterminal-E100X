@@ -1,15 +1,15 @@
 # Games
 
-Touch-friendly games for the Seeed reTerminal E1005
-("Seeed Sticky"). The app opens on a game-selection screen so additional games
-can be added without installing separate firmware.
+Touch-friendly games and an EPUB reader for the Seeed reTerminal E1005
+("Seeed Sticky"). The app opens on an activity-selection screen so additional
+activities can be added without installing separate firmware.
 
 | First selector page | Mini Minesweeper |
 | --- | --- |
 | ![First Games selector page on a reTerminal E1005](assets/e1005-games-menu.png) | ![Mini Minesweeper running on a reTerminal E1005](assets/e1005-minesweeper.png) |
 
-The selector shows six games per page, ordered from most played to least played.
-Games with equal play counts retain this default order:
+The selector shows six activities per page, ordered from most used to least
+used. Activities with equal use counts retain this default order:
 
 | Game | Board or collection |
 | --- | --- |
@@ -25,8 +25,11 @@ Games with equal play counts retain this default order:
 | Slitherlink | Bundled 5x5 logic puzzles |
 | Sudoku | 12 uniquely solvable easy 9x9 puzzles |
 | Crossword | 100 easy 5x5 mini crosswords; engine supports up to 9x9 |
+| Klondike | Standard 52-card draw-one solitaire |
+| Mahjong Solitaire | Solvable 144-tile layered layouts |
+| EPUB Reader | Read-only SD browser and paginated reflowable books |
 
-## Included games
+## Included activities
 
 ### Lights Out
 
@@ -210,8 +213,76 @@ Touch controls:
 - Tap **NEW** for another random crossword or **RESET** to clear the grid.
 - Tap the back arrow to save and return to the selection screen.
 
-The selector uses two two-column pages with six games each. It automatically
-orders the games by play count, from most played to least played, and preserves
+### Klondike
+
+Build descending tableau runs with alternating colours, expose hidden cards,
+and move each suit from Ace through King onto its foundation. The draw-one
+stock can be recycled without a pass limit.
+
+Touch controls:
+
+- Tap the stock to draw a card, or tap its empty outline to recycle the waste.
+- Tap a face-up tableau card, the waste, or a foundation card to select it.
+  Selected cards use a thicker outline.
+- Double-tap the waste or a top tableau card to move it directly to its
+  matching foundation when the next rank is available.
+- Tap a tableau column to move the selected card or valid descending run.
+  Only a King can move to an empty column.
+- Tap the matching foundation to move a selected single card there.
+- Exposed tableau cards turn face-up automatically after a move.
+- Tap **NEW** for a freshly shuffled deal or **RESET** to replay the current
+  deal.
+- Tap the back arrow to save and return to the selection screen.
+
+### Mahjong Solitaire
+
+Remove matching pairs from a 144-tile, four-layer layout. A tile is free when
+no tile covers it and at least one horizontal side is open. Each generated deal
+has a known removal sequence, although choosing different matching pairs can
+still lead to a dead end as in traditional Mahjong Solitaire.
+
+Touch controls:
+
+- Tap a free tile to select it, then tap a matching free tile to remove both.
+- Tap another free tile to change the selection.
+- Tap **NEW** for a newly shuffled layout or **RESET** to restore the current
+  layout.
+- Tap the back arrow to save and return to the selection screen.
+
+### EPUB Reader
+
+Insert an SD card and open the EPUB Reader tile to browse its folders. The
+browser does not write, rename, delete, or format files. Directories are shown
+first, followed by files in case-insensitive name order; non-EPUB files remain
+visible but cannot be opened.
+
+The reader supports standard DRM-free, reflowable EPUB 2 and EPUB 3 books. It
+uses each book's package manifest and spine, extracts XHTML chapters, decodes
+HTML entities, removes script and style content, and paginates the resulting
+text. DRM, fixed-layout books, embedded scripting, advanced CSS, images, audio,
+and video are not supported. A book may contain up to 96 spine entries, each
+extracted chapter is limited to 512 KiB, and one browser folder displays up to
+96 entries.
+
+Touch controls:
+
+- Tap a folder to enter it, or the back arrow to return to its parent. At the
+  SD root, the back arrow returns to the activity selector.
+- Tap an `.epub` file to open it. Tap **PREVIOUS** or **NEXT** to move between
+  pages; page navigation continues across chapter boundaries.
+- Tap the reading-screen back arrow to return to the book's folder.
+- The current browser folder, book path, chapter, and page offset are retained
+  in RTC memory. Waking from deep sleep reopens the same page when the SD card
+  and book are still available; otherwise the reader returns to the browser.
+
+The reader uses `/fonts/sans_bold_16.vlw` when that full Unicode font has been
+prepared on the SD card by `tools/preload_sd.py`. Without it, the flash-backed
+interface font provides ASCII plus the glyphs used by the five localized user
+interfaces, so a book containing other characters may show missing glyphs.
+
+The selector uses three two-column pages with up to six activities each. It
+automatically orders them by use count, from most used to least used,
+and preserves
 the default order for ties. Counts are retained in RTC memory through deep
 sleep, but reset after power loss, RTC memory loss, or reflashing. Previous and
 next arrows appear only when a page exists in that direction.
@@ -222,7 +293,7 @@ Front buttons:
   **DOWN** opens the next selector page. Pressing either at the corresponding
   first or last page boundary has no effect.
 - While playing, **UP** saves the game and returns to the selection screen.
-  **DOWN** has no in-game action.
+  This also leaves the EPUB browser or reader. **DOWN** has no in-game action.
 - Release **OK** in under 2 seconds to save and enter deep sleep. Press
   **OK** again to resume.
 - Hold **OK** for 2–5 seconds and release it to open the language selection

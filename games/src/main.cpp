@@ -9,6 +9,8 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstring>
+#include <utility>
 
 #include "app_logger.h"
 #include "battery_gauge.h"
@@ -16,8 +18,11 @@
 #include "crossword_game.h"
 #include "driver.h"
 #include "dots_and_boxes_game.h"
+#include "double_tap_tracker.h"
 #include "e1005_fast_refresh.h"
 #include "epaper_setup.h"
+#include "epub_archive.h"
+#include "epub_text.h"
 #include "game_2048.h"
 #include "game_language_store.h"
 #include "game_localization.h"
@@ -26,8 +31,10 @@
 #include "game_ui_fonts.h"
 #include "gt911_touch.h"
 #include "hardware.h"
+#include "klondike_game.h"
 #include "lights_out_game.h"
 #include "low_battery.h"
+#include "mahjong_solitaire_game.h"
 #include "mini_minesweeper_game.h"
 #include "nonogram_game.h"
 #include "ok_button_action.h"
@@ -39,6 +46,7 @@
 #include "reversi_game.h"
 #include "sd_card.h"
 #include "sd_ota.h"
+#include "sd_readonly_browser.h"
 #include "slitherlink_game.h"
 #include "sokoban_game.h"
 #include "sudoku_game.h"
@@ -104,6 +112,18 @@ constexpr int kSudokuCellSize = 44;
 constexpr int kSudokuGridSize = kSudokuCellSize * SudokuGame::kSize;
 constexpr int kCrosswordGridTop = 92;
 constexpr int kCrosswordMaxGridPixels = 360;
+constexpr int kKlondikeCardWidth = 58;
+constexpr int kKlondikeCardHeight = 78;
+constexpr int kKlondikeColumnStep = 66;
+constexpr int kKlondikeGridLeft = 10;
+constexpr int kKlondikeTableauTop = 176;
+constexpr int kMahjongTileWidth = 34;
+constexpr int kMahjongTileHeight = 48;
+constexpr int kMahjongColumnStep = 37;
+constexpr int kMahjongRowStep = 58;
+constexpr int kMahjongGridLeft = 16;
+constexpr int kMahjongGridTop = 98;
+constexpr int kMahjongLayerOffset = 5;
 constexpr int kKeyboardKeyHeight = 42;
 constexpr int kKeyboardFirstRowY = 586;
 constexpr int kKeyboardRowGap = 6;
@@ -113,11 +133,14 @@ constexpr int kMinesTouchMoveTolerance = 20;
 constexpr int kReversiAiDepth = 3;
 constexpr uint32_t kButtonDebounceMs = 30;
 constexpr uint32_t kMinesFlagHoldMs = 650;
+constexpr uint32_t kKlondikeDoubleTapMs = 800;
+constexpr uint16_t kKlondikeWasteTapTarget = 0x100;
+constexpr uint16_t kKlondikeTableauTapTarget = 0x200;
 constexpr uint32_t kBatteryCheckIntervalMs = 60000;
 constexpr uint32_t kInactivitySleepMs = 5UL * 60UL * 1000UL;
 constexpr int kLowBatteryThresholdPct = 10;
 constexpr uint32_t kPersistedStateMagic = 0x47414D45;
-constexpr uint16_t kPersistedStateVersion = 12;
+constexpr uint16_t kPersistedStateVersion = 14;
 constexpr uint16_t kLightsOutSavedFlag = 1U << 0;
 constexpr uint16_t k2048SavedFlag = 1U << 1;
 constexpr uint16_t kPipeConnectSavedFlag = 1U << 2;
@@ -130,7 +153,15 @@ constexpr uint16_t kPegSolitaireSavedFlag = 1U << 8;
 constexpr uint16_t kSlitherlinkSavedFlag = 1U << 9;
 constexpr uint16_t kSudokuSavedFlag = 1U << 10;
 constexpr uint16_t kCrosswordSavedFlag = 1U << 11;
+constexpr uint16_t kKlondikeSavedFlag = 1U << 12;
+constexpr uint16_t kMahjongSavedFlag = 1U << 13;
 constexpr char kSokobanProgressKey[] = "sokoban_level";
+constexpr size_t kReaderPathCapacity = 192;
+constexpr size_t kReaderColumns = 45;
+constexpr size_t kReaderLinesPerPage = 24;
+constexpr int kBrowserRowsPerPage = 7;
+constexpr int kBrowserRowTop = 96;
+constexpr int kBrowserRowHeight = 78;
 
 constexpr uint32_t makeNonogramSolution(uint8_t row0, uint8_t row1,
                                         uint8_t row2, uint8_t row3,
@@ -190,12 +221,19 @@ Rect kPegSolitaireMenuCard = kMenuCardSlots[2];
 Rect kSlitherlinkMenuCard = kMenuCardSlots[3];
 Rect kSudokuMenuCard = kMenuCardSlots[4];
 Rect kCrosswordMenuCard = kMenuCardSlots[5];
+Rect kKlondikeMenuCard = kMenuCardSlots[0];
+Rect kMahjongMenuCard = kMenuCardSlots[1];
+Rect kEpubReaderMenuCard = kMenuCardSlots[2];
 constexpr Rect kPreviousPageButton = {8, 756, 48, 36};
 constexpr Rect kNextPageButton = {424, 756, 48, 36};
 constexpr Rect kBackButton = {8, 6, 48, 36};
 constexpr Rect kNewButton = {30, 688, 190, 66};
 constexpr Rect kResetButton = {260, 688, 190, 66};
 constexpr Rect kCenteredNewButton = {145, 688, 190, 66};
+constexpr Rect kKlondikeStockSlot = {10, 72, kKlondikeCardWidth,
+                                     kKlondikeCardHeight};
+constexpr Rect kKlondikeWasteSlot = {80, 72, kKlondikeCardWidth,
+                                     kKlondikeCardHeight};
 constexpr E1005FastRefresh::Region kBatteryStatusRegion = {390, 0, 90, 48};
 constexpr E1005FastRefresh::Region kBoardRegion = {30, 80, 420, 600};
 constexpr E1005FastRefresh::Region k2048BoardRegion = {30, 80, 420, 585};
@@ -210,6 +248,8 @@ constexpr E1005FastRefresh::Region kPegBoardRegion = {25, 80, 430, 584};
 constexpr E1005FastRefresh::Region kSlitherlinkBoardRegion = {25, 80, 430, 584};
 constexpr E1005FastRefresh::Region kSudokuBoardRegion = {20, 64, 440, 610};
 constexpr E1005FastRefresh::Region kCrosswordBoardRegion = {20, 64, 440, 690};
+constexpr E1005FastRefresh::Region kKlondikeBoardRegion = {5, 56, 470, 620};
+constexpr E1005FastRefresh::Region kMahjongBoardRegion = {8, 64, 464, 612};
 
 enum class Screen {
   Menu,
@@ -225,11 +265,16 @@ enum class Screen {
   Slitherlink,
   Sudoku,
   Crossword,
+  Klondike,
+  MahjongSolitaire,
+  EpubBrowser,
+  EpubReading,
 };
 
 enum class MenuPage : uint8_t {
   First,
   Second,
+  Third,
 };
 
 enum class GameId : uint8_t {
@@ -245,13 +290,18 @@ enum class GameId : uint8_t {
   Slitherlink,
   Sudoku,
   Crossword,
+  Klondike,
+  MahjongSolitaire,
+  EpubReader,
   Count,
 };
 
 constexpr size_t kGameCount = static_cast<size_t>(GameId::Count);
 constexpr size_t kGamesPerMenuPage =
     sizeof(kMenuCardSlots) / sizeof(kMenuCardSlots[0]);
-static_assert(kGameCount == kGamesPerMenuPage * 2);
+constexpr size_t kMenuPageCount =
+    (kGameCount + kGamesPerMenuPage - 1) / kGamesPerMenuPage;
+static_assert(kMenuPageCount == 3);
 const char* screenName(Screen screen) {
   switch (screen) {
     case Screen::Menu:
@@ -280,6 +330,14 @@ const char* screenName(Screen screen) {
       return "saved Sudoku";
     case Screen::Crossword:
       return "saved Crossword";
+    case Screen::Klondike:
+      return "saved Klondike";
+    case Screen::MahjongSolitaire:
+      return "saved Mahjong Solitaire";
+    case Screen::EpubBrowser:
+      return "EPUB browser";
+    case Screen::EpubReading:
+      return "saved EPUB page";
   }
   return "unknown";
 }
@@ -287,6 +345,13 @@ const char* screenName(Screen screen) {
 enum class ReversiMode : uint8_t {
   SinglePlayer,
   TwoPlayer,
+};
+
+struct ReaderResume {
+  char browserPath[kReaderPathCapacity];
+  char bookPath[kReaderPathCapacity];
+  uint16_t chapter;
+  uint32_t pageStart;
 };
 
 struct PersistedState {
@@ -308,6 +373,9 @@ struct PersistedState {
   SlitherlinkGame::Snapshot slitherlink;
   SudokuGame::Snapshot sudoku;
   CrosswordGame::Snapshot crossword;
+  KlondikeGame::Snapshot klondike;
+  MahjongSolitaireGame::Snapshot mahjong;
+  ReaderResume reader;
   uint32_t gamePlayCounts[kGameCount];
   uint32_t checksum;
 };
@@ -354,6 +422,11 @@ PegSolitaireGame pegSolitaire;
 SlitherlinkGame slitherlink;
 SudokuGame sudoku;
 CrosswordGame crossword;
+KlondikeGame klondike;
+MahjongSolitaireGame mahjong;
+EpubArchive epubArchive;
+SdReadonlyBrowser sdBrowser;
+DoubleTapTracker klondikeDoubleTap;
 uint16_t sokobanCompletedLevelCount = 0;
 bool sokobanProgressSaveFailed = false;
 uint32_t gamePlayCounts[kGameCount] = {};
@@ -380,6 +453,16 @@ bool pegSolitaireSaved = false;
 bool slitherlinkSaved = false;
 bool sudokuSaved = false;
 bool crosswordSaved = false;
+bool klondikeSaved = false;
+bool mahjongSaved = false;
+bool sdCardReady = false;
+int browserPageStart = 0;
+String browserMessage;
+String readerBrowserPath = "/";
+String readerBookPath;
+String readerChapterText;
+int readerChapterIndex = 0;
+size_t readerPageStart = 0;
 bool crosswordKeyboardVisible = false;
 bool batteryStatusSampled = false;
 bool externalPowerPresent = false;
@@ -467,6 +550,12 @@ const char* gameName(GameId game) {
       return "Sudoku";
     case GameId::Crossword:
       return "Crossword";
+    case GameId::Klondike:
+      return "Klondike";
+    case GameId::MahjongSolitaire:
+      return "Mahjong Solitaire";
+    case GameId::EpubReader:
+      return "EPUB Reader";
     case GameId::Count:
       break;
   }
@@ -500,6 +589,15 @@ uint32_t stateChecksum(const PersistedState& state) {
     checksum *= 16777619UL;
   }
   return checksum;
+}
+
+bool copyReaderPath(char* destination, size_t capacity, const String& path) {
+  if (path.length() >= capacity) {
+    destination[0] = '\0';
+    return false;
+  }
+  memcpy(destination, path.c_str(), path.length() + 1);
+  return true;
 }
 
 void saveResumeState() {
@@ -560,6 +658,28 @@ void saveResumeState() {
     state.flags |= kCrosswordSavedFlag;
     state.crossword = crossword.snapshot();
   }
+  if (klondikeSaved) {
+    state.flags |= kKlondikeSavedFlag;
+    state.klondike = klondike.snapshot();
+  }
+  if (mahjongSaved) {
+    state.flags |= kMahjongSavedFlag;
+    state.mahjong = mahjong.snapshot();
+  }
+  const bool savedBrowserPath =
+      copyReaderPath(state.reader.browserPath, sizeof(state.reader.browserPath),
+                     readerBrowserPath);
+  const bool savedBookPath =
+      copyReaderPath(state.reader.bookPath, sizeof(state.reader.bookPath),
+                     readerBookPath);
+  state.reader.chapter = static_cast<uint16_t>(readerChapterIndex);
+  state.reader.pageStart = static_cast<uint32_t>(readerPageStart);
+  if ((currentScreen == Screen::EpubBrowser && !savedBrowserPath) ||
+      (currentScreen == Screen::EpubReading && !savedBookPath)) {
+    state.screen = static_cast<uint8_t>(Screen::EpubBrowser);
+    state.reader.browserPath[0] = '/';
+    state.reader.browserPath[1] = '\0';
+  }
   state.checksum = stateChecksum(state);
   persistedState = state;
 }
@@ -571,15 +691,22 @@ bool restoreResumeState() {
   if (state.magic != kPersistedStateMagic ||
       state.version != kPersistedStateVersion ||
       state.checksum != stateChecksum(state) ||
-      state.screen > static_cast<uint8_t>(Screen::Crossword) ||
-      state.menuPage > static_cast<uint8_t>(MenuPage::Second) ||
+      state.screen > static_cast<uint8_t>(Screen::EpubReading) ||
+      state.menuPage > static_cast<uint8_t>(MenuPage::Third) ||
       state.reversiMode > static_cast<uint8_t>(ReversiMode::TwoPlayer) ||
       (state.flags & ~(kLightsOutSavedFlag | k2048SavedFlag |
                        kPipeConnectSavedFlag | kMinesweeperSavedFlag |
                        kNonogramSavedFlag | kReversiSavedFlag |
                        kDotsAndBoxesSavedFlag | kSokobanSavedFlag |
                        kPegSolitaireSavedFlag | kSlitherlinkSavedFlag |
-                       kSudokuSavedFlag | kCrosswordSavedFlag)) != 0) {
+                       kSudokuSavedFlag | kCrosswordSavedFlag |
+                       kKlondikeSavedFlag | kMahjongSavedFlag)) != 0 ||
+      memchr(state.reader.browserPath, '\0',
+             sizeof(state.reader.browserPath)) == nullptr ||
+      memchr(state.reader.bookPath, '\0', sizeof(state.reader.bookPath)) ==
+          nullptr ||
+      state.reader.chapter >= EpubArchive::kMaximumSpineItems ||
+      state.reader.pageStart > EpubArchive::kMaximumChapterBytes) {
     LOG.println("[games] saved resume state is invalid");
     return false;
   }
@@ -701,6 +828,35 @@ bool restoreResumeState() {
     LOG.println("[games] saved screen has no Crossword game");
     return false;
   }
+  const bool hasKlondikeSave = (state.flags & kKlondikeSavedFlag) != 0;
+  if (hasKlondikeSave && !klondike.restore(state.klondike)) {
+    LOG.println("[games] saved Klondike state is invalid");
+    return false;
+  }
+  if (savedScreen == Screen::Klondike && !hasKlondikeSave) {
+    LOG.println("[games] saved screen has no Klondike game");
+    return false;
+  }
+  const bool hasMahjongSave = (state.flags & kMahjongSavedFlag) != 0;
+  if (hasMahjongSave && !mahjong.restore(state.mahjong)) {
+    LOG.println("[games] saved Mahjong Solitaire state is invalid");
+    return false;
+  }
+  if (savedScreen == Screen::MahjongSolitaire && !hasMahjongSave) {
+    LOG.println("[games] saved screen has no Mahjong Solitaire game");
+    return false;
+  }
+  if ((savedScreen == Screen::EpubBrowser ||
+       savedScreen == Screen::EpubReading) &&
+      state.reader.browserPath[0] != '/') {
+    LOG.println("[games] saved EPUB browser path is invalid");
+    return false;
+  }
+  if (savedScreen == Screen::EpubReading &&
+      state.reader.bookPath[0] != '/') {
+    LOG.println("[games] saved EPUB book path is invalid");
+    return false;
+  }
   lightsOutSaved = hasLightsOutSave;
   game2048Saved = has2048Save;
   pipeConnectSaved = hasPipeConnectSave;
@@ -713,6 +869,13 @@ bool restoreResumeState() {
   slitherlinkSaved = hasSlitherlinkSave;
   sudokuSaved = hasSudokuSave;
   crosswordSaved = hasCrosswordSave;
+  klondikeSaved = hasKlondikeSave;
+  mahjongSaved = hasMahjongSave;
+  readerBrowserPath =
+      state.reader.browserPath[0] == '\0' ? "/" : state.reader.browserPath;
+  readerBookPath = state.reader.bookPath;
+  readerChapterIndex = state.reader.chapter;
+  readerPageStart = state.reader.pageStart;
   for (size_t index = 0; index < kGameCount; ++index) {
     gamePlayCounts[index] = state.gamePlayCounts[index];
   }
@@ -927,10 +1090,115 @@ Rect& menuCardFor(GameId game) {
       return kSudokuMenuCard;
     case GameId::Crossword:
       return kCrosswordMenuCard;
+    case GameId::Klondike:
+      return kKlondikeMenuCard;
+    case GameId::MahjongSolitaire:
+      return kMahjongMenuCard;
+    case GameId::EpubReader:
+      return kEpubReaderMenuCard;
     case GameId::Count:
       break;
   }
   return kLightsOutMenuCard;
+}
+
+const char* klondikeRankLabel(uint8_t card) {
+  static constexpr const char* kLabels[KlondikeGame::kRankCount] = {
+      "A", "2", "3", "4",  "5", "6", "7",
+      "8", "9", "10", "J", "Q", "K",
+  };
+  const int rank = KlondikeGame::rank(card);
+  return rank >= 0 ? kLabels[rank] : "";
+}
+
+void drawKlondikeSuit(int suit, int centerX, int centerY, int size,
+                       uint16_t color) {
+  const int radius = std::max(2, size / 4);
+  if (suit == 0) {
+    epaper.fillCircle(centerX, centerY - radius, radius, color);
+    epaper.fillCircle(centerX - radius, centerY + radius / 2, radius, color);
+    epaper.fillCircle(centerX + radius, centerY + radius / 2, radius, color);
+    epaper.fillRect(centerX - std::max(1, radius / 3), centerY,
+                   std::max(2, radius * 2 / 3), radius * 2, color);
+  } else if (suit == 1) {
+    epaper.fillTriangle(centerX, centerY - size / 2, centerX - size / 3,
+                       centerY, centerX + size / 3, centerY, color);
+    epaper.fillTriangle(centerX, centerY + size / 2, centerX - size / 3,
+                       centerY, centerX + size / 3, centerY, color);
+  } else if (suit == 2) {
+    epaper.fillCircle(centerX - radius, centerY - radius / 2, radius, color);
+    epaper.fillCircle(centerX + radius, centerY - radius / 2, radius, color);
+    epaper.fillTriangle(centerX - radius * 2, centerY - radius / 2,
+                       centerX + radius * 2, centerY - radius / 2, centerX,
+                       centerY + size / 2, color);
+  } else {
+    epaper.fillTriangle(centerX, centerY - size / 2, centerX - size / 2,
+                       centerY + radius, centerX + size / 2,
+                       centerY + radius, color);
+    epaper.fillCircle(centerX - radius, centerY + radius / 2, radius, color);
+    epaper.fillCircle(centerX + radius, centerY + radius / 2, radius, color);
+    epaper.fillRect(centerX - std::max(1, radius / 3), centerY,
+                   std::max(2, radius * 2 / 3), radius * 2, color);
+  }
+}
+
+void drawKlondikeCard(int x, int y, int width, int height, uint8_t card,
+                      bool faceUp, bool selected = false) {
+  epaper.fillRoundRect(x, y, width, height, 5,
+                      faceUp ? TFT_WHITE : TFT_BLACK);
+  epaper.drawRoundRect(x, y, width, height, 5, TFT_BLACK);
+  if (!faceUp) {
+    epaper.drawRoundRect(x + 4, y + 4, width - 8, height - 8, 4, TFT_WHITE);
+    for (int offset = 9; offset < width - 5; offset += 10) {
+      epaper.drawLine(x + offset, y + 6, x + 5, y + offset + 1, TFT_WHITE);
+    }
+    return;
+  }
+
+  drawCentered(klondikeRankLabel(card), x + width / 2,
+               y + std::max(13, height / 5), width < 50 ? 2 : 4);
+  drawKlondikeSuit(KlondikeGame::cardSuit(card), x + width / 2,
+                    y + height * 3 / 5, std::max(12, width / 3), TFT_BLACK);
+  if (selected) {
+    epaper.drawRoundRect(x + 2, y + 2, width - 4, height - 4, 4, TFT_BLACK);
+    epaper.drawRoundRect(x + 4, y + 4, width - 8, height - 8, 3, TFT_BLACK);
+  }
+}
+
+void drawMahjongSymbol(int suit, int centerX, int centerY, int size,
+                       uint16_t color) {
+  if (suit == 0) {
+    epaper.drawCircle(centerX, centerY, size / 3, color);
+    epaper.fillCircle(centerX, centerY, std::max(1, size / 9), color);
+  } else if (suit == 1) {
+    const int gap = std::max(2, size / 5);
+    for (int offset = -gap; offset <= gap; offset += gap) {
+      epaper.fillRect(centerX + offset - 1, centerY - size / 3, 3,
+                     size * 2 / 3, color);
+    }
+  } else if (suit == 2) {
+    epaper.drawRect(centerX - size / 3, centerY - size / 3, size * 2 / 3,
+                   size * 2 / 3, color);
+    epaper.fillRect(centerX - 2, centerY - size / 4, 4, size / 2, color);
+  } else {
+    epaper.fillTriangle(centerX, centerY - size / 3, centerX - size / 3,
+                       centerY + size / 3, centerX + size / 3,
+                       centerY + size / 3, color);
+  }
+}
+
+void drawMahjongTile(int x, int y, int width, int height, uint8_t suit,
+                     uint8_t rank, bool selected = false) {
+  epaper.fillRoundRect(x, y, width, height, 3, TFT_WHITE);
+  epaper.drawRoundRect(x, y, width, height, 3, TFT_BLACK);
+  if (selected) {
+    epaper.drawRoundRect(x + 2, y + 2, width - 4, height - 4, 2, TFT_BLACK);
+    epaper.drawRoundRect(x + 4, y + 4, width - 8, height - 8, 2, TFT_BLACK);
+  }
+  drawMahjongSymbol(suit, x + width / 2, y + height / 3,
+                    std::max(10, width / 2), TFT_BLACK);
+  drawCenteredNumber(rank, x + width / 2, y + height * 3 / 4, 2, TFT_BLACK,
+                     TFT_WHITE);
 }
 
 void drawLightsOutCell(int x, int y, bool on) {
@@ -1410,6 +1678,42 @@ void drawCrosswordMenuCard() {
   }
 }
 
+void drawKlondikeMenuCard() {
+  drawMenuCardFrame(kKlondikeMenuCard);
+  const int left = kKlondikeMenuCard.x + 24;
+  const int top = kKlondikeMenuCard.y + 43;
+  drawKlondikeCard(left, top, 52, 92, 0, true);
+  drawKlondikeCard(left + 45, top + 12, 52, 92, 25, true);
+  drawKlondikeCard(left + 90, top + 24, 52, 92, 37, true);
+}
+
+void drawMahjongMenuCard() {
+  drawMenuCardFrame(kMahjongMenuCard);
+  constexpr int kWidth = 58;
+  constexpr int kHeight = 66;
+  const int left = kMahjongMenuCard.x + 27;
+  const int top = kMahjongMenuCard.y + 23;
+  drawMahjongTile(left, top, kWidth, kHeight, 0, 1);
+  drawMahjongTile(left + 74, top, kWidth, kHeight, 1, 8);
+  drawMahjongTile(left, top + 78, kWidth, kHeight, 2, 5);
+  drawMahjongTile(left + 74, top + 78, kWidth, kHeight, 3, 3);
+}
+
+void drawEpubReaderMenuCard() {
+  drawMenuCardFrame(kEpubReaderMenuCard);
+  const int left = kEpubReaderMenuCard.x + 42;
+  const int top = kEpubReaderMenuCard.y + 24;
+  constexpr int kBookWidth = 106;
+  constexpr int kBookHeight = 142;
+  epaper.fillRoundRect(left, top, kBookWidth, kBookHeight, 5, TFT_BLACK);
+  epaper.fillRect(left + 8, top + 7, kBookWidth - 16, kBookHeight - 14,
+                  TFT_WHITE);
+  epaper.fillRect(left + 16, top + 26, kBookWidth - 32, 4, TFT_BLACK);
+  epaper.fillRect(left + 16, top + 42, kBookWidth - 32, 4, TFT_BLACK);
+  epaper.fillRect(left + 16, top + 58, kBookWidth - 45, 4, TFT_BLACK);
+  drawCentered("EPUB", left + kBookWidth / 2, top + 103, 2);
+}
+
 void arrangeMenuCards() {
   for (size_t rank = 0; rank < kGameCount; ++rank) {
     menuCardFor(rankedGameAt(rank)) = kMenuCardSlots[rank % kGamesPerMenuPage];
@@ -1453,6 +1757,15 @@ void drawGameMenuCard(GameId game) {
       return;
     case GameId::Crossword:
       drawCrosswordMenuCard();
+      return;
+    case GameId::Klondike:
+      drawKlondikeMenuCard();
+      return;
+    case GameId::MahjongSolitaire:
+      drawMahjongMenuCard();
+      return;
+    case GameId::EpubReader:
+      drawEpubReaderMenuCard();
       return;
     case GameId::Count:
       return;
@@ -1523,18 +1836,19 @@ void drawMenu() {
   epaper.fillSprite(TFT_WHITE);
   drawGamesLogo(kScreenWidth / 2, 80, 72);
   arrangeMenuCards();
-  const size_t firstRank =
-      currentMenuPage == MenuPage::First ? 0 : kGamesPerMenuPage;
-  for (size_t slot = 0; slot < kGamesPerMenuPage; ++slot) {
+  const size_t pageIndex = static_cast<size_t>(currentMenuPage);
+  const size_t firstRank = pageIndex * kGamesPerMenuPage;
+  const size_t visibleGames =
+      std::min(kGamesPerMenuPage, kGameCount - firstRank);
+  for (size_t slot = 0; slot < visibleGames; ++slot) {
     drawGameMenuCard(rankedGameAt(firstRank + slot));
   }
-  if (currentMenuPage == MenuPage::First) {
+  if (pageIndex > 0) drawArrowButton(kPreviousPageButton, false);
+  if (pageIndex + 1 < kMenuPageCount) {
     drawArrowButton(kNextPageButton, true);
-  } else {
-    drawArrowButton(kPreviousPageButton, false);
   }
-  const char* pageLabel =
-      currentMenuPage == MenuPage::First ? "1 / 2" : "2 / 2";
+  const String pageLabel =
+      String(pageIndex + 1) + " / " + String(kMenuPageCount);
   drawCentered(pageLabel, kScreenWidth / 2, 774, 4);
   drawStatusBar();
 }
@@ -2345,6 +2659,290 @@ void drawCrossword() {
   drawGameStatusBar(tr(TextId::Crossword));
 }
 
+Rect klondikeFoundationSlot(int suit) {
+  return {208 + suit * kKlondikeColumnStep, 72, kKlondikeCardWidth,
+          kKlondikeCardHeight};
+}
+
+int klondikeTableauCardY(int column, int cardIndex) {
+  const int count = klondike.tableauCount(column);
+  if (count <= 1) return kKlondikeTableauTop;
+  const int hidden = klondike.faceUpStart(column);
+  constexpr int kHiddenStep = 16;
+  constexpr int kFaceUpStep = 28;
+  constexpr int kLastCardBottom = 666;
+  const int available =
+      kLastCardBottom - kKlondikeTableauTop - kKlondikeCardHeight;
+  const int desired =
+      hidden * kHiddenStep + std::max(0, count - hidden - 1) * kFaceUpStep;
+  if (desired <= available) {
+    return kKlondikeTableauTop +
+           std::min(cardIndex, hidden) * kHiddenStep +
+           std::max(0, cardIndex - hidden) * kFaceUpStep;
+  }
+  return kKlondikeTableauTop +
+         cardIndex * std::max(7, available / (count - 1));
+}
+
+void drawKlondikeBoard() {
+  epaper.fillRect(kKlondikeBoardRegion.x, kKlondikeBoardRegion.y,
+                   kKlondikeBoardRegion.width, kKlondikeBoardRegion.height,
+                   TFT_WHITE);
+  if (klondike.stockCount() > 0) {
+    drawKlondikeCard(kKlondikeStockSlot.x, kKlondikeStockSlot.y,
+                     kKlondikeCardWidth, kKlondikeCardHeight, 0, false);
+  } else {
+    epaper.drawRoundRect(kKlondikeStockSlot.x, kKlondikeStockSlot.y,
+                         kKlondikeCardWidth, kKlondikeCardHeight, 5,
+                         TFT_BLACK);
+  }
+  if (klondike.wasteCount() > 0) {
+    drawKlondikeCard(kKlondikeWasteSlot.x, kKlondikeWasteSlot.y,
+                     kKlondikeCardWidth, kKlondikeCardHeight,
+                     klondike.wasteTop(), true, klondike.wasteSelected());
+  } else {
+    epaper.drawRoundRect(kKlondikeWasteSlot.x, kKlondikeWasteSlot.y,
+                         kKlondikeCardWidth, kKlondikeCardHeight, 5,
+                         TFT_BLACK);
+  }
+  for (int suit = 0; suit < KlondikeGame::kSuitCount; ++suit) {
+    const Rect slot = klondikeFoundationSlot(suit);
+    const uint8_t card = klondike.foundationTop(suit);
+    if (card == KlondikeGame::kNoCard) {
+      epaper.drawRoundRect(slot.x, slot.y, slot.width, slot.height, 5,
+                           TFT_BLACK);
+      drawKlondikeSuit(suit, slot.x + slot.width / 2,
+                        slot.y + slot.height / 2, 22, TFT_BLACK);
+    } else {
+      drawKlondikeCard(slot.x, slot.y, slot.width, slot.height, card, true,
+                       klondike.foundationSelected(suit));
+    }
+  }
+
+  for (int column = 0; column < KlondikeGame::kTableauCount; ++column) {
+    const int count = klondike.tableauCount(column);
+    const int x = kKlondikeGridLeft + column * kKlondikeColumnStep;
+    if (count == 0) {
+      epaper.drawRoundRect(x, kKlondikeTableauTop, kKlondikeCardWidth,
+                           kKlondikeCardHeight, 5, TFT_BLACK);
+      drawCentered("K", x + kKlondikeCardWidth / 2,
+                   kKlondikeTableauTop + kKlondikeCardHeight / 2, 4);
+      continue;
+    }
+    for (int index = 0; index < count; ++index) {
+      drawKlondikeCard(
+          x, klondikeTableauCardY(column, index), kKlondikeCardWidth,
+          kKlondikeCardHeight, klondike.tableauCard(column, index),
+          klondike.tableauCardFaceUp(column, index),
+          klondike.isTableauCardSelected(column, index));
+    }
+  }
+
+  if (klondike.solved()) {
+    drawCentered(tr(TextId::Solved), kScreenWidth / 2, 654, 4);
+  } else {
+    drawCentered(String(klondike.moves()) + " " + tr(TextId::Moves),
+                 kScreenWidth / 2, 654, 4);
+  }
+}
+
+void drawKlondike() {
+  epaper.fillSprite(TFT_WHITE);
+  drawKlondikeBoard();
+  drawButton(kNewButton, tr(TextId::NewGame));
+  drawButton(kResetButton, tr(TextId::Reset));
+  drawGameStatusBar(tr(TextId::Klondike));
+}
+
+Rect mahjongTileRect(int index) {
+  const MahjongSolitaireGame::Position position =
+      MahjongSolitaireGame::position(index);
+  return {kMahjongGridLeft + position.column * kMahjongColumnStep +
+              position.layer * kMahjongLayerOffset,
+          kMahjongGridTop + position.row * kMahjongRowStep -
+              position.layer * kMahjongLayerOffset,
+          kMahjongTileWidth, kMahjongTileHeight};
+}
+
+void drawMahjongBoard() {
+  epaper.fillRect(kMahjongBoardRegion.x, kMahjongBoardRegion.y,
+                   kMahjongBoardRegion.width, kMahjongBoardRegion.height,
+                   TFT_WHITE);
+  for (int layer = 0; layer < 4; ++layer) {
+    for (int index = 0; index < MahjongSolitaireGame::kTileCount; ++index) {
+      if (!mahjong.occupied(index) ||
+          MahjongSolitaireGame::position(index).layer != layer) {
+        continue;
+      }
+      const Rect tile = mahjongTileRect(index);
+      if (layer > 0) {
+        epaper.fillRoundRect(tile.x - 3, tile.y + 3, tile.width, tile.height, 3,
+                            TFT_BLACK);
+      }
+      drawMahjongTile(tile.x, tile.y, tile.width, tile.height,
+                      mahjong.tileSuit(index), mahjong.tileRank(index),
+                      mahjong.selected(index));
+    }
+  }
+
+  if (mahjong.solved()) {
+    drawCentered(tr(TextId::Solved), kScreenWidth / 2, 654, 4);
+  } else if (!mahjong.hasMoves()) {
+    drawCentered(tr(TextId::NoMoves), kScreenWidth / 2, 654, 4);
+  } else {
+    drawCentered(String(mahjong.remaining()) + " " + tr(TextId::Tiles) +
+                     "   " + String(mahjong.moves()) + " " +
+                     tr(TextId::Moves),
+                 kScreenWidth / 2, 654, 4);
+  }
+}
+
+void drawMahjong() {
+  epaper.fillSprite(TFT_WHITE);
+  drawMahjongBoard();
+  drawButton(kNewButton, tr(TextId::NewGame));
+  drawButton(kResetButton, tr(TextId::Reset));
+  drawGameStatusBar(tr(TextId::MahjongSolitaire));
+}
+
+String fitReaderText(String text, int maximumWidth) {
+  if (epaper.textWidth(text) <= maximumWidth) return text;
+  constexpr char kEllipsis[] = "...";
+  while (!text.isEmpty() &&
+         epaper.textWidth(text + kEllipsis) > maximumWidth) {
+    size_t offset = text.length() - 1;
+    while (offset > 0 &&
+           (static_cast<uint8_t>(text[offset]) & 0xC0) == 0x80) {
+      --offset;
+    }
+    text.remove(offset);
+  }
+  return text + kEllipsis;
+}
+
+void loadReaderFont() {
+  if (sdCardReady && sd_card::fileExists("/fonts/sans_bold_16.vlw")) {
+    epaper.loadFont("fonts/sans_bold_16", SD);
+  } else {
+    epaper.loadFont(game_ui_fonts::kGameUiFont16);
+  }
+}
+
+void drawBrowserEntryIcon(const SdReadonlyBrowser::Entry& entry, int x,
+                          int y) {
+  if (entry.directory) {
+    epaper.fillRect(x + 2, y + 8, 44, 31, TFT_BLACK);
+    epaper.fillRect(x + 7, y + 2, 19, 10, TFT_BLACK);
+    epaper.fillRect(x + 6, y + 13, 36, 22, TFT_WHITE);
+    return;
+  }
+  epaper.drawRect(x + 7, y, 34, 44, TFT_BLACK);
+  epaper.fillTriangle(x + 30, y, x + 41, y, x + 41, y + 11, TFT_BLACK);
+  if (entry.epub) {
+    epaper.fillRect(x + 12, y + 18, 24, 4, TFT_BLACK);
+    epaper.fillRect(x + 12, y + 28, 24, 4, TFT_BLACK);
+  } else {
+    epaper.drawLine(x + 13, y + 17, x + 35, y + 37, TFT_BLACK);
+    epaper.drawLine(x + 35, y + 17, x + 13, y + 37, TFT_BLACK);
+  }
+}
+
+void drawEpubBrowser() {
+  epaper.fillSprite(TFT_WHITE);
+  drawGameStatusBar(tr(TextId::EpubReader));
+  if (!sdCardReady) {
+    drawCentered(tr(TextId::SdCardRequired), kScreenWidth / 2, 320, 4);
+    drawCentered(tr(TextId::InsertSdCard), kScreenWidth / 2, 380, 4);
+    return;
+  }
+
+  loadReaderFont();
+  epaper.setTextColor(TFT_BLACK, TFT_WHITE, true);
+  epaper.setTextDatum(MC_DATUM);
+  epaper.drawString(fitReaderText(readerBrowserPath, kScreenWidth - 36),
+                    kScreenWidth / 2, 72);
+  if (sdBrowser.count() == 0) {
+    epaper.unloadFont();
+    drawCentered(tr(TextId::EmptyFolder), kScreenWidth / 2, 350, 4);
+  } else {
+    browserPageStart =
+        std::max(0, std::min(browserPageStart,
+                             std::max(0, sdBrowser.count() - 1)));
+    epaper.setTextDatum(ML_DATUM);
+    for (int row = 0; row < kBrowserRowsPerPage; ++row) {
+      const int index = browserPageStart + row;
+      const SdReadonlyBrowser::Entry* entry = sdBrowser.entry(index);
+      if (entry == nullptr) break;
+      const int top = kBrowserRowTop + row * kBrowserRowHeight;
+      epaper.drawFastHLine(18, top + kBrowserRowHeight - 1,
+                          kScreenWidth - 36, TFT_BLACK);
+      drawBrowserEntryIcon(*entry, 22, top + 16);
+      const String name = fitReaderText(entry->name, 365);
+      epaper.drawString(name, 82, top + kBrowserRowHeight / 2);
+    }
+    epaper.unloadFont();
+  }
+
+  if (browserPageStart > 0) {
+    drawButton(kNewButton, tr(TextId::Previous));
+  }
+  if (browserPageStart + kBrowserRowsPerPage < sdBrowser.count()) {
+    drawButton(kResetButton, tr(TextId::Next));
+  }
+  String footer = browserMessage.isEmpty() ? tr(TextId::ReadOnly)
+                                           : browserMessage;
+  if (browserMessage.isEmpty() && sdBrowser.truncated()) footer += " - 96+";
+  drawCentered(footer, kScreenWidth / 2, 668, 2);
+}
+
+epub_text::TextPage currentReaderPage() {
+  return epub_text::paginate(
+      readerChapterText.c_str(), readerChapterText.length(), readerPageStart,
+      kReaderColumns, kReaderLinesPerPage);
+}
+
+uint32_t readerPageNumber() {
+  uint32_t pageNumber = 1;
+  size_t offset = 0;
+  while (offset < readerPageStart) {
+    const epub_text::TextPage page = epub_text::paginate(
+        readerChapterText.c_str(), readerChapterText.length(), offset,
+        kReaderColumns, kReaderLinesPerPage);
+    if (page.end <= offset || page.end > readerPageStart) break;
+    offset = page.end;
+    ++pageNumber;
+  }
+  return pageNumber;
+}
+
+void drawEpubReading() {
+  epaper.fillSprite(TFT_WHITE);
+  drawCentered(epubArchive.title(), kScreenWidth / 2, 76, 2);
+  const epub_text::TextPage page = currentReaderPage();
+  loadReaderFont();
+  epaper.setTextColor(TFT_BLACK, TFT_WHITE, true);
+  epaper.setTextDatum(TL_DATUM);
+  for (size_t index = 0; index < page.lines.size(); ++index) {
+    epaper.drawString(page.lines[index].c_str(), 18,
+                      104 + static_cast<int>(index) * 23);
+  }
+  epaper.unloadFont();
+
+  const String location =
+      String(tr(TextId::Chapter)) + " " + String(readerChapterIndex + 1) +
+      " / " + String(epubArchive.chapterCount()) + "   " +
+      tr(TextId::Page) + " " + String(readerPageNumber());
+  drawCentered(location, kScreenWidth / 2, 668, 2);
+  if (readerPageStart > 0 || readerChapterIndex > 0) {
+    drawButton(kNewButton, tr(TextId::Previous));
+  }
+  if (page.end < readerChapterText.length() ||
+      readerChapterIndex + 1 < epubArchive.chapterCount()) {
+    drawButton(kResetButton, tr(TextId::Next));
+  }
+  drawGameStatusBar(tr(TextId::EpubReader));
+}
+
 uint32_t randomScramble() {
   uint32_t mask = esp_random() & LightsOutGame::kCellMask;
   int pressed = 0;
@@ -2465,6 +3063,72 @@ void startNewCrossword() {
   crosswordKeyboardVisible = false;
 }
 
+void startNewKlondike() {
+  klondike.start(esp_random());
+  klondikeDoubleTap.clear();
+  klondikeSaved = true;
+}
+
+void startNewMahjong() {
+  mahjong.start(esp_random());
+  mahjongSaved = true;
+}
+
+bool openReaderBrowserPath(const String& path) {
+  epubArchive.close();
+  readerChapterText = "";
+  readerBookPath = "";
+  readerPageStart = 0;
+  readerChapterIndex = 0;
+  browserPageStart = 0;
+  browserMessage = "";
+  readerBrowserPath = path.isEmpty() ? "/" : path;
+  if (!sdCardReady) return false;
+  if (sdBrowser.open(readerBrowserPath)) return true;
+  LOG.printf("[games] could not open SD directory: %s\n",
+             readerBrowserPath.c_str());
+  readerBrowserPath = "/";
+  browserMessage = tr(TextId::OpenFailed);
+  return sdBrowser.open(readerBrowserPath);
+}
+
+bool loadReaderChapter(int chapter, size_t pageStart = 0) {
+  String text;
+  if (!epubArchive.loadChapter(chapter, text)) return false;
+  readerChapterText = std::move(text);
+  readerChapterIndex = chapter;
+  readerPageStart =
+      pageStart < readerChapterText.length() ? pageStart : 0;
+  return true;
+}
+
+bool openReaderBook(const String& path, int chapter = 0,
+                    size_t pageStart = 0, bool skipUnreadable = true) {
+  if (!sdCardReady || !epubArchive.open(path)) {
+    LOG.printf("[games] could not open EPUB %s: %s\n", path.c_str(),
+               epubArchive.error().c_str());
+    return false;
+  }
+  const int firstChapter =
+      std::max(0, std::min(chapter, epubArchive.chapterCount() - 1));
+  const int lastChapter =
+      skipUnreadable ? epubArchive.chapterCount() : firstChapter + 1;
+  for (int index = firstChapter; index < lastChapter; ++index) {
+    if (!loadReaderChapter(index, index == firstChapter ? pageStart : 0)) {
+      LOG.printf("[games] skipping EPUB chapter %d: %s\n", index + 1,
+                 epubArchive.error().c_str());
+      continue;
+    }
+    readerBookPath = path;
+    return true;
+  }
+  const String savedError = epubArchive.error();
+  epubArchive.close();
+  LOG.printf("[games] EPUB has no readable chapter: %s\n",
+             savedError.c_str());
+  return false;
+}
+
 void playReversiComputerTurns() {
   while (reversiMode == ReversiMode::SinglePlayer &&
          reversi.currentPlayer() == ReversiGame::Disc::White &&
@@ -2572,6 +3236,18 @@ void drawCurrentScreen() {
     case Screen::Crossword:
       drawCrossword();
       return;
+    case Screen::Klondike:
+      drawKlondike();
+      return;
+    case Screen::MahjongSolitaire:
+      drawMahjong();
+      return;
+    case Screen::EpubBrowser:
+      drawEpubBrowser();
+      return;
+    case Screen::EpubReading:
+      drawEpubReading();
+      return;
   }
 }
 
@@ -2625,6 +3301,17 @@ void showMenu() {
     LOG.println("[games] auto-saving Sudoku");
   } else if (currentScreen == Screen::Crossword && crosswordSaved) {
     LOG.println("[games] auto-saving Crossword");
+  } else if (currentScreen == Screen::Klondike && klondikeSaved) {
+    LOG.println("[games] auto-saving Klondike");
+  } else if (currentScreen == Screen::MahjongSolitaire && mahjongSaved) {
+    LOG.println("[games] auto-saving Mahjong Solitaire");
+  } else if (currentScreen == Screen::EpubReading) {
+    LOG.println("[games] saving EPUB reading position");
+  }
+  if (currentScreen == Screen::EpubBrowser ||
+      currentScreen == Screen::EpubReading) {
+    epubArchive.close();
+    readerChapterText = "";
   }
   currentScreen = Screen::Menu;
   saveResumeState();
@@ -2717,6 +3404,34 @@ void showCrossword() {
   currentScreen = Screen::Crossword;
   drawCrossword();
   refreshScreen("Crossword screen");
+}
+
+void showKlondike() {
+  if (!klondikeSaved) startNewKlondike();
+  currentScreen = Screen::Klondike;
+  drawKlondike();
+  refreshScreen("Klondike screen");
+}
+
+void showMahjong() {
+  if (!mahjongSaved) startNewMahjong();
+  currentScreen = Screen::MahjongSolitaire;
+  drawMahjong();
+  refreshScreen("Mahjong Solitaire screen");
+}
+
+void showEpubBrowser() {
+  currentScreen = Screen::EpubBrowser;
+  openReaderBrowserPath(readerBrowserPath);
+  drawEpubBrowser();
+  refreshScreen("EPUB browser");
+}
+
+void showEpubReading() {
+  currentScreen = Screen::EpubReading;
+  saveResumeState();
+  drawEpubReading();
+  refreshScreen("EPUB page");
 }
 
 void updateLightsOut(const char* action) {
@@ -2823,6 +3538,16 @@ void updateCrossword(const char* action) {
   refreshRegion(kCrosswordBoardRegion, action);
 }
 
+void updateKlondike(const char* action) {
+  drawKlondikeBoard();
+  refreshRegion(kKlondikeBoardRegion, action);
+}
+
+void updateMahjong(const char* action) {
+  drawMahjongBoard();
+  refreshRegion(kMahjongBoardRegion, action);
+}
+
 void launchGame(GameId game) {
   hardware::beep();
   recordGameLaunch(game);
@@ -2863,6 +3588,15 @@ void launchGame(GameId game) {
     case GameId::Crossword:
       showCrossword();
       break;
+    case GameId::Klondike:
+      showKlondike();
+      break;
+    case GameId::MahjongSolitaire:
+      showMahjong();
+      break;
+    case GameId::EpubReader:
+      showEpubBrowser();
+      break;
     case GameId::Count:
       return;
   }
@@ -2874,7 +3608,7 @@ void showMenuPage(MenuPage page, bool beep = true) {
   currentMenuPage = page;
   saveResumeState();
   drawMenu();
-  refreshScreen(page == MenuPage::First ? "menu page 1" : "menu page 2");
+  refreshScreen("menu page");
 }
 
 void handleLanguageTouch(const Gt911Touch::Point& point) {
@@ -2887,19 +3621,21 @@ void handleLanguageTouch(const Gt911Touch::Point& point) {
 }
 
 void handleMenuTouch(const Gt911Touch::Point& point) {
-  if (currentMenuPage == MenuPage::First &&
+  const size_t pageIndex = static_cast<size_t>(currentMenuPage);
+  if (pageIndex + 1 < kMenuPageCount &&
       kNextPageButton.contains(point.x, point.y)) {
-    showMenuPage(MenuPage::Second);
+    showMenuPage(static_cast<MenuPage>(pageIndex + 1));
     return;
   }
-  if (currentMenuPage == MenuPage::Second &&
+  if (pageIndex > 0 &&
       kPreviousPageButton.contains(point.x, point.y)) {
-    showMenuPage(MenuPage::First);
+    showMenuPage(static_cast<MenuPage>(pageIndex - 1));
     return;
   }
-  const size_t firstRank =
-      currentMenuPage == MenuPage::First ? 0 : kGamesPerMenuPage;
-  for (size_t slot = 0; slot < kGamesPerMenuPage; ++slot) {
+  const size_t firstRank = pageIndex * kGamesPerMenuPage;
+  const size_t visibleGames =
+      std::min(kGamesPerMenuPage, kGameCount - firstRank);
+  for (size_t slot = 0; slot < visibleGames; ++slot) {
     if (kMenuCardSlots[slot].contains(point.x, point.y)) {
       launchGame(rankedGameAt(firstRank + slot));
       return;
@@ -3382,6 +4118,271 @@ void handleCrosswordTouch(const Gt911Touch::Point& point) {
   }
 }
 
+void handleKlondikeTouch(const Gt911Touch::Point& point) {
+  if (kBackButton.contains(point.x, point.y)) {
+    klondikeDoubleTap.clear();
+    hardware::beep();
+    showMenu();
+    return;
+  }
+  if (kNewButton.contains(point.x, point.y)) {
+    hardware::beep();
+    startNewKlondike();
+    updateKlondike("new Klondike deal");
+    return;
+  }
+  if (kResetButton.contains(point.x, point.y)) {
+    hardware::beep();
+    klondike.reset();
+    klondikeDoubleTap.clear();
+    updateKlondike("reset Klondike deal");
+    return;
+  }
+  if (kKlondikeStockSlot.contains(point.x, point.y)) {
+    klondikeDoubleTap.clear();
+    const KlondikeGame::StockResult result = klondike.drawStock();
+    if (result != KlondikeGame::StockResult::NoChange) {
+      updateKlondike(result == KlondikeGame::StockResult::Drawn
+                         ? "draw Klondike stock"
+                         : "recycle Klondike stock");
+    }
+    return;
+  }
+  if (kKlondikeWasteSlot.contains(point.x, point.y)) {
+    if (klondikeDoubleTap.registerTap(kKlondikeWasteTapTarget, millis(),
+                                     kKlondikeDoubleTapMs)) {
+      if (klondike.moveSelectionToMatchingFoundation()) {
+        updateKlondike("double-tap Klondike foundation move");
+      }
+      return;
+    }
+    if (klondike.selectWaste()) updateKlondike("select Klondike waste");
+    return;
+  }
+  for (int suit = 0; suit < KlondikeGame::kSuitCount; ++suit) {
+    if (!klondikeFoundationSlot(suit).contains(point.x, point.y)) continue;
+    klondikeDoubleTap.clear();
+    if (klondike.hasSelection()) {
+      if (klondike.moveSelectionToFoundation(suit)) {
+        updateKlondike("Klondike foundation move");
+      }
+    } else if (klondike.selectFoundation(suit)) {
+      updateKlondike("select Klondike foundation");
+    }
+    return;
+  }
+
+  if (point.x < kKlondikeGridLeft ||
+      point.x >= kKlondikeGridLeft +
+                     KlondikeGame::kTableauCount * kKlondikeColumnStep ||
+      point.y < kKlondikeTableauTop || point.y >= 676) {
+    return;
+  }
+  const int column = (point.x - kKlondikeGridLeft) / kKlondikeColumnStep;
+  const int columnLeft = kKlondikeGridLeft + column * kKlondikeColumnStep;
+  if (point.x >= columnLeft + kKlondikeCardWidth) return;
+  const int count = klondike.tableauCount(column);
+  int cardIndex = -1;
+  for (int index = count - 1; index >= 0; --index) {
+    const Rect card = {columnLeft, klondikeTableauCardY(column, index),
+                       kKlondikeCardWidth, kKlondikeCardHeight};
+    if (card.contains(point.x, point.y)) {
+      cardIndex = index;
+      break;
+    }
+  }
+  if (klondike.hasSelection() &&
+      klondike.moveSelectionToTableau(column)) {
+    klondikeDoubleTap.clear();
+    updateKlondike("Klondike tableau move");
+    return;
+  }
+  if (cardIndex >= 0 && cardIndex == count - 1 &&
+      klondikeDoubleTap.registerTap(
+          static_cast<uint16_t>(kKlondikeTableauTapTarget |
+                                (column << 6) | cardIndex),
+          millis(), kKlondikeDoubleTapMs)) {
+    if (klondike.moveSelectionToMatchingFoundation()) {
+      updateKlondike("double-tap Klondike foundation move");
+    }
+    return;
+  }
+  if (cardIndex < 0 || cardIndex != count - 1) klondikeDoubleTap.clear();
+  if (cardIndex >= 0 && klondike.selectTableau(column, cardIndex)) {
+    updateKlondike("select Klondike tableau");
+  }
+}
+
+void handleMahjongTouch(const Gt911Touch::Point& point) {
+  if (kBackButton.contains(point.x, point.y)) {
+    hardware::beep();
+    showMenu();
+    return;
+  }
+  if (kNewButton.contains(point.x, point.y)) {
+    hardware::beep();
+    startNewMahjong();
+    updateMahjong("new Mahjong Solitaire layout");
+    return;
+  }
+  if (kResetButton.contains(point.x, point.y)) {
+    hardware::beep();
+    mahjong.reset();
+    updateMahjong("reset Mahjong Solitaire");
+    return;
+  }
+
+  for (int layer = 3; layer >= 0; --layer) {
+    for (int index = MahjongSolitaireGame::kTileCount - 1; index >= 0;
+         --index) {
+      if (!mahjong.occupied(index) ||
+          MahjongSolitaireGame::position(index).layer != layer ||
+          !mahjongTileRect(index).contains(point.x, point.y)) {
+        continue;
+      }
+      const MahjongSolitaireGame::TapResult result = mahjong.tap(index);
+      if (result != MahjongSolitaireGame::TapResult::NoChange &&
+          result != MahjongSolitaireGame::TapResult::Blocked) {
+        updateMahjong(result == MahjongSolitaireGame::TapResult::Removed
+                          ? "Mahjong Solitaire pair"
+                          : result == MahjongSolitaireGame::TapResult::Won
+                                ? "Mahjong Solitaire solved"
+                                : "Mahjong Solitaire selection");
+      }
+      return;
+    }
+  }
+}
+
+size_t lastReaderPageStart() {
+  size_t offset = 0;
+  size_t last = 0;
+  while (offset < readerChapterText.length()) {
+    const epub_text::TextPage page = epub_text::paginate(
+        readerChapterText.c_str(), readerChapterText.length(), offset,
+        kReaderColumns, kReaderLinesPerPage);
+    if (page.end <= offset || page.end >= readerChapterText.length()) {
+      return last;
+    }
+    last = page.end;
+    offset = page.end;
+  }
+  return last;
+}
+
+void showPreviousReaderPage() {
+  if (readerPageStart > 0) {
+    readerPageStart = epub_text::previousPageStart(
+        readerChapterText.c_str(), readerChapterText.length(), readerPageStart,
+        kReaderColumns, kReaderLinesPerPage);
+    showEpubReading();
+    return;
+  }
+  for (int chapter = readerChapterIndex - 1; chapter >= 0; --chapter) {
+    if (!loadReaderChapter(chapter)) continue;
+    readerPageStart = lastReaderPageStart();
+    showEpubReading();
+    return;
+  }
+}
+
+void showNextReaderPage() {
+  const epub_text::TextPage page = currentReaderPage();
+  if (page.end < readerChapterText.length()) {
+    readerPageStart = page.end;
+    showEpubReading();
+    return;
+  }
+  for (int chapter = readerChapterIndex + 1;
+       chapter < epubArchive.chapterCount(); ++chapter) {
+    if (!loadReaderChapter(chapter)) continue;
+    showEpubReading();
+    return;
+  }
+}
+
+void handleEpubBrowserTouch(const Gt911Touch::Point& point) {
+  if (kBackButton.contains(point.x, point.y)) {
+    hardware::beep();
+    if (readerBrowserPath == "/") {
+      showMenu();
+    } else {
+      openReaderBrowserPath(
+          SdReadonlyBrowser::parentPath(readerBrowserPath));
+      drawEpubBrowser();
+      refreshScreen("EPUB parent folder");
+    }
+    return;
+  }
+  if (!sdCardReady) return;
+  if (browserPageStart > 0 &&
+      kNewButton.contains(point.x, point.y)) {
+    hardware::beep();
+    browserPageStart = std::max(0, browserPageStart - kBrowserRowsPerPage);
+    browserMessage = "";
+    drawEpubBrowser();
+    refreshScreen("EPUB previous files");
+    return;
+  }
+  if (browserPageStart + kBrowserRowsPerPage < sdBrowser.count() &&
+      kResetButton.contains(point.x, point.y)) {
+    hardware::beep();
+    browserPageStart += kBrowserRowsPerPage;
+    browserMessage = "";
+    drawEpubBrowser();
+    refreshScreen("EPUB next files");
+    return;
+  }
+  if (point.y < kBrowserRowTop ||
+      point.y >= kBrowserRowTop +
+                     kBrowserRowsPerPage * kBrowserRowHeight) {
+    return;
+  }
+  const int row = (point.y - kBrowserRowTop) / kBrowserRowHeight;
+  const SdReadonlyBrowser::Entry* entry =
+      sdBrowser.entry(browserPageStart + row);
+  if (entry == nullptr) return;
+  if (entry->directory) {
+    hardware::beep();
+    openReaderBrowserPath(entry->path);
+    drawEpubBrowser();
+    refreshScreen("EPUB folder");
+    return;
+  }
+  if (!entry->epub) return;
+
+  hardware::beep();
+  browserMessage = "";
+  if (openReaderBook(entry->path)) {
+    showEpubReading();
+  } else {
+    browserMessage = tr(TextId::OpenFailed);
+    drawEpubBrowser();
+    refreshScreen("EPUB open failed");
+  }
+}
+
+void handleEpubReadingTouch(const Gt911Touch::Point& point) {
+  if (kBackButton.contains(point.x, point.y)) {
+    hardware::beep();
+    showEpubBrowser();
+    return;
+  }
+  if ((readerPageStart > 0 || readerChapterIndex > 0) &&
+      kNewButton.contains(point.x, point.y)) {
+    hardware::beep();
+    showPreviousReaderPage();
+    return;
+  }
+  const epub_text::TextPage page = currentReaderPage();
+  if ((page.end < readerChapterText.length() ||
+       readerChapterIndex + 1 < epubArchive.chapterCount()) &&
+      kResetButton.contains(point.x, point.y)) {
+    hardware::beep();
+    showNextReaderPage();
+  }
+}
+
 bool handleMinesweeperTouchStart(const Gt911Touch::Point& point) {
   if (kBackButton.contains(point.x, point.y)) {
     hardware::beep();
@@ -3542,6 +4543,18 @@ void pollTouch() {
   } else if (currentScreen == Screen::Crossword) {
     handleCrosswordTouch(point);
     touchActionHandled = true;
+  } else if (currentScreen == Screen::Klondike) {
+    handleKlondikeTouch(point);
+    touchActionHandled = true;
+  } else if (currentScreen == Screen::MahjongSolitaire) {
+    handleMahjongTouch(point);
+    touchActionHandled = true;
+  } else if (currentScreen == Screen::EpubBrowser) {
+    handleEpubBrowserTouch(point);
+    touchActionHandled = true;
+  } else if (currentScreen == Screen::EpubReading) {
+    handleEpubReadingTouch(point);
+    touchActionHandled = true;
   } else if (currentScreen == Screen::Game2048) {
     touchActionHandled = handle2048TouchStart(point);
   }
@@ -3622,8 +4635,10 @@ void handleButton(const ButtonEvent& event) {
   if (button.pin == board::PIN_BUTTON_1) {
     if (currentScreen != Screen::Menu) {
       showMenu();
-    } else if (currentMenuPage == MenuPage::Second) {
-      showMenuPage(MenuPage::First, false);
+    } else if (currentMenuPage != MenuPage::First) {
+      showMenuPage(
+          static_cast<MenuPage>(static_cast<uint8_t>(currentMenuPage) - 1),
+          false);
     } else {
       LOG.println("[games] already on first menu page");
     }
@@ -3631,8 +4646,10 @@ void handleButton(const ButtonEvent& event) {
   }
   if (button.pin == board::PIN_BUTTON_2) {
     if (currentScreen == Screen::Menu &&
-        currentMenuPage == MenuPage::First) {
-      showMenuPage(MenuPage::Second, false);
+        static_cast<size_t>(currentMenuPage) + 1 < kMenuPageCount) {
+      showMenuPage(
+          static_cast<MenuPage>(static_cast<uint8_t>(currentMenuPage) + 1),
+          false);
     } else if (currentScreen == Screen::Menu) {
       LOG.println("[games] already on last menu page");
     } else {
@@ -3745,8 +4762,8 @@ void setup() {
 
   epaper_setup::begin(epaper);
   checkBatteryAndSleepIfNeeded();
-  const bool sdReady = sd_card::mount(epaper.getSPIinstance(), "/games");
-  if (sdReady && sd_ota::hasUpdate()) {
+  sdCardReady = sd_card::mount(epaper.getSPIinstance(), "/games");
+  if (sdCardReady && sd_ota::hasUpdate()) {
     drawStatus(tr(TextId::UpdatingFirmware), tr(TextId::DoNotPowerOff));
     epaper.update();
     const sd_ota::Result updateResult = sd_ota::apply();
@@ -3762,6 +4779,18 @@ void setup() {
   if (!resumed) currentScreen = Screen::Menu;
   if (resumed && currentScreen == Screen::Reversi) {
     playReversiComputerTurns();
+  }
+  if (resumed && currentScreen == Screen::EpubReading) {
+    const String savedBookPath = readerBookPath;
+    const int savedChapter = readerChapterIndex;
+    const size_t savedPageStart = readerPageStart;
+    if (!openReaderBook(savedBookPath, savedChapter, savedPageStart, false)) {
+      currentScreen = Screen::EpubBrowser;
+      openReaderBrowserPath(readerBrowserPath);
+      browserMessage = tr(TextId::OpenFailed);
+    }
+  } else if (resumed && currentScreen == Screen::EpubBrowser) {
+    openReaderBrowserPath(readerBrowserPath);
   }
   if (languageSelected) {
     drawCurrentScreen();

@@ -2,11 +2,15 @@
 
 #include "crossword_game.h"
 #include "dots_and_boxes_game.h"
+#include "double_tap_tracker.h"
+#include "epub_text.h"
 #include "game_2048.h"
 #include "game_localization.h"
 #include "game_progress_store.h"
 #include "game_ranking.h"
+#include "klondike_game.h"
 #include "lights_out_game.h"
+#include "mahjong_solitaire_game.h"
 #include "mini_minesweeper_game.h"
 #include "nonogram_game.h"
 #include "ok_button_action.h"
@@ -1251,6 +1255,257 @@ void test_every_slitherlink_puzzle_has_a_verified_single_loop_solution() {
   TEST_ASSERT_TRUE(game.solved());
 }
 
+void test_klondike_deal_has_standard_pile_sizes_and_unique_cards() {
+  KlondikeGame game;
+  game.start(0x12345678UL);
+
+  TEST_ASSERT_EQUAL_UINT8(24, game.stockCount());
+  TEST_ASSERT_EQUAL_UINT8(0, game.wasteCount());
+  bool seen[KlondikeGame::kCardCount] = {};
+  int seenCount = 0;
+  for (int column = 0; column < KlondikeGame::kTableauCount; ++column) {
+    TEST_ASSERT_EQUAL_UINT8(column + 1, game.tableauCount(column));
+    TEST_ASSERT_EQUAL_UINT8(column, game.faceUpStart(column));
+    for (int index = 0; index < game.tableauCount(column); ++index) {
+      const uint8_t card = game.tableauCard(column, index);
+      TEST_ASSERT_LESS_THAN_UINT8(KlondikeGame::kCardCount, card);
+      TEST_ASSERT_FALSE(seen[card]);
+      seen[card] = true;
+      ++seenCount;
+    }
+  }
+  const KlondikeGame::Snapshot snapshot = game.snapshot();
+  for (int index = 0; index < snapshot.stockCount; ++index) {
+    const uint8_t card = snapshot.stock[index];
+    TEST_ASSERT_LESS_THAN_UINT8(KlondikeGame::kCardCount, card);
+    TEST_ASSERT_FALSE(seen[card]);
+    seen[card] = true;
+    ++seenCount;
+  }
+  TEST_ASSERT_EQUAL_INT(KlondikeGame::kCardCount, seenCount);
+}
+
+void test_klondike_stock_recycles_in_draw_order() {
+  KlondikeGame game;
+  game.start(17);
+  uint8_t firstDraw = KlondikeGame::kNoCard;
+  for (int draw = 0; draw < 24; ++draw) {
+    TEST_ASSERT_EQUAL(KlondikeGame::StockResult::Drawn, game.drawStock());
+    if (draw == 0) firstDraw = game.wasteTop();
+  }
+  TEST_ASSERT_EQUAL_UINT8(0, game.stockCount());
+  TEST_ASSERT_EQUAL_UINT8(24, game.wasteCount());
+  TEST_ASSERT_EQUAL(KlondikeGame::StockResult::Recycled, game.drawStock());
+  TEST_ASSERT_EQUAL(KlondikeGame::StockResult::Drawn, game.drawStock());
+  TEST_ASSERT_EQUAL_UINT8(firstDraw, game.wasteTop());
+}
+
+void test_klondike_moves_ace_from_waste_to_foundation() {
+  bool movedAce = false;
+  for (uint32_t seed = 1; seed <= 100 && !movedAce; ++seed) {
+    KlondikeGame game;
+    game.start(seed);
+    for (int draw = 0; draw < 24; ++draw) {
+      TEST_ASSERT_EQUAL(KlondikeGame::StockResult::Drawn, game.drawStock());
+      const uint8_t card = game.wasteTop();
+      if (KlondikeGame::rank(card) != 0) continue;
+      const int suit = KlondikeGame::cardSuit(card);
+      TEST_ASSERT_TRUE(game.selectWaste());
+      TEST_ASSERT_TRUE(game.moveSelectionToMatchingFoundation());
+      TEST_ASSERT_EQUAL_UINT8(1, game.foundationCount(suit));
+      movedAce = true;
+      break;
+    }
+  }
+  TEST_ASSERT_TRUE(movedAce);
+}
+
+void test_double_tap_tracker_requires_same_target_within_window() {
+  DoubleTapTracker tracker;
+  TEST_ASSERT_FALSE(tracker.registerTap(10, 1000, 500));
+  TEST_ASSERT_FALSE(tracker.registerTap(11, 1200, 500));
+  TEST_ASSERT_TRUE(tracker.registerTap(11, 1700, 500));
+  TEST_ASSERT_FALSE(tracker.registerTap(11, 1800, 500));
+  TEST_ASSERT_FALSE(tracker.registerTap(11, 2301, 500));
+  TEST_ASSERT_TRUE(tracker.registerTap(11, 2400, 500));
+}
+
+void test_klondike_moves_legal_tableau_card_and_restores_snapshot() {
+  bool movedCard = false;
+  for (uint32_t seed = 1; seed <= 200 && !movedCard; ++seed) {
+    KlondikeGame game;
+    game.start(seed);
+    for (int source = 0; source < KlondikeGame::kTableauCount && !movedCard;
+         ++source) {
+      const int sourceIndex = game.tableauCount(source) - 1;
+      const uint8_t moving = game.tableauCard(source, sourceIndex);
+      for (int destination = 0;
+           destination < KlondikeGame::kTableauCount; ++destination) {
+        if (source == destination) continue;
+        const int destinationIndex = game.tableauCount(destination) - 1;
+        const uint8_t target =
+            game.tableauCard(destination, destinationIndex);
+        if (!KlondikeGame::canStack(target, moving)) continue;
+        const uint8_t previousDestinationCount =
+            game.tableauCount(destination);
+        TEST_ASSERT_TRUE(game.selectTableau(source, sourceIndex));
+        TEST_ASSERT_TRUE(game.moveSelectionToTableau(destination));
+        TEST_ASSERT_EQUAL_UINT8(previousDestinationCount + 1,
+                                game.tableauCount(destination));
+
+        const KlondikeGame::Snapshot snapshot = game.snapshot();
+        KlondikeGame restored;
+        TEST_ASSERT_TRUE(restored.restore(snapshot));
+        TEST_ASSERT_EQUAL_UINT16(game.moves(), restored.moves());
+        TEST_ASSERT_EQUAL_UINT8(game.tableauCount(destination),
+                                restored.tableauCount(destination));
+        TEST_ASSERT_EQUAL_UINT8(
+            game.tableauCard(destination, game.tableauCount(destination) - 1),
+            restored.tableauCard(destination,
+                                 restored.tableauCount(destination) - 1));
+        movedCard = true;
+        break;
+      }
+    }
+  }
+  TEST_ASSERT_TRUE(movedCard);
+}
+
+void test_klondike_rejects_duplicate_card_snapshot() {
+  KlondikeGame game;
+  KlondikeGame::Snapshot invalid = game.snapshot();
+  invalid.stock[0] = invalid.stock[1];
+  TEST_ASSERT_FALSE(game.restore(invalid));
+}
+
+void test_mahjong_layout_has_144_tiles_and_four_of_each_type() {
+  MahjongSolitaireGame game;
+  game.start(0xC0FFEEUL);
+
+  TEST_ASSERT_EQUAL_INT(144, game.remaining());
+  TEST_ASSERT_TRUE(game.hasMoves());
+  uint8_t counts[MahjongSolitaireGame::kTileTypeCount] = {};
+  for (int index = 0; index < MahjongSolitaireGame::kTileCount; ++index) {
+    ++counts[game.tileType(index)];
+  }
+  for (int type = 0; type < MahjongSolitaireGame::kTileTypeCount; ++type) {
+    TEST_ASSERT_EQUAL_UINT8(4, counts[type]);
+  }
+  TEST_ASSERT_FALSE(game.free(41));
+}
+
+void test_mahjong_known_pair_sequence_solves_every_deal() {
+  MahjongSolitaireGame game;
+  game.start(99);
+  const int starts[] = {0, 96, 128, 140};
+  const int widths[] = {12, 8, 4, 2};
+  const int rows[] = {8, 4, 3, 2};
+
+  for (int layer = 3; layer >= 0; --layer) {
+    for (int row = 0; row < rows[layer]; ++row) {
+      for (int left = 0; left < widths[layer] / 2; ++left) {
+        const int first = starts[layer] + row * widths[layer] + left;
+        const int second =
+            starts[layer] + row * widths[layer] + widths[layer] - left - 1;
+        TEST_ASSERT_TRUE(game.free(first));
+        TEST_ASSERT_TRUE(game.free(second));
+        TEST_ASSERT_EQUAL_UINT8(game.tileType(first), game.tileType(second));
+        TEST_ASSERT_EQUAL(MahjongSolitaireGame::TapResult::Selected,
+                          game.tap(first));
+        const MahjongSolitaireGame::TapResult result = game.tap(second);
+        TEST_ASSERT_TRUE(result == MahjongSolitaireGame::TapResult::Removed ||
+                         result == MahjongSolitaireGame::TapResult::Won);
+      }
+    }
+  }
+  TEST_ASSERT_TRUE(game.solved());
+  TEST_ASSERT_EQUAL_UINT16(72, game.moves());
+}
+
+void test_mahjong_snapshot_restores_selection_and_removed_pair() {
+  MahjongSolitaireGame game;
+  game.start(123);
+  TEST_ASSERT_EQUAL(MahjongSolitaireGame::TapResult::Selected, game.tap(140));
+  TEST_ASSERT_EQUAL(MahjongSolitaireGame::TapResult::Removed, game.tap(141));
+  TEST_ASSERT_EQUAL(MahjongSolitaireGame::TapResult::Selected, game.tap(142));
+
+  const MahjongSolitaireGame::Snapshot snapshot = game.snapshot();
+  MahjongSolitaireGame restored;
+  TEST_ASSERT_TRUE(restored.restore(snapshot));
+  TEST_ASSERT_EQUAL_INT(142, restored.selectedIndex());
+  TEST_ASSERT_EQUAL_INT(142, restored.remaining());
+  TEST_ASSERT_FALSE(restored.occupied(140));
+  TEST_ASSERT_FALSE(restored.occupied(141));
+}
+
+void test_mahjong_rejects_inconsistent_snapshot() {
+  MahjongSolitaireGame game;
+  MahjongSolitaireGame::Snapshot invalid = game.snapshot();
+  invalid.occupied[0] &= ~1ULL;
+  TEST_ASSERT_FALSE(game.restore(invalid));
+}
+
+void test_epub_html_to_text_preserves_blocks_and_decodes_entities() {
+  const char html[] =
+      "<html><head><style>hidden</style></head><body><h1>One &amp; "
+      "Two</h1><p>Hello&nbsp;world.<br/>Next line.</p>"
+      "<script>ignored()</script><p>&#x00E9;lan</p></body></html>";
+  const std::string text =
+      epub_text::htmlToPlainText(html, sizeof(html) - 1);
+  TEST_ASSERT_EQUAL_STRING("One & Two\nHello world.\nNext line.\nélan",
+                           text.c_str());
+}
+
+void test_epub_xml_helpers_parse_attributes_and_resolve_paths() {
+  const char tag[] =
+      "rootfile media-type=\"application/oebps-package+xml\" "
+      "full-path='OPS/content.opf'";
+  TEST_ASSERT_EQUAL_STRING(
+      "OPS/content.opf",
+      epub_text::attribute(tag, sizeof(tag) - 1, "full-path").c_str());
+  const char firstAttribute[] = "rootfile full-path=\"OPS/package.opf\"";
+  TEST_ASSERT_EQUAL_STRING(
+      "OPS/package.opf",
+      epub_text::attribute(firstAttribute, sizeof(firstAttribute) - 1,
+                           "full-path")
+          .c_str());
+  TEST_ASSERT_EQUAL_STRING(
+      "OPS/Text/chapter.xhtml",
+      epub_text::resolvePath("OPS/content.opf", "Text/chapter.xhtml#part")
+          .c_str());
+  TEST_ASSERT_EQUAL_STRING(
+      "Images/cover.jpg",
+      epub_text::resolvePath("OPS/Text/chapter.xhtml", "../../Images/cover.jpg")
+          .c_str());
+  TEST_ASSERT_EQUAL_STRING(
+      "OPS/Text/Chapter One.xhtml",
+      epub_text::resolvePath("OPS/content.opf", "Text/Chapter%20One.xhtml")
+          .c_str());
+  const std::string container =
+      "<rootfiles><rootfile full-path=\"OPS/content.opf\"/></rootfiles>";
+  TEST_ASSERT_EQUAL_UINT32(
+      container.find("<rootfile "),
+      epub_text::findStartTag(container, "rootfile"));
+}
+
+void test_epub_pagination_wraps_utf8_without_splitting_characters() {
+  const std::string text = "one two three\nélan four five";
+  const epub_text::TextPage first =
+      epub_text::paginate(text.data(), text.size(), 0, 7, 2);
+  TEST_ASSERT_EQUAL_UINT32(2, first.lines.size());
+  TEST_ASSERT_EQUAL_STRING("one two", first.lines[0].c_str());
+  TEST_ASSERT_EQUAL_STRING("three", first.lines[1].c_str());
+
+  const epub_text::TextPage second = epub_text::paginate(
+      text.data(), text.size(), first.end, 7, 2);
+  TEST_ASSERT_EQUAL_UINT32(2, second.lines.size());
+  TEST_ASSERT_EQUAL_STRING("élan", second.lines[0].c_str());
+  TEST_ASSERT_EQUAL_STRING("four", second.lines[1].c_str());
+  TEST_ASSERT_EQUAL_UINT32(
+      0, epub_text::previousPageStart(text.data(), text.size(), second.start, 7,
+                                     2));
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_corner_press_toggles_three_cells);
@@ -1338,5 +1593,18 @@ int main(int, char**) {
   RUN_TEST(test_slitherlink_invalid_snapshot_is_rejected);
   RUN_TEST(
       test_every_slitherlink_puzzle_has_a_verified_single_loop_solution);
+  RUN_TEST(test_klondike_deal_has_standard_pile_sizes_and_unique_cards);
+  RUN_TEST(test_klondike_stock_recycles_in_draw_order);
+  RUN_TEST(test_klondike_moves_ace_from_waste_to_foundation);
+  RUN_TEST(test_double_tap_tracker_requires_same_target_within_window);
+  RUN_TEST(test_klondike_moves_legal_tableau_card_and_restores_snapshot);
+  RUN_TEST(test_klondike_rejects_duplicate_card_snapshot);
+  RUN_TEST(test_mahjong_layout_has_144_tiles_and_four_of_each_type);
+  RUN_TEST(test_mahjong_known_pair_sequence_solves_every_deal);
+  RUN_TEST(test_mahjong_snapshot_restores_selection_and_removed_pair);
+  RUN_TEST(test_mahjong_rejects_inconsistent_snapshot);
+  RUN_TEST(test_epub_html_to_text_preserves_blocks_and_decodes_entities);
+  RUN_TEST(test_epub_xml_helpers_parse_attributes_and_resolve_paths);
+  RUN_TEST(test_epub_pagination_wraps_utf8_without_splitting_characters);
   return UNITY_END();
 }
