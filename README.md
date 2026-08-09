@@ -79,7 +79,8 @@ most played to least played. Equal play counts retain the default order below:
 
 All games preserve their current state across selector visits and deep sleep.
 The EPUB reader resumes the same book, chapter, and page when the SD card is
-still available.
+still available. An optional SD-backed Noto font adds common Chinese, Japanese,
+and Korean book text without increasing firmware flash usage.
 Play counts are kept in RTC memory across deep sleep and reset after power loss
 or reflashing. The interface supports English, Spanish, French, German, and
 Simplified Chinese using fonts embedded in firmware flash. See the

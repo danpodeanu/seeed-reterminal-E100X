@@ -156,6 +156,8 @@ constexpr uint16_t kCrosswordSavedFlag = 1U << 11;
 constexpr uint16_t kKlondikeSavedFlag = 1U << 12;
 constexpr uint16_t kMahjongSavedFlag = 1U << 13;
 constexpr char kSokobanProgressKey[] = "sokoban_level";
+constexpr char kReaderCjkFontPath[] = "/fonts/epub_cjk_16.vlw";
+constexpr char kReaderCjkFontName[] = "fonts/epub_cjk_16";
 constexpr size_t kReaderPathCapacity = 192;
 constexpr size_t kReaderColumns = 45;
 constexpr size_t kReaderLinesPerPage = 24;
@@ -2820,12 +2822,17 @@ String fitReaderText(String text, int maximumWidth) {
   return text + kEllipsis;
 }
 
-void loadReaderFont() {
+bool loadReaderFont() {
+  if (sdCardReady && sd_card::fileExists(kReaderCjkFontPath)) {
+    epaper.loadFont(kReaderCjkFontName, SD);
+    return true;
+  }
   if (sdCardReady && sd_card::fileExists("/fonts/sans_bold_16.vlw")) {
     epaper.loadFont("fonts/sans_bold_16", SD);
   } else {
     epaper.loadFont(game_ui_fonts::kGameUiFont16);
   }
+  return false;
 }
 
 void drawBrowserEntryIcon(const SdReadonlyBrowser::Entry& entry, int x,
@@ -2917,16 +2924,28 @@ uint32_t readerPageNumber() {
 
 void drawEpubReading() {
   epaper.fillSprite(TFT_WHITE);
-  drawCentered(epubArchive.title(), kScreenWidth / 2, 76, 2);
   const epub_text::TextPage page = currentReaderPage();
-  loadReaderFont();
+  const bool cjkFontReady = loadReaderFont();
   epaper.setTextColor(TFT_BLACK, TFT_WHITE, true);
+  epaper.setTextDatum(MC_DATUM);
+  epaper.drawString(fitReaderText(epubArchive.title(), kScreenWidth - 36),
+                    kScreenWidth / 2, 76);
   epaper.setTextDatum(TL_DATUM);
-  for (size_t index = 0; index < page.lines.size(); ++index) {
-    epaper.drawString(page.lines[index].c_str(), 18,
-                      104 + static_cast<int>(index) * 23);
+  const bool cjkRequired =
+      epub_text::containsCjk(readerChapterText.c_str(),
+                             readerChapterText.length()) ||
+      epub_text::containsCjk(epubArchive.title().c_str(),
+                             epubArchive.title().length());
+  if (!cjkRequired || cjkFontReady) {
+    for (size_t index = 0; index < page.lines.size(); ++index) {
+      epaper.drawString(page.lines[index].c_str(), 18,
+                        104 + static_cast<int>(index) * 23);
+    }
   }
   epaper.unloadFont();
+  if (cjkRequired && !cjkFontReady) {
+    drawCentered(tr(TextId::CjkFontRequired), kScreenWidth / 2, 360, 4);
+  }
 
   const String location =
       String(tr(TextId::Chapter)) + " " + String(readerChapterIndex + 1) +

@@ -340,6 +340,47 @@ inline size_t utf8CharacterBytes(const char* text, size_t length,
   return bytes;
 }
 
+inline uint32_t utf8Codepoint(const char* text, size_t length, size_t offset) {
+  const size_t bytes = utf8CharacterBytes(text, length, offset);
+  if (bytes == 0) return 0;
+  const uint8_t first = static_cast<uint8_t>(text[offset]);
+  if (bytes == 1) return first;
+  uint32_t codepoint =
+      first & static_cast<uint8_t>(bytes == 2 ? 0x1F : bytes == 3 ? 0x0F : 0x07);
+  for (size_t index = 1; index < bytes; ++index) {
+    codepoint =
+        (codepoint << 6) | (static_cast<uint8_t>(text[offset + index]) & 0x3F);
+  }
+  return codepoint;
+}
+
+inline bool isCjkCodepoint(uint32_t codepoint) {
+  return (codepoint >= 0x1100 && codepoint <= 0x11FF) ||
+         (codepoint >= 0x2E80 && codepoint <= 0xA4CF) ||
+         (codepoint >= 0xAC00 && codepoint <= 0xD7A3) ||
+         (codepoint >= 0xF900 && codepoint <= 0xFAFF) ||
+         (codepoint >= 0xFE10 && codepoint <= 0xFE19) ||
+         (codepoint >= 0xFE30 && codepoint <= 0xFE6F) ||
+         (codepoint >= 0xFF01 && codepoint <= 0xFF60) ||
+         (codepoint >= 0xFFE0 && codepoint <= 0xFFE6);
+}
+
+inline size_t displayColumns(uint32_t codepoint) {
+  if ((codepoint >= 0x0300 && codepoint <= 0x036F) ||
+      (codepoint >= 0xFE00 && codepoint <= 0xFE0F)) {
+    return 0;
+  }
+  return isCjkCodepoint(codepoint) ? 2 : 1;
+}
+
+inline bool containsCjk(const char* text, size_t length) {
+  for (size_t offset = 0; offset < length;) {
+    if (isCjkCodepoint(utf8Codepoint(text, length, offset))) return true;
+    offset += utf8CharacterBytes(text, length, offset);
+  }
+  return false;
+}
+
 inline TextPage paginate(const char* text, size_t length, size_t requestedStart,
                          size_t maximumColumns, size_t maximumLines) {
   TextPage page;
@@ -365,14 +406,20 @@ inline TextPage paginate(const char* text, size_t length, size_t requestedStart,
     size_t lastSpace = std::string::npos;
     size_t columns = 0;
     bool endedAtNewline = false;
-    while (lineEnd < length && columns < maximumColumns) {
+    while (lineEnd < length) {
       if (text[lineEnd] == '\n') {
         endedAtNewline = true;
         break;
       }
       if (text[lineEnd] == ' ') lastSpace = lineEnd;
-      lineEnd += utf8CharacterBytes(text, length, lineEnd);
-      ++columns;
+      const size_t characterBytes =
+          utf8CharacterBytes(text, length, lineEnd);
+      const size_t characterColumns =
+          displayColumns(utf8Codepoint(text, length, lineEnd));
+      if (columns > 0 && columns + characterColumns > maximumColumns) break;
+      lineEnd += characterBytes;
+      columns += characterColumns;
+      if (columns >= maximumColumns) break;
     }
 
     size_t next = lineEnd;

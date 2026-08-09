@@ -1506,6 +1506,20 @@ void test_epub_pagination_wraps_utf8_without_splitting_characters() {
                                      2));
 }
 
+void test_epub_pagination_treats_cjk_as_full_width() {
+  const std::string text = u8"甲乙丙丁戊";
+  const epub_text::TextPage page =
+      epub_text::paginate(text.data(), text.size(), 0, 4, 3);
+  TEST_ASSERT_EQUAL_UINT32(3, page.lines.size());
+  TEST_ASSERT_EQUAL_STRING(u8"甲乙", page.lines[0].c_str());
+  TEST_ASSERT_EQUAL_STRING(u8"丙丁", page.lines[1].c_str());
+  TEST_ASSERT_EQUAL_STRING(u8"戊", page.lines[2].c_str());
+  TEST_ASSERT_TRUE(epub_text::containsCjk(text.data(), text.size()));
+  const std::string korean = u8"한글";
+  TEST_ASSERT_TRUE(epub_text::containsCjk(korean.data(), korean.size()));
+  TEST_ASSERT_FALSE(epub_text::containsCjk("Café", 5));
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_corner_press_toggles_three_cells);
@@ -1606,5 +1620,6 @@ int main(int, char**) {
   RUN_TEST(test_epub_html_to_text_preserves_blocks_and_decodes_entities);
   RUN_TEST(test_epub_xml_helpers_parse_attributes_and_resolve_paths);
   RUN_TEST(test_epub_pagination_wraps_utf8_without_splitting_characters);
+  RUN_TEST(test_epub_pagination_treats_cjk_as_full_width);
   return UNITY_END();
 }

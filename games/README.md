@@ -275,10 +275,32 @@ Touch controls:
   in RTC memory. Waking from deep sleep reopens the same page when the SD card
   and book are still available; otherwise the reader returns to the browser.
 
-The reader uses `/fonts/sans_bold_16.vlw` when that full Unicode font has been
-prepared on the SD card by `tools/preload_sd.py`. Without it, the flash-backed
-interface font provides ASCII plus the glyphs used by the five localized user
-interfaces, so a book containing other characters may show missing glyphs.
+For CJK books, generate `/fonts/epub_cjk_16.vlw` on the SD card from the pinned
+Noto Sans CJK SC Bold source:
+
+```powershell
+# Download once, from the repository root.
+Invoke-WebRequest `
+  https://raw.githubusercontent.com/notofonts/noto-cjk/f8d157532fbfaeda587e826d4cd5b21a49186f7c/Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Bold.otf `
+  -OutFile tools\fonts\NotoSansCJKsc-Bold.otf
+
+# Replace E:\ with the mounted SD-card root.
+python games\tools\generate_epub_cjk_font.py E:\
+```
+
+The generator verifies the pinned source font, creates the SD card's `fonts`
+folder when needed, and writes only `epub_cjk_16.vlw`. The generated file is
+about 12 MB and contains 42,220 BMP glyphs covering common Simplified and
+Traditional Chinese characters, Japanese kana and kanji, and Korean Hangul.
+The source `.otf` does not need to be copied to the SD card. Rare supplementary
+CJK Extension B and later characters above `U+FFFF` are not supported by the
+display renderer.
+
+If the CJK file is absent, the reader uses `/fonts/sans_bold_16.vlw` when
+available, then falls back to the flash-backed interface font. A CJK chapter
+shows a localized **CJK FONT REQUIRED** message instead of blank text when the
+required SD font is missing. CJK characters are treated as full-width during
+pagination.
 
 The selector uses three two-column pages with up to six activities each. It
 automatically orders them by use count, from most used to least used,

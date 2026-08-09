@@ -27,3 +27,19 @@ The source font is intentionally not checked in. The generated
 `games/src/game_ui_fonts.h` contains only the ASCII and localized UI glyphs at
 16, 24, and 32 pixels. Noto Sans CJK is licensed under the SIL Open Font
 License 1.1; see `LICENSE.noto`.
+
+## EPUB CJK font
+
+The Games EPUB reader can load the same Noto source from the SD card as a
+complete 16px Basic Multilingual Plane font. After downloading and verifying
+the source above, generate the reader font directly onto a mounted SD card:
+
+```bash
+python games/tools/generate_epub_cjk_font.py /path/to/sd-card
+```
+
+On Windows, use the drive root, for example
+`python games\tools\generate_epub_cjk_font.py E:\`. The script verifies the
+pinned source SHA-256 and writes `fonts/epub_cjk_16.vlw` beneath the supplied
+root. Its output is approximately 12 MB with 42,220 glyphs. Only the generated
+VLW file belongs on the SD card.
