@@ -3,6 +3,7 @@
 #include "crossword_game.h"
 #include "dots_and_boxes_game.h"
 #include "double_tap_tracker.h"
+#include "epub_browser_logic.h"
 #include "epub_text.h"
 #include "game_2048.h"
 #include "game_localization.h"
@@ -1002,6 +1003,20 @@ void test_every_game_translation_is_present() {
           game_localization::Language::ChineseSimplified));
 }
 
+void test_epub_browser_parent_folder_is_first_below_root() {
+  TEST_ASSERT_FALSE(epub_browser_logic::hasParentFolder(""));
+  TEST_ASSERT_FALSE(epub_browser_logic::hasParentFolder("/"));
+  TEST_ASSERT_TRUE(epub_browser_logic::hasParentFolder("/Books"));
+
+  TEST_ASSERT_EQUAL_INT(1, epub_browser_logic::itemCount(0, true));
+  TEST_ASSERT_EQUAL_INT(4, epub_browser_logic::itemCount(3, true));
+  TEST_ASSERT_TRUE(epub_browser_logic::isParentFolderItem(0, true));
+  TEST_ASSERT_EQUAL_INT(-1, epub_browser_logic::storedEntryIndex(0, true));
+  TEST_ASSERT_EQUAL_INT(0, epub_browser_logic::storedEntryIndex(1, true));
+  TEST_ASSERT_FALSE(epub_browser_logic::isParentFolderItem(0, false));
+  TEST_ASSERT_EQUAL_INT(0, epub_browser_logic::storedEntryIndex(0, false));
+}
+
 void test_ok_hold_duration_selects_requested_action() {
   TEST_ASSERT_EQUAL_INT(
       static_cast<int>(ok_button::Action::DeepSleep),
@@ -1701,6 +1716,7 @@ int main(int, char**) {
   RUN_TEST(test_game_ranking_sorts_counts_and_preserves_ties);
   RUN_TEST(test_game_play_count_saturates);
   RUN_TEST(test_every_game_translation_is_present);
+  RUN_TEST(test_epub_browser_parent_folder_is_first_below_root);
   RUN_TEST(test_ok_hold_duration_selects_requested_action);
   RUN_TEST(test_every_sudoku_puzzle_has_a_valid_solution);
   RUN_TEST(test_sudoku_rejects_conflicts_and_restores_progress);

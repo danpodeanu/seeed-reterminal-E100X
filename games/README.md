@@ -275,8 +275,10 @@ provide separate styled faces.
 
 Touch controls:
 
-- Tap a folder to enter it, or the back arrow to return to its parent. At the
-  SD root, the back arrow returns to the activity selector.
+- Tap a folder to enter it. Below the SD root, **UP FOLDER** is always the
+  first entry and returns to the parent directory.
+- Tap the browser's back arrow to leave the EPUB Reader and return to the
+  activity selector.
 - Use the side **UP** and **DOWN** buttons to move between browser pages.
 - Tap an `.epub` file to open it. The same side buttons move between reading
   pages; navigation continues across chapter boundaries.

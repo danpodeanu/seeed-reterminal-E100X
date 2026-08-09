@@ -22,6 +22,7 @@
 #include "e1005_fast_refresh.h"
 #include "epaper_setup.h"
 #include "epub_archive.h"
+#include "epub_browser_logic.h"
 #include "epub_latin_fonts.h"
 #include "epub_text.h"
 #include "game_2048.h"
@@ -3056,8 +3057,18 @@ bool browserPageRequiresCjk() {
     return true;
   }
   for (int row = 0; row < kBrowserRowsPerPage; ++row) {
+    const int itemIndex = browserPageStart + row;
+    if (epub_browser_logic::isParentFolderItem(
+            itemIndex,
+            epub_browser_logic::hasParentFolder(readerBrowserPath.c_str()))) {
+      const char* name = tr(TextId::UpFolder);
+      if (epub_text::containsCjk(name, strlen(name))) return true;
+      continue;
+    }
     const SdReadonlyBrowser::Entry* entry =
-        sdBrowser.entry(browserPageStart + row);
+        sdBrowser.entry(epub_browser_logic::storedEntryIndex(
+            itemIndex,
+            epub_browser_logic::hasParentFolder(readerBrowserPath.c_str())));
     if (entry != nullptr &&
         epub_text::containsCjk(entry->name.c_str(), entry->name.length())) {
       return true;
@@ -3069,19 +3080,33 @@ bool browserPageRequiresCjk() {
 bool browserPageRequiresNonAscii() {
   if (containsNonAscii(readerBrowserPath)) return true;
   for (int row = 0; row < kBrowserRowsPerPage; ++row) {
+    const int itemIndex = browserPageStart + row;
+    if (epub_browser_logic::isParentFolderItem(
+            itemIndex,
+            epub_browser_logic::hasParentFolder(readerBrowserPath.c_str()))) {
+      const char* name = tr(TextId::UpFolder);
+      if (containsNonAscii(name, strlen(name))) return true;
+      continue;
+    }
     const SdReadonlyBrowser::Entry* entry =
-        sdBrowser.entry(browserPageStart + row);
+        sdBrowser.entry(epub_browser_logic::storedEntryIndex(
+            itemIndex,
+            epub_browser_logic::hasParentFolder(readerBrowserPath.c_str())));
     if (entry != nullptr && containsNonAscii(entry->name)) return true;
   }
   return false;
 }
 
+void drawBrowserFolderIcon(int x, int y) {
+  epaper.fillRect(x + 2, y + 8, 44, 31, TFT_BLACK);
+  epaper.fillRect(x + 7, y + 2, 19, 10, TFT_BLACK);
+  epaper.fillRect(x + 6, y + 13, 36, 22, TFT_WHITE);
+}
+
 void drawBrowserEntryIcon(const SdReadonlyBrowser::Entry& entry, int x,
                           int y) {
   if (entry.directory) {
-    epaper.fillRect(x + 2, y + 8, 44, 31, TFT_BLACK);
-    epaper.fillRect(x + 7, y + 2, 19, 10, TFT_BLACK);
-    epaper.fillRect(x + 6, y + 13, 36, 22, TFT_WHITE);
+    drawBrowserFolderIcon(x, y);
     return;
   }
   epaper.drawRect(x + 7, y, 34, 44, TFT_BLACK);
@@ -3093,6 +3118,13 @@ void drawBrowserEntryIcon(const SdReadonlyBrowser::Entry& entry, int x,
     epaper.drawLine(x + 13, y + 17, x + 35, y + 37, TFT_BLACK);
     epaper.drawLine(x + 35, y + 17, x + 13, y + 37, TFT_BLACK);
   }
+}
+
+void drawBrowserParentFolderIcon(int x, int y) {
+  drawBrowserFolderIcon(x, y);
+  epaper.fillTriangle(x + 24, y + 15, x + 15, y + 26, x + 33, y + 26,
+                      TFT_BLACK);
+  epaper.fillRect(x + 21, y + 25, 7, 9, TFT_BLACK);
 }
 
 void drawEpubBrowser() {
@@ -3113,23 +3145,37 @@ void drawEpubBrowser() {
   drawReaderString(
       fitReaderText(readerBrowserPath, kScreenWidth - 36, builtInFont),
       kScreenWidth / 2, 72, builtInFont);
-  if (sdBrowser.count() == 0) {
+  const bool hasParentFolder =
+      epub_browser_logic::hasParentFolder(readerBrowserPath.c_str());
+  const int itemCount =
+      epub_browser_logic::itemCount(sdBrowser.count(), hasParentFolder);
+  if (itemCount == 0) {
     if (smoothBrowserFont) epaper.unloadFont();
     drawCentered(tr(TextId::EmptyFolder), kScreenWidth / 2, 350, 4);
   } else {
     browserPageStart =
         std::max(0, std::min(browserPageStart,
-                             std::max(0, sdBrowser.count() - 1)));
+                             std::max(0, itemCount - 1)));
     epaper.setTextDatum(ML_DATUM);
     for (int row = 0; row < kBrowserRowsPerPage; ++row) {
       const int index = browserPageStart + row;
-      const SdReadonlyBrowser::Entry* entry = sdBrowser.entry(index);
-      if (entry == nullptr) break;
+      if (index >= itemCount) break;
       const int top = kBrowserRowTop + row * kBrowserRowHeight;
       epaper.drawFastHLine(18, top + kBrowserRowHeight - 1,
                           kScreenWidth - 36, TFT_BLACK);
-      drawBrowserEntryIcon(*entry, 22, top + 16);
-      const String name = fitReaderText(entry->name, 365, builtInFont);
+      String name;
+      if (epub_browser_logic::isParentFolderItem(index, hasParentFolder)) {
+        drawBrowserParentFolderIcon(22, top + 16);
+        name = tr(TextId::UpFolder);
+      } else {
+        const SdReadonlyBrowser::Entry* entry =
+            sdBrowser.entry(epub_browser_logic::storedEntryIndex(
+                index, hasParentFolder));
+        if (entry == nullptr) break;
+        drawBrowserEntryIcon(*entry, 22, top + 16);
+        name = entry->name;
+      }
+      name = fitReaderText(name, 365, builtInFont);
       drawReaderString(name, 82, top + kBrowserRowHeight / 2, builtInFont);
     }
     if (smoothBrowserFont) epaper.unloadFont();
@@ -4638,14 +4684,7 @@ void showNextReaderPage() {
 void handleEpubBrowserTouch(const Gt911Touch::Point& point) {
   if (kBackButton.contains(point.x, point.y)) {
     hardware::beep();
-    if (readerBrowserPath == "/") {
-      showMenu();
-    } else {
-      openReaderBrowserPath(
-          SdReadonlyBrowser::parentPath(readerBrowserPath));
-      drawEpubBrowser();
-      refreshRegion(kReaderRegion, "EPUB parent folder");
-    }
+    showMenu();
     return;
   }
   if (!sdCardReady) return;
@@ -4655,8 +4694,19 @@ void handleEpubBrowserTouch(const Gt911Touch::Point& point) {
     return;
   }
   const int row = (point.y - kBrowserRowTop) / kBrowserRowHeight;
+  const int itemIndex = browserPageStart + row;
+  const bool hasParentFolder =
+      epub_browser_logic::hasParentFolder(readerBrowserPath.c_str());
+  if (epub_browser_logic::isParentFolderItem(itemIndex, hasParentFolder)) {
+    hardware::beep();
+    openReaderBrowserPath(SdReadonlyBrowser::parentPath(readerBrowserPath));
+    drawEpubBrowser();
+    refreshRegion(kReaderRegion, "EPUB parent folder");
+    return;
+  }
   const SdReadonlyBrowser::Entry* entry =
-      sdBrowser.entry(browserPageStart + row);
+      sdBrowser.entry(
+          epub_browser_logic::storedEntryIndex(itemIndex, hasParentFolder));
   if (entry == nullptr) return;
   if (entry->directory) {
     hardware::beep();
@@ -4962,7 +5012,10 @@ void handleButton(const ButtonEvent& event) {
     if (currentScreen == Screen::EpubReading) {
       showNextReaderPage();
     } else if (currentScreen == Screen::EpubBrowser) {
-      if (browserPageStart + kBrowserRowsPerPage < sdBrowser.count()) {
+      const int itemCount = epub_browser_logic::itemCount(
+          sdBrowser.count(),
+          epub_browser_logic::hasParentFolder(readerBrowserPath.c_str()));
+      if (browserPageStart + kBrowserRowsPerPage < itemCount) {
         browserPageStart += kBrowserRowsPerPage;
         browserMessage = "";
         drawEpubBrowser();
