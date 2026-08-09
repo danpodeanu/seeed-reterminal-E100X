@@ -1552,12 +1552,16 @@ void test_epub_pagination_wraps_utf8_without_splitting_characters() {
   TEST_ASSERT_EQUAL_UINT32(2, first.lines.size());
   TEST_ASSERT_EQUAL_STRING("one two", first.lines[0].c_str());
   TEST_ASSERT_EQUAL_STRING("three", first.lines[1].c_str());
+  TEST_ASSERT_TRUE(first.justifyLines[0]);
+  TEST_ASSERT_FALSE(first.justifyLines[1]);
 
   const epub_text::TextPage second = epub_text::paginate(
       text.data(), text.size(), first.end, 7, 2);
   TEST_ASSERT_EQUAL_UINT32(2, second.lines.size());
   TEST_ASSERT_EQUAL_STRING("élan", second.lines[0].c_str());
   TEST_ASSERT_EQUAL_STRING("four", second.lines[1].c_str());
+  TEST_ASSERT_FALSE(second.justifyLines[0]);
+  TEST_ASSERT_FALSE(second.justifyLines[1]);
   TEST_ASSERT_EQUAL_UINT32(
       0, epub_text::previousPageStart(text.data(), text.size(), second.start, 7,
                                      2));
@@ -1620,6 +1624,7 @@ void test_epub_pagination_accepts_proportional_widths() {
       test_epub_proportional_width);
   TEST_ASSERT_EQUAL_UINT32(2, page.lines.size());
   TEST_ASSERT_EQUAL_STRING("WWW", page.lines[0].c_str());
+  TEST_ASSERT_FALSE(page.justifyLines[0]);
 }
 
 int main(int, char**) {

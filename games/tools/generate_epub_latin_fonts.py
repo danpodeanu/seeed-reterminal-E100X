@@ -230,6 +230,7 @@ def main() -> int:
 
     codepoints = sorted(shared_codepoints)
     arrays = []
+    advance_arrays = []
     style_advances = {}
     for style, source in sources.items():
         blob = make_vlw.build_vlw(
@@ -243,6 +244,7 @@ def main() -> int:
         runtime_advances = vlw_advances(blob)
         advances = [runtime_advances[codepoint] for codepoint in codepoints]
         style_advances[style] = advances
+        advance_arrays.append(format_advances(style, advances))
         print(f"generated {style}: {len(blob):,} bytes")
 
     fallback_advances = []
@@ -280,6 +282,16 @@ def main() -> int:
     maximum_advance_array = format_advances("Maximum", maximum_advances)
 
     advance_function = (
+        "inline uint8_t advance(uint8_t style, uint32_t codepoint) {\n"
+        "  const int index = indexOf(codepoint);\n"
+        "  if (index < 0) return 0;\n"
+        "  switch (style) {\n"
+        "    case 1: return pgm_read_byte(&kBoldAdvance[index]);\n"
+        "    case 2: return pgm_read_byte(&kItalicAdvance[index]);\n"
+        "    case 3: return pgm_read_byte(&kBoldItalicAdvance[index]);\n"
+        "    default: return pgm_read_byte(&kRegularAdvance[index]);\n"
+        "  }\n"
+        "}\n\n"
         "inline uint8_t maximumAdvance(uint32_t codepoint) {\n"
         "  const int index = indexOf(codepoint);\n"
         "  return index < 0 ? 0 : pgm_read_byte(&kMaximumAdvance[index]);\n"
@@ -293,6 +305,8 @@ def main() -> int:
         "// Noto fonts are licensed under the SIL Open Font License 1.1.\n"
         "namespace epub_latin_fonts {\n\n"
         + format_codepoints(codepoints)
+        + "\n"
+        + "\n".join(advance_arrays)
         + "\n"
         + maximum_advance_array
         + "\n"

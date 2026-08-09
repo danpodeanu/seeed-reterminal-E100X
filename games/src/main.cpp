@@ -2869,16 +2869,69 @@ const uint8_t* embeddedReaderFont(epub_text::TextStyle style) {
   return epub_latin_fonts::kRegular;
 }
 
+size_t readerGlyphWidth(uint32_t codepoint, epub_text::TextStyle style,
+                        bool embeddedLatin) {
+  if (codepoint >= 1 && codepoint <= 4) return 0;
+  if ((codepoint >= 0x0300 && codepoint <= 0x036F) ||
+      (codepoint >= 0xFE00 && codepoint <= 0xFE0F)) {
+    return 0;
+  }
+  if (embeddedLatin && epub_latin_fonts::supports(codepoint)) {
+    return epub_latin_fonts::advance(static_cast<uint8_t>(style), codepoint);
+  }
+
+  uint8_t width = 0;
+  const size_t fallbackWidth =
+      epub_latin_fonts::maximumFallbackAdvance(codepoint, width) ? width : 24;
+  return fallbackWidth +
+         ((!embeddedLatin &&
+           (style == epub_text::TextStyle::Bold ||
+            style == epub_text::TextStyle::BoldItalic))
+              ? 1
+              : 0);
+}
+
+size_t readerLineWidth(const std::string& line,
+                       epub_text::TextStyle initialStyle,
+                       bool embeddedLatin) {
+  size_t width = 0;
+  epub_text::TextStyle style = initialStyle;
+  for (size_t offset = 0; offset < line.length();) {
+    if (epub_text::isStyleMarker(line[offset])) {
+      style = epub_text::styleFromMarker(line[offset++]);
+      continue;
+    }
+    const uint32_t codepoint =
+        epub_text::utf8Codepoint(line.data(), line.length(), offset);
+    width += readerGlyphWidth(codepoint, style, embeddedLatin);
+    offset += epub_text::utf8CharacterBytes(line.data(), line.length(), offset);
+  }
+  return width;
+}
+
 void drawStyledReaderLine(const std::string& line, int x, int y,
                           epub_text::TextStyle& style, bool embeddedLatin,
                           epub_text::TextStyle& loadedStyle,
-                          bool& embeddedFontLoaded) {
+                          bool& embeddedFontLoaded, bool justify) {
+  const size_t spaceCount =
+      static_cast<size_t>(std::count(line.begin(), line.end(), ' '));
+  const size_t lineWidth = readerLineWidth(line, style, embeddedLatin);
+  const size_t extraWidth =
+      justify && spaceCount > 0 && lineWidth < kReaderTextWidth
+          ? kReaderTextWidth - lineWidth
+          : 0;
+  const size_t extraPerSpace =
+      spaceCount > 0 ? extraWidth / spaceCount : 0;
+  const size_t extraRemainder =
+      spaceCount > 0 ? extraWidth % spaceCount : 0;
+  size_t spaceIndex = 0;
   size_t runStart = 0;
   for (size_t offset = 0; offset <= line.length(); ++offset) {
     const bool atEnd = offset == line.length();
     const bool atStyle =
         !atEnd && epub_text::isStyleMarker(line[offset]);
-    if (!atEnd && !atStyle) continue;
+    const bool atSpace = !atEnd && line[offset] == ' ';
+    if (!atEnd && !atStyle && !atSpace) continue;
 
     if (offset > runStart) {
       const String run(line.substr(runStart, offset - runStart).c_str());
@@ -2904,7 +2957,14 @@ void drawStyledReaderLine(const std::string& line, int x, int y,
       }
       x += width;
     }
-    if (atStyle) style = epub_text::styleFromMarker(line[offset]);
+    if (atStyle) {
+      style = epub_text::styleFromMarker(line[offset]);
+    } else if (atSpace) {
+      x += static_cast<int>(readerGlyphWidth(' ', style, embeddedLatin) +
+                            extraPerSpace +
+                            (spaceIndex < extraRemainder ? 1 : 0));
+      ++spaceIndex;
+    }
     runStart = offset + 1;
   }
 }
@@ -2939,24 +2999,7 @@ bool pageRequiresCjk(const epub_text::TextPage& page) {
 
 size_t readerCharacterWidth(uint32_t codepoint,
                             epub_text::TextStyle style) {
-  if (codepoint >= 1 && codepoint <= 4) return 0;
-  size_t width = 0;
-  if (epub_latin_fonts::supports(codepoint)) {
-    width = epub_latin_fonts::maximumAdvance(codepoint);
-  } else if ((codepoint >= 0x0300 && codepoint <= 0x036F) ||
-             (codepoint >= 0xFE00 && codepoint <= 0xFE0F)) {
-    return 0;
-  } else {
-    uint8_t fallbackWidth = 0;
-    width = epub_latin_fonts::maximumFallbackAdvance(codepoint, fallbackWidth)
-                ? fallbackWidth
-                : 24;
-  }
-  if (style == epub_text::TextStyle::Bold ||
-      style == epub_text::TextStyle::BoldItalic) {
-    ++width;
-  }
-  return width;
+  return readerGlyphWidth(codepoint, style, true);
 }
 
 void detectReaderFonts() {
@@ -3170,7 +3213,8 @@ void drawEpubReading() {
       drawStyledReaderLine(
           page.lines[index], 18,
           104 + static_cast<int>(index) * kReaderLineHeight, style,
-          bodyUsesEmbeddedLatin, loadedStyle, embeddedFontLoaded);
+          bodyUsesEmbeddedLatin, loadedStyle, embeddedFontLoaded,
+          index < page.justifyLines.size() && page.justifyLines[index]);
     }
   }
   epaper.unloadFont();

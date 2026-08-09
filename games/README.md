@@ -263,6 +263,8 @@ script and stylesheet content, and paginates the resulting text. DRM,
 fixed-layout books, embedded scripting, advanced CSS, images, audio, and video
 are not supported. A book may contain up to 96 spine entries, each extracted
 chapter is limited to 512 KiB, and one browser folder displays up to 96 entries.
+Soft-wrapped body lines are fully justified; paragraph-final and explicit-break
+lines retain their natural spacing.
 
 Latin text uses embedded 24px Noto Serif regular, bold, italic, and bold-italic
 faces, including Latin-1 and Latin Extended characters. Their antialiased

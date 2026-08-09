@@ -455,6 +455,7 @@ struct TextPage {
   TextStyle initialStyle = TextStyle::Regular;
   TextStyle finalStyle = TextStyle::Regular;
   std::vector<std::string> lines;
+  std::vector<bool> justifyLines;
 };
 
 inline size_t utf8CharacterBytes(const char* text, size_t length,
@@ -616,9 +617,11 @@ inline TextPage paginate(const char* text, size_t length, size_t requestedStart,
   TextStyle pageStyle = page.initialStyle;
   size_t offset = page.start;
   page.lines.reserve(maximumLines);
+  page.justifyLines.reserve(maximumLines);
   while (offset < length && page.lines.size() < maximumLines) {
     if (text[offset] == '\n') {
       page.lines.emplace_back();
+      page.justifyLines.push_back(false);
       ++offset;
       continue;
     }
@@ -652,18 +655,24 @@ inline TextPage paginate(const char* text, size_t length, size_t requestedStart,
     }
 
     size_t next = lineEnd;
+    bool softWrapped = false;
     if (endedAtNewline) {
       next = lineEnd + 1;
     } else if (lineEnd < length && text[lineEnd] == ' ') {
+      softWrapped = true;
       next = lineEnd + 1;
       while (next < length && text[next] == ' ') ++next;
     } else if (lineEnd < length && lastSpace != std::string::npos) {
+      softWrapped = true;
       lineEnd = lastSpace;
       next = lastSpace + 1;
       while (next < length && text[next] == ' ') ++next;
     }
     while (lineEnd > lineStart && text[lineEnd - 1] == ' ') --lineEnd;
     page.lines.emplace_back(text + lineStart, lineEnd - lineStart);
+    page.justifyLines.push_back(
+        softWrapped &&
+        page.lines.back().find(' ') != std::string::npos);
     offset = next > lineStart ? next : lineEnd;
     pageStyle = styleAfter(text, lineStart, offset, pageStyle);
   }
