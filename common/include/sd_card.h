@@ -49,7 +49,7 @@ bool writeFileAtomically(const String& path, const String& contents);
 
 // Retry-aware wrappers for the raw SD ops. Callers that manage their
 // own File handle (e.g. streaming HTTP downloads to disk, screenshot
-// BMP writers, xkcd index atomic writes) should use these instead of
+// writers, xkcd index atomic writes) should use these instead of
 // SD.open()/SD.rename() directly so a single SPI hiccup does not fail
 // their operation.
 File openForRead(const String& path);
