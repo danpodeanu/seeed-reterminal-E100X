@@ -2,7 +2,7 @@ sync.sh
 
 __pycache__/
 *.pyc
-screenshot-*.bmp
+screenshot-*.png
 
 # Local staging folder for generated .vlw fonts (see tools/fonts/make_vlw.py).
 /out/

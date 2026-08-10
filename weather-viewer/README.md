@@ -125,7 +125,7 @@ Weather Viewer works without a card. Adding one enables:
   normal wake, a saved forecast is redrawn without a network request
   as long as it is no older than the sleep interval.
 - Screenshots captured via a long primary-button hold, written to
-  `/screenshot.bmp`.
+  `/screenshot.png`.
 - Unicode location names (`Muenchen`, `São Paulo`) rendered via
   `.vlw` smooth fonts in `/fonts/`. Without the fonts, non-ASCII
   characters fall back to the built-in GFX font and render as
@@ -157,7 +157,7 @@ it at the SD-card root.
   - **Green/OK button + 1–5 s hold from sleep** → open the Wi-Fi
     configuration portal (QR codes on the panel).
   - **Green/OK button + longer hold (>5 s) from sleep** → save a
-    screenshot of the current frame to `/screenshot.bmp`.
+    screenshot of the current frame to `/screenshot.png`.
 - **Header readouts** update on every refresh:
   - Indoor temperature and humidity (SHT4x).
   - Battery percentage plus a lightning bolt when USB power is

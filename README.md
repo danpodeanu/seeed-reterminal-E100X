@@ -140,7 +140,7 @@ another; select the exact device target during compilation.
 ## USB screen capture
 
 Every application and the panel test expose the current in-memory framebuffer
-as an 8-bit indexed BMP over the same USB serial port used for firmware upload
+as an 8-bit indexed PNG over the same USB serial port used for firmware upload
 and logs. Install the host dependency and run:
 
 ```bash
@@ -148,7 +148,7 @@ python -m pip install pyserial
 python tools/capture_screen.py COM8
 ```
 
-The default output is `screenshot-<unix-epoch>.bmp`; pass `-o path.bmp` to
+The default output is `screenshot-<unix-epoch>.png`; pass `-o path.png` to
 choose another path. The client verifies the payload dimensions and CRC32
 before installing the file. Large E1003/E1004 framebuffers can take several
 minutes over the 115200-baud diagnostic port.

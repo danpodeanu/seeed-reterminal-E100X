@@ -9,7 +9,7 @@
 #include "photo_geom.h"
 #include "photo_manifest.h"
 #include "photo_orientation.h"
-#include "screen_capture_bmp_layout.h"
+#include "screen_capture_png_layout.h"
 #include "usb_screen_capture_protocol.h"
 
 void setUp() {}
@@ -302,19 +302,20 @@ void test_e1005_orientation_geometry_and_rotation() {
                         photo_orientation::panelHeight(Orientation::RotateCCW));
 }
 
-void test_screen_capture_bmp_layout_pads_rows_and_sizes_payload() {
-  const screen_capture_bmp::Layout small =
-      screen_capture_bmp::layout(5, 2);
-  TEST_ASSERT_EQUAL_UINT32(8, small.rowSize);
-  TEST_ASSERT_EQUAL_UINT32(16, small.pixelBytes);
-  TEST_ASSERT_EQUAL_UINT32(1078, small.pixelOffset);
-  TEST_ASSERT_EQUAL_UINT32(1094, small.fileSize);
+void test_screen_capture_png_layout_sizes_streamed_payload() {
+  const screen_capture_png::Layout small =
+      screen_capture_png::layout(5, 2);
+  TEST_ASSERT_EQUAL_UINT32(6, small.rowBytes);
+  TEST_ASSERT_EQUAL_UINT32(11, small.deflateBlockBytes);
+  TEST_ASSERT_EQUAL_UINT32(28, small.idatDataBytes);
+  TEST_ASSERT_EQUAL_UINT32(865, small.fileSize);
 
-  const screen_capture_bmp::Layout e1003 =
-      screen_capture_bmp::layout(1872, 1404);
-  TEST_ASSERT_EQUAL_UINT32(1872, e1003.rowSize);
-  TEST_ASSERT_EQUAL_UINT32(2628288, e1003.pixelBytes);
-  TEST_ASSERT_EQUAL_UINT32(2629366, e1003.fileSize);
+  const screen_capture_png::Layout e1003 =
+      screen_capture_png::layout(1872, 1404);
+  TEST_ASSERT_EQUAL_UINT32(1873, e1003.rowBytes);
+  TEST_ASSERT_EQUAL_UINT32(1878, e1003.deflateBlockBytes);
+  TEST_ASSERT_EQUAL_UINT32(2636718, e1003.idatDataBytes);
+  TEST_ASSERT_EQUAL_UINT32(2637555, e1003.fileSize);
 }
 
 void test_screen_capture_crc32_matches_standard_vector_incrementally() {
@@ -326,13 +327,26 @@ void test_screen_capture_crc32_matches_standard_vector_incrementally() {
   TEST_ASSERT_EQUAL_HEX32(0xCBF43926UL, crc ^ 0xFFFFFFFFUL);
 }
 
+void test_png_chunk_crc32_and_adler32_match_standard_vectors() {
+  const uint8_t first[] = {'1', '2', '3', '4'};
+  const uint8_t second[] = {'5', '6', '7', '8', '9'};
+  uint32_t crc =
+      screen_capture_png::updateCrc32(0xFFFFFFFFUL, first, sizeof(first));
+  crc = screen_capture_png::updateCrc32(crc, second, sizeof(second));
+  TEST_ASSERT_EQUAL_HEX32(0xCBF43926UL, crc ^ 0xFFFFFFFFUL);
+
+  uint32_t adler = screen_capture_png::updateAdler32(1, first, sizeof(first));
+  adler = screen_capture_png::updateAdler32(adler, second, sizeof(second));
+  TEST_ASSERT_EQUAL_HEX32(0x091E01DEUL, adler);
+}
+
 void test_e1005_capture_palette_preserves_gray4_and_monochrome() {
-  TEST_ASSERT_EQUAL_UINT8(0, screen_capture_bmp::e1005PaletteGray(0, 1));
-  TEST_ASSERT_EQUAL_UINT8(255, screen_capture_bmp::e1005PaletteGray(1, 1));
-  TEST_ASSERT_EQUAL_UINT8(0, screen_capture_bmp::e1005PaletteGray(0, 4));
-  TEST_ASSERT_EQUAL_UINT8(85, screen_capture_bmp::e1005PaletteGray(1, 4));
-  TEST_ASSERT_EQUAL_UINT8(170, screen_capture_bmp::e1005PaletteGray(2, 4));
-  TEST_ASSERT_EQUAL_UINT8(255, screen_capture_bmp::e1005PaletteGray(3, 4));
+  TEST_ASSERT_EQUAL_UINT8(0, screen_capture_png::e1005PaletteGray(0, 1));
+  TEST_ASSERT_EQUAL_UINT8(255, screen_capture_png::e1005PaletteGray(1, 1));
+  TEST_ASSERT_EQUAL_UINT8(0, screen_capture_png::e1005PaletteGray(0, 4));
+  TEST_ASSERT_EQUAL_UINT8(85, screen_capture_png::e1005PaletteGray(1, 4));
+  TEST_ASSERT_EQUAL_UINT8(170, screen_capture_png::e1005PaletteGray(2, 4));
+  TEST_ASSERT_EQUAL_UINT8(255, screen_capture_png::e1005PaletteGray(3, 4));
 }
 
 int main(int, char**) {
@@ -365,8 +379,9 @@ int main(int, char**) {
   RUN_TEST(test_photo_geom_rotate_cw_and_ccw_are_inverses);
   RUN_TEST(test_panel_rotation_is_only_applied_to_e1005);
   RUN_TEST(test_e1005_orientation_geometry_and_rotation);
-  RUN_TEST(test_screen_capture_bmp_layout_pads_rows_and_sizes_payload);
+  RUN_TEST(test_screen_capture_png_layout_sizes_streamed_payload);
   RUN_TEST(test_screen_capture_crc32_matches_standard_vector_incrementally);
+  RUN_TEST(test_png_chunk_crc32_and_adler32_match_standard_vectors);
   RUN_TEST(test_e1005_capture_palette_preserves_gray4_and_monochrome);
   return UNITY_END();
 }

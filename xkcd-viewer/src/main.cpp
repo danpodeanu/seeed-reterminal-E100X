@@ -44,7 +44,7 @@
 #include "dither.h"
 #include "image_loader.h"
 #include "pcf8563_utc.h"
-#include "screenshot_bmp.h"
+#include "screenshot_png.h"
 #include "smooth_font_manager.h"
 #include "usb_screen_capture.h"
 #include "panel_watchdog.h"
@@ -70,7 +70,7 @@ SET_LOOP_TASK_STACK_SIZE(16U * 1024U);
 
 TimestampedLogger appLog(Serial1);
 // LOG is provided by app_logger.h; the definition above lives at namespace
-// scope so shared translation units (screenshot_bmp.h) can extern-link.
+// scope so shared screenshot helpers can extern-link.
 
 namespace {
 
@@ -691,13 +691,11 @@ void renderStatus(const String& message, const String& detail = "",
   updatePanel();
 }
 
-// writeLittleEndian16/32, screenshotPaletteColor, and saveScreenshotBmp now
-// live in common/include/screenshot_bmp.h and are invoked via the template
-// screenshot::saveScreenshotBmp<EPaper>().
+// The shared PNG encoder is invoked through screenshot::saveScreenshotPng().
 
 void updatePanel() {
   if (screenshotRequested && sdReady) {
-    screenshot::saveScreenshotBmp(epaper, panelWidth(), panelHeight());
+    screenshot::saveScreenshotPng(epaper, panelWidth(), panelHeight());
     screenshotRequested = false;
   }
   const uint32_t heap = ESP.getFreeHeap();

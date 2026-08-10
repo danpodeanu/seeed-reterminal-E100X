@@ -1,14 +1,17 @@
 #!/usr/bin/env python3
-"""Retrieve the current reTerminal framebuffer as a BMP over USB CDC."""
+"""Retrieve the current reTerminal framebuffer as an indexed PNG over USB CDC."""
 
 from __future__ import annotations
 
 import argparse
 import binascii
+import os
 import re
 import struct
 import sys
+import tempfile
 import time
+import zlib
 from pathlib import Path
 
 
@@ -21,13 +24,21 @@ END_PATTERN = re.compile(
     rb"^RETERMINAL_SCREEN_CAPTURE_V1 END ([0-9A-Fa-f]{8})\n$"
 )
 ERROR_PREFIX = f"{PROTOCOL} ERROR ".encode("ascii")
-BMP_PIXEL_OFFSET = 1078
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
+PNG_PALETTE_BYTES = 256 * 3
+PNG_FIXED_BYTES = 837
 MAX_WIDTH = 1872
 MAX_HEIGHT = 1600
 
 
 class CaptureError(RuntimeError):
     """A capture protocol or framebuffer validation failure."""
+
+
+def png_payload_length(width: int, height: int) -> int:
+    row_bytes = width + 1
+    idat_data_bytes = 2 + (5 + row_bytes) * height + 4
+    return PNG_FIXED_BYTES + idat_data_bytes
 
 
 def parse_header(line: bytes) -> tuple[int, int, int]:
@@ -42,32 +53,151 @@ def parse_header(line: bytes) -> tuple[int, int, int]:
         raise CaptureError("device reported invalid capture dimensions or length")
     if width > MAX_WIDTH or height > MAX_HEIGHT:
         raise CaptureError(f"device reported unsupported dimensions: {width}x{height}")
-    expected_length = BMP_PIXEL_OFFSET + ((width + 3) & ~3) * height
+    expected_length = png_payload_length(width, height)
     if length != expected_length:
         raise CaptureError(
-            f"device reported invalid BMP length: {length} != {expected_length}"
+            f"device reported invalid PNG length: {length} != {expected_length}"
         )
     return width, height, length
 
 
-def validate_bmp(payload: bytes, expected_width: int, expected_height: int) -> None:
-    if len(payload) < 54 or payload[:2] != b"BM":
-        raise CaptureError("payload is not a BMP")
-    file_size = struct.unpack_from("<I", payload, 2)[0]
-    width, height = struct.unpack_from("<ii", payload, 18)
-    planes, bits_per_pixel = struct.unpack_from("<HH", payload, 26)
-    compression = struct.unpack_from("<I", payload, 30)[0]
-    if file_size != len(payload):
-        raise CaptureError(
-            f"BMP length mismatch: header says {file_size}, received {len(payload)}"
-        )
+def _parse_png_chunks(payload: bytes) -> list[tuple[bytes, bytes]]:
+    if not payload.startswith(PNG_SIGNATURE):
+        raise CaptureError("payload is not a PNG")
+
+    chunks = []
+    offset = len(PNG_SIGNATURE)
+    while offset < len(payload):
+        if len(payload) - offset < 12:
+            raise CaptureError("PNG contains a truncated chunk")
+        length = struct.unpack_from(">I", payload, offset)[0]
+        chunk_end = offset + 12 + length
+        if chunk_end > len(payload):
+            raise CaptureError("PNG chunk length exceeds the payload")
+        chunk_type = payload[offset + 4 : offset + 8]
+        data = payload[offset + 8 : offset + 8 + length]
+        expected_crc = struct.unpack_from(">I", payload, offset + 8 + length)[0]
+        actual_crc = binascii.crc32(chunk_type + data) & 0xFFFFFFFF
+        if actual_crc != expected_crc:
+            name = chunk_type.decode("ascii", "replace")
+            raise CaptureError(f"PNG {name} chunk CRC32 mismatch")
+        chunks.append((chunk_type, data))
+        offset = chunk_end
+        if chunk_type == b"IEND":
+            break
+
+    if offset != len(payload):
+        raise CaptureError("PNG has trailing bytes after IEND")
+    return chunks
+
+
+def _validate_idat(data: bytes, width: int, height: int) -> None:
+    if data[:2] != b"\x78\x01":
+        raise CaptureError("PNG IDAT does not use the expected zlib encoding")
+
+    offset = 2
+    adler = 1
+    for y in range(height):
+        if len(data) - offset < 5:
+            raise CaptureError("PNG IDAT contains a truncated DEFLATE block")
+        expected_header = 1 if y + 1 == height else 0
+        if data[offset] != expected_header:
+            raise CaptureError("PNG IDAT has an invalid stored-block header")
+        length, inverse_length = struct.unpack_from("<HH", data, offset + 1)
+        if length != width + 1 or inverse_length != (length ^ 0xFFFF):
+            raise CaptureError("PNG IDAT has an invalid stored-block length")
+        offset += 5
+        block_end = offset + length
+        if block_end > len(data):
+            raise CaptureError("PNG IDAT contains truncated scanline data")
+        scanline = data[offset:block_end]
+        if scanline[0] != 0:
+            raise CaptureError("PNG IDAT uses an unsupported scanline filter")
+        adler = zlib.adler32(scanline, adler)
+        offset = block_end
+
+    if len(data) - offset != 4:
+        raise CaptureError("PNG IDAT has an invalid zlib trailer length")
+    expected_adler = struct.unpack_from(">I", data, offset)[0]
+    if (adler & 0xFFFFFFFF) != expected_adler:
+        raise CaptureError("PNG IDAT Adler-32 mismatch")
+
+
+def validate_png(payload: bytes, expected_width: int, expected_height: int) -> None:
+    chunks = _parse_png_chunks(payload)
+    if [chunk_type for chunk_type, _ in chunks] != [
+        b"IHDR",
+        b"PLTE",
+        b"IDAT",
+        b"IEND",
+    ]:
+        raise CaptureError("PNG does not contain the expected chunk sequence")
+
+    ihdr = chunks[0][1]
+    if len(ihdr) != 13:
+        raise CaptureError("PNG IHDR has an invalid length")
+    width, height, bit_depth, color_type, compression, filter_method, interlace = (
+        struct.unpack(">IIBBBBB", ihdr)
+    )
     if (width, height) != (expected_width, expected_height):
         raise CaptureError(
-            "BMP dimensions do not match response: "
+            "PNG dimensions do not match response: "
             f"{width}x{height} != {expected_width}x{expected_height}"
         )
-    if planes != 1 or bits_per_pixel != 8 or compression != 0:
-        raise CaptureError("device returned an unsupported BMP encoding")
+    expected_length = png_payload_length(expected_width, expected_height)
+    if len(payload) != expected_length:
+        raise CaptureError(
+            f"PNG length mismatch: received {len(payload)}, expected {expected_length}"
+        )
+    if (
+        bit_depth != 8
+        or color_type != 3
+        or compression != 0
+        or filter_method != 0
+        or interlace != 0
+    ):
+        raise CaptureError("device returned an unsupported PNG encoding")
+    if len(chunks[1][1]) != PNG_PALETTE_BYTES:
+        raise CaptureError("PNG PLTE does not contain 256 RGB entries")
+    if len(chunks[2][1]) != 2 + (width + 6) * height + 4:
+        raise CaptureError("PNG IDAT length does not match the response dimensions")
+    if chunks[3][1]:
+        raise CaptureError("PNG IEND chunk is not empty")
+    _validate_idat(chunks[2][1], width, height)
+
+
+def validate_stream_crc(payload: bytes, trailer: bytes) -> None:
+    match = END_PATTERN.fullmatch(trailer)
+    if match is None:
+        raise CaptureError(f"invalid capture trailer: {trailer!r}")
+    expected_crc = int(match.group(1), 16)
+    actual_crc = binascii.crc32(payload) & 0xFFFFFFFF
+    if actual_crc != expected_crc:
+        raise CaptureError(
+            f"CRC32 mismatch: device sent {expected_crc:08X}, "
+            f"received {actual_crc:08X}"
+        )
+
+
+def save_atomically(output: Path, payload: bytes) -> None:
+    temporary_path = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            mode="wb",
+            dir=output.parent,
+            prefix=f".{output.name}.",
+            suffix=".part",
+            delete=False,
+        ) as temporary:
+            temporary_path = Path(temporary.name)
+            temporary.write(payload)
+            temporary.flush()
+            os.fsync(temporary.fileno())
+        os.replace(temporary_path, output)
+        temporary_path = None
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
 
 
 def read_exact(port, length: int, timeout: float) -> bytes:
@@ -153,24 +283,9 @@ def capture(port_name: str, output: Path, timeout: float) -> tuple[int, int, int
     except serial.SerialException as error:
         raise CaptureError(f"could not use {port_name}: {error}") from error
 
-    match = END_PATTERN.fullmatch(trailer)
-    if match is None:
-        raise CaptureError(f"invalid capture trailer: {trailer!r}")
-    expected_crc = int(match.group(1), 16)
-    actual_crc = binascii.crc32(payload) & 0xFFFFFFFF
-    if actual_crc != expected_crc:
-        raise CaptureError(
-            f"CRC32 mismatch: device sent {expected_crc:08X}, "
-            f"received {actual_crc:08X}"
-        )
-    validate_bmp(payload, width, height)
-
-    temporary = output.with_name(f"{output.name}.part")
-    try:
-        temporary.write_bytes(payload)
-        temporary.replace(output)
-    finally:
-        temporary.unlink(missing_ok=True)
+    validate_stream_crc(payload, trailer)
+    validate_png(payload, width, height)
+    save_atomically(output, payload)
     return width, height, length
 
 
@@ -184,7 +299,7 @@ def main() -> int:
         "--output",
         type=Path,
         default=None,
-        help="output BMP path (default: screenshot-<unix-epoch>.bmp)",
+        help="output PNG path (default: screenshot-<unix-epoch>.png)",
     )
     parser.add_argument(
         "--timeout",
@@ -196,7 +311,7 @@ def main() -> int:
     if args.timeout <= 0:
         parser.error("--timeout must be positive")
 
-    output = args.output or Path(f"screenshot-{int(time.time())}.bmp")
+    output = args.output or Path(f"screenshot-{int(time.time())}.png")
     try:
         width, height, length = capture(args.port, output, args.timeout)
     except (CaptureError, OSError) as error:

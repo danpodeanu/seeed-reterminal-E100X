@@ -42,7 +42,7 @@
 #include "sensors.h"
 #include "low_battery.h"
 #include "pcf8563_utc.h"
-#include "screenshot_bmp.h"
+#include "screenshot_png.h"
 #include "smooth_font_manager.h"
 #include "usb_screen_capture.h"
 #include "panel_watchdog.h"
@@ -186,13 +186,11 @@ void beginPanel() {
 // WeatherData / DailyForecast now live in weather_data.h so both the
 // provider translation units and main.cpp share one definition.
 
-// writeLittleEndian16/32, screenshotPaletteColor, and saveScreenshotBmp now
-// live in common/include/screenshot_bmp.h and are invoked via the template
-// screenshot::saveScreenshotBmp<EPaper>().
+// The shared PNG encoder is invoked through screenshot::saveScreenshotPng().
 
 void updatePanel() {
   if (screenshotRequested && sdReady) {
-    screenshot::saveScreenshotBmp(epaper, panelWidth(), panelHeight());
+    screenshot::saveScreenshotPng(epaper, panelWidth(), panelHeight());
     screenshotRequested = false;
   }
   panel_watchdog::guard([]() { epaper.update(); });

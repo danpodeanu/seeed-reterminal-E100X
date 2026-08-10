@@ -9,7 +9,7 @@
 #if USB_SCREEN_CAPTURE_ENABLED
 #include <string.h>
 
-#include "screen_capture_bmp.h"
+#include "screen_capture_png.h"
 #include "usb_screen_capture_protocol.h"
 #endif
 
@@ -144,24 +144,24 @@ class Server {
 
   bool writeText(const char* text) {
     return stream_ != nullptr &&
-           screen_capture_bmp::writeBytes(
+           screen_capture_png::writeBytes(
                *stream_, reinterpret_cast<const uint8_t*>(text), strlen(text));
   }
 
   template <typename EPaper>
   void capture(EPaper& epaper, uint32_t width, uint32_t height) {
-    const screen_capture_bmp::Layout bmp =
-        screen_capture_bmp::layout(width, height);
+    const screen_capture_png::Layout png =
+        screen_capture_png::layout(width, height);
     char header[96];
     snprintf(header, sizeof(header),
              "RETERMINAL_SCREEN_CAPTURE_V1 OK %lu %lu %lu\n",
              static_cast<unsigned long>(width),
              static_cast<unsigned long>(height),
-             static_cast<unsigned long>(bmp.fileSize));
+             static_cast<unsigned long>(png.fileSize));
     if (!writeText(header)) return;
 
     CrcWriter writer(*stream_);
-    if (!screen_capture_bmp::write(epaper, width, height, writer)) return;
+    if (!screen_capture_png::write(epaper, width, height, writer)) return;
 
     char trailer[64];
     snprintf(trailer, sizeof(trailer),

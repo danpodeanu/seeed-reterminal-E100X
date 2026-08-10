@@ -104,7 +104,7 @@ that make the display genuinely feel offline:
   every timer wake picks from the cache without touching Wi-Fi.
 - Unicode fonts (`/fonts/sans_bold_*.vlw`) render exotic characters
   in titles and alt strings correctly.
-- Screenshots are written to `/screenshot.bmp`.
+- Screenshots are written to `/screenshot.png`.
 
 You can either let the device build the cache slowly over time (it
 grabs the newest comic + up to ten old ones every six hours), or seed
@@ -126,7 +126,7 @@ The details are in [Pre-populating an SD card](#pre-populating-an-sd-card).
   - **Green/OK button + 1–5 s hold from sleep** → open the Wi-Fi
     configuration portal (QR codes on the panel).
   - **Green/OK button + longer hold (>5 s) from sleep** → save a
-    screenshot of the current frame to `/screenshot.bmp`.
+    screenshot of the current frame to `/screenshot.png`.
   - A short GPIO45 beep confirms every button wake.
 - **Header readouts** update on every refresh:
   - Indoor temperature and humidity (SHT4x).
