@@ -40,6 +40,7 @@
 #include "lights_out_game.h"
 #include "low_battery.h"
 #include "mahjong_solitaire_game.h"
+#include "menu_edge_swipe.h"
 #include "mini_minesweeper_game.h"
 #include "nonogram_game.h"
 #include "ok_button_action.h"
@@ -143,6 +144,7 @@ constexpr int kKeyboardFirstRowY = 586;
 constexpr int kKeyboardRowGap = 6;
 constexpr int kStatusDividerY = 48;
 constexpr int kSwipeThreshold = 45;
+constexpr int kMenuSwipeEdgeWidth = 40;
 constexpr int kMinesTouchMoveTolerance = 20;
 constexpr int kReversiAiDepth = 3;
 constexpr uint32_t kButtonDebounceMs = 30;
@@ -1988,7 +1990,8 @@ void drawGameMenuCard(GameId game) {
 
   const Rect& card = menuCardFor(game);
   String label = currentLanguage == Language::English
-                     ? gameName(game)
+                     ? (game == GameId::EpubReader ? "Book Reader"
+                                                   : gameName(game))
                      : tr(gameTextId(game));
   if (currentLanguage == Language::English &&
       epaper.textWidth(label, 4) > card.width - 16) {
@@ -4542,6 +4545,31 @@ void handleMenuTouch(const Gt911Touch::Point& point) {
   }
 }
 
+bool handleMenuEdgeSwipe(const Gt911Touch::Point& start,
+                         const Gt911Touch::Point& end) {
+  const menu_edge_swipe::Direction direction = menu_edge_swipe::detect(
+      start.x, start.y, end.x, end.y, kScreenWidth, kMenuSwipeEdgeWidth,
+      kSwipeThreshold);
+  const size_t pageIndex = static_cast<size_t>(currentMenuPage);
+  if (direction == menu_edge_swipe::Direction::Previous) {
+    if (pageIndex > 0) {
+      showMenuPage(static_cast<MenuPage>(pageIndex - 1));
+    } else {
+      LOG.println("[games] already on first menu page");
+    }
+    return true;
+  }
+  if (direction == menu_edge_swipe::Direction::Next) {
+    if (pageIndex + 1 < kMenuPageCount) {
+      showMenuPage(static_cast<MenuPage>(pageIndex + 1));
+    } else {
+      LOG.println("[games] already on last menu page");
+    }
+    return true;
+  }
+  return false;
+}
+
 void handleLightsOutTouch(const Gt911Touch::Point& point) {
   if (kBackButton.contains(point.x, point.y)) {
     hardware::beep();
@@ -5402,7 +5430,12 @@ void pollTouch() {
   Gt911Touch::Point point = {};
   const Gt911Touch::PollResult result = touch.poll(point);
   if (result == Gt911Touch::PollResult::Release) {
-    if (touchActive && currentScreen == Screen::Game2048 &&
+    if (touchActive && currentScreen == Screen::Menu &&
+        !touchActionHandled) {
+      if (!handleMenuEdgeSwipe(touchStart, touchLast)) {
+        handleMenuTouch(touchStart);
+      }
+    } else if (touchActive && currentScreen == Screen::Game2048 &&
         !touchActionHandled) {
       handle2048Swipe(touchStart, touchLast);
     } else if (touchActive && currentScreen == Screen::FallingBlocks &&
@@ -5433,8 +5466,11 @@ void pollTouch() {
     handleLanguageTouch(point);
     touchActionHandled = true;
   } else if (currentScreen == Screen::Menu) {
-    handleMenuTouch(point);
-    touchActionHandled = true;
+    if (!menu_edge_swipe::startsAtEdge(point.x, kScreenWidth,
+                                       kMenuSwipeEdgeWidth)) {
+      handleMenuTouch(point);
+      touchActionHandled = true;
+    }
   } else if (kHelpButton.contains(point.x, point.y)) {
     hardware::beep();
     toggleHelpPane();

@@ -16,6 +16,7 @@
 #include "klondike_game.h"
 #include "lights_out_game.h"
 #include "mahjong_solitaire_game.h"
+#include "menu_edge_swipe.h"
 #include "mini_minesweeper_game.h"
 #include "nonogram_game.h"
 #include "ok_button_action.h"
@@ -1023,6 +1024,32 @@ void test_game_play_count_saturates() {
                            game_ranking::nextPlayCount(UINT32_MAX));
 }
 
+void test_menu_edge_swipes_paginate_inward() {
+  TEST_ASSERT_EQUAL_INT(
+      static_cast<int>(menu_edge_swipe::Direction::Previous),
+      static_cast<int>(
+          menu_edge_swipe::detect(10, 300, 100, 305, 480, 40, 45)));
+  TEST_ASSERT_EQUAL_INT(
+      static_cast<int>(menu_edge_swipe::Direction::Next),
+      static_cast<int>(
+          menu_edge_swipe::detect(470, 300, 380, 295, 480, 40, 45)));
+}
+
+void test_menu_edge_swipes_reject_non_paging_gestures() {
+  TEST_ASSERT_EQUAL_INT(
+      static_cast<int>(menu_edge_swipe::Direction::None),
+      static_cast<int>(
+          menu_edge_swipe::detect(200, 300, 100, 300, 480, 40, 45)));
+  TEST_ASSERT_EQUAL_INT(
+      static_cast<int>(menu_edge_swipe::Direction::None),
+      static_cast<int>(
+          menu_edge_swipe::detect(10, 300, 35, 300, 480, 40, 45)));
+  TEST_ASSERT_EQUAL_INT(
+      static_cast<int>(menu_edge_swipe::Direction::None),
+      static_cast<int>(
+          menu_edge_swipe::detect(10, 300, 70, 390, 480, 40, 45)));
+}
+
 void test_every_game_translation_is_present() {
   for (size_t text = 0; text < game_localization::kTextCount; ++text) {
     for (size_t language = 0;
@@ -1886,6 +1913,8 @@ int main(int, char**) {
   RUN_TEST(test_game_ranking_sorts_counts_and_preserves_ties);
   RUN_TEST(test_game_ranking_uses_default_order_only_to_break_ties);
   RUN_TEST(test_game_play_count_saturates);
+  RUN_TEST(test_menu_edge_swipes_paginate_inward);
+  RUN_TEST(test_menu_edge_swipes_reject_non_paging_gestures);
   RUN_TEST(test_every_game_translation_is_present);
   RUN_TEST(test_every_game_help_translation_is_present);
   RUN_TEST(test_epub_browser_parent_folder_is_first_below_root);
