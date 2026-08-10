@@ -154,10 +154,9 @@ choose another path. The client verifies the payload dimensions and CRC32
 before installing the file. Large E1003/E1004 framebuffers can take several
 minutes over the 115200-baud diagnostic port.
 
-Games and the panel test serve capture requests while running. If any
-application has entered deep sleep, start the client and then wake the device;
-the client repeats its short request while the application boots and renders.
-The firmware checks for a pending request before returning to deep sleep.
+Capture requests are served only while the firmware remains active. Games also
+wake from light sleep for a repeated capture request. Deep sleep has no capture
+window, so request the image before putting the device to sleep.
 The image retained by the e-paper itself cannot be read after its in-memory
 framebuffer has been powered down. Normal serial log lines are ignored by the
 client.

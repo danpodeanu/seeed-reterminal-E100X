@@ -5531,7 +5531,6 @@ void pollTouch() {
 void powerDownAndSleep(SleepScreen screen = SleepScreen::Resume,
                        int batteryPercent = -1) {
   disableLightSleepWake();
-  usbScreenCapture.serveFor(epaper, kScreenWidth, kScreenHeight);
   while (digitalRead(board::PIN_BUTTON_0) == LOW) delay(10);
   const bool wakePinReady = hardware::configureWakePin(board::PIN_BUTTON_0);
   const uint64_t wakeMask = 1ULL << board::PIN_BUTTON_0;

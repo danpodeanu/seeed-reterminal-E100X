@@ -1514,11 +1514,6 @@ void renderWeather(const WeatherData& weather) {
 
 void powerDownAndSleep(uint64_t sleepSeconds = config::SLEEP_SECONDS,
                        bool timerWakeEnabled = true) {
-  if (framebufferReady) {
-    usbScreenCapture.serveFor(epaper, panelWidth(), panelHeight());
-  } else {
-    usbScreenCapture.serveUnavailableFor();
-  }
   wifi_sta::disable();
   // Close the log file before SD.end() so its FAT/directory update
   // hits disk cleanly. Safe to call unconditionally -- no-ops when no

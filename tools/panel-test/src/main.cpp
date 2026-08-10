@@ -485,7 +485,6 @@ void pollTouch() {
 #endif
 
 void powerDownAndSleep() {
-  usbScreenCapture.serveFor(epaper, PANEL_WIDTH, PANEL_HEIGHT);
   const int kButtons[] = {
       board::PIN_BUTTON_0,
       board::PIN_BUTTON_1,

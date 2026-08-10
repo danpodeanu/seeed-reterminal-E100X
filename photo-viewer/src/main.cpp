@@ -1022,11 +1022,6 @@ bool generatePhotoThumbnail(const char* sourcePath, const char* destPath,
 // NTP sync helpers now live in common/include/ntp_sync.h. The wrapper below
 void powerDownAndSleep(uint64_t sleepSeconds = 0) {
   if (sleepSeconds == 0) sleepSeconds = photo_config::runtime::sleepSeconds();
-  if (framebufferReady) {
-    usbScreenCapture.serveFor(epaper, panelWidth(), panelHeight());
-  } else {
-    usbScreenCapture.serveUnavailableFor();
-  }
   wifi_sta::disable();
   // Close the log file before SD.end() so its FAT/directory update
   // hits disk cleanly. Safe to call unconditionally -- no-ops when no

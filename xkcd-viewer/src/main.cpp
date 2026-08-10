@@ -1357,11 +1357,6 @@ bool renderComic(const Comic& comic, RgbImage& image, ImageLayout layout) {
 
 // NTP sync helpers now live in common/include/ntp_sync.h. The wrapper below
 void powerDownAndSleep(uint64_t sleepSeconds = xkcd_config::runtime::sleepSeconds()) {
-  if (framebufferReady) {
-    usbScreenCapture.serveFor(epaper, panelWidth(), panelHeight());
-  } else {
-    usbScreenCapture.serveUnavailableFor();
-  }
   wifi_sta::disable();
   // Close the log file before SD.end() so its FAT/directory update
   // hits disk cleanly. Safe to call unconditionally -- no-ops when no
