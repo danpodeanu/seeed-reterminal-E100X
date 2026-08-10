@@ -1,11 +1,14 @@
 #include <unity.h>
 
+#include <cstring>
+
 #include "crossword_game.h"
 #include "dots_and_boxes_game.h"
 #include "double_tap_tracker.h"
 #include "epub_browser_logic.h"
 #include "epub_text.h"
 #include "game_2048.h"
+#include "game_help_text.h"
 #include "game_localization.h"
 #include "game_progress_store.h"
 #include "game_ranking.h"
@@ -148,6 +151,15 @@ void test_2048_start_adds_two_tiles() {
     }
   }
   TEST_ASSERT_EQUAL_INT(2, populated);
+}
+
+void test_2048_retains_loaded_best_score_across_new_games() {
+  Game2048 game;
+  game.retainBestScore(4096);
+  game.retainBestScore(1024);
+  game.start(0, 1);
+
+  TEST_ASSERT_EQUAL_UINT32(4096, game.bestScore());
 }
 
 void test_2048_left_move_merges_each_pair_once() {
@@ -970,6 +982,21 @@ void test_long_game_progress_only_advances_with_valid_checkpoints() {
   TEST_ASSERT_EQUAL_UINT16(155, result.checkpoint);
 }
 
+void test_high_score_progress_never_moves_backward() {
+  game_progress::HighScoreAdvancement result =
+      game_progress::evaluateHighScore(2048, 4096);
+  TEST_ASSERT_TRUE(result.changed);
+  TEST_ASSERT_EQUAL_UINT32(4096, result.score);
+
+  result = game_progress::evaluateHighScore(4096, 2048);
+  TEST_ASSERT_FALSE(result.changed);
+  TEST_ASSERT_EQUAL_UINT32(4096, result.score);
+
+  result = game_progress::evaluateHighScore(UINT32_MAX, UINT32_MAX);
+  TEST_ASSERT_FALSE(result.changed);
+  TEST_ASSERT_EQUAL_UINT32(UINT32_MAX, result.score);
+}
+
 void test_game_ranking_sorts_counts_and_preserves_ties() {
   const uint32_t counts[] = {2, 9, 9, 0, 4, 1, 0, 4, 2, 9, 0, 1};
   uint8_t ranking[12] = {};
@@ -1001,6 +1028,24 @@ void test_every_game_translation_is_present() {
       u8"简体中文",
       game_localization::languageName(
           game_localization::Language::ChineseSimplified));
+}
+
+void test_every_game_help_translation_is_present() {
+  for (size_t topic = 0; topic < game_help::kTopicCount; ++topic) {
+    for (size_t language = 0;
+         language < game_localization::kLanguageCount; ++language) {
+      const char* instructions = game_help::text(
+          static_cast<game_localization::Language>(language),
+          static_cast<game_help::Topic>(topic));
+      TEST_ASSERT_NOT_NULL(instructions);
+      TEST_ASSERT_NOT_EQUAL('\0', instructions[0]);
+      const size_t instructionLength = strlen(instructions);
+      const epub_text::TextPage page = epub_text::paginate(
+          instructions, instructionLength, 0, game_help::kColumnsPerLine,
+          game_help::kMaximumLines);
+      TEST_ASSERT_EQUAL_UINT(instructionLength, page.end);
+    }
+  }
 }
 
 void test_epub_browser_parent_folder_is_first_below_root() {
@@ -1653,6 +1698,7 @@ int main(int, char**) {
   RUN_TEST(test_snapshot_restores_board_and_moves);
   RUN_TEST(test_invalid_snapshot_is_rejected);
   RUN_TEST(test_2048_start_adds_two_tiles);
+  RUN_TEST(test_2048_retains_loaded_best_score_across_new_games);
   RUN_TEST(test_2048_left_move_merges_each_pair_once);
   RUN_TEST(test_2048_right_move_preserves_direction);
   RUN_TEST(test_2048_up_move_merges_columns);
@@ -1713,9 +1759,11 @@ int main(int, char**) {
   RUN_TEST(test_sokoban_invalid_snapshot_is_rejected);
   RUN_TEST(test_all_microban_sokoban_levels_are_structurally_valid);
   RUN_TEST(test_long_game_progress_only_advances_with_valid_checkpoints);
+  RUN_TEST(test_high_score_progress_never_moves_backward);
   RUN_TEST(test_game_ranking_sorts_counts_and_preserves_ties);
   RUN_TEST(test_game_play_count_saturates);
   RUN_TEST(test_every_game_translation_is_present);
+  RUN_TEST(test_every_game_help_translation_is_present);
   RUN_TEST(test_epub_browser_parent_folder_is_first_below_root);
   RUN_TEST(test_ok_hold_duration_selects_requested_action);
   RUN_TEST(test_every_sudoku_puzzle_has_a_valid_solution);

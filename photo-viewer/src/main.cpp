@@ -54,6 +54,7 @@
 #include "pcf8563_utc.h"
 #include "secrets.h"
 #include "timestamped_logger.h"
+#include "usb_screen_capture.h"
 
 SET_LOOP_TASK_STACK_SIZE(16U * 1024U);
 
@@ -148,9 +149,11 @@ constexpr Rgb E6_COLORS[6] = {
 constexpr uint8_t E6_CODES[6] = {0x0, 0x2, 0x6, 0xB, 0xD, 0xF};
 
 EPaper epaper;
+usb_screen_capture::Server usbScreenCapture;
 Adafruit_SHT4x sht4;
 
 bool sdReady = false;
+bool framebufferReady = false;
 std::vector<String> photoList;
 sensors::Readings sensorReadings;
 
@@ -352,6 +355,7 @@ void drawStatusBadges() {
 
 void updatePanel() {
   panel_watchdog::guard([]() { epaper.update(); });
+  framebufferReady = true;
 }
 
 void renderStatus(const String& message, const String& detail = "",
@@ -1018,6 +1022,11 @@ bool generatePhotoThumbnail(const char* sourcePath, const char* destPath,
 // NTP sync helpers now live in common/include/ntp_sync.h. The wrapper below
 void powerDownAndSleep(uint64_t sleepSeconds = 0) {
   if (sleepSeconds == 0) sleepSeconds = photo_config::runtime::sleepSeconds();
+  if (framebufferReady) {
+    usbScreenCapture.serveFor(epaper, panelWidth(), panelHeight());
+  } else {
+    usbScreenCapture.serveUnavailableFor();
+  }
   wifi_sta::disable();
   // Close the log file before SD.end() so its FAT/directory update
   // hits disk cleanly. Safe to call unconditionally -- no-ops when no
@@ -1158,6 +1167,7 @@ void renderPortalOnPanel(const String& ssid, const String& password,
       epaper, panelWidth(), panelHeight(), PANEL_BLACK,
       PANEL_WHITE, info);
   panel_watchdog::guard([]() { epaper.update(); });
+  framebufferReady = true;
 }
 
 // SD-portal mode entry point. Called from setup() when sdPortalMode is
@@ -1327,6 +1337,7 @@ void renderPortalOnPanel(const String& ssid, const String& password,
 
   while (true) {
     config_portal::loop();
+    usbScreenCapture.poll(epaper, panelWidth(), panelHeight());
     const bool webExit = sd_web_portal::exitRequested()
                          || config_portal::rebootRequested();
     if (webExit || exitButtonPressedNow()) {
@@ -1380,6 +1391,7 @@ void setup() {
                           photo_config::runtime::quietEndHour(),
                           photo_config::runtime::quietEndMinute()});
   LOG.begin(115200, SERIAL_8N1, PIN_LOG_RX, PIN_LOG_TX);
+  usbScreenCapture.begin(Serial1);
   delay(250);
 
   const esp_sleep_wakeup_cause_t wakeCause = esp_sleep_get_wakeup_cause();
@@ -1754,5 +1766,10 @@ void setup() {
 }
 
 void loop() {
+  if (framebufferReady) {
+    usbScreenCapture.poll(epaper, panelWidth(), panelHeight());
+  } else {
+    usbScreenCapture.pollUnavailable();
+  }
   delay(1000);
 }

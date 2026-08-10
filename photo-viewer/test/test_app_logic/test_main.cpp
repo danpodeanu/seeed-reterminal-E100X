@@ -9,6 +9,8 @@
 #include "photo_geom.h"
 #include "photo_manifest.h"
 #include "photo_orientation.h"
+#include "screen_capture_bmp_layout.h"
+#include "usb_screen_capture_protocol.h"
 
 void setUp() {}
 void tearDown() {}
@@ -300,6 +302,39 @@ void test_e1005_orientation_geometry_and_rotation() {
                         photo_orientation::panelHeight(Orientation::RotateCCW));
 }
 
+void test_screen_capture_bmp_layout_pads_rows_and_sizes_payload() {
+  const screen_capture_bmp::Layout small =
+      screen_capture_bmp::layout(5, 2);
+  TEST_ASSERT_EQUAL_UINT32(8, small.rowSize);
+  TEST_ASSERT_EQUAL_UINT32(16, small.pixelBytes);
+  TEST_ASSERT_EQUAL_UINT32(1078, small.pixelOffset);
+  TEST_ASSERT_EQUAL_UINT32(1094, small.fileSize);
+
+  const screen_capture_bmp::Layout e1003 =
+      screen_capture_bmp::layout(1872, 1404);
+  TEST_ASSERT_EQUAL_UINT32(1872, e1003.rowSize);
+  TEST_ASSERT_EQUAL_UINT32(2628288, e1003.pixelBytes);
+  TEST_ASSERT_EQUAL_UINT32(2629366, e1003.fileSize);
+}
+
+void test_screen_capture_crc32_matches_standard_vector_incrementally() {
+  const uint8_t first[] = {'1', '2', '3', '4'};
+  const uint8_t second[] = {'5', '6', '7', '8', '9'};
+  uint32_t crc = usb_screen_capture::updateCrc32(
+      0xFFFFFFFFUL, first, sizeof(first));
+  crc = usb_screen_capture::updateCrc32(crc, second, sizeof(second));
+  TEST_ASSERT_EQUAL_HEX32(0xCBF43926UL, crc ^ 0xFFFFFFFFUL);
+}
+
+void test_e1005_capture_palette_preserves_gray4_and_monochrome() {
+  TEST_ASSERT_EQUAL_UINT8(0, screen_capture_bmp::e1005PaletteGray(0, 1));
+  TEST_ASSERT_EQUAL_UINT8(255, screen_capture_bmp::e1005PaletteGray(1, 1));
+  TEST_ASSERT_EQUAL_UINT8(0, screen_capture_bmp::e1005PaletteGray(0, 4));
+  TEST_ASSERT_EQUAL_UINT8(85, screen_capture_bmp::e1005PaletteGray(1, 4));
+  TEST_ASSERT_EQUAL_UINT8(170, screen_capture_bmp::e1005PaletteGray(2, 4));
+  TEST_ASSERT_EQUAL_UINT8(255, screen_capture_bmp::e1005PaletteGray(3, 4));
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_low_battery_warns_when_below_threshold);
@@ -330,5 +365,8 @@ int main(int, char**) {
   RUN_TEST(test_photo_geom_rotate_cw_and_ccw_are_inverses);
   RUN_TEST(test_panel_rotation_is_only_applied_to_e1005);
   RUN_TEST(test_e1005_orientation_geometry_and_rotation);
+  RUN_TEST(test_screen_capture_bmp_layout_pads_rows_and_sizes_payload);
+  RUN_TEST(test_screen_capture_crc32_matches_standard_vector_incrementally);
+  RUN_TEST(test_e1005_capture_palette_preserves_gray4_and_monochrome);
   return UNITY_END();
 }

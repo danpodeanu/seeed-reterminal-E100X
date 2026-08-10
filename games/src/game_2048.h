@@ -68,6 +68,9 @@ class Game2048 {
 
   uint32_t score() const { return score_; }
   uint32_t bestScore() const { return bestScore_; }
+  void retainBestScore(uint32_t bestScore) {
+    bestScore_ = std::max(bestScore_, bestScore);
+  }
   bool won() const { return won_; }
   bool gameOver() const { return gameOver_; }
 

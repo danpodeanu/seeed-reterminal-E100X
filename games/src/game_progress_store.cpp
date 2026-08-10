@@ -65,6 +65,45 @@ SaveResult saveHighestCheckpoint(const char* gameKey, uint16_t candidate,
   return {Status::Ok, checkpoint, true};
 }
 
+HighScoreLoadResult loadHighScore(const char* gameKey) {
+  if (!validKey(gameKey)) return {Status::InvalidArgument, 0};
+
+  Preferences preferences;
+  if (!preferences.begin(kNamespace, true)) {
+    if (!preferences.begin(kNamespace, false)) {
+      return {Status::OpenFailed, 0};
+    }
+  }
+  const uint32_t score = preferences.getUInt(gameKey, 0);
+  preferences.end();
+  return {Status::Ok, score};
+}
+
+HighScoreSaveResult saveHighScore(const char* gameKey, uint32_t candidate) {
+  if (!validKey(gameKey)) return {Status::InvalidArgument, 0, false};
+
+  Preferences preferences;
+  if (!preferences.begin(kNamespace, false)) {
+    return {Status::OpenFailed, 0, false};
+  }
+
+  const uint32_t stored = preferences.getUInt(gameKey, 0);
+  const HighScoreAdvancement advancement =
+      evaluateHighScore(stored, candidate);
+  if (!advancement.changed) {
+    preferences.end();
+    return {Status::Ok, advancement.score, false};
+  }
+
+  const size_t bytesWritten =
+      preferences.putUInt(gameKey, advancement.score);
+  preferences.end();
+  if (bytesWritten != sizeof(advancement.score)) {
+    return {Status::WriteFailed, advancement.score, false};
+  }
+  return {Status::Ok, advancement.score, true};
+}
+
 const char* statusMessage(Status status) {
   switch (status) {
     case Status::Ok:

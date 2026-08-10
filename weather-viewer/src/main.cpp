@@ -44,6 +44,7 @@
 #include "pcf8563_utc.h"
 #include "screenshot_bmp.h"
 #include "smooth_font_manager.h"
+#include "usb_screen_capture.h"
 #include "panel_watchdog.h"
 #include "peripheral_power.h"
 #include "power_latch.h"
@@ -104,6 +105,7 @@ using namespace theme;
 // and smooth fonts keep their anti-aliasing.
 EPaper epaper;
 smooth_fonts::Manager smoothFontManager(epaper);
+usb_screen_capture::Server usbScreenCapture;
 
 inline int panelWidth() {
   return weather_config::runtime::panelWidth();
@@ -150,6 +152,7 @@ Adafruit_SHT4x sht4;
 
 bool sdReady = false;
 bool screenshotRequested = false;
+bool framebufferReady = false;
 sensors::Readings sensorReadings;
 
 RTC_DATA_ATTR time_t lastNtpSyncEpoch = 0;
@@ -193,6 +196,7 @@ void updatePanel() {
     screenshotRequested = false;
   }
   panel_watchdog::guard([]() { epaper.update(); });
+  framebufferReady = true;
 }
 
 // batteryPercentForVoltage() and the 16-sample averaging block used to be
@@ -1512,6 +1516,11 @@ void renderWeather(const WeatherData& weather) {
 
 void powerDownAndSleep(uint64_t sleepSeconds = config::SLEEP_SECONDS,
                        bool timerWakeEnabled = true) {
+  if (framebufferReady) {
+    usbScreenCapture.serveFor(epaper, panelWidth(), panelHeight());
+  } else {
+    usbScreenCapture.serveUnavailableFor();
+  }
   wifi_sta::disable();
   // Close the log file before SD.end() so its FAT/directory update
   // hits disk cleanly. Safe to call unconditionally -- no-ops when no
@@ -1624,6 +1633,7 @@ void setup() {
                           weather_config::runtime::quietEndHour(),
                           weather_config::runtime::quietEndMinute()});
   LOG.begin(115200, SERIAL_8N1, PIN_LOG_RX, PIN_LOG_TX);
+  usbScreenCapture.begin(Serial1);
 
   // Load NVS-backed settings so every weather_config::runtime accessor
   // returns a consistent value for the rest of this boot. Do this after
@@ -1827,6 +1837,7 @@ void setup() {
                  static_cast<unsigned>(millis() - drawStart));
       const uint32_t updateStart = millis();
       panel_watchdog::guard([]() { epaper.update(); });
+      framebufferReady = true;
       LOG.printf("[portal] panel refresh complete in %u ms\n",
                  static_cast<unsigned>(millis() - updateStart));
 
@@ -1852,6 +1863,7 @@ void setup() {
       while (!config_portal::rebootRequested() &&
              !sd_web_portal::exitRequested()) {
         config_portal::loop();
+        usbScreenCapture.poll(epaper, panelWidth(), panelHeight());
         const uint32_t nowMs = millis();
         // Primary button in the portal = reboot the device. Convenient exit
         // once you've saved settings on your phone, matching the "Reboot"
@@ -2197,5 +2209,10 @@ void setup() {
 }
 
 void loop() {
+  if (framebufferReady) {
+    usbScreenCapture.poll(epaper, panelWidth(), panelHeight());
+  } else {
+    usbScreenCapture.pollUnavailable();
+  }
   delay(1000);
 }

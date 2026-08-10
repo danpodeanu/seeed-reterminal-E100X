@@ -40,6 +40,7 @@
 #include "panel_traits.h"
 #include "peripheral_power.h"
 #include "power_latch.h"
+#include "usb_screen_capture.h"
 
 #ifndef EPAPER_ENABLE
 #error "Seeed_GFX did not select a reTerminal E-series driver; check common/include/driver.h"
@@ -52,6 +53,7 @@ TimestampedLogger appLog(Serial1);
 // Global so both the render helpers (in the anonymous namespace below)
 // and setup() can address it.
 EPaper epaper;
+usb_screen_capture::Server usbScreenCapture;
 
 namespace {
 
@@ -483,6 +485,7 @@ void pollTouch() {
 #endif
 
 void powerDownAndSleep() {
+  usbScreenCapture.serveFor(epaper, PANEL_WIDTH, PANEL_HEIGHT);
   const int kButtons[] = {
       board::PIN_BUTTON_0,
       board::PIN_BUTTON_1,
@@ -528,6 +531,7 @@ void powerDownAndSleep() {
 void setup() {
   power_latch::holdOn();
   LOG.begin(115200, SERIAL_8N1, board::PIN_LOG_RX, board::PIN_LOG_TX);
+  usbScreenCapture.begin(Serial1);
   delay(50);
 
   // Beep once as soon as we know we've booted, so a user pressing a
@@ -589,6 +593,7 @@ void setup() {
 }
 
 void loop() {
+  usbScreenCapture.poll(epaper, PANEL_WIDTH, PANEL_HEIGHT);
 #if RETERMINAL_MODEL == 1005
   pollTouch();
 #endif

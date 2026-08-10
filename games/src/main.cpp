@@ -4,13 +4,13 @@
 #include <Wire.h>
 #include <driver/gpio.h>
 #include <driver/rtc_io.h>
+#include <driver/uart.h>
 #include <esp_sleep.h>
 #include <esp_system.h>
 
 #include <algorithm>
 #include <cstddef>
 #include <cstring>
-#include <ctime>
 #include <utility>
 
 #include "app_logger.h"
@@ -27,6 +27,7 @@
 #include "epub_latin_fonts.h"
 #include "epub_text.h"
 #include "game_2048.h"
+#include "game_help_text.h"
 #include "game_language_store.h"
 #include "game_localization.h"
 #include "game_progress_store.h"
@@ -47,15 +48,14 @@
 #include "power_latch.h"
 #include "repo_qr.h"
 #include "reversi_game.h"
-#include "rtc_sync.h"
 #include "sd_card.h"
 #include "sd_ota.h"
 #include "sd_readonly_browser.h"
-#include "screenshot_bmp.h"
 #include "slitherlink_game.h"
 #include "sokoban_game.h"
 #include "sudoku_game.h"
 #include "text_render.h"
+#include "usb_screen_capture.h"
 
 #if RETERMINAL_MODEL != 1005
 #error "The Games app supports only reTerminal E1005"
@@ -63,6 +63,7 @@
 
 TimestampedLogger appLog(Serial1);
 EPaper epaper;
+usb_screen_capture::Server usbScreenCapture;
 
 namespace {
 
@@ -137,7 +138,6 @@ constexpr int kSwipeThreshold = 45;
 constexpr int kMinesTouchMoveTolerance = 20;
 constexpr int kReversiAiDepth = 3;
 constexpr uint32_t kButtonDebounceMs = 30;
-constexpr uint32_t kScreenshotHoldMs = 5000;
 constexpr uint32_t kMinesFlagHoldMs = 650;
 constexpr uint32_t kKlondikeDoubleTapMs = 800;
 constexpr uint16_t kKlondikeWasteTapTarget = 0x100;
@@ -161,6 +161,7 @@ constexpr uint16_t kSudokuSavedFlag = 1U << 10;
 constexpr uint16_t kCrosswordSavedFlag = 1U << 11;
 constexpr uint16_t kKlondikeSavedFlag = 1U << 12;
 constexpr uint16_t kMahjongSavedFlag = 1U << 13;
+constexpr char k2048HighScoreKey[] = "2048_best";
 constexpr char kSokobanProgressKey[] = "sokoban_level";
 constexpr char kReaderCjkFont16Path[] = "/fonts/epub_cjk_16.vlw";
 constexpr char kReaderCjkFont16Name[] = "fonts/epub_cjk_16";
@@ -243,6 +244,7 @@ Rect kEpubReaderMenuCard = kMenuCardSlots[2];
 constexpr Rect kPreviousPageButton = {8, 756, 48, 36};
 constexpr Rect kNextPageButton = {424, 756, 48, 36};
 constexpr Rect kBackButton = {8, 6, 48, 36};
+constexpr Rect kHelpButton = {344, 6, 36, 36};
 constexpr Rect kNewButton = {30, 688, 190, 66};
 constexpr Rect kResetButton = {260, 688, 190, 66};
 constexpr Rect kCenteredNewButton = {145, 688, 190, 66};
@@ -406,13 +408,12 @@ struct ButtonState {
   int sampledLevel;
   uint32_t changedAtMs;
   uint32_t pressedAtMs;
-  bool screenshotReported;
 };
 
 ButtonState buttons[] = {
-    {board::PIN_BUTTON_0, "OK / power", HIGH, HIGH, 0, 0, false},
-    {board::PIN_BUTTON_1, "UP", HIGH, HIGH, 0, 0, false},
-    {board::PIN_BUTTON_2, "DOWN", HIGH, HIGH, 0, 0, false},
+    {board::PIN_BUTTON_0, "OK / power", HIGH, HIGH, 0, 0},
+    {board::PIN_BUTTON_1, "UP", HIGH, HIGH, 0, 0},
+    {board::PIN_BUTTON_2, "DOWN", HIGH, HIGH, 0, 0},
 };
 
 struct ButtonEvent {
@@ -447,6 +448,7 @@ SdReadonlyBrowser sdBrowser;
 DoubleTapTracker klondikeDoubleTap;
 uint16_t sokobanCompletedLevelCount = 0;
 bool sokobanProgressSaveFailed = false;
+uint32_t stored2048HighScore = 0;
 uint32_t gamePlayCounts[kGameCount] = {};
 uint8_t gameRanking[kGameCount] = {};
 ReversiMode reversiMode = ReversiMode::SinglePlayer;
@@ -459,6 +461,7 @@ bool lightSleepReady = false;
 Language currentLanguage = Language::English;
 bool languageSelected = false;
 bool languageSelectionVisible = false;
+bool helpPaneVisible = false;
 bool lightsOutSaved = false;
 bool game2048Saved = false;
 bool pipeConnectSaved = false;
@@ -505,7 +508,6 @@ void configureButtons() {
     button.changedAtMs = millis();
     button.pressedAtMs =
         button.stableLevel == LOW ? button.changedAtMs : 0;
-    button.screenshotReported = false;
   }
 }
 
@@ -519,21 +521,11 @@ bool pollButtonEvent(ButtonEvent& event) {
     }
     if (level == button.stableLevel ||
         now - button.changedAtMs < kButtonDebounceMs) {
-      if (button.pin == board::PIN_BUTTON_0 && level == LOW &&
-          button.stableLevel == LOW && !button.screenshotReported &&
-          now - button.pressedAtMs >= kScreenshotHoldMs) {
-        button.screenshotReported = true;
-        event = {&button, now - button.pressedAtMs};
-        return true;
-      }
       continue;
     }
     button.stableLevel = level;
     if (level == LOW) {
       button.pressedAtMs = now;
-      button.screenshotReported = false;
-    } else if (button.screenshotReported) {
-      button.screenshotReported = false;
     } else {
       event = {&button, now - button.pressedAtMs};
       return true;
@@ -982,6 +974,9 @@ void disableLightSleepWake() {
   }
   esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_GPIO);
   esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_TIMER);
+#if USB_SCREEN_CAPTURE_ENABLED
+  esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_UART);
+#endif
   lightSleepReady = false;
 }
 
@@ -1000,6 +995,16 @@ bool configureLightSleepWake() {
             GPIO_INTR_LOW_LEVEL) == ESP_OK &&
         configured;
   }
+#if USB_SCREEN_CAPTURE_ENABLED
+  const esp_err_t thresholdResult = uart_set_wakeup_threshold(UART_NUM_1, 3);
+  const esp_err_t captureWakeResult =
+      thresholdResult == ESP_OK ? esp_sleep_enable_uart_wakeup(UART_NUM_1)
+                                : thresholdResult;
+  if (captureWakeResult != ESP_OK) {
+    LOG.printf("[games] USB serial wake unavailable: %s\n",
+               esp_err_to_name(captureWakeResult));
+  }
+#endif
   configured = esp_sleep_enable_gpio_wakeup() == ESP_OK && configured;
   if (!configured) {
     disableLightSleepWake();
@@ -1039,10 +1044,22 @@ void idleInLightSleep() {
   const esp_err_t sleepResult = esp_light_sleep_start();
   if (sleepResult == ESP_OK) {
     const esp_sleep_wakeup_cause_t cause = esp_sleep_get_wakeup_cause();
-    LOG.printf("[games] exited light sleep (wake=%s)\n",
-               cause == ESP_SLEEP_WAKEUP_GPIO
-                   ? "gpio"
-                   : cause == ESP_SLEEP_WAKEUP_TIMER ? "timer" : "other");
+    const char* wakeName = "other";
+    if (cause == ESP_SLEEP_WAKEUP_GPIO) {
+      wakeName = "gpio";
+    } else if (cause == ESP_SLEEP_WAKEUP_UART) {
+      wakeName = "uart";
+    } else if (cause == ESP_SLEEP_WAKEUP_TIMER) {
+      wakeName = "timer";
+    }
+    LOG.printf("[games] exited light sleep (wake=%s)\n", wakeName);
+#if USB_SCREEN_CAPTURE_ENABLED
+    if (cause == ESP_SLEEP_WAKEUP_UART) {
+      // The bytes which trigger ESP32-S3 UART wake are not retained. Stay
+      // awake briefly so the host's repeated full command can be received.
+      usbScreenCapture.serveFor(epaper, kScreenWidth, kScreenHeight, 300);
+    }
+#endif
   } else if (sleepResult == ESP_ERR_SLEEP_REJECT ||
              sleepResult == ESP_ERR_SLEEP_TOO_SHORT_SLEEP_DURATION) {
     LOG.printf("[games] light sleep deferred: %s\n",
@@ -1933,10 +1950,130 @@ void drawBackIndicator() {
   drawArrowButton(kBackButton, false);
 }
 
+void drawHelpIndicator() {
+  const int centerX = kHelpButton.x + kHelpButton.width / 2;
+  const int centerY = kHelpButton.y + kHelpButton.height / 2;
+  epaper.fillRect(kHelpButton.x - 2, kHelpButton.y - 2,
+                  kHelpButton.width + 4, kHelpButton.height + 4, TFT_WHITE);
+  epaper.drawCircle(centerX, centerY, 17, TFT_BLACK);
+  epaper.drawCircle(centerX, centerY, 16, TFT_BLACK);
+  if (helpPaneVisible) {
+    for (int offset = -1; offset <= 1; ++offset) {
+      epaper.drawLine(centerX - 7, centerY - 7 + offset, centerX + 7,
+                      centerY + 7 + offset, TFT_BLACK);
+      epaper.drawLine(centerX - 7, centerY + 7 + offset, centerX + 7,
+                      centerY - 7 + offset, TFT_BLACK);
+    }
+  } else {
+    drawCenteredText("?", centerX, centerY + 2, 4, TFT_BLACK, TFT_WHITE, 24);
+  }
+}
+
 void drawGameStatusBar(const char* title) {
   drawBackIndicator();
-  drawCentered(title, kScreenWidth / 2, 24, 4);
+  drawCenteredText(title, kScreenWidth / 2, 24, 4, TFT_BLACK, TFT_WHITE, 250,
+                   currentLanguage != Language::English);
+  drawHelpIndicator();
   drawStatusBar();
+}
+
+game_help::Topic helpTopicForScreen() {
+  switch (currentScreen) {
+    case Screen::LightsOut:
+      return game_help::Topic::LightsOut;
+    case Screen::Game2048:
+      return game_help::Topic::Game2048;
+    case Screen::PipeConnect:
+      return game_help::Topic::PipeConnect;
+    case Screen::Minesweeper:
+      return game_help::Topic::Minesweeper;
+    case Screen::Nonogram:
+      return game_help::Topic::Nonogram;
+    case Screen::Reversi:
+      return game_help::Topic::Reversi;
+    case Screen::DotsAndBoxes:
+      return game_help::Topic::DotsAndBoxes;
+    case Screen::Sokoban:
+      return game_help::Topic::Sokoban;
+    case Screen::PegSolitaire:
+      return game_help::Topic::PegSolitaire;
+    case Screen::Slitherlink:
+      return game_help::Topic::Slitherlink;
+    case Screen::Sudoku:
+      return game_help::Topic::Sudoku;
+    case Screen::Crossword:
+      return game_help::Topic::Crossword;
+    case Screen::Klondike:
+      return game_help::Topic::Klondike;
+    case Screen::MahjongSolitaire:
+      return game_help::Topic::MahjongSolitaire;
+    case Screen::EpubBrowser:
+    case Screen::EpubReading:
+      return game_help::Topic::EpubReader;
+    case Screen::Menu:
+      break;
+  }
+  return game_help::Topic::LightsOut;
+}
+
+size_t helpCharacterWidth(uint32_t codepoint, epub_text::TextStyle) {
+  char encoded[5] = {};
+  if (codepoint <= 0x7F) {
+    encoded[0] = static_cast<char>(codepoint);
+  } else if (codepoint <= 0x7FF) {
+    encoded[0] = static_cast<char>(0xC0 | (codepoint >> 6));
+    encoded[1] = static_cast<char>(0x80 | (codepoint & 0x3F));
+  } else if (codepoint <= 0xFFFF) {
+    encoded[0] = static_cast<char>(0xE0 | (codepoint >> 12));
+    encoded[1] = static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F));
+    encoded[2] = static_cast<char>(0x80 | (codepoint & 0x3F));
+  } else {
+    encoded[0] = static_cast<char>(0xF0 | (codepoint >> 18));
+    encoded[1] = static_cast<char>(0x80 | ((codepoint >> 12) & 0x3F));
+    encoded[2] = static_cast<char>(0x80 | ((codepoint >> 6) & 0x3F));
+    encoded[3] = static_cast<char>(0x80 | (codepoint & 0x3F));
+  }
+  return static_cast<size_t>(epaper.textWidth(encoded));
+}
+
+void drawHelpPane() {
+  constexpr int kPaneLeft = 14;
+  constexpr int kPaneTop = 64;
+  constexpr int kPaneWidth = kScreenWidth - kPaneLeft * 2;
+  constexpr int kPaneHeight = 672;
+  constexpr int kTextLeft = 28;
+  constexpr int kTextRight = kPaneLeft + kPaneWidth - 14;
+  constexpr int kTextWidth = kTextRight - kTextLeft;
+  constexpr int kTextTop = 126;
+  constexpr int kLineHeight = 28;
+
+  epaper.fillRect(0, kStatusDividerY + 1, kScreenWidth,
+                  kScreenHeight - kStatusDividerY - 1, TFT_WHITE);
+  drawHelpIndicator();
+  epaper.drawRoundRect(kPaneLeft, kPaneTop, kPaneWidth, kPaneHeight, 12,
+                      TFT_BLACK);
+  epaper.drawRoundRect(kPaneLeft + 1, kPaneTop + 1, kPaneWidth - 2,
+                      kPaneHeight - 2, 11, TFT_BLACK);
+  drawCenteredText(tr(TextId::HowToPlay), kScreenWidth / 2, 92, 4, TFT_BLACK,
+                   TFT_WHITE, kPaneWidth - 32,
+                   currentLanguage != Language::English);
+
+  const char* instructions =
+      game_help::text(currentLanguage, helpTopicForScreen());
+  const size_t instructionLength = strlen(instructions);
+  epaper.loadFont(game_ui_fonts::kGameUiFont24);
+  const epub_text::TextPage page = epub_text::paginate(
+      instructions, instructionLength, 0, kTextWidth,
+      game_help::kMaximumLines, epub_text::TextStyle::Regular, true,
+      helpCharacterWidth);
+  epaper.setTextColor(TFT_BLACK, TFT_WHITE, true);
+  epaper.setTextDatum(TL_DATUM);
+  for (size_t line = 0; line < page.lines.size(); ++line) {
+    epaper.drawString(page.lines[line].c_str(), kTextLeft,
+                     kTextTop + static_cast<int>(line) * kLineHeight);
+  }
+  epaper.unloadFont();
+  epaper.setTextFont(2);
 }
 
 void drawMenu() {
@@ -3379,6 +3516,24 @@ void startNew2048() {
   game2048Saved = true;
 }
 
+bool save2048HighScore() {
+  const uint32_t candidate = game2048.bestScore();
+  if (candidate <= stored2048HighScore) return true;
+
+  const game_progress::HighScoreSaveResult result =
+      game_progress::saveHighScore(k2048HighScoreKey, candidate);
+  if (result.status != game_progress::Status::Ok) {
+    LOG.printf("[games] could not save 2048 high score: %s\n",
+               game_progress::statusMessage(result.status));
+    return false;
+  }
+
+  stored2048HighScore = result.score;
+  LOG.printf("[games] saved 2048 high score: %lu\n",
+             static_cast<unsigned long>(stored2048HighScore));
+  return true;
+}
+
 void startNewPipeConnect() {
   pipeConnect.start(esp_random());
   pipeConnectSaved = true;
@@ -3647,6 +3802,19 @@ bool refreshScreen(const char* action) {
   return true;
 }
 
+void drawCurrentScreen();
+
+void toggleHelpPane() {
+  helpPaneVisible = !helpPaneVisible;
+  if (helpPaneVisible) {
+    drawHelpPane();
+    refreshScreen("help pane opened");
+  } else {
+    drawCurrentScreen();
+    refreshScreen("help pane closed");
+  }
+}
+
 void drawCurrentScreen() {
   switch (currentScreen) {
     case Screen::Menu:
@@ -3705,6 +3873,7 @@ void drawCurrentScreen() {
 
 void showLanguageSelection() {
   saveResumeState();
+  helpPaneVisible = false;
   languageSelectionVisible = true;
   drawLanguageSelection();
   refreshScreen("language selection");
@@ -3729,6 +3898,7 @@ void selectLanguage(Language language) {
 }
 
 void showMenu() {
+  helpPaneVisible = false;
   if (currentScreen == Screen::LightsOut && lightsOutSaved) {
     LOG.println("[games] auto-saving Lights Out");
   } else if (currentScreen == Screen::Game2048 && game2048Saved) {
@@ -4903,6 +5073,7 @@ void handle2048Swipe(const Gt911Touch::Point& start,
   }
 
   if (game2048.move(direction, esp_random())) {
+    save2048HighScore();
     update2048(action);
   } else {
     LOG.printf("[games] %s did not change the board\n", action);
@@ -4944,6 +5115,12 @@ void pollTouch() {
     touchActionHandled = true;
   } else if (currentScreen == Screen::Menu) {
     handleMenuTouch(point);
+    touchActionHandled = true;
+  } else if (kHelpButton.contains(point.x, point.y)) {
+    hardware::beep();
+    toggleHelpPane();
+    touchActionHandled = true;
+  } else if (helpPaneVisible) {
     touchActionHandled = true;
   } else if (currentScreen == Screen::LightsOut) {
     handleLightsOutTouch(point);
@@ -4997,6 +5174,7 @@ void pollTouch() {
 void powerDownAndSleep(SleepScreen screen = SleepScreen::Resume,
                        int batteryPercent = -1) {
   disableLightSleepWake();
+  usbScreenCapture.serveFor(epaper, kScreenWidth, kScreenHeight);
   while (digitalRead(board::PIN_BUTTON_0) == LOW) delay(10);
   const bool wakePinReady = hardware::configureWakePin(board::PIN_BUTTON_0);
   const uint64_t wakeMask = 1ULL << board::PIN_BUTTON_0;
@@ -5045,27 +5223,6 @@ void handleButton(const ButtonEvent& event) {
   LOG.printf("[games] %s released after %lu ms\n", button.name,
              static_cast<unsigned long>(event.heldMs));
 
-  if (button.pin == board::PIN_BUTTON_0 &&
-      event.heldMs >= kScreenshotHoldMs) {
-    hardware::beep();
-    if (!sdCardReady) {
-      LOG.println("[screenshot] request ignored: SD card is unavailable");
-      return;
-    }
-    const time_t epoch = time(nullptr);
-    char screenshotPath[48];
-    char temporaryPath[56];
-    snprintf(screenshotPath, sizeof(screenshotPath), "/screenshot-%lld.bmp",
-             static_cast<long long>(epoch));
-    snprintf(temporaryPath, sizeof(temporaryPath),
-             "/screenshot-%lld.bmp.part", static_cast<long long>(epoch));
-    if (!screenshot::saveScreenshotBmp(epaper, kScreenWidth, kScreenHeight,
-                                       screenshotPath, temporaryPath)) {
-      LOG.println("[screenshot] capture failed");
-    }
-    return;
-  }
-
   if (button.pin == board::PIN_BUTTON_0) {
     switch (ok_button::actionForHold(event.heldMs)) {
       case ok_button::Action::DeepSleep:
@@ -5085,6 +5242,10 @@ void handleButton(const ButtonEvent& event) {
   hardware::beep();
   if (languageSelectionVisible) {
     LOG.println("[games] ignoring navigation button on language selection");
+    return;
+  }
+  if (helpPaneVisible) {
+    LOG.println("[games] ignoring navigation button while help is open");
     return;
   }
   if (button.pin == board::PIN_BUTTON_1) {
@@ -5201,11 +5362,11 @@ void sleepAfterInactivityIfNeeded() {
 void setup() {
   power_latch::holdOn();
   LOG.begin(115200, SERIAL_8N1, board::PIN_LOG_RX, board::PIN_LOG_TX);
+  usbScreenCapture.begin(Serial1);
   delay(50);
   LOG.println();
   LOG.println("[games] reTerminal E1005 Games");
   hardware::beep();
-  rtc_sync::restoreSystemClock();
   const game_language_store::LoadResult languageResult =
       game_language_store::load();
   if (languageResult.status == game_language_store::Status::Ok) {
@@ -5229,7 +5390,19 @@ void setup() {
     LOG.printf("[games] could not load Sokoban progress: %s\n",
                game_progress::statusMessage(sokobanProgress.status));
   }
+  const game_progress::HighScoreLoadResult highScore =
+      game_progress::loadHighScore(k2048HighScoreKey);
+  if (highScore.status == game_progress::Status::Ok) {
+    stored2048HighScore = highScore.score;
+    LOG.printf("[games] 2048 high score: %lu\n",
+               static_cast<unsigned long>(stored2048HighScore));
+  } else {
+    LOG.printf("[games] could not load 2048 high score: %s\n",
+               game_progress::statusMessage(highScore.status));
+  }
   const bool resumed = restoreResumeState();
+  game2048.retainBestScore(stored2048HighScore);
+  save2048HighScore();
   updateGameRanking();
   if (resumed && sokobanSaved) {
     openNextUnfinishedSokobanLevel();
@@ -5310,6 +5483,7 @@ void setup() {
 }
 
 void loop() {
+  usbScreenCapture.poll(epaper, kScreenWidth, kScreenHeight);
   checkBatteryAndSleepIfNeeded();
   pollTouch();
   ButtonEvent event = {};

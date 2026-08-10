@@ -104,6 +104,7 @@ enum class TextId : uint8_t {
   TapWhiteSquare,
   AcrossAbbreviation,
   DownAbbreviation,
+  HowToPlay,
   Count,
 };
 
@@ -267,6 +268,8 @@ inline constexpr const Utf8Char*
      u8"TOUCHEZ UNE CASE BLANCHE", u8"WEISSES FELD ANTIPPEN", u8"点击白色方格"},
     {u8"A", u8"H", u8"H", u8"W", u8"横"},
     {u8"D", u8"V", u8"V", u8"S", u8"竖"},
+    {u8"HOW TO PLAY", u8"CÓMO JUGAR", u8"COMMENT JOUER", u8"SPIELANLEITUNG",
+     u8"游戏说明"},
 };
 
 constexpr bool validLanguageValue(uint8_t value) {

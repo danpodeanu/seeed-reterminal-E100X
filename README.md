@@ -137,6 +137,34 @@ Choose an application from the table above and follow the instructions in its
 README. Do not assume that firmware built for one E100X model is suitable for
 another; select the exact device target during compilation.
 
+## USB screen capture
+
+Every application and the panel test expose the current in-memory framebuffer
+as an 8-bit indexed BMP over the same USB serial port used for firmware upload
+and logs. Install the host dependency and run:
+
+```bash
+python -m pip install pyserial
+python tools/capture_screen.py COM8
+```
+
+The default output is `screenshot-<unix-epoch>.bmp`; pass `-o path.bmp` to
+choose another path. The client verifies the payload dimensions and CRC32
+before installing the file. Large E1003/E1004 framebuffers can take several
+minutes over the 115200-baud diagnostic port.
+
+Games and the panel test serve capture requests while running. If any
+application has entered deep sleep, start the client and then wake the device;
+the client repeats its short request while the application boots and renders.
+The firmware checks for a pending request before returning to deep sleep.
+The image retained by the e-paper itself cannot be read after its in-memory
+framebuffer has been powered down. Normal serial log lines are ignored by the
+client.
+
+USB capture is enabled by default. To compile it out completely, add
+`-D USB_SCREEN_CAPTURE_ENABLED=0` to the selected PlatformIO environment's
+`build_flags`.
+
 For pre-built firmware, the
 [web flasher](https://danpodeanu.github.io/seeed-reterminal-E100X/) writes
 the latest GitHub Release for all E1001-E1005 application/board combinations
