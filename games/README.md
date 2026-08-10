@@ -13,6 +13,9 @@ used. Activities with equal use counts retain this default order:
 
 | Game | Board or collection |
 | --- | --- |
+| EPUB Reader | Read-only SD browser and paginated reflowable books |
+| Sokoban | All 155 Microban I levels |
+| Crossword | 100 easy 5x5 mini crosswords; engine supports up to 9x9 |
 | Lights Out | Solvable generated 5x5 puzzles |
 | 2048 | 4x4 sliding-tile board |
 | Pipe Connect | Solvable generated 6x6 networks |
@@ -20,14 +23,11 @@ used. Activities with equal use counts retain this default order:
 | Nonogram / Picross | Generated 5x5 pictures |
 | Reversi / Othello | 8x8, one-player AI or two-player mode |
 | Dots and Boxes | Two-player 5x5 box board |
-| Sokoban | All 155 Microban I levels |
 | Peg Solitaire | Classic 33-hole English board |
 | Slitherlink | Bundled 5x5 logic puzzles |
 | Sudoku | 12 uniquely solvable easy 9x9 puzzles |
-| Crossword | 100 easy 5x5 mini crosswords; engine supports up to 9x9 |
 | Klondike | Standard 52-card draw-one solitaire |
 | Mahjong Solitaire | Solvable 144-tile layered layouts |
-| EPUB Reader | Read-only SD browser and paginated reflowable books |
 
 ## Included activities
 

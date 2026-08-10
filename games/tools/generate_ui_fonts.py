@@ -11,6 +11,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 LOCALIZATION_HEADER = ROOT / "games" / "src" / "game_localization.h"
+HELP_TEXT_HEADER = ROOT / "games" / "src" / "game_help_text.h"
 OUTPUT_HEADER = ROOT / "games" / "src" / "game_ui_fonts.h"
 DEFAULT_FONT = ROOT / "tools" / "fonts" / "NotoSansCJKsc-Bold.otf"
 SIZES = (16, 24, 32)
@@ -26,12 +27,12 @@ def load_vlw_module():
     return module
 
 
-def required_codepoints() -> list[int]:
-    source = LOCALIZATION_HEADER.read_text(encoding="utf-8")
-    strings = re.findall(r'u8"((?:[^"\\]|\\.)*)"', source)
+def required_codepoints(*headers: Path) -> list[int]:
     characters = set(chr(codepoint) for codepoint in range(0x20, 0x7F))
-    for value in strings:
-        characters.update(value)
+    for header in headers:
+        source = header.read_text(encoding="utf-8")
+        for value in re.findall(r'u8"((?:[^"\\]|\\.)*)"', source):
+            characters.update(value)
     return sorted(ord(character) for character in characters)
 
 
@@ -67,17 +68,23 @@ def main() -> int:
         )
 
     make_vlw = load_vlw_module()
-    codepoints = required_codepoints()
+    interface_codepoints = required_codepoints(LOCALIZATION_HEADER)
+    help_codepoints = required_codepoints(HELP_TEXT_HEADER)
     available = set(make_vlw.enumerate_codepoints(args.font))
-    missing = [codepoint for codepoint in codepoints if codepoint not in available]
+    missing = sorted(
+        (set(interface_codepoints) | set(help_codepoints)) - available
+    )
     if missing:
         formatted = ", ".join(f"U+{codepoint:04X}" for codepoint in missing)
         raise SystemExit(f"source font is missing required glyphs: {formatted}")
     arrays = []
     for size in SIZES:
-        blob = make_vlw.build_vlw(args.font, size, codepoints, "GameUi")
+        blob = make_vlw.build_vlw(args.font, size, interface_codepoints, "GameUi")
         arrays.append(format_array(f"kGameUiFont{size}", blob))
         print(f"generated {size}px: {len(blob):,} bytes")
+    help_blob = make_vlw.build_vlw(args.font, 24, help_codepoints, "GameHelp")
+    arrays.append(format_array("kGameHelpFont24", help_blob))
+    print(f"generated 24px help: {len(help_blob):,} bytes")
 
     output = (
         "#pragma once\n\n"

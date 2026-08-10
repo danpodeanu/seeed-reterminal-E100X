@@ -1005,6 +1005,15 @@ void test_game_ranking_sorts_counts_and_preserves_ties() {
   TEST_ASSERT_EQUAL_UINT8_ARRAY(expected, ranking, 12);
 }
 
+void test_game_ranking_uses_default_order_only_to_break_ties() {
+  const uint32_t counts[] = {4, 8, 4, 1, 8};
+  const uint8_t defaultOrder[] = {4, 2, 0, 1, 3};
+  uint8_t ranking[5] = {};
+  game_ranking::rankByPlayCount(counts, defaultOrder, ranking);
+  const uint8_t expected[] = {4, 1, 2, 0, 3};
+  TEST_ASSERT_EQUAL_UINT8_ARRAY(expected, ranking, 5);
+}
+
 void test_game_play_count_saturates() {
   TEST_ASSERT_EQUAL_UINT32(1, game_ranking::nextPlayCount(0));
   TEST_ASSERT_EQUAL_UINT32(UINT32_MAX,
@@ -1761,6 +1770,7 @@ int main(int, char**) {
   RUN_TEST(test_long_game_progress_only_advances_with_valid_checkpoints);
   RUN_TEST(test_high_score_progress_never_moves_backward);
   RUN_TEST(test_game_ranking_sorts_counts_and_preserves_ties);
+  RUN_TEST(test_game_ranking_uses_default_order_only_to_break_ties);
   RUN_TEST(test_game_play_count_saturates);
   RUN_TEST(test_every_game_translation_is_present);
   RUN_TEST(test_every_game_help_translation_is_present);

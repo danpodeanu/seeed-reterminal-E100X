@@ -24,9 +24,9 @@ python games/tools/generate_ui_fonts.py
 ```
 
 The source font is intentionally not checked in. The generated
-`games/src/game_ui_fonts.h` contains only the ASCII and localized UI glyphs at
-16, 24, and 32 pixels. Noto Sans CJK is licensed under the SIL Open Font
-License 1.1; see `LICENSE.noto`.
+`games/src/game_ui_fonts.h` contains the ASCII and localized UI glyphs at 16,
+24, and 32 pixels, plus the localized help-text glyphs at 24 pixels. Noto Sans
+CJK is licensed under the SIL Open Font License 1.1; see `LICENSE.noto`.
 
 ## EPUB styled Latin fonts
 

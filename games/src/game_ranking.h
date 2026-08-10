@@ -11,9 +11,10 @@ constexpr uint32_t nextPlayCount(uint32_t count) {
 
 template <size_t Count>
 void rankByPlayCount(const uint32_t (&counts)[Count],
+                     const uint8_t (&defaultOrder)[Count],
                      uint8_t (&ranking)[Count]) {
   for (size_t index = 0; index < Count; ++index) {
-    ranking[index] = static_cast<uint8_t>(index);
+    ranking[index] = defaultOrder[index];
   }
   for (size_t index = 1; index < Count; ++index) {
     const uint8_t candidate = ranking[index];
@@ -25,6 +26,16 @@ void rankByPlayCount(const uint32_t (&counts)[Count],
     }
     ranking[position] = candidate;
   }
+}
+
+template <size_t Count>
+void rankByPlayCount(const uint32_t (&counts)[Count],
+                     uint8_t (&ranking)[Count]) {
+  uint8_t defaultOrder[Count] = {};
+  for (size_t index = 0; index < Count; ++index) {
+    defaultOrder[index] = static_cast<uint8_t>(index);
+  }
+  rankByPlayCount(counts, defaultOrder, ranking);
 }
 
 }  // namespace game_ranking

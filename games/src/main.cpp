@@ -316,6 +316,26 @@ enum class GameId : uint8_t {
 };
 
 constexpr size_t kGameCount = static_cast<size_t>(GameId::Count);
+constexpr uint8_t kDefaultGameRanking[kGameCount] = {
+    static_cast<uint8_t>(GameId::EpubReader),
+    static_cast<uint8_t>(GameId::Sokoban),
+    static_cast<uint8_t>(GameId::Crossword),
+    static_cast<uint8_t>(GameId::LightsOut),
+    static_cast<uint8_t>(GameId::Game2048),
+    static_cast<uint8_t>(GameId::PipeConnect),
+    static_cast<uint8_t>(GameId::Minesweeper),
+    static_cast<uint8_t>(GameId::Nonogram),
+    static_cast<uint8_t>(GameId::Reversi),
+    static_cast<uint8_t>(GameId::DotsAndBoxes),
+    static_cast<uint8_t>(GameId::PegSolitaire),
+    static_cast<uint8_t>(GameId::Slitherlink),
+    static_cast<uint8_t>(GameId::Sudoku),
+    static_cast<uint8_t>(GameId::Klondike),
+    static_cast<uint8_t>(GameId::MahjongSolitaire),
+};
+static_assert(sizeof(kDefaultGameRanking) /
+                  sizeof(kDefaultGameRanking[0]) ==
+              kGameCount);
 constexpr size_t kGamesPerMenuPage =
     sizeof(kMenuCardSlots) / sizeof(kMenuCardSlots[0]);
 constexpr size_t kMenuPageCount =
@@ -645,7 +665,8 @@ GameId rankedGameAt(size_t rank) {
 }
 
 void updateGameRanking() {
-  game_ranking::rankByPlayCount(gamePlayCounts, gameRanking);
+  game_ranking::rankByPlayCount(gamePlayCounts, kDefaultGameRanking,
+                                gameRanking);
 }
 
 void recordGameLaunch(GameId game) {
@@ -2036,6 +2057,85 @@ size_t helpCharacterWidth(uint32_t codepoint, epub_text::TextStyle) {
   return static_cast<size_t>(epaper.textWidth(encoded));
 }
 
+void drawJustifiedHelpLine(const std::string& line, int x, int y,
+                           int maximumWidth, bool justify) {
+  if (!justify || line.empty()) {
+    epaper.drawString(line.c_str(), x, y);
+    return;
+  }
+
+  const size_t spaceCount =
+      static_cast<size_t>(std::count(line.begin(), line.end(), ' '));
+  if (spaceCount > 0) {
+    const int spaceWidth = epaper.textWidth(" ");
+    int naturalWidth = static_cast<int>(spaceCount) * spaceWidth;
+    size_t runStart = 0;
+    for (size_t offset = 0; offset <= line.length(); ++offset) {
+      if (offset < line.length() && line[offset] != ' ') continue;
+      if (offset > runStart) {
+        naturalWidth += epaper.textWidth(
+            String(line.substr(runStart, offset - runStart).c_str()));
+      }
+      runStart = offset + 1;
+    }
+
+    const int extraWidth = std::max(0, maximumWidth - naturalWidth);
+    const int extraPerSpace = extraWidth / static_cast<int>(spaceCount);
+    const int extraRemainder = extraWidth % static_cast<int>(spaceCount);
+    size_t spaceIndex = 0;
+    runStart = 0;
+    for (size_t offset = 0; offset <= line.length(); ++offset) {
+      if (offset < line.length() && line[offset] != ' ') continue;
+      if (offset > runStart) {
+        const String run(line.substr(runStart, offset - runStart).c_str());
+        epaper.drawString(run, x, y);
+        x += epaper.textWidth(run);
+      }
+      if (offset < line.length()) {
+        x += spaceWidth + extraPerSpace +
+             (spaceIndex < static_cast<size_t>(extraRemainder) ? 1 : 0);
+        ++spaceIndex;
+      }
+      runStart = offset + 1;
+    }
+    return;
+  }
+
+  size_t glyphCount = 0;
+  int naturalWidth = 0;
+  for (size_t offset = 0; offset < line.length();) {
+    const size_t bytes =
+        epub_text::utf8CharacterBytes(line.data(), line.length(), offset);
+    naturalWidth +=
+        epaper.textWidth(String(line.substr(offset, bytes).c_str()));
+    offset += bytes;
+    ++glyphCount;
+  }
+  if (glyphCount < 2) {
+    epaper.drawString(line.c_str(), x, y);
+    return;
+  }
+
+  const size_t gapCount = glyphCount - 1;
+  const int extraWidth = std::max(0, maximumWidth - naturalWidth);
+  const int extraPerGap = extraWidth / static_cast<int>(gapCount);
+  const int extraRemainder = extraWidth % static_cast<int>(gapCount);
+  size_t glyphIndex = 0;
+  for (size_t offset = 0; offset < line.length();) {
+    const size_t bytes =
+        epub_text::utf8CharacterBytes(line.data(), line.length(), offset);
+    const String glyph(line.substr(offset, bytes).c_str());
+    epaper.drawString(glyph, x, y);
+    x += epaper.textWidth(glyph);
+    if (glyphIndex < gapCount) {
+      x += extraPerGap +
+           (glyphIndex < static_cast<size_t>(extraRemainder) ? 1 : 0);
+    }
+    offset += bytes;
+    ++glyphIndex;
+  }
+}
+
 void drawHelpPane() {
   constexpr int kPaneLeft = 14;
   constexpr int kPaneTop = 64;
@@ -2061,7 +2161,9 @@ void drawHelpPane() {
   const char* instructions =
       game_help::text(currentLanguage, helpTopicForScreen());
   const size_t instructionLength = strlen(instructions);
-  epaper.loadFont(game_ui_fonts::kGameUiFont24);
+  epaper.loadFont(currentLanguage == Language::ChineseSimplified
+                       ? game_ui_fonts::kGameHelpFont24
+                       : epub_latin_fonts::kRegular);
   const epub_text::TextPage page = epub_text::paginate(
       instructions, instructionLength, 0, kTextWidth,
       game_help::kMaximumLines, epub_text::TextStyle::Regular, true,
@@ -2069,8 +2171,13 @@ void drawHelpPane() {
   epaper.setTextColor(TFT_BLACK, TFT_WHITE, true);
   epaper.setTextDatum(TL_DATUM);
   for (size_t line = 0; line < page.lines.size(); ++line) {
-    epaper.drawString(page.lines[line].c_str(), kTextLeft,
-                     kTextTop + static_cast<int>(line) * kLineHeight);
+    const bool justify =
+        (line < page.justifyLines.size() && page.justifyLines[line]) ||
+        (currentLanguage == Language::ChineseSimplified &&
+         line + 1 < page.lines.size());
+    drawJustifiedHelpLine(
+        page.lines[line], kTextLeft,
+        kTextTop + static_cast<int>(line) * kLineHeight, kTextWidth, justify);
   }
   epaper.unloadFont();
   epaper.setTextFont(2);
