@@ -7,6 +7,7 @@
 #include "double_tap_tracker.h"
 #include "epub_browser_logic.h"
 #include "epub_text.h"
+#include "falling_blocks_game.h"
 #include "game_2048.h"
 #include "game_help_text.h"
 #include "game_localization.h"
@@ -1514,6 +1515,119 @@ void test_mahjong_rejects_inconsistent_snapshot() {
   TEST_ASSERT_FALSE(game.restore(invalid));
 }
 
+void test_falling_blocks_starts_with_one_active_piece() {
+  FallingBlocksGame game;
+  game.start(1);
+
+  int activeCells = 0;
+  int settledCells = 0;
+  for (int row = 0; row < FallingBlocksGame::kHeight; ++row) {
+    for (int column = 0; column < FallingBlocksGame::kWidth; ++column) {
+      if (game.at(row, column) != 0) ++activeCells;
+      if (game.settledAt(row, column) != 0) ++settledCells;
+    }
+  }
+  TEST_ASSERT_EQUAL_INT(4, activeCells);
+  TEST_ASSERT_EQUAL_INT(0, settledCells);
+  TEST_ASSERT_FALSE(game.gameOver());
+}
+
+void test_falling_blocks_turn_moves_and_advances_gravity() {
+  FallingBlocksGame game;
+  game.start(2);
+  const int initialColumn = game.activeColumn();
+
+  TEST_ASSERT_TRUE(game.turn(FallingBlocksGame::Action::MoveLeft));
+  TEST_ASSERT_EQUAL_INT(initialColumn - 1, game.activeColumn());
+  TEST_ASSERT_EQUAL_INT(1, game.activeRow());
+  TEST_ASSERT_TRUE(game.turn(FallingBlocksGame::Action::RotateClockwise));
+  TEST_ASSERT_EQUAL_UINT8(1, game.rotation());
+  TEST_ASSERT_EQUAL_INT(2, game.activeRow());
+}
+
+void test_falling_blocks_hard_drop_locks_piece_and_scores() {
+  FallingBlocksGame game;
+  game.start(3);
+  const uint8_t nextPiece = game.nextPiece();
+
+  TEST_ASSERT_TRUE(game.turn(FallingBlocksGame::Action::HardDrop));
+  int settledCells = 0;
+  for (int row = 0; row < FallingBlocksGame::kHeight; ++row) {
+    for (int column = 0; column < FallingBlocksGame::kWidth; ++column) {
+      if (game.settledAt(row, column) != 0) ++settledCells;
+    }
+  }
+  TEST_ASSERT_EQUAL_INT(4, settledCells);
+  TEST_ASSERT_EQUAL_UINT8(nextPiece, game.activePiece());
+  TEST_ASSERT_GREATER_THAN_UINT32(0, game.score());
+}
+
+void test_falling_blocks_clears_completed_line() {
+  FallingBlocksGame game;
+  game.start(4);
+  FallingBlocksGame::Snapshot snapshot = game.snapshot();
+  std::memset(snapshot.cells, 0, sizeof(snapshot.cells));
+  for (int column = 0; column < FallingBlocksGame::kWidth; ++column) {
+    if (column < 3 || column > 6) {
+      snapshot.cells[(FallingBlocksGame::kHeight - 1) *
+                         FallingBlocksGame::kWidth +
+                     column] = 2;
+    }
+  }
+  snapshot.activePiece = 0;
+  snapshot.rotation = 0;
+  snapshot.activeRow = FallingBlocksGame::kHeight - 1;
+  snapshot.activeColumn = 3;
+  snapshot.gameOver = 0;
+  TEST_ASSERT_TRUE(game.restore(snapshot));
+
+  TEST_ASSERT_TRUE(game.turn(FallingBlocksGame::Action::SoftDrop));
+  TEST_ASSERT_EQUAL_UINT16(1, game.lines());
+  TEST_ASSERT_EQUAL_UINT32(100, game.score());
+  for (int column = 0; column < FallingBlocksGame::kWidth; ++column) {
+    TEST_ASSERT_EQUAL_UINT8(
+        0, game.settledAt(FallingBlocksGame::kHeight - 1, column));
+  }
+}
+
+void test_falling_blocks_snapshot_restores_active_game() {
+  FallingBlocksGame game;
+  game.start(55);
+  game.turn(FallingBlocksGame::Action::MoveRight);
+  game.turn(FallingBlocksGame::Action::RotateClockwise);
+  const FallingBlocksGame::Snapshot snapshot = game.snapshot();
+
+  FallingBlocksGame restored;
+  TEST_ASSERT_TRUE(restored.restore(snapshot));
+  TEST_ASSERT_EQUAL_UINT8(game.activePiece(), restored.activePiece());
+  TEST_ASSERT_EQUAL_UINT8(game.nextPiece(), restored.nextPiece());
+  TEST_ASSERT_EQUAL_UINT8(game.rotation(), restored.rotation());
+  TEST_ASSERT_EQUAL_INT(game.activeRow(), restored.activeRow());
+  TEST_ASSERT_EQUAL_INT(game.activeColumn(), restored.activeColumn());
+  TEST_ASSERT_EQUAL_UINT32(game.score(), restored.score());
+}
+
+void test_falling_blocks_rejects_invalid_snapshot() {
+  FallingBlocksGame game;
+  FallingBlocksGame::Snapshot invalid = game.snapshot();
+  invalid.cells[0] = FallingBlocksGame::kPieceCount + 1;
+  TEST_ASSERT_FALSE(game.restore(invalid));
+
+  invalid = game.snapshot();
+  invalid.activePiece = FallingBlocksGame::kNoPiece;
+  TEST_ASSERT_FALSE(game.restore(invalid));
+}
+
+void test_falling_blocks_eventually_ends_when_stack_reaches_top() {
+  FallingBlocksGame game;
+  game.start(77);
+  for (int piece = 0; piece < 100 && !game.gameOver(); ++piece) {
+    TEST_ASSERT_TRUE(game.turn(FallingBlocksGame::Action::HardDrop));
+  }
+  TEST_ASSERT_TRUE(game.gameOver());
+  TEST_ASSERT_FALSE(game.turn(FallingBlocksGame::Action::SoftDrop));
+}
+
 void test_epub_html_to_text_preserves_blocks_and_decodes_entities() {
   const char html[] =
       "<html><head><style>hidden</style></head><body><h1>One &amp; "
@@ -1798,6 +1912,13 @@ int main(int, char**) {
   RUN_TEST(test_mahjong_known_pair_sequence_solves_every_deal);
   RUN_TEST(test_mahjong_snapshot_restores_selection_and_removed_pair);
   RUN_TEST(test_mahjong_rejects_inconsistent_snapshot);
+  RUN_TEST(test_falling_blocks_starts_with_one_active_piece);
+  RUN_TEST(test_falling_blocks_turn_moves_and_advances_gravity);
+  RUN_TEST(test_falling_blocks_hard_drop_locks_piece_and_scores);
+  RUN_TEST(test_falling_blocks_clears_completed_line);
+  RUN_TEST(test_falling_blocks_snapshot_restores_active_game);
+  RUN_TEST(test_falling_blocks_rejects_invalid_snapshot);
+  RUN_TEST(test_falling_blocks_eventually_ends_when_stack_reaches_top);
   RUN_TEST(test_epub_html_to_text_preserves_blocks_and_decodes_entities);
   RUN_TEST(test_epub_html_to_text_can_reuse_the_extraction_buffer);
   RUN_TEST(test_epub_html_to_text_separates_chapter_intro_from_body);

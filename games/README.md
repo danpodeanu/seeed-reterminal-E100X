@@ -28,6 +28,7 @@ used. Activities with equal use counts retain this default order:
 | Sudoku | 12 uniquely solvable easy 9x9 puzzles |
 | Klondike | Standard 52-card draw-one solitaire |
 | Mahjong Solitaire | Solvable 144-tile layered layouts |
+| Falling Blocks | Turn-based 10x16 line-clearing board |
 
 ## Included activities
 
@@ -248,6 +249,22 @@ Touch controls:
 - Tap another free tile to change the selection.
 - Tap **NEW** for a newly shuffled layout or **RESET** to restore the current
   layout.
+- Tap the back arrow to save and return to the selection screen.
+
+### Falling Blocks
+
+Complete horizontal lines on a 10x16 board with the seven standard four-square
+pieces. The game advances only when you act, avoiding continuous e-paper
+refreshes. The score, cleared lines, level, current piece, next piece, and board
+persist across selector visits and deep sleep.
+
+Touch controls:
+
+- Tap the board to rotate the current piece clockwise.
+- Swipe left or right to move one column.
+- A rotation or horizontal move also advances the piece by one row.
+- Swipe down to soft-drop one row or swipe up to hard-drop to the stack.
+- Tap **NEW** to start over.
 - Tap the back arrow to save and return to the selection screen.
 
 ### EPUB Reader

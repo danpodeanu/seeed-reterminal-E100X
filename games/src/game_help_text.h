@@ -22,6 +22,7 @@ enum class Topic : uint8_t {
   Crossword,
   Klondike,
   MahjongSolitaire,
+  FallingBlocks,
   EpubReader,
   Count,
 };
@@ -246,6 +247,20 @@ inline constexpr const Utf8Char*
          "Wahl kann alle weiteren Züge blockieren.",
          u8"移除两个相同且可用的牌。没有牌覆盖并且左右至少一侧畅通时，该牌才可用。先点击一张可用牌，"
          "再点击相同的可用牌。选择不当可能导致无牌可消。"},
+        {u8"Complete horizontal lines with the falling pieces. Tap the board to "
+         "rotate. Swipe left or right to move; each move or rotation also drops "
+         "one row. Swipe down for a soft drop or up for a hard drop.",
+         u8"Completa líneas horizontales con las piezas. Toca para girar. "
+         "Desliza a izquierda o derecha para mover; cada movimiento o giro "
+         "también baja una fila. Abajo baja una fila y arriba hace caída rápida.",
+         u8"Complétez des lignes horizontales avec les pièces. Touchez pour "
+         "tourner. Balayez à gauche ou à droite pour déplacer; chaque action "
+         "descend aussi d'une ligne. Bas descend doucement, haut fait chuter.",
+         u8"Fülle waagerechte Reihen mit den Teilen. Tippen dreht. Wische nach "
+         "links oder rechts; jede Bewegung oder Drehung senkt das Teil auch um "
+         "eine Reihe. Nach unten senkt, nach oben lässt es sofort fallen.",
+         u8"用下落方块填满横行。点击棋盘可旋转，左右滑动可移动；每次移动或旋转后方块也会下降一"
+         "行。向下滑动可软降，向上滑动可直接落底。"},
         {u8"Browse the SD card read-only and tap an EPUB file to open it. UP and "
          "DOWN change browser or reading pages. UP FOLDER returns to the parent "
          "folder. The reading-screen back arrow returns to the browser. Only "

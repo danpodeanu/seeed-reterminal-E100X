@@ -26,6 +26,7 @@
 #include "epub_browser_logic.h"
 #include "epub_latin_fonts.h"
 #include "epub_text.h"
+#include "falling_blocks_game.h"
 #include "game_2048.h"
 #include "game_help_text.h"
 #include "game_language_store.h"
@@ -130,6 +131,13 @@ constexpr int kMahjongRowStep = 58;
 constexpr int kMahjongGridLeft = 16;
 constexpr int kMahjongGridTop = 98;
 constexpr int kMahjongLayerOffset = 5;
+constexpr int kFallingGridLeft = 18;
+constexpr int kFallingGridTop = 104;
+constexpr int kFallingCellSize = 34;
+constexpr int kFallingGridWidth =
+    kFallingCellSize * FallingBlocksGame::kWidth;
+constexpr int kFallingGridHeight =
+    kFallingCellSize * FallingBlocksGame::kHeight;
 constexpr int kKeyboardKeyHeight = 42;
 constexpr int kKeyboardFirstRowY = 586;
 constexpr int kKeyboardRowGap = 6;
@@ -146,7 +154,7 @@ constexpr uint32_t kBatteryCheckIntervalMs = 60000;
 constexpr uint32_t kInactivitySleepMs = 5UL * 60UL * 1000UL;
 constexpr int kLowBatteryThresholdPct = 10;
 constexpr uint32_t kPersistedStateMagic = 0x47414D45;
-constexpr uint16_t kPersistedStateVersion = 14;
+constexpr uint16_t kPersistedStateVersion = 15;
 constexpr uint16_t kLightsOutSavedFlag = 1U << 0;
 constexpr uint16_t k2048SavedFlag = 1U << 1;
 constexpr uint16_t kPipeConnectSavedFlag = 1U << 2;
@@ -161,6 +169,7 @@ constexpr uint16_t kSudokuSavedFlag = 1U << 10;
 constexpr uint16_t kCrosswordSavedFlag = 1U << 11;
 constexpr uint16_t kKlondikeSavedFlag = 1U << 12;
 constexpr uint16_t kMahjongSavedFlag = 1U << 13;
+constexpr uint16_t kFallingBlocksSavedFlag = 1U << 14;
 constexpr char k2048HighScoreKey[] = "2048_best";
 constexpr char kSokobanProgressKey[] = "sokoban_level";
 constexpr char kReaderCjkFont16Path[] = "/fonts/epub_cjk_16.vlw";
@@ -241,6 +250,7 @@ Rect kCrosswordMenuCard = kMenuCardSlots[5];
 Rect kKlondikeMenuCard = kMenuCardSlots[0];
 Rect kMahjongMenuCard = kMenuCardSlots[1];
 Rect kEpubReaderMenuCard = kMenuCardSlots[2];
+Rect kFallingBlocksMenuCard = kMenuCardSlots[3];
 constexpr Rect kPreviousPageButton = {8, 756, 48, 36};
 constexpr Rect kNextPageButton = {424, 756, 48, 36};
 constexpr Rect kBackButton = {8, 6, 48, 36};
@@ -268,6 +278,8 @@ constexpr E1005FastRefresh::Region kSudokuBoardRegion = {20, 64, 440, 610};
 constexpr E1005FastRefresh::Region kCrosswordBoardRegion = {20, 64, 440, 690};
 constexpr E1005FastRefresh::Region kKlondikeBoardRegion = {5, 56, 470, 620};
 constexpr E1005FastRefresh::Region kMahjongBoardRegion = {8, 64, 464, 612};
+constexpr E1005FastRefresh::Region kFallingBlocksBoardRegion = {8, 64, 464,
+                                                               620};
 constexpr E1005FastRefresh::Region kReaderRegion = {0, 48, 480, 752};
 
 enum class Screen {
@@ -286,6 +298,7 @@ enum class Screen {
   Crossword,
   Klondike,
   MahjongSolitaire,
+  FallingBlocks,
   EpubBrowser,
   EpubReading,
 };
@@ -311,6 +324,7 @@ enum class GameId : uint8_t {
   Crossword,
   Klondike,
   MahjongSolitaire,
+  FallingBlocks,
   EpubReader,
   Count,
 };
@@ -332,6 +346,7 @@ constexpr uint8_t kDefaultGameRanking[kGameCount] = {
     static_cast<uint8_t>(GameId::Sudoku),
     static_cast<uint8_t>(GameId::Klondike),
     static_cast<uint8_t>(GameId::MahjongSolitaire),
+    static_cast<uint8_t>(GameId::FallingBlocks),
 };
 static_assert(sizeof(kDefaultGameRanking) /
                   sizeof(kDefaultGameRanking[0]) ==
@@ -373,6 +388,8 @@ const char* screenName(Screen screen) {
       return "saved Klondike";
     case Screen::MahjongSolitaire:
       return "saved Mahjong Solitaire";
+    case Screen::FallingBlocks:
+      return "saved Falling Blocks";
     case Screen::EpubBrowser:
       return "EPUB browser";
     case Screen::EpubReading:
@@ -414,6 +431,7 @@ struct PersistedState {
   CrosswordGame::Snapshot crossword;
   KlondikeGame::Snapshot klondike;
   MahjongSolitaireGame::Snapshot mahjong;
+  FallingBlocksGame::Snapshot fallingBlocks;
   ReaderResume reader;
   uint32_t gamePlayCounts[kGameCount];
   uint32_t checksum;
@@ -463,6 +481,7 @@ SudokuGame sudoku;
 CrosswordGame crossword;
 KlondikeGame klondike;
 MahjongSolitaireGame mahjong;
+FallingBlocksGame fallingBlocks;
 EpubArchive epubArchive;
 SdReadonlyBrowser sdBrowser;
 DoubleTapTracker klondikeDoubleTap;
@@ -496,6 +515,7 @@ bool sudokuSaved = false;
 bool crosswordSaved = false;
 bool klondikeSaved = false;
 bool mahjongSaved = false;
+bool fallingBlocksSaved = false;
 bool sdCardReady = false;
 bool readerCjkFont16Available = false;
 bool readerCjkFont24Available = false;
@@ -601,6 +621,8 @@ const char* gameName(GameId game) {
       return "Klondike";
     case GameId::MahjongSolitaire:
       return "Mahjong Solitaire";
+    case GameId::FallingBlocks:
+      return "Falling Blocks";
     case GameId::EpubReader:
       return "EPUB Reader";
     case GameId::Count:
@@ -617,6 +639,8 @@ const char* shortEnglishGameName(GameId game) {
       return "Peg Solo";
     case GameId::MahjongSolitaire:
       return "Mahjong";
+    case GameId::FallingBlocks:
+      return "Blocks";
     default:
       return gameName(game);
   }
@@ -652,6 +676,8 @@ TextId gameTextId(GameId game) {
       return TextId::Klondike;
     case GameId::MahjongSolitaire:
       return TextId::MahjongSolitaire;
+    case GameId::FallingBlocks:
+      return TextId::FallingBlocks;
     case GameId::EpubReader:
       return TextId::EpubReader;
     case GameId::Count:
@@ -765,6 +791,10 @@ void saveResumeState() {
     state.flags |= kMahjongSavedFlag;
     state.mahjong = mahjong.snapshot();
   }
+  if (fallingBlocksSaved) {
+    state.flags |= kFallingBlocksSavedFlag;
+    state.fallingBlocks = fallingBlocks.snapshot();
+  }
   const bool savedBrowserPath =
       copyReaderPath(state.reader.browserPath, sizeof(state.reader.browserPath),
                      readerBrowserPath);
@@ -799,7 +829,8 @@ bool restoreResumeState() {
                        kDotsAndBoxesSavedFlag | kSokobanSavedFlag |
                        kPegSolitaireSavedFlag | kSlitherlinkSavedFlag |
                        kSudokuSavedFlag | kCrosswordSavedFlag |
-                       kKlondikeSavedFlag | kMahjongSavedFlag)) != 0 ||
+                       kKlondikeSavedFlag | kMahjongSavedFlag |
+                       kFallingBlocksSavedFlag)) != 0 ||
       memchr(state.reader.browserPath, '\0',
              sizeof(state.reader.browserPath)) == nullptr ||
       memchr(state.reader.bookPath, '\0', sizeof(state.reader.bookPath)) ==
@@ -945,6 +976,17 @@ bool restoreResumeState() {
     LOG.println("[games] saved screen has no Mahjong Solitaire game");
     return false;
   }
+  const bool hasFallingBlocksSave =
+      (state.flags & kFallingBlocksSavedFlag) != 0;
+  if (hasFallingBlocksSave &&
+      !fallingBlocks.restore(state.fallingBlocks)) {
+    LOG.println("[games] saved Falling Blocks state is invalid");
+    return false;
+  }
+  if (savedScreen == Screen::FallingBlocks && !hasFallingBlocksSave) {
+    LOG.println("[games] saved screen has no Falling Blocks game");
+    return false;
+  }
   if ((savedScreen == Screen::EpubBrowser ||
        savedScreen == Screen::EpubReading) &&
       state.reader.browserPath[0] != '/') {
@@ -970,6 +1012,7 @@ bool restoreResumeState() {
   crosswordSaved = hasCrosswordSave;
   klondikeSaved = hasKlondikeSave;
   mahjongSaved = hasMahjongSave;
+  fallingBlocksSaved = hasFallingBlocksSave;
   readerBrowserPath =
       state.reader.browserPath[0] == '\0' ? "/" : state.reader.browserPath;
   readerBookPath = state.reader.bookPath;
@@ -1227,6 +1270,8 @@ Rect& menuCardFor(GameId game) {
       return kKlondikeMenuCard;
     case GameId::MahjongSolitaire:
       return kMahjongMenuCard;
+    case GameId::FallingBlocks:
+      return kFallingBlocksMenuCard;
     case GameId::EpubReader:
       return kEpubReaderMenuCard;
     case GameId::Count:
@@ -1832,6 +1877,40 @@ void drawMahjongMenuCard() {
   drawMahjongTile(left + 74, top + 78, kWidth, kHeight, 3, 3);
 }
 
+void drawFallingBlock(int x, int y, int size, uint8_t value) {
+  epaper.fillRect(x, y, size, size, TFT_WHITE);
+  epaper.drawRect(x, y, size, size, TFT_BLACK);
+  if (value == 0) return;
+  epaper.fillRect(x + 3, y + 3, size - 6, size - 6, TFT_BLACK);
+  if ((value & 1U) == 0) {
+    epaper.drawRect(x + 6, y + 6, size - 12, size - 12, TFT_WHITE);
+  }
+}
+
+void drawFallingBlocksMenuCard() {
+  drawMenuCardFrame(kFallingBlocksMenuCard);
+  constexpr int kPreviewCell = 20;
+  constexpr int kPreviewColumns = 8;
+  constexpr int kPreviewRows = 7;
+  const int left = kFallingBlocksMenuCard.x +
+                   (kFallingBlocksMenuCard.width -
+                    kPreviewColumns * kPreviewCell) /
+                       2;
+  const int top = kFallingBlocksMenuCard.y + 24;
+  for (int row = 0; row < kPreviewRows; ++row) {
+    for (int column = 0; column < kPreviewColumns; ++column) {
+      const bool filled =
+          row >= 5 || (row == 4 && (column == 0 || column >= 5)) ||
+          (row == 3 && column >= 5) ||
+          (row == 2 && column >= 2 && column <= 5);
+      drawFallingBlock(left + column * kPreviewCell,
+                       top + row * kPreviewCell, kPreviewCell,
+                       filled ? static_cast<uint8_t>((row + column) % 7 + 1)
+                              : 0);
+    }
+  }
+}
+
 void drawEpubReaderMenuCard() {
   drawMenuCardFrame(kEpubReaderMenuCard);
   const int left = kEpubReaderMenuCard.x + 42;
@@ -1896,6 +1975,9 @@ void drawGameMenuCard(GameId game) {
       break;
     case GameId::MahjongSolitaire:
       drawMahjongMenuCard();
+      break;
+    case GameId::FallingBlocks:
+      drawFallingBlocksMenuCard();
       break;
     case GameId::EpubReader:
       drawEpubReaderMenuCard();
@@ -2028,6 +2110,8 @@ game_help::Topic helpTopicForScreen() {
       return game_help::Topic::Klondike;
     case Screen::MahjongSolitaire:
       return game_help::Topic::MahjongSolitaire;
+    case Screen::FallingBlocks:
+      return game_help::Topic::FallingBlocks;
     case Screen::EpubBrowser:
     case Screen::EpubReading:
       return game_help::Topic::EpubReader;
@@ -3156,6 +3240,60 @@ void drawMahjong() {
   drawGameStatusBar(tr(TextId::MahjongSolitaire));
 }
 
+void drawFallingBlocksBoard() {
+  epaper.fillRect(kFallingBlocksBoardRegion.x, kFallingBlocksBoardRegion.y,
+                  kFallingBlocksBoardRegion.width,
+                  kFallingBlocksBoardRegion.height, TFT_WHITE);
+  for (int row = 0; row < FallingBlocksGame::kHeight; ++row) {
+    for (int column = 0; column < FallingBlocksGame::kWidth; ++column) {
+      drawFallingBlock(kFallingGridLeft + column * kFallingCellSize,
+                       kFallingGridTop + row * kFallingCellSize,
+                       kFallingCellSize, fallingBlocks.at(row, column));
+    }
+  }
+  epaper.drawRect(kFallingGridLeft - 2, kFallingGridTop - 2,
+                  kFallingGridWidth + 4, kFallingGridHeight + 4, TFT_BLACK);
+
+  constexpr int kPanelCenterX = 416;
+  drawCenteredText(tr(TextId::Score), kPanelCenterX, 120, 2, TFT_BLACK,
+                   TFT_WHITE, 104, currentLanguage != Language::English);
+  drawCentered(String(fallingBlocks.score()), kPanelCenterX, 148, 4);
+  drawCenteredText(tr(TextId::Lines), kPanelCenterX, 198, 2, TFT_BLACK,
+                   TFT_WHITE, 104, currentLanguage != Language::English);
+  drawCentered(String(fallingBlocks.lines()), kPanelCenterX, 226, 4);
+  drawCenteredText(tr(TextId::Level), kPanelCenterX, 276, 2, TFT_BLACK,
+                   TFT_WHITE, 104, currentLanguage != Language::English);
+  drawCentered(String(fallingBlocks.level()), kPanelCenterX, 304, 4);
+  drawCenteredText(tr(TextId::Next), kPanelCenterX, 360, 2, TFT_BLACK,
+                   TFT_WHITE, 104, currentLanguage != Language::English);
+  constexpr int kPreviewCell = 20;
+  constexpr int kPreviewLeft = 376;
+  constexpr int kPreviewTop = 386;
+  for (int row = 0; row < 4; ++row) {
+    for (int column = 0; column < 4; ++column) {
+      if (FallingBlocksGame::pieceCell(fallingBlocks.nextPiece(), 0, row,
+                                       column)) {
+        drawFallingBlock(kPreviewLeft + column * kPreviewCell,
+                         kPreviewTop + row * kPreviewCell, kPreviewCell,
+                         fallingBlocks.nextPiece() + 1);
+      }
+    }
+  }
+  if (fallingBlocks.gameOver()) {
+    drawCenteredText(
+        String(tr(TextId::GameOver)) + " - " + tr(TextId::TapNew),
+        kScreenWidth / 2, 668, 2, TFT_BLACK, TFT_WHITE, 440,
+        currentLanguage != Language::English);
+  }
+}
+
+void drawFallingBlocks() {
+  epaper.fillSprite(TFT_WHITE);
+  drawFallingBlocksBoard();
+  drawButton(kCenteredNewButton, tr(TextId::NewGame));
+  drawGameStatusBar(tr(TextId::FallingBlocks));
+}
+
 String fitReaderText(String text, int maximumWidth, int builtInFont = 0) {
   const auto textWidth = [builtInFont](const String& value) {
     return builtInFont > 0 ? epaper.textWidth(value, builtInFont)
@@ -3752,6 +3890,11 @@ void startNewMahjong() {
   mahjongSaved = true;
 }
 
+void startNewFallingBlocks() {
+  fallingBlocks.start(esp_random());
+  fallingBlocksSaved = true;
+}
+
 bool openReaderBrowserPath(const String& path) {
   epubArchive.close();
   readerChapterText.clear();
@@ -3969,6 +4112,9 @@ void drawCurrentScreen() {
     case Screen::MahjongSolitaire:
       drawMahjong();
       return;
+    case Screen::FallingBlocks:
+      drawFallingBlocks();
+      return;
     case Screen::EpubBrowser:
       drawEpubBrowser();
       return;
@@ -4034,6 +4180,8 @@ void showMenu() {
     LOG.println("[games] auto-saving Klondike");
   } else if (currentScreen == Screen::MahjongSolitaire && mahjongSaved) {
     LOG.println("[games] auto-saving Mahjong Solitaire");
+  } else if (currentScreen == Screen::FallingBlocks && fallingBlocksSaved) {
+    LOG.println("[games] auto-saving Falling Blocks");
   } else if (currentScreen == Screen::EpubReading) {
     LOG.println("[games] saving EPUB reading position");
   }
@@ -4149,6 +4297,13 @@ void showMahjong() {
   currentScreen = Screen::MahjongSolitaire;
   drawMahjong();
   refreshScreen("Mahjong Solitaire screen");
+}
+
+void showFallingBlocks() {
+  if (!fallingBlocksSaved) startNewFallingBlocks();
+  currentScreen = Screen::FallingBlocks;
+  drawFallingBlocks();
+  refreshScreen("Falling Blocks screen");
 }
 
 void showEpubBrowser(bool fullRefresh = true) {
@@ -4284,6 +4439,11 @@ void updateMahjong(const char* action) {
   refreshRegion(kMahjongBoardRegion, action);
 }
 
+void updateFallingBlocks(const char* action) {
+  drawFallingBlocksBoard();
+  refreshRegion(kFallingBlocksBoardRegion, action);
+}
+
 void launchGame(GameId game) {
   hardware::beep();
   recordGameLaunch(game);
@@ -4329,6 +4489,9 @@ void launchGame(GameId game) {
       break;
     case GameId::MahjongSolitaire:
       showMahjong();
+      break;
+    case GameId::FallingBlocks:
+      showFallingBlocks();
       break;
     case GameId::EpubReader:
       showEpubBrowser();
@@ -4990,6 +5153,52 @@ void handleMahjongTouch(const Gt911Touch::Point& point) {
   }
 }
 
+bool handleFallingBlocksTouchStart(const Gt911Touch::Point& point) {
+  if (kBackButton.contains(point.x, point.y)) {
+    hardware::beep();
+    showMenu();
+    return true;
+  }
+  if (kCenteredNewButton.contains(point.x, point.y)) {
+    hardware::beep();
+    startNewFallingBlocks();
+    updateFallingBlocks("new Falling Blocks game");
+    return true;
+  }
+  return point.x < kFallingGridLeft ||
+         point.x >= kFallingGridLeft + kFallingGridWidth ||
+         point.y < kFallingGridTop ||
+         point.y >= kFallingGridTop + kFallingGridHeight;
+}
+
+void handleFallingBlocksGesture(const Gt911Touch::Point& start,
+                                const Gt911Touch::Point& end) {
+  const int dx = static_cast<int>(end.x) - static_cast<int>(start.x);
+  const int dy = static_cast<int>(end.y) - static_cast<int>(start.y);
+  const int absX = dx < 0 ? -dx : dx;
+  const int absY = dy < 0 ? -dy : dy;
+  FallingBlocksGame::Action action =
+      FallingBlocksGame::Action::RotateClockwise;
+  const char* description = "rotate Falling Blocks piece";
+  if (std::max(absX, absY) >= kSwipeThreshold) {
+    if (absX > absY) {
+      action = dx < 0 ? FallingBlocksGame::Action::MoveLeft
+                      : FallingBlocksGame::Action::MoveRight;
+      description =
+          dx < 0 ? "move Falling Blocks left" : "move Falling Blocks right";
+    } else if (dy < 0) {
+      action = FallingBlocksGame::Action::HardDrop;
+      description = "hard-drop Falling Blocks piece";
+    } else {
+      action = FallingBlocksGame::Action::SoftDrop;
+      description = "soft-drop Falling Blocks piece";
+    }
+  }
+  if (fallingBlocks.turn(action)) {
+    updateFallingBlocks(description);
+  }
+}
+
 size_t lastReaderPageStart() {
   size_t offset = 0;
   size_t last = 0;
@@ -5196,6 +5405,9 @@ void pollTouch() {
     if (touchActive && currentScreen == Screen::Game2048 &&
         !touchActionHandled) {
       handle2048Swipe(touchStart, touchLast);
+    } else if (touchActive && currentScreen == Screen::FallingBlocks &&
+               !touchActionHandled) {
+      handleFallingBlocksGesture(touchStart, touchLast);
     } else if (touchActive && currentScreen == Screen::Minesweeper &&
                !touchActionHandled) {
       handleMinesweeperCellTouch(touchStart, touchLast,
@@ -5267,6 +5479,8 @@ void pollTouch() {
   } else if (currentScreen == Screen::MahjongSolitaire) {
     handleMahjongTouch(point);
     touchActionHandled = true;
+  } else if (currentScreen == Screen::FallingBlocks) {
+    touchActionHandled = handleFallingBlocksTouchStart(point);
   } else if (currentScreen == Screen::EpubBrowser) {
     handleEpubBrowserTouch(point);
     touchActionHandled = true;
