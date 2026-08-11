@@ -267,27 +267,32 @@ inline constexpr const Utf8Char*
          "行。向下滑动可软降，向上滑动可直接落底。上键逆时针旋转，下键顺时针旋转。"},
         {u8"Browse the SD card read-only and tap an EPUB file to open it. The "
          "on-screen arrows or UP and DOWN change browser pages. UP and DOWN "
-         "change reading pages. UP FOLDER returns to the parent "
+         "change reading pages. Supported JPEG/PNG covers appear before the "
+         "text. UP FOLDER returns to the parent "
          "folder. The reading-screen back arrow returns to the browser. Only "
          "DRM-free, reflowable EPUB 2 and EPUB 3 books are supported.",
          u8"Explora la tarjeta SD en modo de solo lectura y toca un EPUB para "
          "abrirlo. Las flechas en pantalla o ARRIBA y ABAJO cambian páginas del "
-         "explorador. ARRIBA y ABAJO cambian páginas de lectura. SUBIR "
+         "explorador. ARRIBA y ABAJO cambian páginas de lectura. Las portadas "
+         "JPEG/PNG compatibles aparecen antes del texto. SUBIR "
          "CARPETA vuelve al directorio superior. La flecha de lectura vuelve al "
          "explorador. Solo se admiten EPUB 2/3 fluidos y sin DRM.",
          u8"Parcourez la carte SD en lecture seule et touchez un EPUB pour "
          "l'ouvrir. Les flèches à l'écran ou HAUT et BAS changent de page dans "
-         "le navigateur. HAUT et BAS changent les pages du livre. "
+         "le navigateur. HAUT et BAS changent les pages du livre. Les couvertures "
+         "JPEG/PNG compatibles précèdent le texte. "
          "DOSSIER PARENT remonte d'un niveau. La flèche de lecture revient au "
          "navigateur. Seuls les EPUB 2/3 redistribuables sans DRM sont pris en "
          "charge.",
          u8"Durchsuche die SD-Karte schreibgeschützt und tippe eine EPUB-Datei "
          "zum Öffnen an. Bildschirmpfeile oder AUF und AB wechseln Browserseiten. "
-         "AUF und AB wechseln Buchseiten. ORDNER "
+         "AUF und AB wechseln Buchseiten. Unterstützte JPEG/PNG-Cover erscheinen "
+         "vor dem Text. ORDNER "
          "NACH OBEN öffnet den Elternordner. Der Lesepfeil kehrt zum Browser "
          "zurück. Unterstützt werden nur DRM-freie, umfließende EPUB-2/3-Bücher.",
          u8"以只读方式浏览 SD 卡，点击 EPUB 文件即可打开。屏幕箭头或侧边上、下键可切换浏览页；"
-         "阅读时使用侧边上、下键。上级文件夹可返回父目录，阅读界面的返回箭头可回到浏览器。仅支"
+         "阅读时使用侧边上、下键。支持的 JPEG/PNG 封面显示在正文之前。上级文件夹可返回父目录，"
+         "阅读界面的返回箭头可回到浏览器。仅支"
          "持无 DRM 的可重排 EPUB 2/3 图书。"},
 };
 

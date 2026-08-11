@@ -6,6 +6,7 @@
 #include "dots_and_boxes_game.h"
 #include "double_tap_tracker.h"
 #include "epub_browser_logic.h"
+#include "epub_cover.h"
 #include "epub_text.h"
 #include "falling_blocks_game.h"
 #include "game_2048.h"
@@ -23,6 +24,7 @@
 #include "peg_solitaire_game.h"
 #include "pipe_connect_game.h"
 #include "reversi_game.h"
+#include "sd_card_identity.h"
 #include "slitherlink_game.h"
 #include "sokoban_game.h"
 #include "sudoku_game.h"
@@ -1024,6 +1026,16 @@ void test_game_play_count_saturates() {
                            game_ranking::nextPlayCount(UINT32_MAX));
 }
 
+void test_game_ranking_finds_current_launcher_page() {
+  const uint8_t ranking[] = {4, 1, 7, 3, 5, 0, 2, 6};
+  TEST_ASSERT_EQUAL_UINT(
+      0, game_ranking::pageForGame(ranking, 7, 3));
+  TEST_ASSERT_EQUAL_UINT(
+      1, game_ranking::pageForGame(ranking, 0, 3));
+  TEST_ASSERT_EQUAL_UINT(
+      2, game_ranking::pageForGame(ranking, 6, 3));
+}
+
 void test_menu_edge_swipes_paginate_inward() {
   TEST_ASSERT_EQUAL_INT(
       static_cast<int>(menu_edge_swipe::Direction::Previous),
@@ -1768,6 +1780,74 @@ void test_epub_xml_helpers_parse_attributes_and_resolve_paths() {
       epub_text::findStartTag(container, "rootfile"));
 }
 
+void test_epub3_cover_uses_cover_image_manifest_property() {
+  const std::string package =
+      "<package><manifest>"
+      "<item id=\"front\" href=\"Images/front.jpg\" "
+      "media-type=\"image/jpeg\" properties=\"nav cover-image\"/>"
+      "<item id=\"chapter\" href=\"Text/one.xhtml\" "
+      "media-type=\"application/xhtml+xml\"/>"
+      "</manifest></package>";
+
+  TEST_ASSERT_EQUAL_STRING(
+      "OPS/Images/front.jpg",
+      epub_cover::findCoverPath(package, "OPS/content.opf").c_str());
+}
+
+void test_epub2_cover_uses_metadata_manifest_id() {
+  const std::string package =
+      "<package><metadata><meta name=\"cover\" content=\"cover-art\"/>"
+      "</metadata><manifest>"
+      "<item id=\"cover-art\" href=\"cover.png\" media-type=\"image/png\"/>"
+      "</manifest></package>";
+
+  TEST_ASSERT_EQUAL_STRING(
+      "OEBPS/cover.png",
+      epub_cover::findCoverPath(package, "OEBPS/book.opf").c_str());
+}
+
+void test_epub_cover_rejects_unsupported_image_formats() {
+  const std::string package =
+      "<package><manifest>"
+      "<item id=\"front\" href=\"cover.svg\" media-type=\"image/svg+xml\" "
+      "properties=\"cover-image\"/>"
+      "</manifest></package>";
+
+  TEST_ASSERT_TRUE(
+      epub_cover::findCoverPath(package, "OPS/content.opf").empty());
+}
+
+void test_sd_card_identity_uses_partition_boot_sector() {
+  uint8_t sectorZero[512] = {};
+  sectorZero[510] = 0x55;
+  sectorZero[511] = 0xAA;
+  sectorZero[446 + 4] = 0x0C;
+  sectorZero[446 + 8] = 0x00;
+  sectorZero[446 + 9] = 0x08;
+  sectorZero[446 + 12] = 0x00;
+  sectorZero[446 + 13] = 0x10;
+  uint8_t volumeBoot[512] = {};
+  volumeBoot[67] = 0x12;
+  volumeBoot[68] = 0x34;
+
+  TEST_ASSERT_EQUAL_UINT32(
+      2048,
+      sd_card_identity::partitionStartSector(sectorZero, sizeof(sectorZero)));
+  const sd_card_identity::Identity first =
+      sd_card_identity::identify(8192, sectorZero, sizeof(sectorZero),
+                                 volumeBoot);
+  const sd_card_identity::Identity same =
+      sd_card_identity::identify(8192, sectorZero, sizeof(sectorZero),
+                                 volumeBoot);
+  TEST_ASSERT_TRUE(sd_card_identity::same(first, same));
+
+  volumeBoot[68] ^= 0x01;
+  const sd_card_identity::Identity changed =
+      sd_card_identity::identify(8192, sectorZero, sizeof(sectorZero),
+                                 volumeBoot);
+  TEST_ASSERT_FALSE(sd_card_identity::same(first, changed));
+}
+
 void test_epub_pagination_wraps_utf8_without_splitting_characters() {
   const std::string text = "one two three\nélan four five";
   const epub_text::TextPage first =
@@ -1926,6 +2006,7 @@ int main(int, char**) {
   RUN_TEST(test_game_ranking_sorts_counts_and_preserves_ties);
   RUN_TEST(test_game_ranking_uses_default_order_only_to_break_ties);
   RUN_TEST(test_game_play_count_saturates);
+  RUN_TEST(test_game_ranking_finds_current_launcher_page);
   RUN_TEST(test_menu_edge_swipes_paginate_inward);
   RUN_TEST(test_menu_edge_swipes_reject_non_paging_gestures);
   RUN_TEST(test_every_game_translation_is_present);
@@ -1968,6 +2049,10 @@ int main(int, char**) {
   RUN_TEST(test_epub_html_to_text_preserves_emphasis_when_requested);
   RUN_TEST(test_epub_typography_normalization_keeps_style_markers);
   RUN_TEST(test_epub_xml_helpers_parse_attributes_and_resolve_paths);
+  RUN_TEST(test_epub3_cover_uses_cover_image_manifest_property);
+  RUN_TEST(test_epub2_cover_uses_metadata_manifest_id);
+  RUN_TEST(test_epub_cover_rejects_unsupported_image_formats);
+  RUN_TEST(test_sd_card_identity_uses_partition_boot_sector);
   RUN_TEST(test_epub_pagination_wraps_utf8_without_splitting_characters);
   RUN_TEST(test_epub_pagination_treats_cjk_as_full_width);
   RUN_TEST(test_epub_pagination_carries_style_between_pages);

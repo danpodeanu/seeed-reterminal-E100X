@@ -10,6 +10,7 @@
 #include <utility>
 
 #include "app_logger.h"
+#include "epub_cover.h"
 #include "epub_text.h"
 #include "sd_card.h"
 
@@ -175,6 +176,23 @@ void EpubChapterText::adopt(char* data, size_t length) {
   length_ = length;
 }
 
+EpubCoverData::~EpubCoverData() { clear(); }
+
+void EpubCoverData::clear() {
+  heap_caps_free(data_);
+  data_ = nullptr;
+  length_ = 0;
+  nameHint_ = "";
+}
+
+void EpubCoverData::adopt(uint8_t* data, size_t length,
+                          const String& nameHint) {
+  clear();
+  data_ = data;
+  length_ = length;
+  nameHint_ = nameHint;
+}
+
 void EpubArchive::setError(const char* message) { error_ = message; }
 
 void EpubArchive::close() {
@@ -184,6 +202,7 @@ void EpubArchive::close() {
   open_ = false;
   sdPath_ = "";
   title_ = "";
+  coverPath_ = "";
   error_ = "";
   chapterCount_ = 0;
   for (String& item : spine_) item = "";
@@ -223,13 +242,13 @@ bool EpubArchive::extractBuffer(const String& archivePath, char*& output,
         heap_caps_malloc(length + 1, MALLOC_CAP_8BIT));
   }
   if (buffer == nullptr) {
-    setError("Not enough memory for EPUB chapter");
+    setError("Not enough memory for EPUB entry");
     return false;
   }
   const bool extracted =
       mz_zip_reader_extract_to_mem(&archive_, fileIndex, buffer, length, 0);
   if (!extracted) {
-    free(buffer);
+    heap_caps_free(buffer);
     setError("Could not decompress EPUB entry");
     return false;
   }
@@ -242,11 +261,13 @@ bool EpubArchive::parsePackage(const std::string& package,
                                const String& packagePath) {
   const std::string parsedTitle = epub_text::elementText(package, "dc:title");
   title_ = parsedTitle.empty() ? "Untitled EPUB" : parsedTitle.c_str();
+  coverPath_ =
+      epub_cover::findCoverPath(package, packagePath.c_str()).c_str();
 
   ManifestItem manifest[kMaximumSpineItems] = {};
   int manifestCount = 0;
   size_t offset = 0;
-  while (manifestCount < kMaximumSpineItems) {
+  while (true) {
     std::string tag = nextTag(package, "item", offset);
     if (tag.empty()) break;
     if (tag.size() > 4 && tag[4] == 'r') continue;
@@ -258,7 +279,8 @@ bool EpubArchive::parsePackage(const std::string& package,
         epub_text::attribute(tag.data(), tag.size(), "media-type");
     if (id.empty() || href.empty() ||
         (mediaType != "application/xhtml+xml" &&
-         mediaType != "text/html")) {
+         mediaType != "text/html") ||
+        manifestCount >= kMaximumSpineItems) {
       continue;
     }
     manifest[manifestCount].id = id.c_str();
@@ -288,6 +310,21 @@ bool EpubArchive::parsePackage(const std::string& package,
     setError("EPUB reading order is empty");
     return false;
   }
+  return true;
+}
+
+bool EpubArchive::loadCover(EpubCoverData& cover) {
+  cover.clear();
+  if (!open_ || coverPath_.isEmpty()) {
+    setError("EPUB cover is not available");
+    return false;
+  }
+  char* data = nullptr;
+  size_t length = 0;
+  if (!extractBuffer(coverPath_, data, length, kMaximumCoverBytes)) {
+    return false;
+  }
+  cover.adopt(reinterpret_cast<uint8_t*>(data), length, coverPath_);
   return true;
 }
 

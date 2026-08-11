@@ -10,6 +10,16 @@ constexpr uint32_t nextPlayCount(uint32_t count) {
 }
 
 template <size_t Count>
+size_t pageForGame(const uint8_t (&ranking)[Count], uint8_t game,
+                   size_t gamesPerPage) {
+  if (gamesPerPage == 0) return 0;
+  for (size_t rank = 0; rank < Count; ++rank) {
+    if (ranking[rank] == game) return rank / gamesPerPage;
+  }
+  return 0;
+}
+
+template <size_t Count>
 void rankByPlayCount(const uint32_t (&counts)[Count],
                      const uint8_t (&defaultOrder)[Count],
                      uint8_t (&ranking)[Count]) {

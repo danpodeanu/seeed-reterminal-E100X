@@ -18,6 +18,7 @@
 #include "board_pins.h"
 #include "crossword_game.h"
 #include "driver.h"
+#include "dither.h"
 #include "dots_and_boxes_game.h"
 #include "double_tap_tracker.h"
 #include "e1005_fast_refresh.h"
@@ -36,6 +37,7 @@
 #include "game_ui_fonts.h"
 #include "gt911_touch.h"
 #include "hardware.h"
+#include "image_loader.h"
 #include "klondike_game.h"
 #include "lights_out_game.h"
 #include "low_battery.h"
@@ -51,6 +53,7 @@
 #include "repo_qr.h"
 #include "reversi_game.h"
 #include "sd_card.h"
+#include "sd_card_identity.h"
 #include "sd_ota.h"
 #include "sd_readonly_browser.h"
 #include "slitherlink_game.h"
@@ -156,7 +159,7 @@ constexpr uint32_t kBatteryCheckIntervalMs = 60000;
 constexpr uint32_t kInactivitySleepMs = 5UL * 60UL * 1000UL;
 constexpr int kLowBatteryThresholdPct = 10;
 constexpr uint32_t kPersistedStateMagic = 0x47414D45;
-constexpr uint16_t kPersistedStateVersion = 15;
+constexpr uint16_t kPersistedStateVersion = 17;
 constexpr uint16_t kLightsOutSavedFlag = 1U << 0;
 constexpr uint16_t k2048SavedFlag = 1U << 1;
 constexpr uint16_t kPipeConnectSavedFlag = 1U << 2;
@@ -189,6 +192,10 @@ constexpr int kReaderLineHeight = 32;
 constexpr int kBrowserRowsPerPage = 8;
 constexpr int kBrowserRowTop = 96;
 constexpr int kBrowserRowHeight = 82;
+constexpr int kReaderCoverLeft = 18;
+constexpr int kReaderCoverTop = 64;
+constexpr int kReaderCoverMaximumWidth = kScreenWidth - kReaderCoverLeft * 2;
+constexpr int kReaderCoverMaximumHeight = 680;
 constexpr int kMenuPreviewSize = 190;
 
 constexpr uint32_t makeNonogramSolution(uint8_t row0, uint8_t row1,
@@ -411,6 +418,9 @@ struct ReaderResume {
   char bookPath[kReaderPathCapacity];
   uint16_t chapter;
   uint32_t pageStart;
+  uint8_t coverVisible;
+  uint32_t cardSectorCount;
+  uint32_t cardFingerprint;
 };
 
 struct PersistedState {
@@ -533,6 +543,8 @@ bool readerChapterRequiresNonAscii = false;
 bool readerChapterRequiresCjk = false;
 int readerChapterIndex = 0;
 size_t readerPageStart = 0;
+bool readerCoverVisible = false;
+sd_card_identity::Identity readerCardIdentity;
 bool crosswordKeyboardVisible = false;
 bool batteryStatusSampled = false;
 bool externalPowerPresent = false;
@@ -689,8 +701,55 @@ TextId gameTextId(GameId game) {
   return TextId::LightsOut;
 }
 
+GameId gameForScreen(Screen screen) {
+  switch (screen) {
+    case Screen::LightsOut:
+      return GameId::LightsOut;
+    case Screen::Game2048:
+      return GameId::Game2048;
+    case Screen::PipeConnect:
+      return GameId::PipeConnect;
+    case Screen::Minesweeper:
+      return GameId::Minesweeper;
+    case Screen::Nonogram:
+      return GameId::Nonogram;
+    case Screen::Reversi:
+      return GameId::Reversi;
+    case Screen::DotsAndBoxes:
+      return GameId::DotsAndBoxes;
+    case Screen::Sokoban:
+      return GameId::Sokoban;
+    case Screen::PegSolitaire:
+      return GameId::PegSolitaire;
+    case Screen::Slitherlink:
+      return GameId::Slitherlink;
+    case Screen::Sudoku:
+      return GameId::Sudoku;
+    case Screen::Crossword:
+      return GameId::Crossword;
+    case Screen::Klondike:
+      return GameId::Klondike;
+    case Screen::MahjongSolitaire:
+      return GameId::MahjongSolitaire;
+    case Screen::FallingBlocks:
+      return GameId::FallingBlocks;
+    case Screen::EpubBrowser:
+    case Screen::EpubReading:
+      return GameId::EpubReader;
+    case Screen::Menu:
+      return GameId::Count;
+  }
+  return GameId::Count;
+}
+
 GameId rankedGameAt(size_t rank) {
   return static_cast<GameId>(gameRanking[rank]);
+}
+
+MenuPage menuPageForGame(GameId game) {
+  const size_t page = game_ranking::pageForGame(
+      gameRanking, static_cast<uint8_t>(game), kGamesPerMenuPage);
+  return static_cast<MenuPage>(std::min(page, kMenuPageCount - 1));
 }
 
 void updateGameRanking() {
@@ -806,6 +865,11 @@ void saveResumeState() {
                      readerBookPath);
   state.reader.chapter = static_cast<uint16_t>(readerChapterIndex);
   state.reader.pageStart = static_cast<uint32_t>(readerPageStart);
+  state.reader.coverVisible = readerCoverVisible ? 1 : 0;
+  if (readerCardIdentity.valid()) {
+    state.reader.cardSectorCount = readerCardIdentity.sectorCount;
+    state.reader.cardFingerprint = readerCardIdentity.fingerprint;
+  }
   if ((currentScreen == Screen::EpubBrowser && !savedBrowserPath) ||
       (currentScreen == Screen::EpubReading && !savedBookPath)) {
     state.screen = static_cast<uint8_t>(Screen::EpubBrowser);
@@ -1001,6 +1065,10 @@ bool restoreResumeState() {
     LOG.println("[games] saved EPUB book path is invalid");
     return false;
   }
+  if (state.reader.coverVisible > 1) {
+    LOG.println("[games] saved EPUB cover state is invalid");
+    return false;
+  }
   lightsOutSaved = hasLightsOutSave;
   game2048Saved = has2048Save;
   pipeConnectSaved = hasPipeConnectSave;
@@ -1021,6 +1089,11 @@ bool restoreResumeState() {
   readerBookPath = state.reader.bookPath;
   readerChapterIndex = state.reader.chapter;
   readerPageStart = state.reader.pageStart;
+  readerCoverVisible = state.reader.coverVisible != 0;
+  readerCardIdentity = {
+      state.reader.cardSectorCount,
+      state.reader.cardFingerprint,
+  };
   for (size_t index = 0; index < kGameCount; ++index) {
     gamePlayCounts[index] = state.gamePlayCounts[index];
   }
@@ -3491,6 +3564,34 @@ size_t readerCharacterWidth(uint32_t codepoint,
   return readerGlyphWidth(codepoint, style, true);
 }
 
+bool sdCardInserted() {
+  pinMode(board::PIN_SD_DETECT, INPUT_PULLUP);
+  delayMicroseconds(50);
+  return digitalRead(board::PIN_SD_DETECT) == LOW;
+}
+
+bool readReaderCardIdentity(sd_card_identity::Identity& identity) {
+  identity = {};
+  if (!sdCardInserted()) return false;
+  const size_t sectors = SD.numSectors();
+  if (sectors == 0 || sectors > UINT32_MAX) return false;
+
+  uint8_t sectorZero[512] = {};
+  if (!SD.readRAW(sectorZero, 0)) return false;
+  const uint32_t partitionStart =
+      sd_card_identity::partitionStartSector(sectorZero, sizeof(sectorZero));
+  uint8_t volumeBoot[512] = {};
+  const uint8_t* volumeBootData = sectorZero;
+  if (partitionStart > 0 && partitionStart < sectors) {
+    if (!SD.readRAW(volumeBoot, partitionStart)) return false;
+    volumeBootData = volumeBoot;
+  }
+  identity = sd_card_identity::identify(
+      static_cast<uint32_t>(sectors), sectorZero, sizeof(sectorZero),
+      volumeBootData);
+  return identity.valid();
+}
+
 void detectReaderFonts() {
   if (!sdCardReady) {
     readerCjkFont16Available = false;
@@ -3499,20 +3600,80 @@ void detectReaderFonts() {
     readerLatinFont24Available = false;
     return;
   }
-  readerCjkFont16Available =
-      readerCjkFont16Available || sd_card::fileExists(kReaderCjkFont16Path);
-  readerCjkFont24Available =
-      readerCjkFont24Available || sd_card::fileExists(kReaderCjkFont24Path);
-  readerLatinFont16Available =
-      readerLatinFont16Available || sd_card::fileExists(kReaderLatinFont16Path);
-  readerLatinFont24Available =
-      readerLatinFont24Available || sd_card::fileExists(kReaderLatinFont24Path);
+  readerCjkFont16Available = sd_card::fileExists(kReaderCjkFont16Path);
+  readerCjkFont24Available = sd_card::fileExists(kReaderCjkFont24Path);
+  readerLatinFont16Available = sd_card::fileExists(kReaderLatinFont16Path);
+  readerLatinFont24Available = sd_card::fileExists(kReaderLatinFont24Path);
   LOG.printf(
       "[games] reader fonts: CJK 16=%s 24=%s, Latin 16=%s 24=%s\n",
       readerCjkFont16Available ? "yes" : "no",
       readerCjkFont24Available ? "yes" : "no",
       readerLatinFont16Available ? "yes" : "no",
       readerLatinFont24Available ? "yes" : "no");
+}
+
+enum class ReaderStorageStatus {
+  Ready,
+  Changed,
+  Missing,
+};
+
+void clearReaderStorageState() {
+  epubArchive.close();
+  readerChapterText.clear();
+  readerChapterRequiresNonAscii = false;
+  readerChapterRequiresCjk = false;
+  readerBookPath = "";
+  readerPageStart = 0;
+  readerChapterIndex = 0;
+  readerCoverVisible = false;
+  readerBrowserPath = "/";
+  browserPageStart = 0;
+  browserMessage = "";
+  readerCjkFont16Available = false;
+  readerCjkFont24Available = false;
+  readerLatinFont16Available = false;
+  readerLatinFont24Available = false;
+}
+
+ReaderStorageStatus refreshReaderStorage() {
+  if (!sdCardInserted()) {
+    clearReaderStorageState();
+    if (sdCardReady) SD.end();
+    sdCardReady = false;
+    return ReaderStorageStatus::Missing;
+  }
+
+  bool remounted = false;
+  if (!sdCardReady) {
+    epubArchive.close();
+    sdCardReady = sd_card::mount(epaper.getSPIinstance(), "/games");
+    if (!sdCardReady) {
+      clearReaderStorageState();
+      return ReaderStorageStatus::Missing;
+    }
+    remounted = true;
+  }
+
+  sd_card_identity::Identity currentIdentity;
+  if (!readReaderCardIdentity(currentIdentity)) {
+    clearReaderStorageState();
+    SD.end();
+    sdCardReady = false;
+    return ReaderStorageStatus::Missing;
+  }
+
+  const bool changed =
+      readerCardIdentity.valid() &&
+      !sd_card_identity::same(readerCardIdentity, currentIdentity);
+  if (changed) {
+    LOG.println("[games] SD card changed; resetting EPUB reader state");
+    clearReaderStorageState();
+  }
+  readerCardIdentity = currentIdentity;
+  if (changed || remounted) detectReaderFonts();
+  return changed ? ReaderStorageStatus::Changed
+                 : ReaderStorageStatus::Ready;
 }
 
 bool loadReaderFont(int pixelSize, bool cjkRequired) {
@@ -3721,7 +3882,104 @@ uint32_t readerPageNumber() {
   return pageNumber;
 }
 
+bool renderEpubCoverImage() {
+  EpubCoverData cover;
+  if (!epubArchive.loadCover(cover)) {
+    LOG.printf("[games] could not extract EPUB cover: %s\n",
+               epubArchive.error().c_str());
+    return false;
+  }
+
+  LOG.printf("[games] decoding EPUB cover %s (%lu bytes)\n",
+             cover.nameHint().c_str(),
+             static_cast<unsigned long>(cover.length()));
+  RgbImage image;
+  const bool decoded =
+      load_image_from_memory(cover.data(), cover.length(),
+                             cover.nameHint().c_str(), 0, 0, &image);
+  cover.clear();
+  if (!decoded || image.width <= 0 || image.height <= 0) {
+    image_free(&image);
+    LOG.println("[games] EPUB cover decode failed");
+    return false;
+  }
+
+  const int sourceWidth = image.width;
+  const int sourceHeight = image.height;
+  const float scale =
+      std::min(static_cast<float>(kReaderCoverMaximumWidth) / sourceWidth,
+               static_cast<float>(kReaderCoverMaximumHeight) / sourceHeight);
+  const int targetWidth =
+      std::max(1, std::min(kReaderCoverMaximumWidth,
+                           static_cast<int>(sourceWidth * scale)));
+  const int targetHeight =
+      std::max(1, std::min(kReaderCoverMaximumHeight,
+                           static_cast<int>(sourceHeight * scale)));
+  const size_t pixelCount =
+      static_cast<size_t>(targetWidth) * targetHeight;
+  uint8_t* indices = static_cast<uint8_t*>(ps_malloc(pixelCount));
+  if (indices == nullptr) indices = static_cast<uint8_t*>(malloc(pixelCount));
+  if (indices == nullptr) {
+    image_free(&image);
+    LOG.println("[games] EPUB cover index allocation failed");
+    return false;
+  }
+
+  const bool dithered = dither_resized_image(
+      image.pixels, sourceWidth, sourceHeight, targetWidth, targetHeight,
+      PAL_BW, 1.0f, false, indices);
+  image_free(&image);
+  if (!dithered) {
+    free(indices);
+    LOG.println("[games] EPUB cover dithering failed");
+    return false;
+  }
+
+  const size_t packedBytes =
+      static_cast<size_t>((targetWidth + 7) / 8) * targetHeight;
+  uint8_t* packed = static_cast<uint8_t*>(ps_malloc(packedBytes));
+  if (packed == nullptr) packed = static_cast<uint8_t*>(malloc(packedBytes));
+  if (packed == nullptr) {
+    free(indices);
+    LOG.println("[games] EPUB cover bitmap allocation failed");
+    return false;
+  }
+  pack_1bpp_msb(indices, packed, targetWidth, targetHeight, true);
+  free(indices);
+
+  const int targetX = (kScreenWidth - targetWidth) / 2;
+  const int targetY =
+      kReaderCoverTop + (kReaderCoverMaximumHeight - targetHeight) / 2;
+  epaper.drawBitmap(targetX, targetY, packed, targetWidth, targetHeight,
+                    TFT_BLACK, TFT_WHITE);
+  free(packed);
+  LOG.printf("[games] EPUB cover rendered %dx%d -> %dx%d\n", sourceWidth,
+             sourceHeight, targetWidth, targetHeight);
+  return true;
+}
+
+void drawEpubCover() {
+  epaper.fillSprite(TFT_WHITE);
+  if (!renderEpubCoverImage()) {
+    constexpr int kFallbackLeft = 100;
+    constexpr int kFallbackTop = 180;
+    constexpr int kFallbackWidth = 280;
+    constexpr int kFallbackHeight = 400;
+    epaper.drawRoundRect(kFallbackLeft, kFallbackTop, kFallbackWidth,
+                        kFallbackHeight, 10, TFT_BLACK);
+    epaper.drawRoundRect(kFallbackLeft + 2, kFallbackTop + 2,
+                        kFallbackWidth - 4, kFallbackHeight - 4, 8, TFT_BLACK);
+    drawCentered("EPUB", kScreenWidth / 2,
+                 kFallbackTop + kFallbackHeight / 2, 4);
+  }
+  drawGameStatusBar(tr(TextId::EpubReader));
+}
+
 void drawEpubReading() {
+  if (readerCoverVisible) {
+    drawEpubCover();
+    return;
+  }
   epaper.fillSprite(TFT_WHITE);
   const epub_text::TextPage page = currentReaderPage();
   const bool bodyUsesEmbeddedLatin = pageUsesEmbeddedReaderFont(page);
@@ -3936,20 +4194,13 @@ void startNewFallingBlocks() {
   fallingBlocksSaved = true;
 }
 
-bool openReaderBrowserPath(const String& path) {
-  epubArchive.close();
-  readerChapterText.clear();
-  readerChapterRequiresNonAscii = false;
-  readerChapterRequiresCjk = false;
-  readerBookPath = "";
-  readerPageStart = 0;
-  readerChapterIndex = 0;
-  browserPageStart = 0;
-  browserMessage = "";
+bool listReaderBrowserPath(const String& path, bool resetPage) {
+  const int savedPageStart = resetPage ? 0 : browserPageStart;
   readerBrowserPath = path.isEmpty() ? "/" : path;
   if (!sdCardReady) return false;
   const uint32_t startedAtMs = millis();
   if (sdBrowser.open(readerBrowserPath)) {
+    browserPageStart = savedPageStart;
     LOG.printf("[games] listed %s: %d entries in %lu ms%s\n",
                readerBrowserPath.c_str(), sdBrowser.count(),
                static_cast<unsigned long>(millis() - startedAtMs),
@@ -3959,8 +4210,27 @@ bool openReaderBrowserPath(const String& path) {
   LOG.printf("[games] could not open SD directory: %s\n",
              readerBrowserPath.c_str());
   readerBrowserPath = "/";
+  browserPageStart = 0;
   browserMessage = tr(TextId::OpenFailed);
-  return sdBrowser.open(readerBrowserPath);
+  if (sdBrowser.open(readerBrowserPath)) return true;
+
+  clearReaderStorageState();
+  SD.end();
+  sdCardReady = false;
+  return false;
+}
+
+bool openReaderBrowserPath(const String& path) {
+  epubArchive.close();
+  readerChapterText.clear();
+  readerChapterRequiresNonAscii = false;
+  readerChapterRequiresCjk = false;
+  readerBookPath = "";
+  readerPageStart = 0;
+  readerChapterIndex = 0;
+  readerCoverVisible = false;
+  browserMessage = "";
+  return listReaderBrowserPath(path, true);
 }
 
 bool loadReaderChapter(int chapter, size_t pageStart = 0) {
@@ -3976,14 +4246,17 @@ bool loadReaderChapter(int chapter, size_t pageStart = 0) {
   readerChapterIndex = chapter;
   readerPageStart =
       pageStart < readerChapterText.length() ? pageStart : 0;
+  readerCoverVisible = false;
   return true;
 }
 
 bool openReaderBook(const String& path, int chapter = 0,
-                    size_t pageStart = 0, bool skipUnreadable = true) {
+                    size_t pageStart = 0, bool skipUnreadable = true,
+                    bool showCover = true) {
   readerChapterText.clear();
   readerChapterRequiresNonAscii = false;
   readerChapterRequiresCjk = false;
+  readerCoverVisible = false;
   LOG.printf(
       "[games] opening EPUB %s (heap=%lu KiB, PSRAM=%lu KiB)\n",
       path.c_str(), static_cast<unsigned long>(ESP.getFreeHeap() / 1024),
@@ -4011,11 +4284,13 @@ bool openReaderBook(const String& path, int chapter = 0,
       continue;
     }
     readerBookPath = path;
+    readerCoverVisible = showCover && epubArchive.hasCover();
     LOG.printf(
-        "[games] EPUB ready: chapter=%d bytes=%lu heap=%lu KiB PSRAM=%lu "
-        "KiB\n",
+        "[games] EPUB ready: chapter=%d bytes=%lu cover=%s heap=%lu KiB "
+        "PSRAM=%lu KiB\n",
         readerChapterIndex + 1,
         static_cast<unsigned long>(readerChapterText.length()),
+        readerCoverVisible ? "yes" : "no",
         static_cast<unsigned long>(ESP.getFreeHeap() / 1024),
         static_cast<unsigned long>(ESP.getFreePsram() / 1024));
     return true;
@@ -4192,6 +4467,7 @@ void selectLanguage(Language language) {
 }
 
 void showMenu() {
+  const GameId returningGame = gameForScreen(currentScreen);
   helpPaneVisible = false;
   if (currentScreen == Screen::LightsOut && lightsOutSaved) {
     LOG.println("[games] auto-saving Lights Out");
@@ -4232,6 +4508,9 @@ void showMenu() {
     readerChapterText.clear();
     readerChapterRequiresNonAscii = false;
     readerChapterRequiresCjk = false;
+  }
+  if (returningGame != GameId::Count) {
+    currentMenuPage = menuPageForGame(returningGame);
   }
   currentScreen = Screen::Menu;
   saveResumeState();
@@ -4349,8 +4628,11 @@ void showFallingBlocks() {
 
 void showEpubBrowser(bool fullRefresh = true) {
   currentScreen = Screen::EpubBrowser;
-  detectReaderFonts();
-  openReaderBrowserPath(readerBrowserPath);
+  const ReaderStorageStatus storage = refreshReaderStorage();
+  if (storage != ReaderStorageStatus::Missing) {
+    openReaderBrowserPath(readerBrowserPath);
+  }
+  saveResumeState();
   drawEpubBrowser();
   if (fullRefresh) {
     refreshScreen("EPUB browser");
@@ -4359,14 +4641,46 @@ void showEpubBrowser(bool fullRefresh = true) {
   }
 }
 
-void showEpubReading() {
+void showEpubReading(bool fullRefresh = false) {
   currentScreen = Screen::EpubReading;
   saveResumeState();
   drawEpubReading();
-  refreshRegion(kReaderRegion, "EPUB page");
+  if (readerCoverVisible || fullRefresh) {
+    refreshScreen(readerCoverVisible ? "EPUB cover" : "EPUB first text page");
+  } else {
+    refreshRegion(kReaderRegion, "EPUB page");
+  }
 }
 
-void showPreviousBrowserPage() {
+bool prepareEpubBrowserInteraction() {
+  const ReaderStorageStatus storage = refreshReaderStorage();
+  if (storage == ReaderStorageStatus::Ready &&
+      listReaderBrowserPath(readerBrowserPath, false)) {
+    return true;
+  }
+  if (storage == ReaderStorageStatus::Changed) {
+    openReaderBrowserPath("/");
+  }
+  currentScreen = Screen::EpubBrowser;
+  saveResumeState();
+  drawEpubBrowser();
+  refreshScreen(storage == ReaderStorageStatus::Changed
+                    ? "EPUB SD card changed"
+                    : "EPUB SD card unavailable");
+  return false;
+}
+
+bool prepareEpubReadingInteraction() {
+  const ReaderStorageStatus storage = refreshReaderStorage();
+  if (storage == ReaderStorageStatus::Ready && epubArchive.isOpen()) {
+    return true;
+  }
+  showEpubBrowser();
+  return false;
+}
+
+void showPreviousBrowserPage(bool validateStorage = true) {
+  if (validateStorage && !prepareEpubBrowserInteraction()) return;
   if (!hasPreviousBrowserPage()) {
     LOG.println("[games] already on first EPUB browser page");
     return;
@@ -4377,7 +4691,8 @@ void showPreviousBrowserPage() {
   refreshRegion(kReaderRegion, "EPUB previous files");
 }
 
-void showNextBrowserPage() {
+void showNextBrowserPage(bool validateStorage = true) {
+  if (validateStorage && !prepareEpubBrowserInteraction()) return;
   if (!hasNextBrowserPage()) {
     LOG.println("[games] already on last EPUB browser page");
     return;
@@ -5312,6 +5627,11 @@ size_t lastReaderPageStart() {
 }
 
 void showPreviousReaderPage() {
+  if (!prepareEpubReadingInteraction()) return;
+  if (readerCoverVisible) {
+    LOG.println("[games] already on EPUB cover");
+    return;
+  }
   if (readerPageStart > 0) {
     readerPageStart = epub_text::previousPageStart(
         readerChapterText.c_str(), readerChapterText.length(), readerPageStart,
@@ -5325,9 +5645,19 @@ void showPreviousReaderPage() {
     showEpubReading();
     return;
   }
+  if (epubArchive.hasCover()) {
+    readerCoverVisible = true;
+    showEpubReading();
+  }
 }
 
 void showNextReaderPage() {
+  if (!prepareEpubReadingInteraction()) return;
+  if (readerCoverVisible) {
+    readerCoverVisible = false;
+    showEpubReading(true);
+    return;
+  }
   const epub_text::TextPage page = currentReaderPage();
   if (page.end < readerChapterText.length()) {
     readerPageStart = page.end;
@@ -5348,16 +5678,16 @@ void handleEpubBrowserTouch(const Gt911Touch::Point& point) {
     showMenu();
     return;
   }
-  if (!sdCardReady) return;
+  if (!prepareEpubBrowserInteraction()) return;
   if (kPreviousPageButton.contains(point.x, point.y) &&
       hasPreviousBrowserPage()) {
     hardware::beep();
-    showPreviousBrowserPage();
+    showPreviousBrowserPage(false);
     return;
   }
   if (kNextPageButton.contains(point.x, point.y) && hasNextBrowserPage()) {
     hardware::beep();
-    showNextBrowserPage();
+    showNextBrowserPage(false);
     return;
   }
   if (point.y < kBrowserRowTop ||
@@ -5789,6 +6119,24 @@ void checkBatteryAndSleepIfNeeded() {
   }
 }
 
+void handleReaderCardRemoval() {
+  if ((currentScreen != Screen::EpubBrowser &&
+       currentScreen != Screen::EpubReading) ||
+      !sdCardReady || sdCardInserted()) {
+    return;
+  }
+
+  LOG.println("[games] SD card removed; closing EPUB reader");
+  clearReaderStorageState();
+  SD.end();
+  sdCardReady = false;
+  helpPaneVisible = false;
+  currentScreen = Screen::EpubBrowser;
+  saveResumeState();
+  drawEpubBrowser();
+  refreshScreen("EPUB SD card removed");
+}
+
 void sleepAfterInactivityIfNeeded() {
   if (inputHandlingActive() ||
       static_cast<uint32_t>(millis() - lastActivityAtMs) <
@@ -5872,23 +6220,38 @@ void setup() {
     epaper.update();
     delay(2500);
   }
-  detectReaderFonts();
+  const ReaderStorageStatus bootStorage = refreshReaderStorage();
+  if (bootStorage != ReaderStorageStatus::Missing) detectReaderFonts();
 
   if (!resumed) currentScreen = Screen::Menu;
   if (resumed && currentScreen == Screen::Reversi) {
     playReversiComputerTurns();
   }
-  if (resumed && currentScreen == Screen::EpubReading) {
+  if (resumed && currentScreen == Screen::EpubReading &&
+      bootStorage == ReaderStorageStatus::Ready) {
     const String savedBookPath = readerBookPath;
     const int savedChapter = readerChapterIndex;
     const size_t savedPageStart = readerPageStart;
-    if (!openReaderBook(savedBookPath, savedChapter, savedPageStart, false)) {
+    const bool savedCoverVisible = readerCoverVisible;
+    if (!openReaderBook(savedBookPath, savedChapter, savedPageStart, false,
+                        savedCoverVisible)) {
       currentScreen = Screen::EpubBrowser;
       openReaderBrowserPath(readerBrowserPath);
       browserMessage = tr(TextId::OpenFailed);
     }
   } else if (resumed && currentScreen == Screen::EpubBrowser) {
-    openReaderBrowserPath(readerBrowserPath);
+    if (bootStorage == ReaderStorageStatus::Missing) {
+      clearReaderStorageState();
+    } else {
+      openReaderBrowserPath(readerBrowserPath);
+    }
+  } else if (resumed && currentScreen == Screen::EpubReading) {
+    currentScreen = Screen::EpubBrowser;
+    if (bootStorage == ReaderStorageStatus::Changed) {
+      openReaderBrowserPath("/");
+    } else {
+      clearReaderStorageState();
+    }
   }
   if (languageSelected) {
     drawCurrentScreen();
@@ -5926,6 +6289,7 @@ void setup() {
 
 void loop() {
   usbScreenCapture.poll(epaper, kScreenWidth, kScreenHeight);
+  handleReaderCardRemoval();
   checkBatteryAndSleepIfNeeded();
   pollTouch();
   ButtonEvent event = {};

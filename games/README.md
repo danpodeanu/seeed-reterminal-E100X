@@ -279,9 +279,12 @@ The reader supports standard DRM-free, reflowable EPUB 2 and EPUB 3 books. It
 uses each book's package manifest and spine, extracts XHTML chapters, decodes
 HTML entities, preserves common heading, bold, and italic emphasis, removes
 script and stylesheet content, and paginates the resulting text. DRM,
-fixed-layout books, embedded scripting, advanced CSS, images, audio, and video
-are not supported. A book may contain up to 96 spine entries, each extracted
-chapter is limited to 512 KiB, and one browser folder displays up to 96 entries.
+fixed-layout books, embedded scripting, advanced CSS, inline images, audio, and
+video are not supported. JPEG and PNG cover art declared through standard EPUB
+2 or EPUB 3 metadata appears as a fitted, dithered page before the book text.
+Cover images are limited to 2 MiB after ZIP extraction. A book may contain up
+to 96 spine entries, each extracted chapter is limited to 512 KiB, and one
+browser folder displays up to 96 entries.
 Soft-wrapped body lines are fully justified; paragraph-final and explicit-break
 lines retain their natural spacing.
 
@@ -301,11 +304,16 @@ Touch controls:
 - Tap the on-screen previous and next arrows or use the side **UP** and
   **DOWN** buttons to move between browser pages.
 - Tap an `.epub` file to open it. The same side buttons move between reading
-  pages; navigation continues across chapter boundaries.
+  pages; navigation starts on supported cover art and continues across chapter
+  boundaries.
 - Tap the reading-screen back arrow to return to the book's folder.
 - The current browser folder, book path, chapter, and page offset are retained
   in RTC memory. Waking from deep sleep reopens the same page when the SD card
   and book are still available; otherwise the reader returns to the browser.
+- Card presence and volume identity are checked before every browser or reading
+  action. Removing or replacing the card closes stale book/archive handles and
+  returns to a safe browser state; an inserted replacement is listed from its
+  root rather than reusing paths or entries from the previous card.
 
 For CJK books, download `fonts.zip` from the
 [latest release](https://github.com/danpodeanu/seeed-reterminal-E100X/releases)
@@ -346,7 +354,8 @@ automatically orders them by use count, from most used to least used,
 and preserves
 the default order for ties. Counts are retained in RTC memory through deep
 sleep, but reset after power loss, RTC memory loss, or reflashing. Previous and
-next arrows appear only when a page exists in that direction.
+next arrows appear only when a page exists in that direction. Returning from an
+activity opens the selector page containing that activity's newly ranked tile.
 
 Front buttons:
 
