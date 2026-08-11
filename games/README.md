@@ -264,6 +264,7 @@ Touch controls:
 - Swipe left or right to move one column.
 - A rotation or horizontal move also advances the piece by one row.
 - Swipe down to soft-drop one row or swipe up to hard-drop to the stack.
+- Press **UP** to rotate counterclockwise or **DOWN** to rotate clockwise.
 - Tap **NEW** to start over.
 - Tap the back arrow to save and return to the selection screen.
 
@@ -297,7 +298,8 @@ Touch controls:
   first entry and returns to the parent directory.
 - Tap the browser's back arrow to leave the EPUB Reader and return to the
   activity selector.
-- Use the side **UP** and **DOWN** buttons to move between browser pages.
+- Tap the on-screen previous and next arrows or use the side **UP** and
+  **DOWN** buttons to move between browser pages.
 - Tap an `.epub` file to open it. The same side buttons move between reading
   pages; navigation continues across chapter boundaries.
 - Tap the reading-screen back arrow to return to the book's folder.
@@ -352,13 +354,14 @@ Front buttons:
   **DOWN** opens the next selector page. Pressing either at the corresponding
   first or last page boundary has no effect.
 - In the EPUB browser and reader, **UP** opens the previous browser or reading
-  page and **DOWN** opens the next one. In other activities, **UP** saves and
-  returns to the selection screen and **DOWN** has no in-game action.
-- Release **OK** in under 2 seconds to save and enter deep sleep. Press
-  **OK** again to resume.
-- Hold **OK** for 2–5 seconds and release it to open the language selection
-  screen.
-- Holding **OK** for more than 5 seconds has no action.
+  page and **DOWN** opens the next one. In Falling Blocks, **UP** rotates
+  counterclockwise and **DOWN** rotates clockwise. In other activities,
+  **UP** saves and returns to the selection screen and **DOWN** has no in-game
+  action.
+- Release **OK** in under 2 seconds to close help or follow the current
+  screen's back action. It does nothing where no back action is available.
+- Hold **OK** for at least 2 seconds and release it to save and enter deep
+  sleep. Press **OK** again to resume.
 - Tap the circled **?** left of the battery indicator on any activity screen to
   open its instructions. Tap the circled **X** to close the instruction pane.
 
@@ -368,15 +371,15 @@ remain silent.
 
 The interface supports English, Spanish, French, German, and Simplified
 Chinese. The language screen appears on first boot until a language is saved
-in NVM, and can be reopened with the 2–5 second **OK** gesture. Its Unicode
-fonts are embedded in firmware flash, so language support does not require an
-SD card. Crossword clues and answers remain in English.
+in NVM, and can be reopened with the cog in the selector's top-left corner.
+Its Unicode fonts are embedded in firmware flash, so language support does not
+require an SD card. Crossword clues and answers remain in English.
 
 The app beeps once at startup and when a game is opened from the selector.
 While the app is open,
 the ESP32-S3 enters light sleep between touch and button events, then wakes
-immediately for input and logs each light-sleep entry and exit. Releasing
-**OK** in under 2 seconds uses deep sleep for longer idle periods. Resume state
+immediately for input and logs each light-sleep entry and exit. Holding
+**OK** for at least 2 seconds uses deep sleep for longer idle periods. Resume state
 is stored in RTC slow memory, so normal sleep/resume cycles do not write to
 flash or the SD card. The selected language and Sokoban completion are stored
 in internal flash. The same saved deep sleep starts automatically after five

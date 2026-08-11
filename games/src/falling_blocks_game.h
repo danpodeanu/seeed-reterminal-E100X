@@ -15,6 +15,7 @@ class FallingBlocksGame {
   enum class Action : uint8_t {
     MoveLeft,
     MoveRight,
+    RotateCounterclockwise,
     RotateClockwise,
     SoftDrop,
     HardDrop,
@@ -72,8 +73,10 @@ class FallingBlocksGame {
       tryMove(0, -1);
     } else if (action == Action::MoveRight) {
       tryMove(0, 1);
+    } else if (action == Action::RotateCounterclockwise) {
+      tryRotate(-1);
     } else if (action == Action::RotateClockwise) {
-      tryRotate();
+      tryRotate(1);
     }
     if (tryMove(1, 0)) return true;
     lockActivePiece();
@@ -258,8 +261,9 @@ class FallingBlocksGame {
     return true;
   }
 
-  bool tryRotate() {
-    const uint8_t rotation = static_cast<uint8_t>((rotation_ + 1U) & 3U);
+  bool tryRotate(int direction) {
+    const uint8_t rotation = static_cast<uint8_t>(
+        (rotation_ + (direction < 0 ? 3U : 1U)) & 3U);
     constexpr int kColumnKicks[] = {0, -1, 1, -2, 2};
     for (int offset : kColumnKicks) {
       if (!canPlace(activePiece_, rotation, activeRow_,

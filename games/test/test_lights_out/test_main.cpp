@@ -1101,19 +1101,19 @@ void test_epub_browser_parent_folder_is_first_below_root() {
 
 void test_ok_hold_duration_selects_requested_action() {
   TEST_ASSERT_EQUAL_INT(
-      static_cast<int>(ok_button::Action::DeepSleep),
+      static_cast<int>(ok_button::Action::ShortPress),
       static_cast<int>(ok_button::actionForHold(0)));
   TEST_ASSERT_EQUAL_INT(
-      static_cast<int>(ok_button::Action::DeepSleep),
+      static_cast<int>(ok_button::Action::ShortPress),
       static_cast<int>(ok_button::actionForHold(1999)));
   TEST_ASSERT_EQUAL_INT(
-      static_cast<int>(ok_button::Action::LanguageSelection),
+      static_cast<int>(ok_button::Action::DeepSleep),
       static_cast<int>(ok_button::actionForHold(2000)));
   TEST_ASSERT_EQUAL_INT(
-      static_cast<int>(ok_button::Action::LanguageSelection),
+      static_cast<int>(ok_button::Action::DeepSleep),
       static_cast<int>(ok_button::actionForHold(5000)));
   TEST_ASSERT_EQUAL_INT(
-      static_cast<int>(ok_button::Action::None),
+      static_cast<int>(ok_button::Action::DeepSleep),
       static_cast<int>(ok_button::actionForHold(5001)));
 }
 
@@ -1572,6 +1572,19 @@ void test_falling_blocks_turn_moves_and_advances_gravity() {
   TEST_ASSERT_EQUAL_INT(2, game.activeRow());
 }
 
+void test_falling_blocks_rotates_in_both_directions() {
+  FallingBlocksGame game;
+  game.start(2);
+
+  TEST_ASSERT_TRUE(
+      game.turn(FallingBlocksGame::Action::RotateCounterclockwise));
+  TEST_ASSERT_EQUAL_UINT8(3, game.rotation());
+  TEST_ASSERT_EQUAL_INT(1, game.activeRow());
+  TEST_ASSERT_TRUE(game.turn(FallingBlocksGame::Action::RotateClockwise));
+  TEST_ASSERT_EQUAL_UINT8(0, game.rotation());
+  TEST_ASSERT_EQUAL_INT(2, game.activeRow());
+}
+
 void test_falling_blocks_hard_drop_locks_piece_and_scores() {
   FallingBlocksGame game;
   game.start(3);
@@ -1943,6 +1956,7 @@ int main(int, char**) {
   RUN_TEST(test_mahjong_rejects_inconsistent_snapshot);
   RUN_TEST(test_falling_blocks_starts_with_one_active_piece);
   RUN_TEST(test_falling_blocks_turn_moves_and_advances_gravity);
+  RUN_TEST(test_falling_blocks_rotates_in_both_directions);
   RUN_TEST(test_falling_blocks_hard_drop_locks_piece_and_scores);
   RUN_TEST(test_falling_blocks_clears_completed_line);
   RUN_TEST(test_falling_blocks_snapshot_restores_active_game);

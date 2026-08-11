@@ -4,19 +4,15 @@
 
 namespace ok_button {
 
-constexpr uint32_t kLanguageHoldMinMs = 2000;
-constexpr uint32_t kLanguageHoldMaxMs = 5000;
+constexpr uint32_t kDeepSleepHoldMs = 2000;
 
 enum class Action : uint8_t {
+  ShortPress,
   DeepSleep,
-  LanguageSelection,
-  None,
 };
 
 constexpr Action actionForHold(uint32_t heldMs) {
-  if (heldMs < kLanguageHoldMinMs) return Action::DeepSleep;
-  if (heldMs <= kLanguageHoldMaxMs) return Action::LanguageSelection;
-  return Action::None;
+  return heldMs < kDeepSleepHoldMs ? Action::ShortPress : Action::DeepSleep;
 }
 
 }  // namespace ok_button

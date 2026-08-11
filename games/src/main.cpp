@@ -256,6 +256,7 @@ Rect kFallingBlocksMenuCard = kMenuCardSlots[3];
 constexpr Rect kPreviousPageButton = {8, 756, 48, 36};
 constexpr Rect kNextPageButton = {424, 756, 48, 36};
 constexpr Rect kBackButton = {8, 6, 48, 36};
+constexpr Rect kSettingsButton = {8, 6, 36, 36};
 constexpr Rect kHelpButton = {344, 6, 36, 36};
 constexpr Rect kNewButton = {30, 688, 190, 66};
 constexpr Rect kResetButton = {260, 688, 190, 66};
@@ -2061,18 +2062,37 @@ void drawHelpIndicator() {
   const int centerY = kHelpButton.y + kHelpButton.height / 2;
   epaper.fillRect(kHelpButton.x - 2, kHelpButton.y - 2,
                   kHelpButton.width + 4, kHelpButton.height + 4, TFT_WHITE);
-  epaper.drawCircle(centerX, centerY, 17, TFT_BLACK);
-  epaper.drawCircle(centerX, centerY, 16, TFT_BLACK);
   if (helpPaneVisible) {
+    epaper.fillCircle(centerX, centerY, 17, TFT_BLACK);
     for (int offset = -1; offset <= 1; ++offset) {
       epaper.drawLine(centerX - 7, centerY - 7 + offset, centerX + 7,
-                      centerY + 7 + offset, TFT_BLACK);
+                      centerY + 7 + offset, TFT_WHITE);
       epaper.drawLine(centerX - 7, centerY + 7 + offset, centerX + 7,
-                      centerY - 7 + offset, TFT_BLACK);
+                      centerY - 7 + offset, TFT_WHITE);
     }
   } else {
+    epaper.drawCircle(centerX, centerY, 17, TFT_BLACK);
+    epaper.drawCircle(centerX, centerY, 16, TFT_BLACK);
     drawCenteredText("?", centerX, centerY + 2, 4, TFT_BLACK, TFT_WHITE, 24);
   }
+}
+
+void drawSettingsIndicator() {
+  const int centerX = kSettingsButton.x + kSettingsButton.width / 2;
+  const int centerY = kSettingsButton.y + kSettingsButton.height / 2;
+  epaper.fillRect(kSettingsButton.x - 2, kSettingsButton.y - 2,
+                  kSettingsButton.width + 4, kSettingsButton.height + 4,
+                  TFT_WHITE);
+  epaper.fillRect(centerX - 3, kSettingsButton.y, 7, 8, TFT_BLACK);
+  epaper.fillRect(centerX - 3, kSettingsButton.y + 28, 7, 8, TFT_BLACK);
+  epaper.fillRect(kSettingsButton.x, centerY - 3, 8, 7, TFT_BLACK);
+  epaper.fillRect(kSettingsButton.x + 28, centerY - 3, 8, 7, TFT_BLACK);
+  epaper.fillRect(centerX - 13, centerY - 13, 7, 7, TFT_BLACK);
+  epaper.fillRect(centerX + 7, centerY - 13, 7, 7, TFT_BLACK);
+  epaper.fillRect(centerX - 13, centerY + 7, 7, 7, TFT_BLACK);
+  epaper.fillRect(centerX + 7, centerY + 7, 7, 7, TFT_BLACK);
+  epaper.fillCircle(centerX, centerY, 12, TFT_BLACK);
+  epaper.fillCircle(centerX, centerY, 5, TFT_WHITE);
 }
 
 void drawGameStatusBar(const char* title) {
@@ -2272,6 +2292,7 @@ void drawHelpPane() {
 
 void drawMenu() {
   epaper.fillSprite(TFT_WHITE);
+  drawSettingsIndicator();
   drawGamesLogo(kScreenWidth / 2, 24, 64);
   arrangeMenuCards();
   const size_t pageIndex = static_cast<size_t>(currentMenuPage);
@@ -3564,6 +3585,18 @@ bool browserPageRequiresNonAscii() {
   return false;
 }
 
+int browserItemCount() {
+  return epub_browser_logic::itemCount(
+      sdBrowser.count(),
+      epub_browser_logic::hasParentFolder(readerBrowserPath.c_str()));
+}
+
+bool hasPreviousBrowserPage() { return browserPageStart > 0; }
+
+bool hasNextBrowserPage() {
+  return browserPageStart + kBrowserRowsPerPage < browserItemCount();
+}
+
 void drawBrowserFolderIcon(int x, int y) {
   epaper.fillRect(x + 2, y + 8, 44, 31, TFT_BLACK);
   epaper.fillRect(x + 7, y + 2, 19, 10, TFT_BLACK);
@@ -3614,8 +3647,7 @@ void drawEpubBrowser() {
       kScreenWidth / 2, 72, builtInFont);
   const bool hasParentFolder =
       epub_browser_logic::hasParentFolder(readerBrowserPath.c_str());
-  const int itemCount =
-      epub_browser_logic::itemCount(sdBrowser.count(), hasParentFolder);
+  const int itemCount = browserItemCount();
   if (itemCount == 0) {
     if (smoothBrowserFont) epaper.unloadFont();
     drawCentered(tr(TextId::EmptyFolder), kScreenWidth / 2, 350, 4);
@@ -3657,6 +3689,12 @@ void drawEpubBrowser() {
     footer += "96+";
   }
   if (!footer.isEmpty()) drawCentered(footer, kScreenWidth / 2, 776, 2);
+  if (hasPreviousBrowserPage()) {
+    drawArrowButton(kPreviousPageButton, false);
+  }
+  if (hasNextBrowserPage()) {
+    drawArrowButton(kNextPageButton, true);
+  }
 }
 
 epub_text::TextPage currentReaderPage() {
@@ -4328,6 +4366,28 @@ void showEpubReading() {
   refreshRegion(kReaderRegion, "EPUB page");
 }
 
+void showPreviousBrowserPage() {
+  if (!hasPreviousBrowserPage()) {
+    LOG.println("[games] already on first EPUB browser page");
+    return;
+  }
+  browserPageStart = std::max(0, browserPageStart - kBrowserRowsPerPage);
+  browserMessage = "";
+  drawEpubBrowser();
+  refreshRegion(kReaderRegion, "EPUB previous files");
+}
+
+void showNextBrowserPage() {
+  if (!hasNextBrowserPage()) {
+    LOG.println("[games] already on last EPUB browser page");
+    return;
+  }
+  browserPageStart += kBrowserRowsPerPage;
+  browserMessage = "";
+  drawEpubBrowser();
+  refreshRegion(kReaderRegion, "EPUB next files");
+}
+
 void updateLightsOut(const char* action) {
   drawLightsOutBoard();
   refreshRegion(kBoardRegion, action);
@@ -4523,6 +4583,11 @@ void handleLanguageTouch(const Gt911Touch::Point& point) {
 }
 
 void handleMenuTouch(const Gt911Touch::Point& point) {
+  if (kSettingsButton.contains(point.x, point.y)) {
+    hardware::beep();
+    showLanguageSelection();
+    return;
+  }
   const size_t pageIndex = static_cast<size_t>(currentMenuPage);
   if (pageIndex + 1 < kMenuPageCount &&
       kNextPageButton.contains(point.x, point.y)) {
@@ -5284,6 +5349,17 @@ void handleEpubBrowserTouch(const Gt911Touch::Point& point) {
     return;
   }
   if (!sdCardReady) return;
+  if (kPreviousPageButton.contains(point.x, point.y) &&
+      hasPreviousBrowserPage()) {
+    hardware::beep();
+    showPreviousBrowserPage();
+    return;
+  }
+  if (kNextPageButton.contains(point.x, point.y) && hasNextBrowserPage()) {
+    hardware::beep();
+    showNextBrowserPage();
+    return;
+  }
   if (point.y < kBrowserRowTop ||
       point.y >= kBrowserRowTop +
                      kBrowserRowsPerPage * kBrowserRowHeight) {
@@ -5573,6 +5649,29 @@ void powerDownAndSleep(SleepScreen screen = SleepScreen::Resume,
   esp_deep_sleep_start();
 }
 
+void handleShortOkPress() {
+  if (helpPaneVisible) {
+    hardware::beep();
+    toggleHelpPane();
+    return;
+  }
+  if (languageSelectionVisible) {
+    LOG.println("[games] no back action on language selection");
+    return;
+  }
+  if (currentScreen == Screen::Menu) {
+    LOG.println("[games] no back action on game picker");
+    return;
+  }
+
+  hardware::beep();
+  if (currentScreen == Screen::EpubReading) {
+    showEpubBrowser(false);
+  } else {
+    showMenu();
+  }
+}
+
 void handleButton(const ButtonEvent& event) {
   ButtonState& button = *event.button;
   recordActivity();
@@ -5581,16 +5680,12 @@ void handleButton(const ButtonEvent& event) {
 
   if (button.pin == board::PIN_BUTTON_0) {
     switch (ok_button::actionForHold(event.heldMs)) {
+      case ok_button::Action::ShortPress:
+        handleShortOkPress();
+        return;
       case ok_button::Action::DeepSleep:
         hardware::beep();
         powerDownAndSleep();
-        return;
-      case ok_button::Action::LanguageSelection:
-        hardware::beep();
-        showLanguageSelection();
-        return;
-      case ok_button::Action::None:
-        LOG.println("[games] ignoring OK hold over five seconds");
         return;
     }
   }
@@ -5605,18 +5700,15 @@ void handleButton(const ButtonEvent& event) {
     return;
   }
   if (button.pin == board::PIN_BUTTON_1) {
-    if (currentScreen == Screen::EpubReading) {
+    if (currentScreen == Screen::FallingBlocks) {
+      if (fallingBlocks.turn(
+              FallingBlocksGame::Action::RotateCounterclockwise)) {
+        updateFallingBlocks("rotate Falling Blocks counterclockwise");
+      }
+    } else if (currentScreen == Screen::EpubReading) {
       showPreviousReaderPage();
     } else if (currentScreen == Screen::EpubBrowser) {
-      if (browserPageStart > 0) {
-        browserPageStart =
-            std::max(0, browserPageStart - kBrowserRowsPerPage);
-        browserMessage = "";
-        drawEpubBrowser();
-        refreshRegion(kReaderRegion, "EPUB previous files");
-      } else {
-        LOG.println("[games] already on first EPUB browser page");
-      }
+      showPreviousBrowserPage();
     } else if (currentScreen != Screen::Menu) {
       showMenu();
     } else if (currentMenuPage != MenuPage::First) {
@@ -5629,20 +5721,14 @@ void handleButton(const ButtonEvent& event) {
     return;
   }
   if (button.pin == board::PIN_BUTTON_2) {
-    if (currentScreen == Screen::EpubReading) {
+    if (currentScreen == Screen::FallingBlocks) {
+      if (fallingBlocks.turn(FallingBlocksGame::Action::RotateClockwise)) {
+        updateFallingBlocks("rotate Falling Blocks clockwise");
+      }
+    } else if (currentScreen == Screen::EpubReading) {
       showNextReaderPage();
     } else if (currentScreen == Screen::EpubBrowser) {
-      const int itemCount = epub_browser_logic::itemCount(
-          sdBrowser.count(),
-          epub_browser_logic::hasParentFolder(readerBrowserPath.c_str()));
-      if (browserPageStart + kBrowserRowsPerPage < itemCount) {
-        browserPageStart += kBrowserRowsPerPage;
-        browserMessage = "";
-        drawEpubBrowser();
-        refreshRegion(kReaderRegion, "EPUB next files");
-      } else {
-        LOG.println("[games] already on last EPUB browser page");
-      }
+      showNextBrowserPage();
     } else if (currentScreen == Screen::Menu &&
         static_cast<size_t>(currentMenuPage) + 1 < kMenuPageCount) {
       showMenuPage(

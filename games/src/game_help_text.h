@@ -249,38 +249,46 @@ inline constexpr const Utf8Char*
          "再点击相同的可用牌。选择不当可能导致无牌可消。"},
         {u8"Complete horizontal lines with the falling pieces. Tap the board to "
          "rotate. Swipe left or right to move; each move or rotation also drops "
-         "one row. Swipe down for a soft drop or up for a hard drop.",
+         "one row. Swipe down for a soft drop or up for a hard drop. UP rotates "
+         "counterclockwise; DOWN rotates clockwise.",
          u8"Completa líneas horizontales con las piezas. Toca para girar. "
          "Desliza a izquierda o derecha para mover; cada movimiento o giro "
-         "también baja una fila. Abajo baja una fila y arriba hace caída rápida.",
+         "también baja una fila. Abajo baja una fila y arriba hace caída rápida. "
+         "ARRIBA gira a la izquierda; ABAJO gira a la derecha.",
          u8"Complétez des lignes horizontales avec les pièces. Touchez pour "
          "tourner. Balayez à gauche ou à droite pour déplacer; chaque action "
-         "descend aussi d'une ligne. Bas descend doucement, haut fait chuter.",
+         "descend aussi d'une ligne. Bas descend doucement, haut fait chuter. "
+         "HAUT tourne à gauche; BAS tourne à droite.",
          u8"Fülle waagerechte Reihen mit den Teilen. Tippen dreht. Wische nach "
          "links oder rechts; jede Bewegung oder Drehung senkt das Teil auch um "
-         "eine Reihe. Nach unten senkt, nach oben lässt es sofort fallen.",
+         "eine Reihe. Nach unten senkt, nach oben lässt es sofort fallen. AUF "
+         "dreht gegen den Uhrzeigersinn; AB dreht im Uhrzeigersinn.",
          u8"用下落方块填满横行。点击棋盘可旋转，左右滑动可移动；每次移动或旋转后方块也会下降一"
-         "行。向下滑动可软降，向上滑动可直接落底。"},
-        {u8"Browse the SD card read-only and tap an EPUB file to open it. UP and "
-         "DOWN change browser or reading pages. UP FOLDER returns to the parent "
+         "行。向下滑动可软降，向上滑动可直接落底。上键逆时针旋转，下键顺时针旋转。"},
+        {u8"Browse the SD card read-only and tap an EPUB file to open it. The "
+         "on-screen arrows or UP and DOWN change browser pages. UP and DOWN "
+         "change reading pages. UP FOLDER returns to the parent "
          "folder. The reading-screen back arrow returns to the browser. Only "
          "DRM-free, reflowable EPUB 2 and EPUB 3 books are supported.",
          u8"Explora la tarjeta SD en modo de solo lectura y toca un EPUB para "
-         "abrirlo. ARRIBA y ABAJO cambian de página al explorar o leer. SUBIR "
+         "abrirlo. Las flechas en pantalla o ARRIBA y ABAJO cambian páginas del "
+         "explorador. ARRIBA y ABAJO cambian páginas de lectura. SUBIR "
          "CARPETA vuelve al directorio superior. La flecha de lectura vuelve al "
          "explorador. Solo se admiten EPUB 2/3 fluidos y sin DRM.",
          u8"Parcourez la carte SD en lecture seule et touchez un EPUB pour "
-         "l'ouvrir. HAUT et BAS changent de page dans le navigateur ou le livre. "
+         "l'ouvrir. Les flèches à l'écran ou HAUT et BAS changent de page dans "
+         "le navigateur. HAUT et BAS changent les pages du livre. "
          "DOSSIER PARENT remonte d'un niveau. La flèche de lecture revient au "
          "navigateur. Seuls les EPUB 2/3 redistribuables sans DRM sont pris en "
          "charge.",
          u8"Durchsuche die SD-Karte schreibgeschützt und tippe eine EPUB-Datei "
-         "zum Öffnen an. AUF und AB wechseln Browser- oder Buchseiten. ORDNER "
+         "zum Öffnen an. Bildschirmpfeile oder AUF und AB wechseln Browserseiten. "
+         "AUF und AB wechseln Buchseiten. ORDNER "
          "NACH OBEN öffnet den Elternordner. Der Lesepfeil kehrt zum Browser "
          "zurück. Unterstützt werden nur DRM-freie, umfließende EPUB-2/3-Bücher.",
-         u8"以只读方式浏览 SD 卡，点击 EPUB 文件即可打开。侧边上、下键可切换浏览页或阅读页。上级"
-         "文件夹可返回父目录，阅读界面的返回箭头可回到浏览器。仅支持无 DRM 的可重排 EPUB 2/3"
-         " 图书。"},
+         u8"以只读方式浏览 SD 卡，点击 EPUB 文件即可打开。屏幕箭头或侧边上、下键可切换浏览页；"
+         "阅读时使用侧边上、下键。上级文件夹可返回父目录，阅读界面的返回箭头可回到浏览器。仅支"
+         "持无 DRM 的可重排 EPUB 2/3 图书。"},
 };
 
 inline const char* text(game_localization::Language language, Topic topic) {
