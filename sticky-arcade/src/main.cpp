@@ -16,6 +16,7 @@
 #include "app_logger.h"
 #include "battery_gauge.h"
 #include "board_pins.h"
+#include "connect_four_game.h"
 #include "crossword_game.h"
 #include "driver.h"
 #include "dither.h"
@@ -34,7 +35,6 @@
 #include "game_language_store.h"
 #include "game_localization.h"
 #include "game_progress_store.h"
-#include "game_ranking.h"
 #include "game_ui_fonts.h"
 #include "gt911_touch.h"
 #include "hardware.h"
@@ -62,6 +62,7 @@
 #include "sudoku_game.h"
 #include "text_render.h"
 #include "usb_screen_capture.h"
+#include "word_search_game.h"
 
 #if RETERMINAL_MODEL != 1005
 #error "Sticky Arcade supports only reTerminal E1005"
@@ -145,6 +146,18 @@ constexpr int kFallingGridWidth =
     kFallingCellSize * FallingBlocksGame::kWidth;
 constexpr int kFallingGridHeight =
     kFallingCellSize * FallingBlocksGame::kHeight;
+constexpr int kConnectFourGridLeft = 37;
+constexpr int kConnectFourGridTop = 150;
+constexpr int kConnectFourCellSize = 58;
+constexpr int kConnectFourGridWidth =
+    kConnectFourCellSize * ConnectFourGame::kColumns;
+constexpr int kConnectFourGridHeight =
+    kConnectFourCellSize * ConnectFourGame::kRows;
+constexpr int kWordSearchGridLeft = 33;
+constexpr int kWordSearchGridTop = 92;
+constexpr int kWordSearchCellSize = 46;
+constexpr int kWordSearchGridSize =
+    kWordSearchCellSize * WordSearchGame::kSize;
 constexpr int kKeyboardKeyHeight = 42;
 constexpr int kKeyboardFirstRowY = 586;
 constexpr int kKeyboardRowGap = 6;
@@ -153,6 +166,7 @@ constexpr int kSwipeThreshold = 45;
 constexpr int kMenuSwipeEdgeWidth = 40;
 constexpr int kMinesTouchMoveTolerance = 20;
 constexpr int kReversiAiDepth = 3;
+constexpr int kConnectFourAiDepth = 5;
 constexpr uint32_t kButtonDebounceMs = 30;
 constexpr uint32_t kMinesFlagHoldMs = 650;
 constexpr uint32_t kKlondikeDoubleTapMs = 800;
@@ -162,22 +176,24 @@ constexpr uint32_t kBatteryCheckIntervalMs = 60000;
 constexpr uint32_t kInactivitySleepMs = 5UL * 60UL * 1000UL;
 constexpr int kLowBatteryThresholdPct = 10;
 constexpr uint32_t kPersistedStateMagic = 0x47414D45;
-constexpr uint16_t kPersistedStateVersion = 17;
-constexpr uint16_t kLightsOutSavedFlag = 1U << 0;
-constexpr uint16_t k2048SavedFlag = 1U << 1;
-constexpr uint16_t kPipeConnectSavedFlag = 1U << 2;
-constexpr uint16_t kMinesweeperSavedFlag = 1U << 3;
-constexpr uint16_t kNonogramSavedFlag = 1U << 4;
-constexpr uint16_t kReversiSavedFlag = 1U << 5;
-constexpr uint16_t kDotsAndBoxesSavedFlag = 1U << 6;
-constexpr uint16_t kSokobanSavedFlag = 1U << 7;
-constexpr uint16_t kPegSolitaireSavedFlag = 1U << 8;
-constexpr uint16_t kSlitherlinkSavedFlag = 1U << 9;
-constexpr uint16_t kSudokuSavedFlag = 1U << 10;
-constexpr uint16_t kCrosswordSavedFlag = 1U << 11;
-constexpr uint16_t kKlondikeSavedFlag = 1U << 12;
-constexpr uint16_t kMahjongSavedFlag = 1U << 13;
-constexpr uint16_t kFallingBlocksSavedFlag = 1U << 14;
+constexpr uint16_t kPersistedStateVersion = 18;
+constexpr uint32_t kLightsOutSavedFlag = 1UL << 0;
+constexpr uint32_t k2048SavedFlag = 1UL << 1;
+constexpr uint32_t kPipeConnectSavedFlag = 1UL << 2;
+constexpr uint32_t kMinesweeperSavedFlag = 1UL << 3;
+constexpr uint32_t kNonogramSavedFlag = 1UL << 4;
+constexpr uint32_t kReversiSavedFlag = 1UL << 5;
+constexpr uint32_t kDotsAndBoxesSavedFlag = 1UL << 6;
+constexpr uint32_t kSokobanSavedFlag = 1UL << 7;
+constexpr uint32_t kPegSolitaireSavedFlag = 1UL << 8;
+constexpr uint32_t kSlitherlinkSavedFlag = 1UL << 9;
+constexpr uint32_t kSudokuSavedFlag = 1UL << 10;
+constexpr uint32_t kCrosswordSavedFlag = 1UL << 11;
+constexpr uint32_t kKlondikeSavedFlag = 1UL << 12;
+constexpr uint32_t kMahjongSavedFlag = 1UL << 13;
+constexpr uint32_t kFallingBlocksSavedFlag = 1UL << 14;
+constexpr uint32_t kConnectFourSavedFlag = 1UL << 15;
+constexpr uint32_t kWordSearchSavedFlag = 1UL << 16;
 constexpr char k2048HighScoreKey[] = "2048_best";
 constexpr char kSokobanProgressKey[] = "sokoban_level";
 constexpr char kReaderCjkFont16Path[] = "/fonts/epub_cjk_16.vlw";
@@ -263,6 +279,8 @@ Rect kKlondikeMenuCard = kMenuCardSlots[0];
 Rect kMahjongMenuCard = kMenuCardSlots[1];
 Rect kEpubReaderMenuCard = kMenuCardSlots[2];
 Rect kFallingBlocksMenuCard = kMenuCardSlots[3];
+Rect kConnectFourMenuCard = kMenuCardSlots[4];
+Rect kWordSearchMenuCard = kMenuCardSlots[5];
 constexpr Rect kPreviousPageButton = {8, 756, 48, 36};
 constexpr Rect kNextPageButton = {424, 756, 48, 36};
 constexpr Rect kBackButton = {8, 6, 48, 36};
@@ -293,6 +311,9 @@ constexpr E1005FastRefresh::Region kKlondikeBoardRegion = {5, 56, 470, 620};
 constexpr E1005FastRefresh::Region kMahjongBoardRegion = {8, 64, 464, 612};
 constexpr E1005FastRefresh::Region kFallingBlocksBoardRegion = {8, 64, 464,
                                                                620};
+constexpr E1005FastRefresh::Region kConnectFourBoardRegion = {25, 80, 430, 584};
+constexpr E1005FastRefresh::Region kConnectFourModeRegion = {25, 80, 430, 674};
+constexpr E1005FastRefresh::Region kWordSearchBoardRegion = {20, 64, 440, 624};
 constexpr E1005FastRefresh::Region kReaderRegion = {0, 48, 480, 752};
 
 enum class Screen {
@@ -312,6 +333,8 @@ enum class Screen {
   Klondike,
   MahjongSolitaire,
   FallingBlocks,
+  ConnectFour,
+  WordSearch,
   EpubBrowser,
   EpubReading,
 };
@@ -339,36 +362,54 @@ enum class GameId : uint8_t {
   MahjongSolitaire,
   FallingBlocks,
   EpubReader,
+  ConnectFour,
+  WordSearch,
   Count,
 };
 
 constexpr size_t kGameCount = static_cast<size_t>(GameId::Count);
-constexpr uint8_t kDefaultGameRanking[kGameCount] = {
-    static_cast<uint8_t>(GameId::EpubReader),
-    static_cast<uint8_t>(GameId::Sokoban),
-    static_cast<uint8_t>(GameId::Crossword),
-    static_cast<uint8_t>(GameId::LightsOut),
-    static_cast<uint8_t>(GameId::Game2048),
-    static_cast<uint8_t>(GameId::PipeConnect),
-    static_cast<uint8_t>(GameId::Minesweeper),
-    static_cast<uint8_t>(GameId::Nonogram),
-    static_cast<uint8_t>(GameId::Reversi),
-    static_cast<uint8_t>(GameId::DotsAndBoxes),
-    static_cast<uint8_t>(GameId::PegSolitaire),
-    static_cast<uint8_t>(GameId::Slitherlink),
-    static_cast<uint8_t>(GameId::Sudoku),
+constexpr uint8_t kGameOrder[kGameCount] = {
+    static_cast<uint8_t>(GameId::FallingBlocks),
+    static_cast<uint8_t>(GameId::ConnectFour),
     static_cast<uint8_t>(GameId::Klondike),
     static_cast<uint8_t>(GameId::MahjongSolitaire),
-    static_cast<uint8_t>(GameId::FallingBlocks),
+    static_cast<uint8_t>(GameId::Game2048),
+    static_cast<uint8_t>(GameId::EpubReader),
+    static_cast<uint8_t>(GameId::Minesweeper),
+    static_cast<uint8_t>(GameId::Sudoku),
+    static_cast<uint8_t>(GameId::Reversi),
+    static_cast<uint8_t>(GameId::WordSearch),
+    static_cast<uint8_t>(GameId::Crossword),
+    static_cast<uint8_t>(GameId::Sokoban),
+    static_cast<uint8_t>(GameId::DotsAndBoxes),
+    static_cast<uint8_t>(GameId::PegSolitaire),
+    static_cast<uint8_t>(GameId::LightsOut),
+    static_cast<uint8_t>(GameId::Nonogram),
+    static_cast<uint8_t>(GameId::PipeConnect),
+    static_cast<uint8_t>(GameId::Slitherlink),
 };
-static_assert(sizeof(kDefaultGameRanking) /
-                  sizeof(kDefaultGameRanking[0]) ==
-              kGameCount);
+static_assert(sizeof(kGameOrder) / sizeof(kGameOrder[0]) == kGameCount);
 constexpr size_t kGamesPerMenuPage =
     sizeof(kMenuCardSlots) / sizeof(kMenuCardSlots[0]);
 constexpr size_t kMenuPageCount =
     (kGameCount + kGamesPerMenuPage - 1) / kGamesPerMenuPage;
 static_assert(kMenuPageCount == 3);
+constexpr bool validGameOrder() {
+  bool seen[kGameCount] = {};
+  for (const uint8_t game : kGameOrder) {
+    if (game >= kGameCount || seen[game]) return false;
+    seen[game] = true;
+  }
+  return true;
+}
+constexpr bool gameIsOnFirstMenuPage(GameId game) {
+  for (size_t position = 0; position < kGamesPerMenuPage; ++position) {
+    if (kGameOrder[position] == static_cast<uint8_t>(game)) return true;
+  }
+  return false;
+}
+static_assert(validGameOrder());
+static_assert(gameIsOnFirstMenuPage(GameId::EpubReader));
 const char* screenName(Screen screen) {
   switch (screen) {
     case Screen::Menu:
@@ -403,6 +444,10 @@ const char* screenName(Screen screen) {
       return "saved Mahjong Solitaire";
     case Screen::FallingBlocks:
       return "saved Falling Blocks";
+    case Screen::ConnectFour:
+      return "saved Connect Four";
+    case Screen::WordSearch:
+      return "saved Word Search";
     case Screen::EpubBrowser:
       return "EPUB browser";
     case Screen::EpubReading:
@@ -431,8 +476,9 @@ struct PersistedState {
   uint16_t version;
   uint8_t screen;
   uint8_t menuPage;
-  uint16_t flags;
+  uint32_t flags;
   uint8_t reversiMode;
+  uint8_t connectFourMode;
   LightsOutGame::Snapshot lightsOut;
   Game2048::Snapshot game2048;
   PipeConnectGame::Snapshot pipeConnect;
@@ -448,8 +494,11 @@ struct PersistedState {
   KlondikeGame::Snapshot klondike;
   MahjongSolitaireGame::Snapshot mahjong;
   FallingBlocksGame::Snapshot fallingBlocks;
+  ConnectFourGame::Snapshot connectFour;
+  WordSearchGame::Snapshot wordSearch;
   ReaderResume reader;
-  uint32_t gamePlayCounts[kGameCount];
+  // Retained so version 18 RTC state keeps its existing layout.
+  uint32_t legacyPlayCounts[kGameCount];
   uint32_t checksum;
 };
 
@@ -498,15 +547,16 @@ CrosswordGame crossword;
 KlondikeGame klondike;
 MahjongSolitaireGame mahjong;
 FallingBlocksGame fallingBlocks;
+ConnectFourGame connectFour;
+WordSearchGame wordSearch;
 EpubArchive epubArchive;
 SdReadonlyBrowser sdBrowser;
 DoubleTapTracker klondikeDoubleTap;
 uint16_t sokobanCompletedLevelCount = 0;
 bool sokobanProgressSaveFailed = false;
 uint32_t stored2048HighScore = 0;
-uint32_t gamePlayCounts[kGameCount] = {};
-uint8_t gameRanking[kGameCount] = {};
 ReversiMode reversiMode = ReversiMode::SinglePlayer;
+ReversiMode connectFourMode = ReversiMode::SinglePlayer;
 Screen currentScreen = Screen::Menu;
 MenuPage currentMenuPage = MenuPage::First;
 bool touchReady = false;
@@ -532,6 +582,8 @@ bool crosswordSaved = false;
 bool klondikeSaved = false;
 bool mahjongSaved = false;
 bool fallingBlocksSaved = false;
+bool connectFourSaved = false;
+bool wordSearchSaved = false;
 bool sdCardReady = false;
 bool readerCjkFont16Available = false;
 bool readerCjkFont24Available = false;
@@ -644,6 +696,10 @@ const char* gameName(GameId game) {
       return "Falling Blocks";
     case GameId::EpubReader:
       return "EPUB Reader";
+    case GameId::ConnectFour:
+      return "Connect Four";
+    case GameId::WordSearch:
+      return "Word Search";
     case GameId::Count:
       break;
   }
@@ -699,6 +755,10 @@ TextId gameTextId(GameId game) {
       return TextId::FallingBlocks;
     case GameId::EpubReader:
       return TextId::EpubReader;
+    case GameId::ConnectFour:
+      return TextId::ConnectFour;
+    case GameId::WordSearch:
+      return TextId::WordSearch;
     case GameId::Count:
       break;
   }
@@ -737,6 +797,10 @@ GameId gameForScreen(Screen screen) {
       return GameId::MahjongSolitaire;
     case Screen::FallingBlocks:
       return GameId::FallingBlocks;
+    case Screen::ConnectFour:
+      return GameId::ConnectFour;
+    case Screen::WordSearch:
+      return GameId::WordSearch;
     case Screen::EpubBrowser:
     case Screen::EpubReading:
       return GameId::EpubReader;
@@ -746,30 +810,17 @@ GameId gameForScreen(Screen screen) {
   return GameId::Count;
 }
 
-GameId rankedGameAt(size_t rank) {
-  return static_cast<GameId>(gameRanking[rank]);
+GameId orderedGameAt(size_t position) {
+  return static_cast<GameId>(kGameOrder[position]);
 }
 
 MenuPage menuPageForGame(GameId game) {
-  const size_t page = game_ranking::pageForGame(
-      gameRanking, static_cast<uint8_t>(game), kGamesPerMenuPage);
-  return static_cast<MenuPage>(std::min(page, kMenuPageCount - 1));
-}
-
-void updateGameRanking() {
-  game_ranking::rankByPlayCount(gamePlayCounts, kDefaultGameRanking,
-                                gameRanking);
-}
-
-void recordGameLaunch(GameId game) {
-  const size_t index = static_cast<size_t>(game);
-  const uint32_t updated = game_ranking::nextPlayCount(gamePlayCounts[index]);
-  if (updated != gamePlayCounts[index]) {
-    gamePlayCounts[index] = updated;
-    updateGameRanking();
+  for (size_t position = 0; position < kGameCount; ++position) {
+    if (orderedGameAt(position) == game) {
+      return static_cast<MenuPage>(position / kGamesPerMenuPage);
+    }
   }
-  LOG.printf("[games] %s play count: %lu\n", gameName(game),
-             static_cast<unsigned long>(gamePlayCounts[index]));
+  return MenuPage::First;
 }
 
 uint32_t stateChecksum(const PersistedState& state) {
@@ -798,9 +849,7 @@ void saveResumeState() {
   state.screen = static_cast<uint8_t>(currentScreen);
   state.menuPage = static_cast<uint8_t>(currentMenuPage);
   state.reversiMode = static_cast<uint8_t>(reversiMode);
-  for (size_t index = 0; index < kGameCount; ++index) {
-    state.gamePlayCounts[index] = gamePlayCounts[index];
-  }
+  state.connectFourMode = static_cast<uint8_t>(connectFourMode);
   if (lightsOutSaved) {
     state.flags |= kLightsOutSavedFlag;
     state.lightsOut = lightsOut.snapshot();
@@ -861,6 +910,14 @@ void saveResumeState() {
     state.flags |= kFallingBlocksSavedFlag;
     state.fallingBlocks = fallingBlocks.snapshot();
   }
+  if (connectFourSaved) {
+    state.flags |= kConnectFourSavedFlag;
+    state.connectFour = connectFour.snapshot();
+  }
+  if (wordSearchSaved) {
+    state.flags |= kWordSearchSavedFlag;
+    state.wordSearch = wordSearch.snapshot();
+  }
   const bool savedBrowserPath =
       copyReaderPath(state.reader.browserPath, sizeof(state.reader.browserPath),
                      readerBrowserPath);
@@ -894,6 +951,7 @@ bool restoreResumeState() {
       state.screen > static_cast<uint8_t>(Screen::EpubReading) ||
       state.menuPage > static_cast<uint8_t>(MenuPage::Third) ||
       state.reversiMode > static_cast<uint8_t>(ReversiMode::TwoPlayer) ||
+      state.connectFourMode > static_cast<uint8_t>(ReversiMode::TwoPlayer) ||
       (state.flags & ~(kLightsOutSavedFlag | k2048SavedFlag |
                        kPipeConnectSavedFlag | kMinesweeperSavedFlag |
                        kNonogramSavedFlag | kReversiSavedFlag |
@@ -901,7 +959,8 @@ bool restoreResumeState() {
                        kPegSolitaireSavedFlag | kSlitherlinkSavedFlag |
                        kSudokuSavedFlag | kCrosswordSavedFlag |
                        kKlondikeSavedFlag | kMahjongSavedFlag |
-                       kFallingBlocksSavedFlag)) != 0 ||
+                       kFallingBlocksSavedFlag | kConnectFourSavedFlag |
+                       kWordSearchSavedFlag)) != 0 ||
       memchr(state.reader.browserPath, '\0',
              sizeof(state.reader.browserPath)) == nullptr ||
       memchr(state.reader.bookPath, '\0', sizeof(state.reader.bookPath)) ==
@@ -1058,6 +1117,25 @@ bool restoreResumeState() {
     LOG.println("[games] saved screen has no Falling Blocks game");
     return false;
   }
+  const bool hasConnectFourSave =
+      (state.flags & kConnectFourSavedFlag) != 0;
+  if (hasConnectFourSave && !connectFour.restore(state.connectFour)) {
+    LOG.println("[games] saved Connect Four state is invalid");
+    return false;
+  }
+  if (savedScreen == Screen::ConnectFour && !hasConnectFourSave) {
+    LOG.println("[games] saved screen has no Connect Four game");
+    return false;
+  }
+  const bool hasWordSearchSave = (state.flags & kWordSearchSavedFlag) != 0;
+  if (hasWordSearchSave && !wordSearch.restore(state.wordSearch)) {
+    LOG.println("[games] saved Word Search state is invalid");
+    return false;
+  }
+  if (savedScreen == Screen::WordSearch && !hasWordSearchSave) {
+    LOG.println("[games] saved screen has no Word Search game");
+    return false;
+  }
   if ((savedScreen == Screen::EpubBrowser ||
        savedScreen == Screen::EpubReading) &&
       state.reader.browserPath[0] != '/') {
@@ -1088,6 +1166,8 @@ bool restoreResumeState() {
   klondikeSaved = hasKlondikeSave;
   mahjongSaved = hasMahjongSave;
   fallingBlocksSaved = hasFallingBlocksSave;
+  connectFourSaved = hasConnectFourSave;
+  wordSearchSaved = hasWordSearchSave;
   readerBrowserPath =
       state.reader.browserPath[0] == '\0' ? "/" : state.reader.browserPath;
   readerBookPath = state.reader.bookPath;
@@ -1098,11 +1178,9 @@ bool restoreResumeState() {
       state.reader.cardSectorCount,
       state.reader.cardFingerprint,
   };
-  for (size_t index = 0; index < kGameCount; ++index) {
-    gamePlayCounts[index] = state.gamePlayCounts[index];
-  }
   crosswordKeyboardVisible = false;
   reversiMode = static_cast<ReversiMode>(state.reversiMode);
+  connectFourMode = static_cast<ReversiMode>(state.connectFourMode);
   currentMenuPage = static_cast<MenuPage>(state.menuPage);
   currentScreen = savedScreen;
   return true;
@@ -1359,6 +1437,10 @@ Rect& menuCardFor(GameId game) {
       return kFallingBlocksMenuCard;
     case GameId::EpubReader:
       return kEpubReaderMenuCard;
+    case GameId::ConnectFour:
+      return kConnectFourMenuCard;
+    case GameId::WordSearch:
+      return kWordSearchMenuCard;
     case GameId::Count:
       break;
   }
@@ -2011,9 +2093,45 @@ void drawEpubReaderMenuCard() {
   drawCentered("EPUB", left + kBookWidth / 2, top + 103, 2);
 }
 
+void drawConnectFourMenuCard() {
+  drawMenuCardFrame(kConnectFourMenuCard);
+  constexpr int kPreviewCell = 24;
+  const int left = kConnectFourMenuCard.x + 11;
+  const int top = kConnectFourMenuCard.y + 22;
+  for (int row = 0; row < 6; ++row) {
+    for (int column = 0; column < 7; ++column) {
+      const int centerX = left + column * kPreviewCell + kPreviewCell / 2;
+      const int centerY = top + row * kPreviewCell + kPreviewCell / 2;
+      epaper.drawCircle(centerX, centerY, 9, TFT_BLACK);
+      const bool solid =
+          (row == 5 && (column == 0 || column == 2 || column == 4)) ||
+          (row == 4 && (column == 1 || column == 3));
+      if (solid) epaper.fillCircle(centerX, centerY, 7, TFT_BLACK);
+    }
+  }
+}
+
+void drawWordSearchMenuCard() {
+  drawMenuCardFrame(kWordSearchMenuCard);
+  static constexpr char kPreview[] = "PLAYGAMEWORDCOIN";
+  constexpr int kPreviewCell = 38;
+  const int left = kWordSearchMenuCard.x + 19;
+  const int top = kWordSearchMenuCard.y + 17;
+  for (int row = 0; row < 4; ++row) {
+    for (int column = 0; column < 4; ++column) {
+      const int x = left + column * kPreviewCell;
+      const int y = top + row * kPreviewCell;
+      epaper.drawRect(x, y, kPreviewCell, kPreviewCell, TFT_BLACK);
+      const char label[] = {kPreview[row * 4 + column], '\0'};
+      drawCentered(label, x + kPreviewCell / 2, y + kPreviewCell / 2 + 2, 2);
+    }
+  }
+}
+
 void arrangeMenuCards() {
-  for (size_t rank = 0; rank < kGameCount; ++rank) {
-    menuCardFor(rankedGameAt(rank)) = kMenuCardSlots[rank % kGamesPerMenuPage];
+  for (size_t position = 0; position < kGameCount; ++position) {
+    menuCardFor(orderedGameAt(position)) =
+        kMenuCardSlots[position % kGamesPerMenuPage];
   }
 }
 
@@ -2066,6 +2184,12 @@ void drawGameMenuCard(GameId game) {
       break;
     case GameId::EpubReader:
       drawEpubReaderMenuCard();
+      break;
+    case GameId::ConnectFour:
+      drawConnectFourMenuCard();
+      break;
+    case GameId::WordSearch:
+      drawWordSearchMenuCard();
       break;
     case GameId::Count:
       return;
@@ -2162,19 +2286,30 @@ void drawHelpIndicator() {
 void drawSettingsIndicator() {
   const int centerX = kSettingsButton.x + kSettingsButton.width / 2;
   const int centerY = kSettingsButton.y + kSettingsButton.height / 2;
+  constexpr int kGlyphRadius = 14;
+  constexpr int kToothLength = 6;
+  constexpr int kToothThickness = 5;
+  const int left = centerX - kGlyphRadius;
+  const int top = centerY - kGlyphRadius;
   epaper.fillRect(kSettingsButton.x - 2, kSettingsButton.y - 2,
                   kSettingsButton.width + 4, kSettingsButton.height + 4,
                   TFT_WHITE);
-  epaper.fillRect(centerX - 3, kSettingsButton.y, 7, 8, TFT_BLACK);
-  epaper.fillRect(centerX - 3, kSettingsButton.y + 28, 7, 8, TFT_BLACK);
-  epaper.fillRect(kSettingsButton.x, centerY - 3, 8, 7, TFT_BLACK);
-  epaper.fillRect(kSettingsButton.x + 28, centerY - 3, 8, 7, TFT_BLACK);
-  epaper.fillRect(centerX - 13, centerY - 13, 7, 7, TFT_BLACK);
-  epaper.fillRect(centerX + 7, centerY - 13, 7, 7, TFT_BLACK);
-  epaper.fillRect(centerX - 13, centerY + 7, 7, 7, TFT_BLACK);
-  epaper.fillRect(centerX + 7, centerY + 7, 7, 7, TFT_BLACK);
-  epaper.fillCircle(centerX, centerY, 12, TFT_BLACK);
-  epaper.fillCircle(centerX, centerY, 5, TFT_WHITE);
+  epaper.fillRect(centerX - kToothThickness / 2, top, kToothThickness,
+                  kToothLength, TFT_BLACK);
+  epaper.fillRect(centerX - kToothThickness / 2,
+                  centerY + kGlyphRadius - kToothLength, kToothThickness,
+                  kToothLength, TFT_BLACK);
+  epaper.fillRect(left, centerY - kToothThickness / 2, kToothLength,
+                  kToothThickness, TFT_BLACK);
+  epaper.fillRect(centerX + kGlyphRadius - kToothLength,
+                  centerY - kToothThickness / 2, kToothLength,
+                  kToothThickness, TFT_BLACK);
+  epaper.fillRect(centerX - 11, centerY - 11, 5, 5, TFT_BLACK);
+  epaper.fillRect(centerX + 6, centerY - 11, 5, 5, TFT_BLACK);
+  epaper.fillRect(centerX - 11, centerY + 6, 5, 5, TFT_BLACK);
+  epaper.fillRect(centerX + 6, centerY + 6, 5, 5, TFT_BLACK);
+  epaper.fillCircle(centerX, centerY, 9, TFT_BLACK);
+  epaper.fillCircle(centerX, centerY, 4, TFT_WHITE);
 }
 
 void drawGameStatusBar(const char* title) {
@@ -2217,6 +2352,10 @@ game_help::Topic helpTopicForScreen() {
       return game_help::Topic::MahjongSolitaire;
     case Screen::FallingBlocks:
       return game_help::Topic::FallingBlocks;
+    case Screen::ConnectFour:
+      return game_help::Topic::ConnectFour;
+    case Screen::WordSearch:
+      return game_help::Topic::WordSearch;
     case Screen::EpubBrowser:
     case Screen::EpubReading:
       return game_help::Topic::EpubReader;
@@ -2378,11 +2517,11 @@ void drawMenu() {
   drawStickyArcadeBrand(24, 4);
   arrangeMenuCards();
   const size_t pageIndex = static_cast<size_t>(currentMenuPage);
-  const size_t firstRank = pageIndex * kGamesPerMenuPage;
+  const size_t firstPosition = pageIndex * kGamesPerMenuPage;
   const size_t visibleGames =
-      std::min(kGamesPerMenuPage, kGameCount - firstRank);
+      std::min(kGamesPerMenuPage, kGameCount - firstPosition);
   for (size_t slot = 0; slot < visibleGames; ++slot) {
-    drawGameMenuCard(rankedGameAt(firstRank + slot));
+    drawGameMenuCard(orderedGameAt(firstPosition + slot));
   }
   if (pageIndex > 0) drawArrowButton(kPreviousPageButton, false);
   if (pageIndex + 1 < kMenuPageCount) {
@@ -3403,6 +3542,108 @@ void drawFallingBlocks() {
   drawGameStatusBar(tr(TextId::FallingBlocks));
 }
 
+const char* connectFourModeLabel() {
+  return connectFourMode == ReversiMode::SinglePlayer
+             ? tr(TextId::OnePlayer)
+             : tr(TextId::TwoPlayers);
+}
+
+void drawConnectFourBoard() {
+  epaper.fillRect(kConnectFourBoardRegion.x, kConnectFourBoardRegion.y,
+                  kConnectFourBoardRegion.width,
+                  kConnectFourBoardRegion.height, TFT_WHITE);
+  for (int row = 0; row < ConnectFourGame::kRows; ++row) {
+    for (int column = 0; column < ConnectFourGame::kColumns; ++column) {
+      const int x = kConnectFourGridLeft + column * kConnectFourCellSize;
+      const int y = kConnectFourGridTop + row * kConnectFourCellSize;
+      const int centerX = x + kConnectFourCellSize / 2;
+      const int centerY = y + kConnectFourCellSize / 2;
+      epaper.drawRect(x, y, kConnectFourCellSize, kConnectFourCellSize,
+                      TFT_BLACK);
+      const ConnectFourGame::Disc disc = connectFour.at(row, column);
+      if (disc == ConnectFourGame::Disc::Red) {
+        epaper.fillCircle(centerX, centerY, 20, TFT_BLACK);
+      } else if (disc == ConnectFourGame::Disc::Yellow) {
+        epaper.drawCircle(centerX, centerY, 20, TFT_BLACK);
+        epaper.drawCircle(centerX, centerY, 19, TFT_BLACK);
+        epaper.drawCircle(centerX, centerY, 13, TFT_BLACK);
+      }
+    }
+  }
+
+  const char* status = nullptr;
+  if (connectFour.gameOver()) {
+    const ConnectFourGame::Disc winner = connectFour.winner();
+    status = winner == ConnectFourGame::Disc::Red
+                 ? tr(TextId::RedWins)
+                 : winner == ConnectFourGame::Disc::Yellow
+                       ? tr(TextId::YellowWins)
+                       : tr(TextId::Draw);
+  } else {
+    status = connectFour.currentPlayer() == ConnectFourGame::Disc::Red
+                 ? tr(TextId::RedToMove)
+                 : tr(TextId::YellowToMove);
+  }
+  drawCentered(status, kScreenWidth / 2, 555, 4);
+}
+
+void drawConnectFour() {
+  epaper.fillSprite(TFT_WHITE);
+  drawConnectFourBoard();
+  drawButton(kNewButton, tr(TextId::NewGame));
+  drawButton(kResetButton, connectFourModeLabel());
+  drawGameStatusBar(tr(TextId::ConnectFour));
+}
+
+void drawWordSearchBoard() {
+  epaper.fillRect(kWordSearchBoardRegion.x, kWordSearchBoardRegion.y,
+                  kWordSearchBoardRegion.width,
+                  kWordSearchBoardRegion.height, TFT_WHITE);
+  for (int row = 0; row < WordSearchGame::kSize; ++row) {
+    for (int column = 0; column < WordSearchGame::kSize; ++column) {
+      const int x = kWordSearchGridLeft + column * kWordSearchCellSize;
+      const int y = kWordSearchGridTop + row * kWordSearchCellSize;
+      epaper.drawRect(x, y, kWordSearchCellSize, kWordSearchCellSize,
+                      TFT_BLACK);
+      const char label[] = {wordSearch.at(row, column), '\0'};
+      drawCentered(label, x + kWordSearchCellSize / 2,
+                   y + kWordSearchCellSize / 2 + 2, 2);
+    }
+  }
+
+  for (int index = 0; index < WordSearchGame::kWordCount; ++index) {
+    const int column = index % 2;
+    const int row = index / 2;
+    const Rect wordRect = {20 + column * 230, 526 + row * 48, 210, 38};
+    if (wordSearch.found(index)) {
+      epaper.fillRoundRect(wordRect.x, wordRect.y, wordRect.width,
+                           wordRect.height, 5, TFT_BLACK);
+      drawCenteredText(wordSearch.word(index),
+                       wordRect.x + wordRect.width / 2,
+                       wordRect.y + wordRect.height / 2, 2, TFT_WHITE,
+                       TFT_BLACK, wordRect.width - 8);
+    } else {
+      epaper.drawRoundRect(wordRect.x, wordRect.y, wordRect.width,
+                           wordRect.height, 5, TFT_BLACK);
+      drawCenteredText(wordSearch.word(index),
+                       wordRect.x + wordRect.width / 2,
+                       wordRect.y + wordRect.height / 2, 2, TFT_BLACK,
+                       TFT_WHITE, wordRect.width - 8);
+    }
+  }
+  if (wordSearch.solved()) {
+    drawCentered(tr(TextId::PuzzleComplete), kScreenWidth / 2, 674, 2);
+  }
+}
+
+void drawWordSearch() {
+  epaper.fillSprite(TFT_WHITE);
+  drawWordSearchBoard();
+  drawButton(kNewButton, tr(TextId::NewGame));
+  drawButton(kResetButton, tr(TextId::Reset));
+  drawGameStatusBar(tr(TextId::WordSearch));
+}
+
 String fitReaderText(String text, int maximumWidth, int builtInFont = 0) {
   const auto textWidth = [builtInFont](const String& value) {
     return builtInFont > 0 ? epaper.textWidth(value, builtInFont)
@@ -4291,6 +4532,16 @@ void startNewFallingBlocks() {
   fallingBlocksSaved = true;
 }
 
+void startNewConnectFour() {
+  connectFour.start();
+  connectFourSaved = true;
+}
+
+void startNewWordSearch() {
+  wordSearch.start(esp_random());
+  wordSearchSaved = true;
+}
+
 bool listReaderBrowserPath(const String& path, bool resetPage) {
   const int savedPageStart = resetPage ? 0 : browserPageStart;
   readerBrowserPath = path.isEmpty() ? "/" : path;
@@ -4424,6 +4675,23 @@ void playReversiComputerTurns() {
   }
 }
 
+void playConnectFourComputerTurn() {
+  if (connectFourMode != ReversiMode::SinglePlayer ||
+      connectFour.currentPlayer() != ConnectFourGame::Disc::Yellow ||
+      connectFour.gameOver()) {
+    return;
+  }
+  int column = -1;
+  if (!connectFour.chooseBestColumn(kConnectFourAiDepth, column)) {
+    LOG.println("[games] Connect Four AI could not find a legal move");
+    return;
+  }
+  LOG.printf("[games] Connect Four AI plays column=%d\n", column);
+  if (!connectFour.drop(column)) {
+    LOG.println("[games] Connect Four AI selected an illegal move");
+  }
+}
+
 bool recoverFullRefresh() {
   epaper.sleep();
   epaper.update();
@@ -4534,6 +4802,12 @@ void drawCurrentScreen() {
     case Screen::FallingBlocks:
       drawFallingBlocks();
       return;
+    case Screen::ConnectFour:
+      drawConnectFour();
+      return;
+    case Screen::WordSearch:
+      drawWordSearch();
+      return;
     case Screen::EpubBrowser:
       drawEpubBrowser();
       return;
@@ -4602,6 +4876,10 @@ void showMenu() {
     LOG.println("[games] auto-saving Mahjong Solitaire");
   } else if (currentScreen == Screen::FallingBlocks && fallingBlocksSaved) {
     LOG.println("[games] auto-saving Falling Blocks");
+  } else if (currentScreen == Screen::ConnectFour && connectFourSaved) {
+    LOG.println("[games] auto-saving Connect Four");
+  } else if (currentScreen == Screen::WordSearch && wordSearchSaved) {
+    LOG.println("[games] auto-saving Word Search");
   } else if (currentScreen == Screen::EpubReading) {
     LOG.println("[games] saving EPUB reading position");
   }
@@ -4727,6 +5005,21 @@ void showFallingBlocks() {
   currentScreen = Screen::FallingBlocks;
   drawFallingBlocks();
   refreshScreen("Falling Blocks screen");
+}
+
+void showConnectFour() {
+  if (!connectFourSaved) startNewConnectFour();
+  playConnectFourComputerTurn();
+  currentScreen = Screen::ConnectFour;
+  drawConnectFour();
+  refreshScreen("Connect Four screen");
+}
+
+void showWordSearch() {
+  if (!wordSearchSaved) startNewWordSearch();
+  currentScreen = Screen::WordSearch;
+  drawWordSearch();
+  refreshScreen("Word Search screen");
 }
 
 void showEpubBrowser(bool fullRefresh = true) {
@@ -4925,9 +5218,25 @@ void updateFallingBlocks(const char* action) {
   refreshRegion(kFallingBlocksBoardRegion, action);
 }
 
+void updateConnectFour(const char* action) {
+  drawConnectFourBoard();
+  refreshRegion(kConnectFourBoardRegion, action);
+}
+
+void updateConnectFourMode(const char* action) {
+  drawConnectFourBoard();
+  drawButton(kNewButton, tr(TextId::NewGame));
+  drawButton(kResetButton, connectFourModeLabel());
+  refreshRegion(kConnectFourModeRegion, action);
+}
+
+void updateWordSearch(const char* action) {
+  drawWordSearchBoard();
+  refreshRegion(kWordSearchBoardRegion, action);
+}
+
 void launchGame(GameId game) {
   hardware::beep();
-  recordGameLaunch(game);
   switch (game) {
     case GameId::LightsOut:
       showLightsOut();
@@ -4977,6 +5286,12 @@ void launchGame(GameId game) {
     case GameId::EpubReader:
       showEpubBrowser();
       break;
+    case GameId::ConnectFour:
+      showConnectFour();
+      break;
+    case GameId::WordSearch:
+      showWordSearch();
+      break;
     case GameId::Count:
       return;
   }
@@ -5017,12 +5332,12 @@ void handleMenuTouch(const Gt911Touch::Point& point) {
     showMenuPage(static_cast<MenuPage>(pageIndex - 1));
     return;
   }
-  const size_t firstRank = pageIndex * kGamesPerMenuPage;
+  const size_t firstPosition = pageIndex * kGamesPerMenuPage;
   const size_t visibleGames =
-      std::min(kGamesPerMenuPage, kGameCount - firstRank);
+      std::min(kGamesPerMenuPage, kGameCount - firstPosition);
   for (size_t slot = 0; slot < visibleGames; ++slot) {
     if (kMenuCardSlots[slot].contains(point.x, point.y)) {
-      launchGame(rankedGameAt(firstRank + slot));
+      launchGame(orderedGameAt(firstPosition + slot));
       return;
     }
   }
@@ -5905,6 +6220,88 @@ bool handle2048TouchStart(const Gt911Touch::Point& point) {
          point.y >= k2048GridTop + k2048GridSize;
 }
 
+void handleConnectFourTouch(const Gt911Touch::Point& point) {
+  if (kBackButton.contains(point.x, point.y)) {
+    hardware::beep();
+    showMenu();
+    return;
+  }
+  if (kNewButton.contains(point.x, point.y)) {
+    hardware::beep();
+    startNewConnectFour();
+    updateConnectFour("new Connect Four game");
+    return;
+  }
+  if (kResetButton.contains(point.x, point.y)) {
+    hardware::beep();
+    connectFourMode = connectFourMode == ReversiMode::SinglePlayer
+                          ? ReversiMode::TwoPlayer
+                          : ReversiMode::SinglePlayer;
+    startNewConnectFour();
+    updateConnectFourMode("Connect Four mode");
+    return;
+  }
+  if (point.x < kConnectFourGridLeft ||
+      point.x >= kConnectFourGridLeft + kConnectFourGridWidth ||
+      point.y < kConnectFourGridTop ||
+      point.y >= kConnectFourGridTop + kConnectFourGridHeight ||
+      (connectFourMode == ReversiMode::SinglePlayer &&
+       connectFour.currentPlayer() != ConnectFourGame::Disc::Red)) {
+    return;
+  }
+  const int column = (point.x - kConnectFourGridLeft) / kConnectFourCellSize;
+  if (connectFour.drop(column)) {
+    hardware::beep();
+    playConnectFourComputerTurn();
+    updateConnectFour(connectFour.gameOver() ? "Connect Four game over"
+                                             : "Connect Four move");
+  }
+}
+
+bool handleWordSearchTouchStart(const Gt911Touch::Point& point) {
+  if (kBackButton.contains(point.x, point.y)) {
+    hardware::beep();
+    showMenu();
+    return true;
+  }
+  if (kNewButton.contains(point.x, point.y)) {
+    hardware::beep();
+    startNewWordSearch();
+    updateWordSearch("new Word Search puzzle");
+    return true;
+  }
+  if (kResetButton.contains(point.x, point.y)) {
+    hardware::beep();
+    wordSearch.reset();
+    updateWordSearch("reset Word Search puzzle");
+    return true;
+  }
+  return point.x < kWordSearchGridLeft ||
+         point.x >= kWordSearchGridLeft + kWordSearchGridSize ||
+         point.y < kWordSearchGridTop ||
+         point.y >= kWordSearchGridTop + kWordSearchGridSize;
+}
+
+void handleWordSearchSelection(const Gt911Touch::Point& start,
+                               const Gt911Touch::Point& end) {
+  if (end.x < kWordSearchGridLeft ||
+      end.x >= kWordSearchGridLeft + kWordSearchGridSize ||
+      end.y < kWordSearchGridTop ||
+      end.y >= kWordSearchGridTop + kWordSearchGridSize) {
+    return;
+  }
+  const int startColumn =
+      (start.x - kWordSearchGridLeft) / kWordSearchCellSize;
+  const int startRow = (start.y - kWordSearchGridTop) / kWordSearchCellSize;
+  const int endColumn = (end.x - kWordSearchGridLeft) / kWordSearchCellSize;
+  const int endRow = (end.y - kWordSearchGridTop) / kWordSearchCellSize;
+  if (wordSearch.submit(startRow, startColumn, endRow, endColumn)) {
+    hardware::beep();
+    updateWordSearch(wordSearch.solved() ? "Word Search solved"
+                                         : "Word Search word found");
+  }
+}
+
 void handle2048Swipe(const Gt911Touch::Point& start,
                      const Gt911Touch::Point& end) {
   const int dx = static_cast<int>(end.x) - static_cast<int>(start.x);
@@ -5954,6 +6351,9 @@ void pollTouch() {
                !touchActionHandled) {
       handleMinesweeperCellTouch(touchStart, touchLast,
                                  millis() - touchStartedAtMs);
+    } else if (touchActive && currentScreen == Screen::WordSearch &&
+               !touchActionHandled) {
+      handleWordSearchSelection(touchStart, touchLast);
     }
     touchActive = false;
     touchActionHandled = false;
@@ -6026,6 +6426,11 @@ void pollTouch() {
     touchActionHandled = true;
   } else if (currentScreen == Screen::FallingBlocks) {
     touchActionHandled = handleFallingBlocksTouchStart(point);
+  } else if (currentScreen == Screen::ConnectFour) {
+    handleConnectFourTouch(point);
+    touchActionHandled = true;
+  } else if (currentScreen == Screen::WordSearch) {
+    touchActionHandled = handleWordSearchTouchStart(point);
   } else if (currentScreen == Screen::EpubBrowser) {
     handleEpubBrowserTouch(point);
     touchActionHandled = true;
@@ -6296,7 +6701,6 @@ void setup() {
   const bool resumed = restoreResumeState();
   game2048.retainBestScore(stored2048HighScore);
   save2048HighScore();
-  updateGameRanking();
   if (resumed && sokobanSaved) {
     openNextUnfinishedSokobanLevel();
     if (sokoban.solved()) saveSokobanCompletion();
@@ -6329,6 +6733,8 @@ void setup() {
   if (!resumed) currentScreen = Screen::Menu;
   if (resumed && currentScreen == Screen::Reversi) {
     playReversiComputerTurns();
+  } else if (resumed && currentScreen == Screen::ConnectFour) {
+    playConnectFourComputerTurn();
   }
   if (resumed && currentScreen == Screen::EpubReading &&
       bootStorage == ReaderStorageStatus::Ready) {

@@ -30,7 +30,7 @@ details.
 | [XKCD Viewer](xkcd-viewer/) | A battery-powered random XKCD display with model-aware scaling, optional SD caching, Unicode titles, environmental readings, and deep sleep. | Available |
 | [Weather Viewer](weather-viewer/) | A low-power current-conditions and three-day forecast display using QWeather or Open-Meteo, with local environmental readings, severe-weather alerts, Unicode location names, and deep sleep. | Available |
 | [Photo Viewer](photo-viewer/) | A private, SD-card photo frame with panel-native preprocessing, full model-specific color, quiet hours, daily time sync, and deep sleep. | Available |
-| [Sticky Arcade](sticky-arcade/) | Sixteen ranked E1005 activities with fast refresh and resumable state: fifteen touch games plus a read-only SD browser and EPUB reader. | Available on E1005 |
+| [Sticky Arcade](sticky-arcade/) | Eighteen E1005 activities with fast refresh and resumable state: seventeen touch games plus a read-only SD browser and EPUB reader. | Available on E1005 |
 
 ## XKCD Viewer example
 
@@ -56,27 +56,29 @@ This frame was captured directly from a reTerminal E1001 running the
 These frames were captured directly from a reTerminal E1005 running
 [Sticky Arcade](sticky-arcade/).
 
-The selector presents six games per page and automatically orders them from
-most played to least played. Equal play counts retain the default order below:
+The selector presents six games per page in this fixed, popularity-based order,
+with EPUB Reader kept on the first page:
 
 | Game | Description |
 | --- | --- |
-| Lights Out | Toggle a square and its neighbours until the 5x5 board is dark. |
-| 2048 | Swipe and merge matching tiles while preserving the best score. |
-| Pipe Connect | Rotate 36 pipe tiles into one connected network. |
-| Mini Minesweeper | Clear a first-tap-safe 6x6 field containing six mines. |
-| Nonogram / Picross | Use row and column clues to reveal a hidden 5x5 picture. |
-| Reversi / Othello | Play against the built-in AI or use two-player pass-and-play. |
-| Dots and Boxes | Draw edges, complete boxes, and keep the turn after scoring. |
-| Sokoban | Push crates through all 155 Microban I levels with durable completion progress. |
-| Peg Solitaire | Jump and remove pegs from the classic cross-shaped board. |
-| Slitherlink | Draw one loop whose edges satisfy every numbered clue. |
-| Sudoku | Complete a randomly selected, uniquely solvable easy 9x9 puzzle. |
-| Crossword | Solve one of 100 easy mini crosswords with an on-screen QWERTY keyboard. |
+| Falling Blocks | Complete lines in a turn-based falling-block game adapted for e-paper. |
+| Connect Four | Connect four discs against the built-in AI or in two-player pass-and-play. |
 | Klondike | Play draw-one solitaire with movable tableau runs and four foundations. |
 | Mahjong Solitaire | Match free tiles across a solvable 144-tile layered layout. |
-| Falling Blocks | Complete lines in a turn-based falling-block game adapted for e-paper. |
+| 2048 | Swipe and merge matching tiles while preserving the best score. |
 | EPUB Reader | Browse an SD card without modifying it and read DRM-free reflowable EPUB 2/3 books. |
+| Mini Minesweeper | Clear a first-tap-safe 6x6 field containing six mines. |
+| Sudoku | Complete a randomly selected, uniquely solvable easy 9x9 puzzle. |
+| Reversi / Othello | Play against the built-in AI or use two-player pass-and-play. |
+| Word Search | Find six words in a generated 9x9 arcade-themed letter grid. |
+| Crossword | Solve one of 100 easy mini crosswords with an on-screen QWERTY keyboard. |
+| Sokoban | Push crates through all 155 Microban I levels with durable completion progress. |
+| Dots and Boxes | Draw edges, complete boxes, and keep the turn after scoring. |
+| Peg Solitaire | Jump and remove pegs from the classic cross-shaped board. |
+| Lights Out | Toggle a square and its neighbours until the 5x5 board is dark. |
+| Nonogram / Picross | Use row and column clues to reveal a hidden 5x5 picture. |
+| Pipe Connect | Rotate 36 pipe tiles into one connected network. |
+| Slitherlink | Draw one loop whose edges satisfy every numbered clue. |
 
 All games preserve their current state across selector visits and deep sleep.
 The EPUB reader resumes the same book, chapter, and page when the SD card is

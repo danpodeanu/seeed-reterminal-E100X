@@ -2,6 +2,7 @@
 
 #include <cstring>
 
+#include "connect_four_game.h"
 #include "crossword_game.h"
 #include "dots_and_boxes_game.h"
 #include "double_tap_tracker.h"
@@ -13,7 +14,6 @@
 #include "game_help_text.h"
 #include "game_localization.h"
 #include "game_progress_store.h"
-#include "game_ranking.h"
 #include "klondike_game.h"
 #include "lights_out_game.h"
 #include "mahjong_solitaire_game.h"
@@ -28,6 +28,7 @@
 #include "slitherlink_game.h"
 #include "sokoban_game.h"
 #include "sudoku_game.h"
+#include "word_search_game.h"
 
 void setUp() {}
 void tearDown() {}
@@ -627,6 +628,307 @@ void test_nonogram_invalid_snapshot_is_rejected() {
   TEST_ASSERT_FALSE(game.restore(invalid));
 }
 
+void test_connect_four_drops_with_gravity() {
+  ConnectFourGame game;
+  game.start();
+
+  TEST_ASSERT_TRUE(game.drop(2));
+  TEST_ASSERT_EQUAL(ConnectFourGame::Disc::Red, game.at(5, 2));
+  TEST_ASSERT_EQUAL(ConnectFourGame::Disc::Empty, game.at(4, 2));
+  TEST_ASSERT_TRUE(game.drop(2));
+  TEST_ASSERT_EQUAL(ConnectFourGame::Disc::Yellow, game.at(4, 2));
+  TEST_ASSERT_EQUAL_UINT8(2, game.moveCount());
+}
+
+void test_connect_four_alternates_turns() {
+  ConnectFourGame game;
+  game.start();
+
+  TEST_ASSERT_EQUAL(ConnectFourGame::Disc::Red, game.currentPlayer());
+  TEST_ASSERT_TRUE(game.drop(0));
+  TEST_ASSERT_EQUAL(ConnectFourGame::Disc::Yellow, game.currentPlayer());
+  TEST_ASSERT_TRUE(game.drop(1));
+  TEST_ASSERT_EQUAL(ConnectFourGame::Disc::Red, game.currentPlayer());
+}
+
+void test_connect_four_detects_horizontal_win() {
+  ConnectFourGame game;
+  game.start();
+  const int moves[] = {0, 6, 1, 6, 2, 5, 3};
+  for (int column : moves) TEST_ASSERT_TRUE(game.drop(column));
+
+  TEST_ASSERT_TRUE(game.gameOver());
+  TEST_ASSERT_EQUAL(ConnectFourGame::Disc::Red, game.winner());
+  TEST_ASSERT_FALSE(game.tied());
+  TEST_ASSERT_FALSE(game.drop(4));
+}
+
+void test_connect_four_detects_vertical_win() {
+  ConnectFourGame game;
+  game.start();
+  const int moves[] = {0, 1, 0, 1, 0, 1, 0};
+  for (int column : moves) TEST_ASSERT_TRUE(game.drop(column));
+
+  TEST_ASSERT_TRUE(game.gameOver());
+  TEST_ASSERT_EQUAL(ConnectFourGame::Disc::Red, game.winner());
+}
+
+void test_connect_four_detects_diagonal_win() {
+  ConnectFourGame game;
+  game.start();
+  const int moves[] = {0, 1, 1, 2, 4, 2, 2, 3, 4, 3, 5, 3, 3};
+  for (int column : moves) TEST_ASSERT_TRUE(game.drop(column));
+
+  TEST_ASSERT_TRUE(game.gameOver());
+  TEST_ASSERT_EQUAL(ConnectFourGame::Disc::Red, game.winner());
+  TEST_ASSERT_EQUAL(ConnectFourGame::Disc::Red, game.at(5, 0));
+  TEST_ASSERT_EQUAL(ConnectFourGame::Disc::Red, game.at(4, 1));
+  TEST_ASSERT_EQUAL(ConnectFourGame::Disc::Red, game.at(3, 2));
+  TEST_ASSERT_EQUAL(ConnectFourGame::Disc::Red, game.at(2, 3));
+}
+
+void test_connect_four_rejects_full_column() {
+  ConnectFourGame game;
+  game.start();
+  for (int move = 0; move < ConnectFourGame::kRows; ++move) {
+    TEST_ASSERT_TRUE(game.drop(0));
+  }
+  const ConnectFourGame::Disc player = game.currentPlayer();
+
+  TEST_ASSERT_FALSE(game.canDrop(0));
+  TEST_ASSERT_FALSE(game.drop(0));
+  TEST_ASSERT_EQUAL(player, game.currentPlayer());
+  TEST_ASSERT_EQUAL_UINT8(ConnectFourGame::kRows, game.moveCount());
+}
+
+void test_connect_four_ai_takes_immediate_win() {
+  ConnectFourGame game;
+  game.start();
+  const int moves[] = {0, 6, 1, 6, 2, 5};
+  for (int move : moves) TEST_ASSERT_TRUE(game.drop(move));
+  int column = -1;
+
+  TEST_ASSERT_TRUE(game.chooseBestColumn(5, column));
+  TEST_ASSERT_EQUAL_INT(3, column);
+}
+
+void test_connect_four_ai_blocks_immediate_loss() {
+  ConnectFourGame game;
+  game.start();
+  const int moves[] = {6, 0, 6, 1, 5, 2};
+  for (int move : moves) TEST_ASSERT_TRUE(game.drop(move));
+  int column = -1;
+
+  TEST_ASSERT_TRUE(game.chooseBestColumn(5, column));
+  TEST_ASSERT_EQUAL_INT(3, column);
+}
+
+void test_connect_four_snapshot_round_trip() {
+  ConnectFourGame original;
+  original.start();
+  const int moves[] = {3, 2, 3, 4, 1};
+  for (int move : moves) TEST_ASSERT_TRUE(original.drop(move));
+
+  ConnectFourGame restored;
+  TEST_ASSERT_TRUE(restored.restore(original.snapshot()));
+  TEST_ASSERT_EQUAL_UINT64(original.snapshot().red,
+                           restored.snapshot().red);
+  TEST_ASSERT_EQUAL_UINT64(original.snapshot().yellow,
+                           restored.snapshot().yellow);
+  TEST_ASSERT_EQUAL(original.currentPlayer(), restored.currentPlayer());
+  TEST_ASSERT_EQUAL_UINT8(original.moveCount(), restored.moveCount());
+}
+
+void test_connect_four_rejects_floating_snapshot() {
+  ConnectFourGame game;
+  const ConnectFourGame::Snapshot floating = {
+      1ULL << (4 * ConnectFourGame::kColumns),
+      0,
+      static_cast<uint8_t>(ConnectFourGame::Disc::Yellow),
+  };
+
+  TEST_ASSERT_FALSE(game.restore(floating));
+}
+
+int word_search_word_length(const char* word) {
+  int length = 0;
+  while (word[length] != '\0') ++length;
+  return length;
+}
+
+bool find_word_search_selection(const WordSearchGame& game, int wordIndex,
+                                int& startRow, int& startColumn, int& endRow,
+                                int& endColumn) {
+  constexpr int directions[][2] = {
+      {0, 1},  {0, -1}, {1, 0},  {-1, 0},
+      {1, 1},  {-1, -1}, {1, -1}, {-1, 1},
+  };
+  const char* target = game.word(wordIndex);
+  const int length = word_search_word_length(target);
+  for (int row = 0; row < WordSearchGame::kSize; ++row) {
+    for (int column = 0; column < WordSearchGame::kSize; ++column) {
+      for (const auto& direction : directions) {
+        const int candidateEndRow = row + direction[0] * (length - 1);
+        const int candidateEndColumn =
+            column + direction[1] * (length - 1);
+        if (candidateEndRow < 0 ||
+            candidateEndRow >= WordSearchGame::kSize ||
+            candidateEndColumn < 0 ||
+            candidateEndColumn >= WordSearchGame::kSize) {
+          continue;
+        }
+        bool matches = true;
+        for (int offset = 0; offset < length; ++offset) {
+          if (game.at(row + direction[0] * offset,
+                      column + direction[1] * offset) != target[offset]) {
+            matches = false;
+            break;
+          }
+        }
+        if (matches) {
+          startRow = row;
+          startColumn = column;
+          endRow = candidateEndRow;
+          endColumn = candidateEndColumn;
+          return true;
+        }
+      }
+    }
+  }
+  return false;
+}
+
+void test_word_search_generation_is_deterministic() {
+  WordSearchGame first;
+  WordSearchGame second;
+  first.start(0x12345678UL);
+  second.start(0x12345678UL);
+
+  for (int row = 0; row < WordSearchGame::kSize; ++row) {
+    for (int column = 0; column < WordSearchGame::kSize; ++column) {
+      TEST_ASSERT_EQUAL_CHAR(first.at(row, column), second.at(row, column));
+    }
+  }
+  for (int index = 0; index < WordSearchGame::kWordCount; ++index) {
+    TEST_ASSERT_EQUAL_STRING(first.word(index), second.word(index));
+  }
+  TEST_ASSERT_EQUAL_UINT32(first.snapshot().checksum,
+                           second.snapshot().checksum);
+}
+
+void test_word_search_different_seed_changes_puzzle() {
+  WordSearchGame first;
+  WordSearchGame second;
+  first.start(0x12345678UL);
+  second.start(0x87654321UL);
+  bool differs = false;
+
+  for (int row = 0; row < WordSearchGame::kSize && !differs; ++row) {
+    for (int column = 0; column < WordSearchGame::kSize; ++column) {
+      if (first.at(row, column) != second.at(row, column)) {
+        differs = true;
+        break;
+      }
+    }
+  }
+  TEST_ASSERT_TRUE(differs);
+}
+
+void test_word_search_all_words_are_selectable_and_solve_puzzle() {
+  WordSearchGame game;
+  game.start(0xC0FFEEUL);
+
+  for (int index = 0; index < WordSearchGame::kWordCount; ++index) {
+    int startRow = -1;
+    int startColumn = -1;
+    int endRow = -1;
+    int endColumn = -1;
+    TEST_ASSERT_TRUE(find_word_search_selection(
+        game, index, startRow, startColumn, endRow, endColumn));
+    TEST_ASSERT_TRUE(
+        game.submit(startRow, startColumn, endRow, endColumn));
+  }
+  TEST_ASSERT_EQUAL_UINT8(WordSearchGame::kWordCount, game.foundCount());
+  TEST_ASSERT_TRUE(game.solved());
+}
+
+void test_word_search_accepts_reverse_and_rejects_duplicate() {
+  WordSearchGame game;
+  game.start(0x31415926UL);
+  int startRow = -1;
+  int startColumn = -1;
+  int endRow = -1;
+  int endColumn = -1;
+  TEST_ASSERT_TRUE(find_word_search_selection(
+      game, 0, startRow, startColumn, endRow, endColumn));
+
+  TEST_ASSERT_TRUE(game.submit(endRow, endColumn, startRow, startColumn));
+  TEST_ASSERT_TRUE(game.found(0));
+  TEST_ASSERT_FALSE(game.submit(startRow, startColumn, endRow, endColumn));
+  TEST_ASSERT_EQUAL_UINT8(1, game.foundCount());
+}
+
+void test_word_search_reset_keeps_puzzle_and_clears_found_words() {
+  WordSearchGame game;
+  game.start(0xABCDEF01UL);
+  const WordSearchGame::Snapshot initial = game.snapshot();
+  int startRow = -1;
+  int startColumn = -1;
+  int endRow = -1;
+  int endColumn = -1;
+  TEST_ASSERT_TRUE(find_word_search_selection(
+      game, 0, startRow, startColumn, endRow, endColumn));
+  TEST_ASSERT_TRUE(game.submit(startRow, startColumn, endRow, endColumn));
+
+  game.reset();
+  TEST_ASSERT_EQUAL_UINT8(0, game.foundCount());
+  TEST_ASSERT_FALSE(game.solved());
+  TEST_ASSERT_EQUAL_UINT32(initial.seed, game.snapshot().seed);
+  TEST_ASSERT_EQUAL_UINT32(initial.checksum, game.snapshot().checksum);
+}
+
+void test_word_search_snapshot_round_trip() {
+  WordSearchGame original;
+  original.start(0x10203040UL);
+  for (int index = 0; index < 2; ++index) {
+    int startRow = -1;
+    int startColumn = -1;
+    int endRow = -1;
+    int endColumn = -1;
+    TEST_ASSERT_TRUE(find_word_search_selection(
+        original, index, startRow, startColumn, endRow, endColumn));
+    TEST_ASSERT_TRUE(
+        original.submit(startRow, startColumn, endRow, endColumn));
+  }
+
+  WordSearchGame restored;
+  TEST_ASSERT_TRUE(restored.restore(original.snapshot()));
+  TEST_ASSERT_EQUAL_UINT8(original.foundCount(), restored.foundCount());
+  TEST_ASSERT_EQUAL_UINT32(original.snapshot().checksum,
+                           restored.snapshot().checksum);
+  for (int row = 0; row < WordSearchGame::kSize; ++row) {
+    for (int column = 0; column < WordSearchGame::kSize; ++column) {
+      TEST_ASSERT_EQUAL_CHAR(original.at(row, column),
+                             restored.at(row, column));
+    }
+  }
+}
+
+void test_word_search_rejects_invalid_snapshot() {
+  WordSearchGame game;
+  game.start(0x55667788UL);
+  WordSearchGame::Snapshot invalid = game.snapshot();
+
+  invalid.seed = 0;
+  TEST_ASSERT_FALSE(game.restore(invalid));
+  invalid = game.snapshot();
+  invalid.foundMask = 0x80;
+  TEST_ASSERT_FALSE(game.restore(invalid));
+  invalid = game.snapshot();
+  invalid.checksum ^= 1UL;
+  TEST_ASSERT_FALSE(game.restore(invalid));
+}
+
 void test_reversi_starts_with_four_discs_and_four_legal_moves() {
   ReversiGame game;
   game.start();
@@ -999,41 +1301,6 @@ void test_high_score_progress_never_moves_backward() {
   result = game_progress::evaluateHighScore(UINT32_MAX, UINT32_MAX);
   TEST_ASSERT_FALSE(result.changed);
   TEST_ASSERT_EQUAL_UINT32(UINT32_MAX, result.score);
-}
-
-void test_game_ranking_sorts_counts_and_preserves_ties() {
-  const uint32_t counts[] = {2, 9, 9, 0, 4, 1, 0, 4, 2, 9, 0, 1};
-  uint8_t ranking[12] = {};
-  game_ranking::rankByPlayCount(counts, ranking);
-  const uint8_t expected[] = {1, 2, 9, 4, 7, 0, 8, 5, 11, 3, 6, 10};
-  TEST_ASSERT_EQUAL_UINT8_ARRAY(expected, ranking, 12);
-}
-
-void test_game_ranking_uses_default_order_only_to_break_ties() {
-  const uint32_t counts[] = {4, 8, 4, 1, 8};
-  const uint8_t defaultOrder[] = {4, 2, 0, 1, 3};
-  uint8_t ranking[5] = {};
-  game_ranking::rankByPlayCount(counts, defaultOrder, ranking);
-  const uint8_t expected[] = {4, 1, 2, 0, 3};
-  TEST_ASSERT_EQUAL_UINT8_ARRAY(expected, ranking, 5);
-}
-
-void test_game_play_count_saturates() {
-  TEST_ASSERT_EQUAL_UINT32(1, game_ranking::nextPlayCount(0));
-  TEST_ASSERT_EQUAL_UINT32(UINT32_MAX,
-                           game_ranking::nextPlayCount(UINT32_MAX - 1));
-  TEST_ASSERT_EQUAL_UINT32(UINT32_MAX,
-                           game_ranking::nextPlayCount(UINT32_MAX));
-}
-
-void test_game_ranking_finds_current_launcher_page() {
-  const uint8_t ranking[] = {4, 1, 7, 3, 5, 0, 2, 6};
-  TEST_ASSERT_EQUAL_UINT(
-      0, game_ranking::pageForGame(ranking, 7, 3));
-  TEST_ASSERT_EQUAL_UINT(
-      1, game_ranking::pageForGame(ranking, 0, 3));
-  TEST_ASSERT_EQUAL_UINT(
-      2, game_ranking::pageForGame(ranking, 6, 3));
 }
 
 void test_menu_edge_swipes_paginate_inward() {
@@ -1987,6 +2254,23 @@ int main(int, char**) {
   RUN_TEST(test_nonogram_reset_clears_marks_but_keeps_solution);
   RUN_TEST(test_nonogram_snapshot_restores_progress);
   RUN_TEST(test_nonogram_invalid_snapshot_is_rejected);
+  RUN_TEST(test_connect_four_drops_with_gravity);
+  RUN_TEST(test_connect_four_alternates_turns);
+  RUN_TEST(test_connect_four_detects_horizontal_win);
+  RUN_TEST(test_connect_four_detects_vertical_win);
+  RUN_TEST(test_connect_four_detects_diagonal_win);
+  RUN_TEST(test_connect_four_rejects_full_column);
+  RUN_TEST(test_connect_four_ai_takes_immediate_win);
+  RUN_TEST(test_connect_four_ai_blocks_immediate_loss);
+  RUN_TEST(test_connect_four_snapshot_round_trip);
+  RUN_TEST(test_connect_four_rejects_floating_snapshot);
+  RUN_TEST(test_word_search_generation_is_deterministic);
+  RUN_TEST(test_word_search_different_seed_changes_puzzle);
+  RUN_TEST(test_word_search_all_words_are_selectable_and_solve_puzzle);
+  RUN_TEST(test_word_search_accepts_reverse_and_rejects_duplicate);
+  RUN_TEST(test_word_search_reset_keeps_puzzle_and_clears_found_words);
+  RUN_TEST(test_word_search_snapshot_round_trip);
+  RUN_TEST(test_word_search_rejects_invalid_snapshot);
   RUN_TEST(test_reversi_starts_with_four_discs_and_four_legal_moves);
   RUN_TEST(test_reversi_move_places_disc_and_flips_opponent);
   RUN_TEST(test_reversi_move_flips_in_all_eight_directions);
@@ -2015,10 +2299,6 @@ int main(int, char**) {
   RUN_TEST(test_all_microban_sokoban_levels_are_structurally_valid);
   RUN_TEST(test_long_game_progress_only_advances_with_valid_checkpoints);
   RUN_TEST(test_high_score_progress_never_moves_backward);
-  RUN_TEST(test_game_ranking_sorts_counts_and_preserves_ties);
-  RUN_TEST(test_game_ranking_uses_default_order_only_to_break_ties);
-  RUN_TEST(test_game_play_count_saturates);
-  RUN_TEST(test_game_ranking_finds_current_launcher_page);
   RUN_TEST(test_menu_edge_swipes_paginate_inward);
   RUN_TEST(test_menu_edge_swipes_reject_non_paging_gestures);
   RUN_TEST(test_every_game_translation_is_present);

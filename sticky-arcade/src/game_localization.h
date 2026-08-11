@@ -108,6 +108,12 @@ enum class TextId : uint8_t {
   AcrossAbbreviation,
   DownAbbreviation,
   HowToPlay,
+  ConnectFour,
+  WordSearch,
+  RedWins,
+  YellowWins,
+  RedToMove,
+  YellowToMove,
   Count,
 };
 
@@ -278,6 +284,18 @@ inline constexpr const Utf8Char*
     {u8"D", u8"V", u8"V", u8"S", u8"竖"},
     {u8"HOW TO PLAY", u8"CÓMO JUGAR", u8"COMMENT JOUER", u8"SPIELANLEITUNG",
      u8"游戏说明"},
+    {u8"CONNECT FOUR", u8"CUATRO EN RAYA", u8"PUISSANCE 4", u8"VIER GEWINNT",
+     u8"四子棋"},
+    {u8"WORD SEARCH", u8"SOPA DE LETRAS", u8"MOTS MÊLÉS", u8"WORTSUCHE",
+     u8"单词搜索"},
+    {u8"RED WINS", u8"GANA ROJO", u8"ROUGE GAGNE", u8"ROT GEWINNT",
+     u8"红方获胜"},
+    {u8"YELLOW WINS", u8"GANA AMARILLO", u8"JAUNE GAGNE",
+     u8"GELB GEWINNT", u8"黄方获胜"},
+    {u8"RED TO MOVE", u8"TURNO DE ROJO", u8"AU ROUGE DE JOUER",
+     u8"ROT AM ZUG", u8"红方回合"},
+    {u8"YELLOW TO MOVE", u8"TURNO DE AMARILLO", u8"AU JAUNE DE JOUER",
+     u8"GELB AM ZUG", u8"黄方回合"},
 };
 
 constexpr bool validLanguageValue(uint8_t value) {

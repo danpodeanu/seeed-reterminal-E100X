@@ -23,6 +23,8 @@ enum class Topic : uint8_t {
   Klondike,
   MahjongSolitaire,
   FallingBlocks,
+  ConnectFour,
+  WordSearch,
   EpubReader,
   Count,
 };
@@ -265,6 +267,34 @@ inline constexpr const Utf8Char*
          "dreht gegen den Uhrzeigersinn; AB dreht im Uhrzeigersinn.",
          u8"用下落方块填满横行。点击棋盘可旋转，左右滑动可移动；每次移动或旋转后方块也会下降一"
          "行。向下滑动可软降，向上滑动可直接落底。上键逆时针旋转，下键顺时针旋转。"},
+        {u8"Drop discs into columns and connect four horizontally, vertically, or "
+         "diagonally. Solid discs are red; ringed discs are yellow. Choose one "
+         "player for the computer opponent or two players for pass-and-play.",
+         u8"Deja caer fichas en las columnas y conecta cuatro en horizontal, "
+         "vertical o diagonal. Las fichas sólidas son rojas y los aros amarillos. "
+         "Elige uno o dos jugadores.",
+         u8"Faites tomber les jetons et alignez-en quatre horizontalement, "
+         "verticalement ou en diagonale. Les jetons pleins sont rouges et les "
+         "anneaux jaunes. Choisissez un ou deux joueurs.",
+         u8"Lasse Steine in die Spalten fallen und verbinde vier waagerecht, "
+         "senkrecht oder diagonal. Volle Steine sind rot, Ringe gelb. Wähle ein "
+         "oder zwei Spieler.",
+         u8"将棋子落入列中，横向、纵向或斜向连成四子即可获胜。实心棋子代表红方，圆环代表黄方。"
+         "可选择单人对战电脑或双人轮流游戏。"},
+        {u8"Find all six words hidden horizontally, vertically, or diagonally, "
+         "forwards or backwards. Drag from the first letter to the last. Found "
+         "words turn black. RESET clears found words; NEW creates a new puzzle.",
+         u8"Encuentra las seis palabras ocultas en horizontal, vertical o "
+         "diagonal, en ambos sentidos. Arrastra de la primera letra a la última. "
+         "REINICIAR borra los hallazgos y NUEVO crea otro puzle.",
+         u8"Trouvez les six mots cachés horizontalement, verticalement ou en "
+         "diagonale, dans les deux sens. Glissez de la première à la dernière "
+         "lettre. RÉINITIALISER efface les trouvailles; NOUVEAU crée une grille.",
+         u8"Finde alle sechs Wörter waagerecht, senkrecht oder diagonal, vorwärts "
+         "oder rückwärts. Ziehe vom ersten zum letzten Buchstaben. ZURÜCKSETZEN "
+         "löscht Funde; NEU erzeugt ein neues Rätsel.",
+         u8"找出横向、纵向或斜向隐藏的六个单词，正反方向均可。请从首字母拖到末字母。已找到的"
+         "单词会变黑；重置会清除记录，新游戏会生成新题目。"},
         {u8"Browse the SD card read-only and tap an EPUB file to open it. The "
          "on-screen arrows or UP and DOWN change browser pages. UP and DOWN "
          "change reading pages. Supported embedded JPEG/PNG covers appear "

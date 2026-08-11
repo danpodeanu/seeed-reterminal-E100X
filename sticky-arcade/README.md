@@ -9,27 +9,29 @@ installing separate firmware.
 | --- | --- |
 | ![First Sticky Arcade selector page on a reTerminal E1005](assets/e1005-sticky-arcade-menu.png) | ![Mini Minesweeper running on a reTerminal E1005](assets/e1005-minesweeper.png) |
 
-The selector shows six activities per page, ordered from most used to least
-used. Activities with equal use counts retain this default order:
+The selector shows six activities per page in a fixed, popularity-based order.
+EPUB Reader remains on the first page:
 
 | Game | Board or collection |
 | --- | --- |
-| EPUB Reader | Read-only SD browser and paginated reflowable books |
-| Sokoban | All 155 Microban I levels |
-| Crossword | 100 easy 5x5 mini crosswords; engine supports up to 9x9 |
-| Lights Out | Solvable generated 5x5 puzzles |
-| 2048 | 4x4 sliding-tile board |
-| Pipe Connect | Solvable generated 6x6 networks |
-| Mini Minesweeper | First-tap-safe 6x6 fields with six mines |
-| Nonogram / Picross | Generated 5x5 pictures |
-| Reversi / Othello | 8x8, one-player AI or two-player mode |
-| Dots and Boxes | Two-player 5x5 box board |
-| Peg Solitaire | Classic 33-hole English board |
-| Slitherlink | Bundled 5x5 logic puzzles |
-| Sudoku | 12 uniquely solvable easy 9x9 puzzles |
+| Falling Blocks | Turn-based 10x16 line-clearing board |
+| Connect Four | 6x7, one-player AI or two-player mode |
 | Klondike | Standard 52-card draw-one solitaire |
 | Mahjong Solitaire | Solvable 144-tile layered layouts |
-| Falling Blocks | Turn-based 10x16 line-clearing board |
+| 2048 | 4x4 sliding-tile board |
+| EPUB Reader | Read-only SD browser and paginated reflowable books |
+| Mini Minesweeper | First-tap-safe 6x6 fields with six mines |
+| Sudoku | 12 uniquely solvable easy 9x9 puzzles |
+| Reversi / Othello | 8x8, one-player AI or two-player mode |
+| Word Search | Generated 9x9 puzzles with six hidden words |
+| Crossword | 100 easy 5x5 mini crosswords; engine supports up to 9x9 |
+| Sokoban | All 155 Microban I levels |
+| Dots and Boxes | Two-player 5x5 box board |
+| Peg Solitaire | Classic 33-hole English board |
+| Lights Out | Solvable generated 5x5 puzzles |
+| Nonogram / Picross | Generated 5x5 pictures |
+| Pipe Connect | Solvable generated 6x6 networks |
+| Slitherlink | Bundled 5x5 logic puzzles |
 
 ## Included activities
 
@@ -269,6 +271,33 @@ Touch controls:
 - Tap **NEW** to start over.
 - Tap the back arrow to save and return to the selection screen.
 
+### Connect Four
+
+Drop discs into the 6x7 board and connect four horizontally, vertically, or
+diagonally. Solid discs represent red and ringed discs represent yellow on the
+monochrome display. One-player mode uses a built-in opponent; two-player mode
+supports pass-and-play.
+
+Touch controls:
+
+- Tap a column to drop a disc.
+- Tap **1 PLAYER** or **2 PLAYERS** to switch modes and start a new game.
+- Tap **NEW** to restart in the current mode.
+- Tap the back arrow to save and return to the selection screen.
+
+### Word Search
+
+Find six arcade-themed words hidden horizontally, vertically, or diagonally in
+either direction on a generated 9x9 grid.
+
+Touch controls:
+
+- Drag from the first letter of a word to its last letter.
+- Found words are shown with a black background below the grid.
+- Tap **RESET** to clear the found-word list for the current puzzle.
+- Tap **NEW** to generate another puzzle.
+- Tap the back arrow to save and return to the selection screen.
+
 ### EPUB Reader
 
 Insert an SD card and open the EPUB Reader tile to browse its folders. The
@@ -351,13 +380,10 @@ when the required SD font is missing. The browser falls back to the 16px CJK
 font if the 24px file is absent. CJK characters are treated as full-width
 during pagination.
 
-The selector uses three two-column pages with up to six activities each. It
-automatically orders them by use count, from most used to least used,
-and preserves
-the default order for ties. Counts are retained in RTC memory through deep
-sleep, but reset after power loss, RTC memory loss, or reflashing. Previous and
-next arrows appear only when a page exists in that direction. Returning from an
-activity opens the selector page containing that activity's newly ranked tile.
+The selector uses three two-column pages with six activities each in the fixed
+order above. Previous and next arrows appear only when a page exists in that
+direction. Returning from an activity opens the selector page containing that
+activity's tile.
 
 Front buttons:
 
