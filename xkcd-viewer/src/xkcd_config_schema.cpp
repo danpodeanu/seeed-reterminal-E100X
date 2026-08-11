@@ -15,7 +15,7 @@ const Field kRefreshFields[] = {
     {kKeySleepSeconds,
      "Sleep between refreshes (s)",
      "Deep-sleep interval between automatic refreshes. Range 60..21600.",
-     FieldType::Int, "900", nullptr, 60, 21600, nullptr},
+     FieldType::Int, "1800", nullptr, 60, 21600, nullptr},
     {kKeyTimezone,
      "Timezone",
      "Pick your region or choose \"Custom (POSIX)\" and enter a POSIX TZ string.",

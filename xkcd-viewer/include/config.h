@@ -18,7 +18,7 @@ namespace config {
 // --- Refresh cadence --------------------------------------------------------
 // How long the device sleeps between automatic refreshes. Shorter = fresher
 // comics but noticeably more battery drain and more panel wear.
-constexpr uint64_t SLEEP_SECONDS = 15ULL * 60ULL;
+constexpr uint64_t SLEEP_SECONDS = 30ULL * 60ULL;
 
 // POSIX TZ notation uses the opposite sign: CST-8 means UTC+8.
 // London (GMT/BST) with EU-style DST rules is the default.

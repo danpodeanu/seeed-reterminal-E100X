@@ -17,7 +17,7 @@ screenshot feature.*
 
 ## What it does
 
-- Picks a random XKCD every 15 minutes (default) and shows it on the
+- Picks a random XKCD every 30 minutes (default) and shows it on the
   panel.
 - Optional SD-card archive that stores comics indefinitely, so most
   refreshes are entirely offline once the cache is populated.
@@ -118,7 +118,7 @@ The details are in [Pre-populating an SD card](#pre-populating-an-sd-card).
 
 ## Using the viewer
 
-- **Every 15 minutes** (default) the device wakes, picks a new comic,
+- **Every 30 minutes** (default) the device wakes, picks a new comic,
   refreshes the panel, and returns to sleep. Cadence is configurable in
   the portal.
 - **Buttons on the front** all wake the device:
@@ -324,7 +324,7 @@ The archive refresh cadence and quiet-hour period are configured in
 the same file:
 
 ```cpp
-constexpr uint64_t SLEEP_SECONDS = 15ULL * 60ULL;
+constexpr uint64_t SLEEP_SECONDS = 30ULL * 60ULL;
 constexpr uint32_t ARCHIVE_REFRESH_SECONDS = 6UL * 60UL * 60UL;
 constexpr uint8_t ARCHIVE_OLD_COMICS_PER_REFRESH = 10;
 constexpr bool QUIET_HOURS_ENABLED = true;
