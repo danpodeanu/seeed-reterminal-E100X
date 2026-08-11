@@ -25,6 +25,7 @@
 #include "epaper_setup.h"
 #include "epub_archive.h"
 #include "epub_browser_logic.h"
+#include "epub_cover.h"
 #include "epub_latin_fonts.h"
 #include "epub_text.h"
 #include "falling_blocks_game.h"
@@ -538,6 +539,7 @@ int browserPageStart = 0;
 String browserMessage;
 String readerBrowserPath = "/";
 String readerBookPath;
+String readerFolderCoverPath;
 EpubChapterText readerChapterText;
 bool readerChapterRequiresNonAscii = false;
 bool readerChapterRequiresCjk = false;
@@ -3624,6 +3626,7 @@ void clearReaderStorageState() {
   readerChapterRequiresNonAscii = false;
   readerChapterRequiresCjk = false;
   readerBookPath = "";
+  readerFolderCoverPath = "";
   readerPageStart = 0;
   readerChapterIndex = 0;
   readerCoverVisible = false;
@@ -3882,22 +3885,105 @@ uint32_t readerPageNumber() {
   return pageNumber;
 }
 
-bool renderEpubCoverImage() {
-  EpubCoverData cover;
-  if (!epubArchive.loadCover(cover)) {
-    LOG.printf("[games] could not extract EPUB cover: %s\n",
-               epubArchive.error().c_str());
+bool readerHasCover() {
+  return epubArchive.hasCover() || !readerFolderCoverPath.isEmpty();
+}
+
+String findReaderFolderCoverPath(const String& bookPath) {
+  constexpr const char* kCoverNames[] = {"cover.png", "cover.jpg"};
+  for (const char* coverName : kCoverNames) {
+    const String candidate =
+        epub_cover::folderCoverPath(bookPath.c_str(), coverName).c_str();
+    if (!sd_card::fileExists(candidate)) continue;
+
+    File cover = sd_card::openForRead(candidate);
+    if (!cover) {
+      LOG.printf("[games] could not open folder cover %s\n",
+                 candidate.c_str());
+      continue;
+    }
+    const size_t length = cover.size();
+    cover.close();
+    if (length == 0 || length > EpubArchive::kMaximumCoverBytes) {
+      LOG.printf("[games] ignoring folder cover %s (%lu bytes)\n",
+                 candidate.c_str(), static_cast<unsigned long>(length));
+      continue;
+    }
+    return candidate;
+  }
+  return "";
+}
+
+bool loadReaderFolderCoverImage(RgbImage& image) {
+  if (readerFolderCoverPath.isEmpty() || !sdCardInserted()) return false;
+
+  // Avoid a recovery remount while the EPUB archive has an open File handle.
+  File cover = SD.open(readerFolderCoverPath, FILE_READ);
+  if (!cover) {
+    LOG.printf("[games] could not reopen folder cover %s\n",
+               readerFolderCoverPath.c_str());
+    return false;
+  }
+  const size_t length = cover.size();
+  if (length == 0 || length > EpubArchive::kMaximumCoverBytes) {
+    cover.close();
+    LOG.printf("[games] refusing changed folder cover %s (%lu bytes)\n",
+               readerFolderCoverPath.c_str(),
+               static_cast<unsigned long>(length));
     return false;
   }
 
-  LOG.printf("[games] decoding EPUB cover %s (%lu bytes)\n",
-             cover.nameHint().c_str(),
-             static_cast<unsigned long>(cover.length()));
-  RgbImage image;
+  uint8_t* data = static_cast<uint8_t*>(ps_malloc(length));
+  if (data == nullptr) data = static_cast<uint8_t*>(malloc(length));
+  if (data == nullptr) {
+    cover.close();
+    LOG.println("[games] folder cover allocation failed");
+    return false;
+  }
+  size_t bytesRead = 0;
+  while (bytesRead < length) {
+    const size_t chunk = cover.read(data + bytesRead, length - bytesRead);
+    if (chunk == 0) break;
+    bytesRead += chunk;
+  }
+  cover.close();
+  if (bytesRead != length) {
+    free(data);
+    LOG.println("[games] folder cover read failed");
+    return false;
+  }
+
   const bool decoded =
-      load_image_from_memory(cover.data(), cover.length(),
-                             cover.nameHint().c_str(), 0, 0, &image);
-  cover.clear();
+      load_image_from_memory(data, length, readerFolderCoverPath.c_str(), 0, 0,
+                             &image);
+  free(data);
+  return decoded;
+}
+
+bool renderEpubCoverImage() {
+  RgbImage image;
+  bool decoded = false;
+  if (epubArchive.hasCover()) {
+    EpubCoverData cover;
+    if (!epubArchive.loadCover(cover)) {
+      LOG.printf("[games] could not extract EPUB cover: %s\n",
+                 epubArchive.error().c_str());
+      return false;
+    }
+    LOG.printf("[games] decoding EPUB cover %s (%lu bytes)\n",
+               cover.nameHint().c_str(),
+               static_cast<unsigned long>(cover.length()));
+    decoded = load_image_from_memory(cover.data(), cover.length(),
+                                     cover.nameHint().c_str(), 0, 0, &image);
+    cover.clear();
+  } else if (!readerFolderCoverPath.isEmpty()) {
+    LOG.printf("[games] decoding folder cover %s\n",
+               readerFolderCoverPath.c_str());
+    decoded = loadReaderFolderCoverImage(image);
+  } else {
+    return false;
+  }
+
   if (!decoded || image.width <= 0 || image.height <= 0) {
     image_free(&image);
     LOG.println("[games] EPUB cover decode failed");
@@ -4226,6 +4312,7 @@ bool openReaderBrowserPath(const String& path) {
   readerChapterRequiresNonAscii = false;
   readerChapterRequiresCjk = false;
   readerBookPath = "";
+  readerFolderCoverPath = "";
   readerPageStart = 0;
   readerChapterIndex = 0;
   readerCoverVisible = false;
@@ -4257,6 +4344,7 @@ bool openReaderBook(const String& path, int chapter = 0,
   readerChapterRequiresNonAscii = false;
   readerChapterRequiresCjk = false;
   readerCoverVisible = false;
+  readerFolderCoverPath = "";
   LOG.printf(
       "[games] opening EPUB %s (heap=%lu KiB, PSRAM=%lu KiB)\n",
       path.c_str(), static_cast<unsigned long>(ESP.getFreeHeap() / 1024),
@@ -4266,6 +4354,7 @@ bool openReaderBook(const String& path, int chapter = 0,
     return false;
   }
   detectReaderFonts();
+  const String folderCoverPath = findReaderFolderCoverPath(path);
   if (!epubArchive.open(path)) {
     LOG.printf("[games] could not open EPUB %s: %s\n", path.c_str(),
                epubArchive.error().c_str());
@@ -4284,7 +4373,10 @@ bool openReaderBook(const String& path, int chapter = 0,
       continue;
     }
     readerBookPath = path;
-    readerCoverVisible = showCover && epubArchive.hasCover();
+    if (!epubArchive.hasCover()) {
+      readerFolderCoverPath = folderCoverPath;
+    }
+    readerCoverVisible = showCover && readerHasCover();
     LOG.printf(
         "[games] EPUB ready: chapter=%d bytes=%lu cover=%s heap=%lu KiB "
         "PSRAM=%lu KiB\n",
@@ -5645,7 +5737,7 @@ void showPreviousReaderPage() {
     showEpubReading();
     return;
   }
-  if (epubArchive.hasCover()) {
+  if (readerHasCover()) {
     readerCoverVisible = true;
     showEpubReading();
   }

@@ -282,9 +282,10 @@ script and stylesheet content, and paginates the resulting text. DRM,
 fixed-layout books, embedded scripting, advanced CSS, inline images, audio, and
 video are not supported. JPEG and PNG cover art declared through standard EPUB
 2 or EPUB 3 metadata appears as a fitted, dithered page before the book text.
-Cover images are limited to 2 MiB after ZIP extraction. A book may contain up
-to 96 spine entries, each extracted chapter is limited to 512 KiB, and one
-browser folder displays up to 96 entries.
+When no embedded cover is declared, the reader uses `cover.png`, then
+`cover.jpg`, from the EPUB's folder when present. Cover images are limited to
+2 MiB. A book may contain up to 96 spine entries, each extracted chapter is
+limited to 512 KiB, and one browser folder displays up to 96 entries.
 Soft-wrapped body lines are fully justified; paragraph-final and explicit-break
 lines retain their natural spacing.
 

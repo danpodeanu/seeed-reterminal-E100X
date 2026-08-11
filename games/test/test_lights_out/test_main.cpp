@@ -1817,6 +1817,18 @@ void test_epub_cover_rejects_unsupported_image_formats() {
       epub_cover::findCoverPath(package, "OPS/content.opf").empty());
 }
 
+void test_epub_folder_cover_uses_book_directory() {
+  TEST_ASSERT_EQUAL_STRING(
+      "/Books/cover.png",
+      epub_cover::folderCoverPath("/Books/title.epub", "cover.png").c_str());
+  TEST_ASSERT_EQUAL_STRING(
+      "/cover.jpg",
+      epub_cover::folderCoverPath("/title.epub", "cover.jpg").c_str());
+  TEST_ASSERT_EQUAL_STRING(
+      "cover.png",
+      epub_cover::folderCoverPath("title.epub", "cover.png").c_str());
+}
+
 void test_sd_card_identity_uses_partition_boot_sector() {
   uint8_t sectorZero[512] = {};
   sectorZero[510] = 0x55;
@@ -2052,6 +2064,7 @@ int main(int, char**) {
   RUN_TEST(test_epub3_cover_uses_cover_image_manifest_property);
   RUN_TEST(test_epub2_cover_uses_metadata_manifest_id);
   RUN_TEST(test_epub_cover_rejects_unsupported_image_formats);
+  RUN_TEST(test_epub_folder_cover_uses_book_directory);
   RUN_TEST(test_sd_card_identity_uses_partition_boot_sector);
   RUN_TEST(test_epub_pagination_wraps_utf8_without_splitting_characters);
   RUN_TEST(test_epub_pagination_treats_cjk_as_full_width);

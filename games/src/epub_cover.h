@@ -79,4 +79,12 @@ inline std::string findCoverPath(const std::string& package,
   return epub2Candidate;
 }
 
+inline std::string folderCoverPath(const std::string& bookPath,
+                                   const char* coverName) {
+  if (coverName == nullptr || coverName[0] == '\0') return {};
+  const size_t slash = bookPath.find_last_of('/');
+  if (slash == std::string::npos) return coverName;
+  return bookPath.substr(0, slash + 1) + coverName;
+}
+
 }  // namespace epub_cover
