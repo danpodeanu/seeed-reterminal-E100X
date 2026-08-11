@@ -1,16 +1,16 @@
-name: Games build
+name: Sticky Arcade build
 
 on:
   push:
     paths:
-      - "games/**"
+      - "sticky-arcade/**"
       - "common/**"
-      - ".github/workflows/games-build.yml"
+      - ".github/workflows/sticky-arcade-build.yml"
   pull_request:
     paths:
-      - "games/**"
+      - "sticky-arcade/**"
       - "common/**"
-      - ".github/workflows/games-build.yml"
+      - ".github/workflows/sticky-arcade-build.yml"
   workflow_dispatch:
 
 permissions:
@@ -22,7 +22,7 @@ concurrency:
 
 defaults:
   run:
-    working-directory: games
+    working-directory: sticky-arcade
 
 jobs:
   unit-tests:

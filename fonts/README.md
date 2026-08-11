@@ -3,7 +3,7 @@
 TFT_eSPI `.vlw` smooth fonts derived from **DejaVu Sans Bold**, shared
 by the xkcd, weather, and photo viewers to render non-ASCII characters
 (e.g. `München`, `São Paulo`, `forté`, em dashes, curly quotes).
-The Games EPUB reader also uses **Noto Sans CJK SC Bold** for common Chinese,
+The Sticky Arcade EPUB reader also uses **Noto Sans CJK SC Bold** for common Chinese,
 Japanese, and Korean text.
 
 ## What's here

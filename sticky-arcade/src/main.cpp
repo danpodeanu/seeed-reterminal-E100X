@@ -64,7 +64,7 @@
 #include "usb_screen_capture.h"
 
 #if RETERMINAL_MODEL != 1005
-#error "The Games app supports only reTerminal E1005"
+#error "Sticky Arcade supports only reTerminal E1005"
 #endif
 
 TimestampedLogger appLog(Serial1);
@@ -78,6 +78,8 @@ using game_localization::TextId;
 
 constexpr int kScreenWidth = 480;
 constexpr int kScreenHeight = 800;
+constexpr char kAppName[] = "Sticky Arcade";
+constexpr char kBrandName[] = "STICKY ARCADE";
 constexpr int kGridLeft = 40;
 constexpr int kGridTop = 150;
 constexpr int kCellSize = 80;
@@ -1269,6 +1271,11 @@ void drawCentered(const String& text, int x, int y, int font) {
                    kScreenWidth - 16);
 }
 
+void drawStickyArcadeBrand(int centerY, int font) {
+  drawCenteredText(kBrandName, kScreenWidth / 2, centerY, font, TFT_BLACK,
+                   TFT_WHITE, kScreenWidth - 32, true);
+}
+
 void drawCenteredNumber(uint32_t value, int x, int y, int font,
                         uint16_t foreground, uint16_t background) {
   const int opticalYOffset = font == 6 ? 6 : font == 4 ? 3 : 0;
@@ -1277,7 +1284,7 @@ void drawCenteredNumber(uint32_t value, int x, int y, int font,
   epaper.drawNumber(static_cast<long>(value), x, y + opticalYOffset, font);
 }
 
-void drawGamesLogo(int centerX, int centerY, int width) {
+void drawArcadeLogo(int centerX, int centerY, int width) {
   const int height = width * 5 / 8;
   const int left = centerX - width / 2;
   const int top = centerY - height / 2;
@@ -2368,7 +2375,7 @@ void drawHelpPane() {
 void drawMenu() {
   epaper.fillSprite(TFT_WHITE);
   drawSettingsIndicator();
-  drawGamesLogo(kScreenWidth / 2, 24, 64);
+  drawStickyArcadeBrand(24, 4);
   arrangeMenuCards();
   const size_t pageIndex = static_cast<size_t>(currentMenuPage);
   const size_t firstRank = pageIndex * kGamesPerMenuPage;
@@ -2389,6 +2396,7 @@ void drawMenu() {
 
 void drawLanguageSelection() {
   epaper.fillSprite(TFT_WHITE);
+  drawStickyArcadeBrand(24, 4);
   drawCentered(tr(TextId::SelectLanguage), kScreenWidth / 2, 72, 4);
   for (size_t index = 0; index < game_localization::kLanguageCount; ++index) {
     drawButton(kLanguageButtons[index],
@@ -2425,7 +2433,8 @@ void drawRepoQr() {
 
 void drawSleepSplash() {
   epaper.fillSprite(TFT_WHITE);
-  drawGamesLogo(kScreenWidth / 2, 390, 280);
+  drawArcadeLogo(kScreenWidth / 2, 390, 280);
+  drawStickyArcadeBrand(525, 6);
   drawRepoQr();
 }
 
@@ -2434,7 +2443,8 @@ void drawChargeSplash(int batteryPercent) {
   drawCentered(tr(TextId::BatteryLow), kScreenWidth / 2, 130, 4);
   drawCentered(String(batteryPercent) + "% " + tr(TextId::Remaining),
                kScreenWidth / 2, 180, 4);
-  drawGamesLogo(kScreenWidth / 2, 390, 280);
+  drawArcadeLogo(kScreenWidth / 2, 390, 280);
+  drawStickyArcadeBrand(500, 4);
   drawCentered(tr(TextId::PleaseCharge), kScreenWidth / 2, 545, 4);
   drawCentered(tr(TextId::ConnectUsbC), kScreenWidth / 2, 595, 4);
   drawCentered(tr(TextId::PressOkAfterCharging), kScreenWidth / 2, 645, 4);
@@ -3650,7 +3660,8 @@ ReaderStorageStatus refreshReaderStorage() {
   bool remounted = false;
   if (!sdCardReady) {
     epubArchive.close();
-    sdCardReady = sd_card::mount(epaper.getSPIinstance(), "/games");
+    sdCardReady =
+        sd_card::mount(epaper.getSPIinstance(), "/sticky-arcade");
     if (!sdCardReady) {
       clearReaderStorageState();
       return ReaderStorageStatus::Missing;
@@ -6247,7 +6258,7 @@ void setup() {
   usbScreenCapture.begin(Serial1);
   delay(50);
   LOG.println();
-  LOG.println("[games] reTerminal E1005 Games");
+  LOG.printf("[games] reTerminal E1005 %s\n", kAppName);
   hardware::beep();
   const game_language_store::LoadResult languageResult =
       game_language_store::load();
@@ -6299,7 +6310,7 @@ void setup() {
 
   epaper_setup::begin(epaper);
   checkBatteryAndSleepIfNeeded();
-  sdCardReady = sd_card::mount(epaper.getSPIinstance(), "/games");
+  sdCardReady = sd_card::mount(epaper.getSPIinstance(), "/sticky-arcade");
   if (sdCardReady && sd_ota::hasUpdate()) {
     drawStatus(tr(TextId::UpdatingFirmware), tr(TextId::DoNotPowerOff));
     epaper.update();

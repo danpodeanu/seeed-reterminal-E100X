@@ -3,7 +3,7 @@
 #include <Arduino.h>
 #include <stdint.h>
 
-// SD-driven firmware update shared by the viewer and games apps: at boot,
+// SD-driven firmware update shared by the viewers and Sticky Arcade: at boot,
 // if /update.bin exists on the SD card, we stream it into the inactive
 // OTA slot, verify the built-in SHA-256, refuse the update unless the
 // image was built for the same board model (E1001/E1002/E1003/E1004/E1005),

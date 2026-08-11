@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate the BMP CJK font used by the Games EPUB reader."""
+"""Generate the BMP CJK font used by the Sticky Arcade EPUB reader."""
 
 from __future__ import annotations
 

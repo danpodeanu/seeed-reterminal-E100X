@@ -1,12 +1,13 @@
-# Games
+# Sticky Arcade
 
 Touch-friendly games and an EPUB reader for the Seeed reTerminal E1005
-("Seeed Sticky"). The app opens on an activity-selection screen so additional
-activities can be added without installing separate firmware.
+("Seeed Sticky"), bundled as **Sticky Arcade**. The app opens on an
+activity-selection screen so additional activities can be added without
+installing separate firmware.
 
 | First selector page | Mini Minesweeper |
 | --- | --- |
-| ![First Games selector page on a reTerminal E1005](assets/e1005-games-menu.png) | ![Mini Minesweeper running on a reTerminal E1005](assets/e1005-minesweeper.png) |
+| ![First Sticky Arcade selector page on a reTerminal E1005](assets/e1005-sticky-arcade-menu.png) | ![Mini Minesweeper running on a reTerminal E1005](assets/e1005-minesweeper.png) |
 
 The selector shows six activities per page, ordered from most used to least
 used. Activities with equal use counts retain this default order:
@@ -330,7 +331,7 @@ Invoke-WebRequest `
   -OutFile tools\fonts\NotoSansCJKsc-Bold.otf
 
 # Replace E:\ with the mounted SD-card root.
-python games\tools\generate_epub_cjk_font.py E:\
+python sticky-arcade\tools\generate_epub_cjk_font.py E:\
 ```
 
 The generator verifies the pinned source font, creates the SD card's `fonts`
@@ -409,9 +410,9 @@ waveform limit while preventing one move from affecting earlier regions.
 
 ```powershell
 # From the repository root
-pio run -d games -e reterminal_e1005
+pio run -d sticky-arcade -e reterminal_e1005
 
-# Or build, upload, and monitor from games/
+# Or build, upload, and monitor from sticky-arcade/
 ..\deploy.bat e1005
 ```
 
@@ -421,12 +422,12 @@ defined intentionally.
 ## SD firmware updates
 
 The app checks for `/update.bin` on an inserted SD card during startup. Use the
-E1005 Games `-ota.bin` release asset; model validation, rollback protection,
+E1005 Sticky Arcade `-ota.bin` release asset; model validation, rollback protection,
 and failure-safe file renaming use the same shared updater as the viewer apps.
 
 ## Tests
 
 ```powershell
-Set-Location games
+Set-Location sticky-arcade
 pio test -c platformio-test.ini -e native_test
 ```

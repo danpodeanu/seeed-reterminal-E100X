@@ -19,7 +19,8 @@ const E1005_BOARD = "reterminal_e1005";
 
 const boardSel = document.getElementById("board");
 const appSel = document.getElementById("app");
-const gamesOption = appSel.querySelector('option[value="games"]');
+const stickyArcadeOption =
+  appSel.querySelector('option[value="sticky-arcade"]');
 const installer = document.getElementById("installer");
 const status = document.getElementById("status");
 
@@ -38,8 +39,13 @@ function otaFirmwareUrl(app, board) {
   return `${FIRMWARE_BASE}/${otaAssetName(app, board)}`;
 }
 
+function otaFirmwareCandidates(app, board) {
+  const appIds = app === "sticky-arcade" ? [app, "games"] : [app];
+  return appIds.map((appId) => otaFirmwareUrl(appId, board));
+}
+
 function appSupportedOnBoard(app, board) {
-  return app !== "games" || board === E1005_BOARD;
+  return app !== "sticky-arcade" || board === E1005_BOARD;
 }
 
 function bootAssetUrl(stem, board) {
@@ -112,24 +118,32 @@ async function firmwarePresent(url) {
   }
 }
 
+async function firstAvailableFirmware(urls) {
+  for (const url of urls) {
+    if (await firmwarePresent(url)) return url;
+  }
+  return null;
+}
+
 async function refresh() {
   const app = appSel.value;
   const board = boardSel.value;
   installer.hidden = true;
   if (!appSupportedOnBoard(app, board)) {
-    setStatus("Games is available only for reTerminal E1005.", true);
+    setStatus("Sticky Arcade is available only for reTerminal E1005.", true);
     return;
   }
-  const otaUrl = otaFirmwareUrl(app, board);
-  const requiredUrls = [
-    otaUrl,
+  const bootUrls = [
     bootAssetUrl("bootloader", board),
     bootAssetUrl("partitions", board),
     bootAssetUrl("boot_app0", board),
   ];
   setStatus("Checking firmware…");
-  const available = await Promise.all(requiredUrls.map(firmwarePresent));
-  if (available.some((present) => !present)) {
+  const [otaUrl, bootAvailable] = await Promise.all([
+    firstAvailableFirmware(otaFirmwareCandidates(app, board)),
+    Promise.all(bootUrls.map(firmwarePresent)),
+  ]);
+  if (otaUrl === null || bootAvailable.some((present) => !present)) {
     setStatus(
       `No firmware for ${app} on ${board} at ${releaseTag || "the latest release"}.`,
       true
@@ -146,8 +160,9 @@ async function refresh() {
 }
 
 function updateAppAvailability() {
-  gamesOption.disabled = !appSupportedOnBoard("games", boardSel.value);
-  if (gamesOption.disabled && appSel.value === "games") {
+  stickyArcadeOption.disabled =
+    !appSupportedOnBoard("sticky-arcade", boardSel.value);
+  if (stickyArcadeOption.disabled && appSel.value === "sticky-arcade") {
     appSel.value = "weather-viewer";
   }
 }

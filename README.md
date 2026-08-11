@@ -3,7 +3,7 @@
 [![XKCD Viewer build](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/xkcd-viewer-build.yml/badge.svg?branch=main&event=push)](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/xkcd-viewer-build.yml)
 [![Weather Viewer build](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/weather-viewer-build.yml/badge.svg?branch=main&event=push)](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/weather-viewer-build.yml)
 [![Photo Viewer build](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/photo-viewer-build.yml/badge.svg?branch=main&event=push)](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/photo-viewer-build.yml)
-[![Games build](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/games-build.yml/badge.svg?branch=main&event=push)](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/games-build.yml)
+[![Sticky Arcade build](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/sticky-arcade-build.yml/badge.svg?branch=main&event=push)](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/sticky-arcade-build.yml)
 [![Repository checks](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/repository-checks.yml/badge.svg?branch=main&event=push)](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/repository-checks.yml)
 [![CodeQL](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/codeql.yml/badge.svg?branch=main&event=push)](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/codeql.yml)
 [![Release firmware](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/release.yml/badge.svg)](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/release.yml)
@@ -30,7 +30,7 @@ details.
 | [XKCD Viewer](xkcd-viewer/) | A battery-powered random XKCD display with model-aware scaling, optional SD caching, Unicode titles, environmental readings, and deep sleep. | Available |
 | [Weather Viewer](weather-viewer/) | A low-power current-conditions and three-day forecast display using QWeather or Open-Meteo, with local environmental readings, severe-weather alerts, Unicode location names, and deep sleep. | Available |
 | [Photo Viewer](photo-viewer/) | A private, SD-card photo frame with panel-native preprocessing, full model-specific color, quiet hours, daily time sync, and deep sleep. | Available |
-| [Games](games/) | Sixteen ranked E1005 activities with fast refresh and resumable state: fifteen touch games plus a read-only SD browser and EPUB reader. | Available on E1005 |
+| [Sticky Arcade](sticky-arcade/) | Sixteen ranked E1005 activities with fast refresh and resumable state: fifteen touch games plus a read-only SD browser and EPUB reader. | Available on E1005 |
 
 ## XKCD Viewer example
 
@@ -47,14 +47,14 @@ This frame was captured directly from a reTerminal E1003 running the
 This frame was captured directly from a reTerminal E1001 running the
 [Weather Viewer](weather-viewer/).
 
-## Games examples
+## Sticky Arcade examples
 
 | First selector page | Mini Minesweeper |
 | --- | --- |
-| ![First Games selector page on a reTerminal E1005](games/assets/e1005-games-menu.png) | ![Mini Minesweeper running on a reTerminal E1005](games/assets/e1005-minesweeper.png) |
+| ![First Sticky Arcade selector page on a reTerminal E1005](sticky-arcade/assets/e1005-sticky-arcade-menu.png) | ![Mini Minesweeper running on a reTerminal E1005](sticky-arcade/assets/e1005-minesweeper.png) |
 
 These frames were captured directly from a reTerminal E1005 running
-[Games](games/).
+[Sticky Arcade](sticky-arcade/).
 
 The selector presents six games per page and automatically orders them from
 most played to least played. Equal play counts retain the default order below:
@@ -85,7 +85,7 @@ and Korean book text without increasing firmware flash usage.
 Play counts are kept in RTC memory across deep sleep and reset after power loss
 or reflashing. The interface supports English, Spanish, French, German, and
 Simplified Chinese using fonts embedded in firmware flash. See the
-[Games README](games/) for complete rules, controls, persistence details, and
+[Sticky Arcade README](sticky-arcade/) for complete rules, controls, persistence details, and
 puzzle-source attribution.
 
 ## Future ideas
@@ -109,7 +109,7 @@ different framework or architecture where that better suits their use case.
 ├── xkcd-viewer/          # Standalone XKCD display firmware
 ├── weather-viewer/       # Standalone weather display firmware
 ├── photo-viewer/         # SD-card photo-frame firmware and preparation tool
-├── games/                # Fifteen touch games and an EPUB reader for E1005
+├── sticky-arcade/        # Fifteen touch games and an EPUB reader for E1005
 ├── tools/                # Hardware utilities (i2c-scan, panel-test, sd-web)
 └── README.md             # This project index
 ```
@@ -128,7 +128,7 @@ uploading firmware.
 
 All three viewer applications support E1001-E1005, including the monochrome
 Seeed reTerminal E1005 ("Seeed Sticky") in portrait and both landscape
-directions. The Games app is intentionally E1005-only because it depends on
+directions. Sticky Arcade is intentionally E1005-only because it depends on
 the integrated touch screen. E1005 hardware tools live under `tools/`.
 Model-specific firmware for supported combinations is included in releases.
 
@@ -154,7 +154,7 @@ choose another path. The client verifies the payload dimensions and CRC32
 before installing the file. Large E1003/E1004 framebuffers can take several
 minutes over the 115200-baud diagnostic port.
 
-Capture requests are served only while the firmware remains active. Games also
+Capture requests are served only while the firmware remains active. Sticky Arcade also
 wake from light sleep for a repeated capture request. Deep sleep has no capture
 window, so request the image before putting the device to sleep.
 The image retained by the e-paper itself cannot be read after its in-memory
