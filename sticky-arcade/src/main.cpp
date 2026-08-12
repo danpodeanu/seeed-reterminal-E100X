@@ -2584,9 +2584,6 @@ void drawChargeSplash(int batteryPercent) {
                kScreenWidth / 2, 180, 4);
   drawArcadeLogo(kScreenWidth / 2, 390, 280);
   drawStickyArcadeBrand(500, 4);
-  drawCentered(tr(TextId::PleaseCharge), kScreenWidth / 2, 545, 4);
-  drawCentered(tr(TextId::ConnectUsbC), kScreenWidth / 2, 595, 4);
-  drawCentered(tr(TextId::PressOkAfterCharging), kScreenWidth / 2, 645, 4);
 }
 
 void drawLightsOutBoard() {
