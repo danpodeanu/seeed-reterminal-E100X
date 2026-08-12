@@ -420,7 +420,7 @@ immediately for input and logs each light-sleep entry and exit. Holding
 is stored in RTC slow memory, so normal sleep/resume cycles do not write to
 flash or the SD card. The selected language and Sokoban completion are stored
 in internal flash. The same saved deep sleep starts automatically after five
-minutes without touch or button input. Below 10% battery, the app saves its
+minutes without touch or button input. Below 5% battery, the app saves its
 state, displays a recharge screen, and enters deep sleep unless USB-C power is
 connected. The normal sleep screen includes a QR code for this repository. All
 active screens show the current battery percentage and the shared battery
