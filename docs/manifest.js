@@ -19,8 +19,10 @@ const E1005_BOARD = "reterminal_e1005";
 
 const boardSel = document.getElementById("board");
 const appSel = document.getElementById("app");
-const stickyArcadeOption =
-  appSel.querySelector('option[value="sticky-arcade"]');
+const e1005OnlyApps = new Set(["sticky-arcade", "sticky-fiddle"]);
+const e1005OnlyOptions = Array.from(appSel.options).filter((option) =>
+  e1005OnlyApps.has(option.value)
+);
 const installer = document.getElementById("installer");
 const status = document.getElementById("status");
 
@@ -45,7 +47,7 @@ function otaFirmwareCandidates(app, board) {
 }
 
 function appSupportedOnBoard(app, board) {
-  return app !== "sticky-arcade" || board === E1005_BOARD;
+  return !e1005OnlyApps.has(app) || board === E1005_BOARD;
 }
 
 function bootAssetUrl(stem, board) {
@@ -130,7 +132,7 @@ async function refresh() {
   const board = boardSel.value;
   installer.hidden = true;
   if (!appSupportedOnBoard(app, board)) {
-    setStatus("Sticky Arcade is available only for reTerminal E1005.", true);
+    setStatus(`${app} is available only for reTerminal E1005.`, true);
     return;
   }
   const bootUrls = [
@@ -160,9 +162,10 @@ async function refresh() {
 }
 
 function updateAppAvailability() {
-  stickyArcadeOption.disabled =
-    !appSupportedOnBoard("sticky-arcade", boardSel.value);
-  if (stickyArcadeOption.disabled && appSel.value === "sticky-arcade") {
+  for (const option of e1005OnlyOptions) {
+    option.disabled = !appSupportedOnBoard(option.value, boardSel.value);
+  }
+  if (!appSupportedOnBoard(appSel.value, boardSel.value)) {
     appSel.value = "weather-viewer";
   }
 }

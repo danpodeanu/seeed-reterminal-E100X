@@ -42,6 +42,11 @@ jobs:
           test -f sticky-arcade/test/test_lights_out/test_main.cpp
           test -f sticky-arcade/assets/e1005-sticky-arcade-menu.png
           test -f sticky-arcade/assets/e1005-minesweeper.png
+          test -f sticky-fiddle/README.md
+          test -f sticky-fiddle/platformio.ini
+          test -f sticky-fiddle/platformio-test.ini
+          test -f sticky-fiddle/src/fidget_activities.h
+          test -f sticky-fiddle/test/test_activities/test_main.cpp
           test -f photo-viewer/tools/prepare_photos.py
           test -f photo-viewer/requirements.txt
           test -f xkcd-viewer/assets/e1003-xkcd-screenshot.png

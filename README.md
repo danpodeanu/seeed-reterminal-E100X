@@ -4,6 +4,7 @@
 [![Weather Viewer build](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/weather-viewer-build.yml/badge.svg?branch=main&event=push)](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/weather-viewer-build.yml)
 [![Photo Viewer build](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/photo-viewer-build.yml/badge.svg?branch=main&event=push)](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/photo-viewer-build.yml)
 [![Sticky Arcade build](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/sticky-arcade-build.yml/badge.svg?branch=main&event=push)](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/sticky-arcade-build.yml)
+[![Sticky Fiddle build](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/sticky-fiddle-build.yml/badge.svg?branch=main&event=push)](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/sticky-fiddle-build.yml)
 [![Repository checks](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/repository-checks.yml/badge.svg?branch=main&event=push)](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/repository-checks.yml)
 [![CodeQL](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/codeql.yml/badge.svg?branch=main&event=push)](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/codeql.yml)
 [![Release firmware](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/release.yml/badge.svg)](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/release.yml)
@@ -31,6 +32,7 @@ details.
 | [Weather Viewer](weather-viewer/) | A low-power current-conditions and three-day forecast display using QWeather or Open-Meteo, with local environmental readings, severe-weather alerts, Unicode location names, and deep sleep. | Available |
 | [Photo Viewer](photo-viewer/) | A private, SD-card photo frame with panel-native preprocessing, full model-specific color, quiet hours, daily time sync, and deep sleep. | Available |
 | [Sticky Arcade](sticky-arcade/) | Eighteen E1005 activities with fast refresh and resumable state: seventeen touch games plus a read-only SD browser and EPUB reader. | Available on E1005 |
+| [Sticky Fiddle](sticky-fiddle/) | Six no-pressure E1005 touch activities for idle hands: Bubble Wrap, Zen Rake, Flip-Dot Board, Ripple Pond, Pointless Counter, and Squish. | Available on E1005 |
 
 ## XKCD Viewer example
 
@@ -111,7 +113,8 @@ different framework or architecture where that better suits their use case.
 ├── xkcd-viewer/          # Standalone XKCD display firmware
 ├── weather-viewer/       # Standalone weather display firmware
 ├── photo-viewer/         # SD-card photo-frame firmware and preparation tool
-├── sticky-arcade/        # Fifteen touch games and an EPUB reader for E1005
+├── sticky-arcade/        # Seventeen touch games and an EPUB reader for E1005
+├── sticky-fiddle/        # Six no-pressure touch activities for E1005
 ├── tools/                # Hardware utilities (i2c-scan, panel-test, sd-web)
 └── README.md             # This project index
 ```
@@ -130,8 +133,9 @@ uploading firmware.
 
 All three viewer applications support E1001-E1005, including the monochrome
 Seeed reTerminal E1005 ("Seeed Sticky") in portrait and both landscape
-directions. Sticky Arcade is intentionally E1005-only because it depends on
-the integrated touch screen. E1005 hardware tools live under `tools/`.
+directions. Sticky Arcade and Sticky Fiddle are intentionally E1005-only
+because they depend on the integrated touch screen. E1005 hardware tools live
+under `tools/`.
 Model-specific firmware for supported combinations is included in releases.
 
 ## Getting started
