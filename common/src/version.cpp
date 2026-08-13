@@ -5,6 +5,12 @@
 // build without executing it. Same __attribute__((used)) trick as the
 // model tag in sd_ota.cpp.
 extern "C" {
-__attribute__((used, section(".rodata")))
 const char kFirmwareVersionTag[] = "reterminal-fw:" FIRMWARE_VERSION_LITERAL;
 }
+
+namespace board {
+
+const char* const FIRMWARE_VERSION =
+    kFirmwareVersionTag + sizeof("reterminal-fw:") - 1;
+
+}  // namespace board

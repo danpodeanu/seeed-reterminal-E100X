@@ -51,6 +51,24 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v7
 
+      - name: Stamp firmware version
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF_TYPE" == "tag" && "$GITHUB_REF_NAME" == v* ]]; then
+            FIRMWARE_VERSION="${GITHUB_REF_NAME#v}"
+          else
+            FIRMWARE_VERSION="dev-${GITHUB_SHA::7}"
+          fi
+          if [[ ! "$FIRMWARE_VERSION" =~ ^[0-9A-Za-z][0-9A-Za-z._-]*$ ]]; then
+            echo "Invalid firmware version: $FIRMWARE_VERSION" >&2
+            exit 1
+          fi
+          sed -i -E \
+            "s/^#define FIRMWARE_VERSION_LITERAL .*/#define FIRMWARE_VERSION_LITERAL \"$FIRMWARE_VERSION\"/" \
+            common/include/version.h
+          echo "FIRMWARE_VERSION=$FIRMWARE_VERSION" >> "$GITHUB_ENV"
+          grep '^#define FIRMWARE_VERSION_LITERAL ' common/include/version.h
+
       - name: Set up Python
         uses: actions/setup-python@v7
         with:
@@ -67,6 +85,12 @@ jobs:
       - name: Build firmware
         working-directory: ${{ matrix.app }}
         run: pio run -e "${{ matrix.board }}"
+
+      - name: Verify embedded firmware version
+        working-directory: ${{ matrix.app }}
+        run: |
+          python -c 'import pathlib, sys; data = pathlib.Path(sys.argv[1]).read_bytes(); marker = ("reterminal-fw:" + sys.argv[2]).encode(); assert marker in data, f"missing firmware version marker {marker!r}"' \
+            ".pio/build/${{ matrix.board }}/firmware.bin" "$FIRMWARE_VERSION"
 
       - name: Merge flash image
         working-directory: ${{ matrix.app }}

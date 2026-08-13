@@ -1,9 +1,10 @@
 #pragma once
 
-// Firmware version, shared across all three viewer apps.
+// Firmware version shared across all apps.
 //
-// Bump this on every release. The value is baked into every firmware
-// image in three places:
+// Local builds use the development value below. The release workflow replaces
+// it with the tag version before compiling and verifies the resulting image.
+// The value is baked into every firmware image in three places:
 //
 //   1. The boot log line ("[boot] fw <version>") - useful for confirming
 //      which build is on a device without opening it up.
@@ -18,10 +19,10 @@
 // preprocessor macro (for string concatenation into rodata markers),
 // matching the pattern used for MODEL_NAME / MODEL_NAME_LITERAL.
 
-#define FIRMWARE_VERSION_LITERAL "1.9.1"
+#define FIRMWARE_VERSION_LITERAL "2.0.0-dev"
 
 namespace board {
 
-inline constexpr char FIRMWARE_VERSION[] = FIRMWARE_VERSION_LITERAL;
+extern const char* const FIRMWARE_VERSION;
 
 }  // namespace board
