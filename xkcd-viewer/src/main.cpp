@@ -726,7 +726,7 @@ void updatePanel() {
              static_cast<unsigned long>(psram / 1024));
   const uint32_t start = millis();
   LOG.println("[render] epaper.update() start");
-  panel_watchdog::guard(epaper, []() { epaper.update(); });
+  panel_watchdog::refresh(epaper);
   framebufferReady = true;
   LOG.printf("[render] epaper.update() returned after %lu ms\n",
              static_cast<unsigned long>(millis() - start));
@@ -1657,7 +1657,7 @@ void setup() {
       LOG.printf("[portal] splash drawn in %u ms; committing to panel\n",
                  static_cast<unsigned>(millis() - drawStart));
       const uint32_t updateStart = millis();
-      panel_watchdog::guard(epaper, []() { epaper.update(); });
+      panel_watchdog::refresh(epaper);
       framebufferReady = true;
       LOG.printf("[portal] panel refresh complete in %u ms\n",
                  static_cast<unsigned>(millis() - updateStart));

@@ -375,7 +375,7 @@ void drawStatusBadges() {
 }
 
 void updatePanel() {
-  panel_watchdog::guard(epaper, []() { epaper.update(); });
+  panel_watchdog::refresh(epaper);
   framebufferReady = true;
 }
 
@@ -1182,7 +1182,7 @@ void renderPortalOnPanel(const String& ssid, const String& password,
   config_portal::ui::renderPortalScreen<EPaper>(
       epaper, panelWidth(), panelHeight(), PANEL_BLACK,
       PANEL_WHITE, info);
-  panel_watchdog::guard(epaper, []() { epaper.update(); });
+  panel_watchdog::refresh(epaper);
   framebufferReady = true;
 }
 
@@ -1348,7 +1348,7 @@ void renderPortalOnPanel(const String& ssid, const String& password,
   // arduino-esp32 can't feed the task WDT for us. On E1003, the panel
   // refresh we did above armed a 120 s WDT; drop the subscription now
   // so the portal doesn't get panic-reset ~2 min in. No-op on E1001 /
-  // E1002 / E1004 where panel_watchdog::guard is a no-op.
+  // E1002 / E1004 where panel_watchdog::refresh does not arm the watchdog.
   panel_watchdog::disarmCurrentTask();
 
   while (true) {

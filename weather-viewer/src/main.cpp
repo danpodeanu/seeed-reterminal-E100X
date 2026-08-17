@@ -214,7 +214,7 @@ void updatePanel() {
     screenshot::saveScreenshotPng(epaper, panelWidth(), panelHeight());
     screenshotRequested = false;
   }
-  panel_watchdog::guard(epaper, []() { epaper.update(); });
+  panel_watchdog::refresh(epaper);
   framebufferReady = true;
 }
 
@@ -1850,7 +1850,7 @@ void setup() {
       LOG.printf("[portal] splash drawn in %u ms; committing to panel\n",
                  static_cast<unsigned>(millis() - drawStart));
       const uint32_t updateStart = millis();
-      panel_watchdog::guard(epaper, []() { epaper.update(); });
+      panel_watchdog::refresh(epaper);
       framebufferReady = true;
       LOG.printf("[portal] panel refresh complete in %u ms\n",
                  static_cast<unsigned>(millis() - updateStart));

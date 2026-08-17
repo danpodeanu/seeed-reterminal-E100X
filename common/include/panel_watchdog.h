@@ -1,18 +1,12 @@
 #pragma once
 
-// Best-effort panel-refresh watchdog. The Spectra Gray16 driver used by
-// E1003 occasionally locks up inside epaper.update() when the panel's
-// BUSY line never returns to ready (a rare hardware glitch that has
-// been observed on scheduled timer refreshes). The device is then stuck
-// in a bare `while` loop inside the panel driver - buttons are dead
-// and only a hard power cycle recovers.
-//
-// Seeed_GFX also sends TCON_SLEEP immediately after starting a Gray16 update.
-// Usually HRDY remains low until the update completes, but it can briefly be
-// high before the LUT engine asserts busy. If sleep lands in that window, the
-// panel can remain stuck in an inverted intermediate frame. This helper wakes
-// the TCON after update(), waits for LUTAFSR to become idle, then sleeps it
-// again under the same watchdog.
+// Guard panel refreshes against controller stalls. Seeed_GFX's E1003 Gray16
+// path starts the IT8951 waveform and immediately sends TCON_SLEEP without
+// waiting for LUTAFSR to return idle. If sleep lands before the waveform
+// completes, the panel can remain in a dark/inverted intermediate frame.
+// The E1003 path below reproduces the driver's full-frame upload but waits for
+// LUT completion before the first sleep command. Monochrome refreshes keep
+// using update(), whose 1-bpp driver path already performs this wait.
 //
 // The guard is a no-op on other panels: E1001/E1002/E1004/E1005 haven't
 // exhibited the freeze in field use, and the fast paths on those
@@ -25,16 +19,35 @@
 
 namespace panel_watchdog {
 
-// Run `refresh` under a task watchdog. If refresh() takes longer than
+template <typename Panel>
+inline void refreshPanel(Panel& panel) {
+  if (panel.getColorDepth() != 4) {
+    panel.update();
+    return;
+  }
+
+  const uint16_t width = static_cast<uint16_t>(panel.width());
+  const uint16_t height = static_cast<uint16_t>(panel.height());
+  const auto* framebuffer =
+      static_cast<const uint8_t*>(panel.getPointer());
+
+  panel.wake();
+  panel.setTconWindowsData(0, 0, width - 1, height - 1);
+  panel.tconLoadImage(framebuffer, 0, 0, width, height, false);
+  panel.tconDisplayArea(0, 0, width, height, 0x02);
+  panel.tconWaitForDisplayReady();
+  panel.sleep();
+}
+
+// Run the panel refresh under a task watchdog. If it takes longer than
 // `timeoutSeconds`, the ESP-IDF watchdog panics the CPU and reboots.
 // The Arduino-ESP32 core starts a TWDT by default (typically 5 s) that
 // only monitors the idle tasks, so we reconfigure to our longer
 // timeout, then subscribe the current task. Any esp_task_wdt_* call
 // that returns something other than ESP_OK is treated as a soft error
 // - we still run the refresh so a WDT hiccup can never brick a wake.
-template <typename Panel, typename Refresh>
-inline void guard(Panel& panel, Refresh&& refresh,
-                  uint32_t timeoutSeconds = 120) {
+template <typename Panel>
+inline void refresh(Panel& panel, uint32_t timeoutSeconds = 120) {
   const esp_task_wdt_config_t cfg = {
       /*timeout_ms=*/timeoutSeconds * 1000U,
       /*idle_core_mask=*/0,        // don't monitor idle tasks
@@ -49,10 +62,7 @@ inline void guard(Panel& panel, Refresh&& refresh,
   LOG.printf("[wdt] panel refresh guarded, panic reset in %us%s\n",
              (unsigned)timeoutSeconds,
              subscribed ? "" : " (subscribe failed)");
-  refresh();
-  panel.wake();
-  panel.tconWaitForDisplayReady();
-  panel.sleep();
+  refreshPanel(panel);
   // Always try to unsubscribe on exit - not just when our add()
   // returned ESP_OK. arduino-esp32's startup can auto-subscribe the
   // loopTask under some menuconfigs; in that case our add() returns
@@ -86,10 +96,9 @@ inline void disarmCurrentTask() {
 #else  // Non-E1003 panels: no-op wrapper.
 
 namespace panel_watchdog {
-template <typename Panel, typename Refresh>
-inline void guard(Panel& /*panel*/, Refresh&& refresh,
-                  uint32_t /*timeoutSeconds*/ = 120) {
-  refresh();
+template <typename Panel>
+inline void refresh(Panel& panel, uint32_t /*timeoutSeconds*/ = 120) {
+  panel.update();
 }
 inline void disarmCurrentTask() {}
 }  // namespace panel_watchdog
