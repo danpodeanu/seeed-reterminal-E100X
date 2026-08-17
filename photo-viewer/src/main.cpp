@@ -1235,6 +1235,7 @@ void renderPortalOnPanel(const String& ssid, const String& password,
   portalCfg.wifiSchema = &config_portal::kWifiSchema;
   portalCfg.appSchema = &photo_config::kSchema;
   portalCfg.appName = "Photo Viewer";
+  portalCfg.repositoryUrl = repo_qr::kUrl;
   portalCfg.helpUrl = config::PORTAL_HELP_URL;
   portalCfg.apSsidPrefix = config::PORTAL_SSID_PREFIX;
   portalCfg.apIp = IPAddress(192, 168, 1, 1);

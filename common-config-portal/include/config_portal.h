@@ -43,6 +43,8 @@ struct Config {
   const Schema* appSchema = nullptr;
   const char* appName = "reTerminal";
   const char* helpUrl = "https://github.com/danpodeanu/seeed-reterminal-E100X#configuration";
+  // Optional external repository link rendered in the portal header.
+  const char* repositoryUrl = nullptr;
   const char* firmwareVersion = nullptr;
 
   // Optional compile-time-defaults provider consulted when NVS has no

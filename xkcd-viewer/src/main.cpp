@@ -1601,6 +1601,7 @@ void setup() {
     portalCfg.wifiSchema = &config_portal::kWifiSchema;
     portalCfg.appSchema = &xkcd_config::kSchema;
     portalCfg.appName = "xkcd viewer";
+    portalCfg.repositoryUrl = repo_qr::kUrl;
     // Persistent per-device SoftAP password: generated on first boot,
     // stored in NVS, reused thereafter. Encrypts the portal as WPA2-PSK
     // without any compile-time shared secret. The password is embedded

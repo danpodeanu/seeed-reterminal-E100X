@@ -61,6 +61,11 @@ void appendNavLinks(String& html, const Config& cfg, bool settings, const char* 
   html += F("<a");
   if (String(active) == "reset") html += F(" class=\"active\"");
   html += F(" href=\"/reset\">Reset</a>");
+  if (cfg.repositoryUrl && cfg.repositoryUrl[0]) {
+    html += F("<a href=\"");
+    html += htmlEscape(cfg.repositoryUrl);
+    html += F("\" target=\"_blank\" rel=\"noopener noreferrer\">GitHub</a>");
+  }
 }
 
 void appendHeader(String& html, const Config& cfg, bool settings,

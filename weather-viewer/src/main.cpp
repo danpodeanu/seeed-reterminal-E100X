@@ -1798,6 +1798,7 @@ void setup() {
     portalCfg.wifiSchema = &config_portal::kWifiSchema;
     portalCfg.appSchema = &weather_config::kSchema;
     portalCfg.appName = "weather viewer";
+    portalCfg.repositoryUrl = repo_qr::kUrl;
     portalCfg.useAutoApPassword = true;
     // Nav tab that jumps to the SD browser served by sd_web_portal.
     // The route is registered below via attachRoutes; the config_portal
