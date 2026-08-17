@@ -61,18 +61,32 @@ class ZenRake {
   static constexpr size_t kMaximumSegments = 96;
 
   bool add(int x1, int y1, int x2, int y2) {
-    if (count_ >= kMaximumSegments || (x1 == x2 && y1 == y2)) return false;
-    segments_[count_++] = {
+    if (x1 == x2 && y1 == y2) return false;
+    size_t writeIndex = 0;
+    if (count_ < kMaximumSegments) {
+      writeIndex = (head_ + count_) % kMaximumSegments;
+      ++count_;
+    } else {
+      writeIndex = head_;
+      head_ = (head_ + 1) % kMaximumSegments;
+    }
+    segments_[writeIndex] = {
         static_cast<int16_t>(x1), static_cast<int16_t>(y1),
         static_cast<int16_t>(x2), static_cast<int16_t>(y2)};
     return true;
   }
 
   size_t count() const { return count_; }
-  const RakeSegment& segment(size_t index) const { return segments_[index]; }
-  void reset() { count_ = 0; }
+  const RakeSegment& segment(size_t index) const {
+    return segments_[(head_ + index) % kMaximumSegments];
+  }
+  void reset() {
+    head_ = 0;
+    count_ = 0;
+  }
 
   void restore(const RakeSegment* segments, size_t count) {
+    head_ = 0;
     count_ = count > kMaximumSegments ? kMaximumSegments : count;
     for (size_t index = 0; index < count_; ++index) {
       segments_[index] = segments[index];
@@ -81,6 +95,7 @@ class ZenRake {
 
  private:
   RakeSegment segments_[kMaximumSegments] = {};
+  size_t head_ = 0;
   size_t count_ = 0;
 };
 
@@ -198,18 +213,32 @@ class Kaleidoscope {
   static constexpr size_t kMaximumSegments = 80;
 
   bool add(int x1, int y1, int x2, int y2) {
-    if (count_ >= kMaximumSegments || (x1 == x2 && y1 == y2)) return false;
-    segments_[count_++] = {
+    if (x1 == x2 && y1 == y2) return false;
+    size_t writeIndex = 0;
+    if (count_ < kMaximumSegments) {
+      writeIndex = (head_ + count_) % kMaximumSegments;
+      ++count_;
+    } else {
+      writeIndex = head_;
+      head_ = (head_ + 1) % kMaximumSegments;
+    }
+    segments_[writeIndex] = {
         static_cast<int16_t>(x1), static_cast<int16_t>(y1),
         static_cast<int16_t>(x2), static_cast<int16_t>(y2)};
     return true;
   }
 
   size_t count() const { return count_; }
-  const RakeSegment& segment(size_t index) const { return segments_[index]; }
-  void reset() { count_ = 0; }
+  const RakeSegment& segment(size_t index) const {
+    return segments_[(head_ + index) % kMaximumSegments];
+  }
+  void reset() {
+    head_ = 0;
+    count_ = 0;
+  }
 
   void restore(const RakeSegment* segments, size_t count) {
+    head_ = 0;
     count_ = count > kMaximumSegments ? kMaximumSegments : count;
     for (size_t index = 0; index < count_; ++index) {
       segments_[index] = segments[index];
@@ -218,6 +247,7 @@ class Kaleidoscope {
 
  private:
   RakeSegment segments_[kMaximumSegments] = {};
+  size_t head_ = 0;
   size_t count_ = 0;
 };
 
@@ -232,17 +262,31 @@ class Inkblot {
   static constexpr size_t kMaximumDots = 64;
 
   bool add(int x, int y, uint8_t radius) {
-    if (count_ >= kMaximumDots || radius == 0) return false;
-    dots_[count_++] = {
+    if (radius == 0) return false;
+    size_t writeIndex = 0;
+    if (count_ < kMaximumDots) {
+      writeIndex = (head_ + count_) % kMaximumDots;
+      ++count_;
+    } else {
+      writeIndex = head_;
+      head_ = (head_ + 1) % kMaximumDots;
+    }
+    dots_[writeIndex] = {
         static_cast<int16_t>(x), static_cast<int16_t>(y), radius};
     return true;
   }
 
   size_t count() const { return count_; }
-  const InkDot& dot(size_t index) const { return dots_[index]; }
-  void reset() { count_ = 0; }
+  const InkDot& dot(size_t index) const {
+    return dots_[(head_ + index) % kMaximumDots];
+  }
+  void reset() {
+    head_ = 0;
+    count_ = 0;
+  }
 
   void restore(const InkDot* dots, size_t count) {
+    head_ = 0;
     count_ = 0;
     const size_t capped = count > kMaximumDots ? kMaximumDots : count;
     for (size_t index = 0; index < capped; ++index) {
@@ -252,6 +296,7 @@ class Inkblot {
 
  private:
   InkDot dots_[kMaximumDots] = {};
+  size_t head_ = 0;
   size_t count_ = 0;
 };
 

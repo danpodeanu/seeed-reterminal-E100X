@@ -30,14 +30,16 @@ void test_bubble_wrap_detects_completion() {
   TEST_ASSERT_TRUE(bubbles.allPopped());
 }
 
-void test_zen_rake_rejects_empty_and_caps_history() {
+void test_zen_rake_rejects_empty_and_rolls_history() {
   ZenRake rake;
   TEST_ASSERT_FALSE(rake.add(1, 1, 1, 1));
   for (size_t index = 0; index < ZenRake::kMaximumSegments; ++index) {
     TEST_ASSERT_TRUE(rake.add(index, 1, index + 1, 2));
   }
-  TEST_ASSERT_FALSE(rake.add(0, 0, 1, 1));
+  TEST_ASSERT_TRUE(rake.add(500, 10, 510, 20));
   TEST_ASSERT_EQUAL_UINT(ZenRake::kMaximumSegments, rake.count());
+  TEST_ASSERT_EQUAL_INT(1, rake.segment(0).x1);
+  TEST_ASSERT_EQUAL_INT(500, rake.segment(rake.count() - 1).x1);
 }
 
 void test_flip_dots_toggle_and_restore() {
@@ -68,12 +70,17 @@ void test_counter_saturates_and_resets() {
   TEST_ASSERT_EQUAL_UINT32(0, counter.value());
 }
 
-void test_kaleidoscope_caps_segments() {
+void test_kaleidoscope_rolls_segments() {
   Kaleidoscope kaleidoscope;
   for (size_t index = 0; index < Kaleidoscope::kMaximumSegments; ++index) {
     TEST_ASSERT_TRUE(kaleidoscope.add(index, 1, index + 1, 2));
   }
-  TEST_ASSERT_FALSE(kaleidoscope.add(0, 0, 1, 1));
+  TEST_ASSERT_TRUE(kaleidoscope.add(500, 10, 510, 20));
+  TEST_ASSERT_EQUAL_UINT(Kaleidoscope::kMaximumSegments,
+                         kaleidoscope.count());
+  TEST_ASSERT_EQUAL_INT(1, kaleidoscope.segment(0).x1);
+  TEST_ASSERT_EQUAL_INT(
+      500, kaleidoscope.segment(kaleidoscope.count() - 1).x1);
 }
 
 void test_inkblot_restores_valid_dots() {
@@ -84,6 +91,17 @@ void test_inkblot_restores_valid_dots() {
   restored.restore(dots, 2);
   TEST_ASSERT_EQUAL_UINT(1, restored.count());
   TEST_ASSERT_EQUAL_INT(120, restored.dot(0).x);
+}
+
+void test_inkblot_rolls_dots() {
+  Inkblot inkblot;
+  for (size_t index = 0; index < Inkblot::kMaximumDots; ++index) {
+    TEST_ASSERT_TRUE(inkblot.add(index, 200, 10));
+  }
+  TEST_ASSERT_TRUE(inkblot.add(500, 300, 12));
+  TEST_ASSERT_EQUAL_UINT(Inkblot::kMaximumDots, inkblot.count());
+  TEST_ASSERT_EQUAL_INT(1, inkblot.dot(0).x);
+  TEST_ASSERT_EQUAL_INT(500, inkblot.dot(inkblot.count() - 1).x);
 }
 
 void test_pebble_stack_clamps_offsets() {
@@ -109,12 +127,13 @@ int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_bubble_wrap_pops_once_and_restores);
   RUN_TEST(test_bubble_wrap_detects_completion);
-  RUN_TEST(test_zen_rake_rejects_empty_and_caps_history);
+  RUN_TEST(test_zen_rake_rejects_empty_and_rolls_history);
   RUN_TEST(test_flip_dots_toggle_and_restore);
   RUN_TEST(test_ripples_age_out);
   RUN_TEST(test_counter_saturates_and_resets);
-  RUN_TEST(test_kaleidoscope_caps_segments);
+  RUN_TEST(test_kaleidoscope_rolls_segments);
   RUN_TEST(test_inkblot_restores_valid_dots);
+  RUN_TEST(test_inkblot_rolls_dots);
   RUN_TEST(test_pebble_stack_clamps_offsets);
   RUN_TEST(test_worry_stone_counts_rubs);
   return UNITY_END();

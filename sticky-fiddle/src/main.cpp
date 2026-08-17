@@ -203,6 +203,7 @@ bool touchReady = false;
 bool touchActive = false;
 bool touchConsumed = false;
 bool touchDirty = false;
+bool touchNeedsRedraw = false;
 bool lightSleepReady = false;
 bool sdCardReady = false;
 bool batterySampled = false;
@@ -534,6 +535,13 @@ void drawBubbleWrap() {
   }
 }
 
+void drawZenRakeSegment(const RakeSegment& segment) {
+  for (int offset = -6; offset <= 6; offset += 6) {
+    epaper.drawLine(segment.x1 + offset, segment.y1, segment.x2 + offset,
+                    segment.y2, TFT_BLACK);
+  }
+}
+
 void drawZenRake() {
   epaper.fillRect(0, kContentTop, kScreenWidth,
                   kContentBottom - kContentTop + 1, TFT_WHITE);
@@ -542,11 +550,7 @@ void drawZenRake() {
     epaper.drawFastHLine(30, y, 420, 0xDEFB);
   }
   for (size_t index = 0; index < rake.count(); ++index) {
-    const RakeSegment& segment = rake.segment(index);
-    for (int offset = -6; offset <= 6; offset += 6) {
-      epaper.drawLine(segment.x1 + offset, segment.y1, segment.x2 + offset,
-                      segment.y2, TFT_BLACK);
-    }
+    drawZenRakeSegment(rake.segment(index));
   }
 }
 
@@ -881,6 +885,54 @@ void flushTouchDirty(const char* action) {
   touchDirty = false;
   touchDirtyRegion = {};
   refreshRegion(region, action);
+}
+
+void markRakeSegmentDirty(const RakeSegment& segment) {
+  const int left = std::min(segment.x1, segment.x2) - 8;
+  const int top = std::min(segment.y1, segment.y2) - 4;
+  const int right = std::max(segment.x1, segment.x2) + 8;
+  const int bottom = std::max(segment.y1, segment.y2) + 4;
+  markTouchDirty({left, top, right - left + 1, bottom - top + 1});
+}
+
+void markKaleidoscopeSegmentDirty(const RakeSegment& segment) {
+  const int left = std::min(segment.x1, segment.x2) - 3;
+  const int right = std::max(segment.x1, segment.x2) + 3;
+  const int top = std::min(segment.y1, segment.y2) - 3;
+  const int bottom = std::max(segment.y1, segment.y2) + 3;
+  markTouchDirty({left, top, right - left + 1, bottom - top + 1});
+  markTouchDirty({kScreenWidth - right, top, right - left + 1,
+                  bottom - top + 1});
+  markTouchDirty(
+      {left, 812 - bottom, right - left + 1, bottom - top + 1});
+  markTouchDirty({kScreenWidth - right, 812 - bottom, right - left + 1,
+                  bottom - top + 1});
+}
+
+void markInkDotDirty(const InkDot& dot) {
+  const int size = dot.radius * 2 + 5;
+  markTouchDirty(
+      {dot.x - dot.radius - 2, dot.y - dot.radius - 2, size, size});
+  markTouchDirty({kScreenWidth - dot.x - dot.radius - 2,
+                  dot.y - dot.radius - 2, size, size});
+}
+
+void redrawRolledTouchActivity() {
+  if (!touchNeedsRedraw) return;
+  switch (currentScreen) {
+    case Screen::ZenRake:
+      drawZenRake();
+      break;
+    case Screen::Kaleidoscope:
+      drawKaleidoscope();
+      break;
+    case Screen::Inkblot:
+      drawInkblot();
+      break;
+    default:
+      break;
+  }
+  touchNeedsRedraw = false;
 }
 
 uint32_t stateChecksum(const PersistedState& state) {
@@ -1253,14 +1305,19 @@ void handleTouchPoint(const Gt911Touch::Point& point, bool first) {
       if (!first) {
         const int dx = point.x - touchLast.x;
         const int dy = point.y - touchLast.y;
-        if (dx * dx + dy * dy >= 64 &&
-            rake.add(touchLast.x, touchLast.y, point.x, point.y)) {
-          drawZenRake();
-          const int left = std::min(touchLast.x, point.x) - 8;
-          const int top = std::min(touchLast.y, point.y) - 4;
-          const int right = std::max(touchLast.x, point.x) + 8;
-          const int bottom = std::max(touchLast.y, point.y) + 4;
-          markTouchDirty({left, top, right - left + 1, bottom - top + 1});
+        if (dx * dx + dy * dy >= 64) {
+          const bool rolling = rake.count() == ZenRake::kMaximumSegments;
+          RakeSegment evicted = {};
+          if (rolling) evicted = rake.segment(0);
+          if (rake.add(touchLast.x, touchLast.y, point.x, point.y)) {
+            const RakeSegment& segment = rake.segment(rake.count() - 1);
+            drawZenRakeSegment(segment);
+            markRakeSegmentDirty(segment);
+            if (rolling) {
+              markRakeSegmentDirty(evicted);
+              touchNeedsRedraw = true;
+            }
+          }
         }
       }
       break;
@@ -1317,22 +1374,21 @@ void handleTouchPoint(const Gt911Touch::Point& point, bool first) {
             std::max(136, std::min(static_cast<int>(point.y), 676));
         const int dx = currentX - previousX;
         const int dy = currentY - previousY;
-        if (dx * dx + dy * dy >= 36 &&
-            kaleidoscope.add(previousX, previousY, currentX, currentY)) {
-          const RakeSegment& segment =
-              kaleidoscope.segment(kaleidoscope.count() - 1);
-          drawMirroredKaleidoscopeSegment(segment);
-          const int left = std::min(segment.x1, segment.x2) - 3;
-          const int right = std::max(segment.x1, segment.x2) + 3;
-          const int top = std::min(segment.y1, segment.y2) - 3;
-          const int bottom = std::max(segment.y1, segment.y2) + 3;
-          markTouchDirty({left, top, right - left + 1, bottom - top + 1});
-          markTouchDirty({kScreenWidth - right, top, right - left + 1,
-                          bottom - top + 1});
-          markTouchDirty(
-              {left, 812 - bottom, right - left + 1, bottom - top + 1});
-          markTouchDirty({kScreenWidth - right, 812 - bottom,
-                          right - left + 1, bottom - top + 1});
+        if (dx * dx + dy * dy >= 36) {
+          const bool rolling =
+              kaleidoscope.count() == Kaleidoscope::kMaximumSegments;
+          RakeSegment evicted = {};
+          if (rolling) evicted = kaleidoscope.segment(0);
+          if (kaleidoscope.add(previousX, previousY, currentX, currentY)) {
+            const RakeSegment& segment =
+                kaleidoscope.segment(kaleidoscope.count() - 1);
+            drawMirroredKaleidoscopeSegment(segment);
+            markKaleidoscopeSegmentDirty(segment);
+            if (rolling) {
+              markKaleidoscopeSegmentDirty(evicted);
+              touchNeedsRedraw = true;
+            }
+          }
         }
       }
       break;
@@ -1343,20 +1399,26 @@ void handleTouchPoint(const Gt911Touch::Point& point, bool first) {
           std::max(150, std::min(static_cast<int>(point.y), 658));
       const int dx = point.x - touchLast.x;
       const int dy = point.y - touchLast.y;
-      if ((first || dx * dx + dy * dy >= 49) &&
-          inkblot.add(x, y,
-                      static_cast<uint8_t>(7 + (inkblot.count() * 5) % 13))) {
-        const InkDot& dot = inkblot.dot(inkblot.count() - 1);
-        if (inkblot.count() == 1) {
-          drawInkblot();
-          markTouchDirty(kInkblotRegion);
-        } else {
-          drawInkDot(dot);
-          const int size = dot.radius * 2 + 5;
-          markTouchDirty(
-              {dot.x - dot.radius - 2, dot.y - dot.radius - 2, size, size});
-          markTouchDirty({kScreenWidth - dot.x - dot.radius - 2,
-                          dot.y - dot.radius - 2, size, size});
+      if (first || dx * dx + dy * dy >= 49) {
+        const bool wasEmpty = inkblot.count() == 0;
+        const bool rolling = inkblot.count() == Inkblot::kMaximumDots;
+        InkDot evicted = {};
+        if (rolling) evicted = inkblot.dot(0);
+        if (inkblot.add(
+                x, y,
+                static_cast<uint8_t>(7 + (inkblot.count() * 5) % 13))) {
+          const InkDot& dot = inkblot.dot(inkblot.count() - 1);
+          if (wasEmpty) {
+            drawInkblot();
+            markTouchDirty(kInkblotRegion);
+          } else {
+            drawInkDot(dot);
+            markInkDotDirty(dot);
+          }
+          if (rolling) {
+            markInkDotDirty(evicted);
+            touchNeedsRedraw = true;
+          }
         }
       }
       break;
@@ -1401,6 +1463,7 @@ void pollTouch() {
       touchActive = false;
       touchConsumed = false;
       lastFlipCell = -1;
+      redrawRolledTouchActivity();
       flushTouchDirty("touch activity");
     }
     return;
@@ -1410,6 +1473,7 @@ void pollTouch() {
   if (first) {
     touchActive = true;
     touchConsumed = false;
+    touchNeedsRedraw = false;
     touchStart = point;
     touchLast = point;
     lastFlipCell = -1;

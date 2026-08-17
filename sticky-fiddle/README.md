@@ -23,6 +23,9 @@ on-screen arrows and the UP/DOWN buttons page through the picker. Within an
 activity, UP and DOWN move directly between activities. Each activity has a
 reset or clear button.
 
+Zen Rake, Kaleidoscope, and Inkblot keep accepting input indefinitely. Once
+their saved history is full, the oldest marks are retired as new ones arrive.
+
 ## Shared controls and power behavior
 
 - Tap an activity card to open it.
