@@ -40,11 +40,15 @@ namespace {
 
 using sticky_fiddle::BubbleWrap;
 using sticky_fiddle::FlipDots;
+using sticky_fiddle::InkDot;
+using sticky_fiddle::Inkblot;
+using sticky_fiddle::Kaleidoscope;
+using sticky_fiddle::PebbleStack;
 using sticky_fiddle::PointlessCounter;
 using sticky_fiddle::RakeSegment;
 using sticky_fiddle::Ripple;
 using sticky_fiddle::RipplePond;
-using sticky_fiddle::Squish;
+using sticky_fiddle::WorryStone;
 using sticky_fiddle::ZenRake;
 
 constexpr int kScreenWidth = 480;
@@ -60,13 +64,29 @@ constexpr uint32_t kDeepSleepHoldMs = 2000;
 constexpr uint32_t kInactivitySleepMs = 5UL * 60UL * 1000UL;
 constexpr uint32_t kBatteryCheckIntervalMs = 60UL * 1000UL;
 constexpr uint32_t kRippleAgeIntervalMs = 2500;
-constexpr uint32_t kSquishStepMs = 350;
 constexpr uint32_t kPersistedMagic = 0x46494444UL;
-constexpr uint16_t kPersistedVersion = 1;
+constexpr uint16_t kPersistedVersion = 2;
 constexpr char kAppName[] = "Sticky Fiddle";
 constexpr char kBrandName[] = "STICKY FIDDLE";
+constexpr E1005FastRefresh::Region kScreenRegion = {
+    0, 0, kScreenWidth, kScreenHeight};
 constexpr E1005FastRefresh::Region kStatusRegion = {340, 0, 140, 49};
 constexpr E1005FastRefresh::Region kContentRegion = {
+    0, kContentTop, kScreenWidth, kContentBottom - kContentTop + 1};
+constexpr E1005FastRefresh::Region kHelpRegion = {20, 140, 440, 512};
+constexpr E1005FastRefresh::Region kBubbleRegion = {36, 122, 408, 570};
+constexpr E1005FastRefresh::Region kZenRegion = {
+    0, kContentTop, kScreenWidth, kContentBottom - kContentTop + 1};
+constexpr E1005FastRefresh::Region kFlipRegion = {48, 126, 384, 552};
+constexpr E1005FastRefresh::Region kPondRegion = {
+    0, kContentTop, kScreenWidth, kContentBottom - kContentTop + 1};
+constexpr E1005FastRefresh::Region kCounterRegion = {40, 200, 400, 400};
+constexpr E1005FastRefresh::Region kKaleidoscopeRegion = {
+    0, kContentTop, kScreenWidth, kContentBottom - kContentTop + 1};
+constexpr E1005FastRefresh::Region kInkblotRegion = {
+    0, kContentTop, kScreenWidth, kContentBottom - kContentTop + 1};
+constexpr E1005FastRefresh::Region kPebbleRegion = {38, 150, 404, 530};
+constexpr E1005FastRefresh::Region kWorryStoneRegion = {
     0, kContentTop, kScreenWidth, kContentBottom - kContentTop + 1};
 
 struct Rect {
@@ -84,12 +104,15 @@ struct Rect {
 constexpr Rect kBackButton = {12, 58, 54, 40};
 constexpr Rect kHelpButton = {414, 58, 54, 40};
 constexpr Rect kResetButton = {100, kFooterTop, 280, 62};
+constexpr Rect kPreviousPageButton = {12, 748, 54, 40};
+constexpr Rect kNextPageButton = {414, 748, 54, 40};
 constexpr Rect kActivityArea = {
     0, kContentTop, kScreenWidth, kContentBottom - kContentTop + 1};
 constexpr Rect kMenuCards[] = {
-    {18, 72, 213, 208}, {249, 72, 213, 208},
-    {18, 296, 213, 208}, {249, 296, 213, 208},
-    {18, 520, 213, 208}, {249, 520, 213, 208},
+    {14, 66, 220, 154},  {246, 66, 220, 154},
+    {14, 228, 220, 154}, {246, 228, 220, 154},
+    {14, 390, 220, 154}, {246, 390, 220, 154},
+    {14, 552, 220, 154}, {246, 552, 220, 154},
 };
 
 enum class Screen : uint8_t {
@@ -99,16 +122,22 @@ enum class Screen : uint8_t {
   FlipDots,
   RipplePond,
   PointlessCounter,
-  Squish,
+  Kaleidoscope,
+  Inkblot,
+  PebbleStack,
+  WorryStone,
 };
 
-constexpr size_t kActivityCount = 6;
+constexpr size_t kActivityCount = 9;
+constexpr size_t kActivitiesPerMenuPage = 8;
+constexpr size_t kMenuPageCount =
+    (kActivityCount + kActivitiesPerMenuPage - 1) / kActivitiesPerMenuPage;
 
 struct PersistedState {
   uint32_t magic;
   uint16_t version;
   uint8_t screen;
-  uint8_t reserved;
+  uint8_t menuPage;
   uint64_t bubbles;
   uint16_t rakeCount;
   RakeSegment rakeSegments[ZenRake::kMaximumSegments];
@@ -116,8 +145,13 @@ struct PersistedState {
   uint8_t rippleCount;
   Ripple ripples[RipplePond::kMaximumRipples];
   uint32_t counter;
-  uint8_t squishLevel;
-  uint8_t padding[3];
+  uint16_t kaleidoscopeCount;
+  RakeSegment kaleidoscopeSegments[Kaleidoscope::kMaximumSegments];
+  uint8_t inkblotCount;
+  InkDot inkDots[Inkblot::kMaximumDots];
+  uint8_t pebbleCount;
+  int8_t pebbleOffsets[PebbleStack::kMaximumPebbles];
+  uint16_t worryRubs;
   uint32_t checksum;
 };
 
@@ -151,26 +185,30 @@ ZenRake rake;
 FlipDots flipDots;
 RipplePond pond;
 PointlessCounter counter;
-Squish squish;
+Kaleidoscope kaleidoscope;
+Inkblot inkblot;
+PebbleStack pebbleStack;
+WorryStone worryStone;
 
 Screen currentScreen = Screen::Menu;
+uint8_t currentMenuPage = 0;
 bool helpVisible = false;
 bool touchReady = false;
 bool touchActive = false;
+bool touchConsumed = false;
 bool touchDirty = false;
 bool lightSleepReady = false;
 bool sdCardReady = false;
 bool batterySampled = false;
 bool externalPowerPresent = false;
-bool squishRelaxing = false;
 int batteryPercent = -1;
 int lastFlipCell = -1;
 uint32_t lastActivityAtMs = 0;
 uint32_t nextBatteryCheckAtMs = 0;
 uint32_t nextRippleAgeAtMs = 0;
-uint32_t nextSquishStepAtMs = 0;
 Gt911Touch::Point touchStart = {};
 Gt911Touch::Point touchLast = {};
+E1005FastRefresh::Region touchDirtyRegion = {};
 
 const char* screenName(Screen screen) {
   switch (screen) {
@@ -186,8 +224,14 @@ const char* screenName(Screen screen) {
       return "Ripple Pond";
     case Screen::PointlessCounter:
       return "Pointless Counter";
-    case Screen::Squish:
-      return "Squish";
+    case Screen::Kaleidoscope:
+      return "Kaleidoscope";
+    case Screen::Inkblot:
+      return "Inkblot";
+    case Screen::PebbleStack:
+      return "Pebble Stack";
+    case Screen::WorryStone:
+      return "Worry Stone";
   }
   return kAppName;
 }
@@ -204,8 +248,14 @@ const char* helpText(Screen screen) {
       return "Tap the pond to send out ripples. They fade on their own.";
     case Screen::PointlessCounter:
       return "Tap the enormous button. The number goes up. That is all.";
-    case Screen::Squish:
-      return "Press and hold the blob to squish it. Release to let it recover.";
+    case Screen::Kaleidoscope:
+      return "Drag to draw four mirrored strokes at once.";
+    case Screen::Inkblot:
+      return "Tap or drag to grow a perfectly symmetric inkblot.";
+    case Screen::PebbleStack:
+      return "Tap left or right to add another pleasantly uneven pebble.";
+    case Screen::WorryStone:
+      return "Rub the stone repeatedly to deepen its smooth central groove.";
     case Screen::Menu:
       return "Pick anything. There are no goals, scores, timers, or wrong moves.";
   }
@@ -222,13 +272,16 @@ Screen activityScreen(size_t index) {
 }
 
 void centerText(const String& text, int x, int y, int font = 4,
-                uint16_t color = TFT_BLACK, uint16_t background = TFT_WHITE) {
+                uint16_t color = TFT_BLACK, uint16_t background = TFT_WHITE,
+                int maxWidth = kScreenWidth - 16) {
   epaper.setTextDatum(MC_DATUM);
   epaper.setTextColor(color, background, true);
-  epaper.drawString(text, x, y, font);
+  const int selectedFont =
+      font == 4 && epaper.textWidth(text, font) > maxWidth ? 2 : font;
+  epaper.drawString(text, x, y, selectedFont);
 }
 
-void leftText(const String& text, int x, int y, int font = 2,
+void leftText(const String& text, int x, int y, int font = 4,
               uint16_t color = TFT_BLACK, uint16_t background = TFT_WHITE) {
   epaper.setTextDatum(ML_DATUM);
   epaper.setTextColor(color, background, true);
@@ -245,6 +298,33 @@ void drawFiddleMark(int centerX, int centerY, uint16_t color = TFT_BLACK) {
   epaper.drawLine(centerX + 4, centerY + 8, centerX + 13, centerY - 3, color);
 }
 
+void drawFiddleLogo(int centerX, int centerY, int width) {
+  const int offset = width * 27 / 100;
+  const int radius = width * 18 / 100;
+  const int dotRadius = std::max(6, width / 24);
+  epaper.drawCircle(centerX - offset, centerY + width / 30, radius, TFT_BLACK);
+  epaper.drawCircle(centerX + offset, centerY - width / 30, radius, TFT_BLACK);
+  epaper.drawCircle(centerX - offset, centerY + width / 30, radius - 1,
+                    TFT_BLACK);
+  epaper.drawCircle(centerX + offset, centerY - width / 30, radius - 1,
+                    TFT_BLACK);
+  epaper.fillCircle(centerX - offset, centerY + width / 30, dotRadius,
+                    TFT_BLACK);
+  epaper.fillCircle(centerX + offset, centerY - width / 30, dotRadius,
+                    TFT_BLACK);
+  for (int line = -2; line <= 2; ++line) {
+    epaper.drawLine(centerX - offset + radius, centerY + width / 30 + line,
+                    centerX - width / 18, centerY - width / 16 + line,
+                    TFT_BLACK);
+    epaper.drawLine(centerX - width / 18, centerY - width / 16 + line,
+                    centerX + width / 18, centerY + width / 16 + line,
+                    TFT_BLACK);
+    epaper.drawLine(centerX + width / 18, centerY + width / 16 + line,
+                    centerX + offset - radius, centerY - width / 30 + line,
+                    TFT_BLACK);
+  }
+}
+
 void drawBatteryStatus() {
   const int gaugeX = 427;
   const int gaugeY = 17;
@@ -256,7 +336,10 @@ void drawBatteryStatus() {
       batteryPercent >= 0 ? String(batteryPercent) + "%" : "--%";
   epaper.setTextDatum(MR_DATUM);
   epaper.setTextColor(TFT_BLACK, TFT_WHITE, true);
-  epaper.drawString(percent, gaugeX - 8, 25, 2);
+  epaper.setFreeFont(&FreeSansBold9pt7b);
+  epaper.drawString(percent, gaugeX - 8, 25, 1);
+  epaper.setFreeFont(nullptr);
+  epaper.setTextFont(2);
   epaper.drawRect(gaugeX, gaugeY, gaugeWidth, gaugeHeight, TFT_BLACK);
   epaper.fillRect(gaugeX + gaugeWidth, gaugeY + 5, 4, 7, TFT_BLACK);
   if (batteryPercent >= 0) {
@@ -275,26 +358,31 @@ void drawBatteryStatus() {
 }
 
 void drawStatusBar() {
-  leftText(kBrandName, 12, 25, 2);
+  leftText(kBrandName, 12, 25, 4);
   drawBatteryStatus();
   epaper.drawFastHLine(0, kStatusHeight - 1, kScreenWidth, TFT_BLACK);
 }
 
-void drawBackButton() {
-  epaper.fillRoundRect(kBackButton.x, kBackButton.y, kBackButton.width,
-                       kBackButton.height, 8, TFT_BLACK);
-  const int centerY = kBackButton.y + kBackButton.height / 2;
-  epaper.fillTriangle(kBackButton.x + 11, centerY, kBackButton.x + 27,
-                      centerY - 12, kBackButton.x + 27, centerY + 12,
-                      TFT_WHITE);
-  epaper.fillRect(kBackButton.x + 25, centerY - 3, 18, 7, TFT_WHITE);
+void drawArrowButton(const Rect& button, bool pointsRight) {
+  epaper.fillRoundRect(button.x, button.y, button.width, button.height, 8,
+                       TFT_BLACK);
+  const int centerY = button.y + button.height / 2;
+  const int tipX = pointsRight ? button.x + button.width - 11 : button.x + 11;
+  const int baseX = pointsRight ? tipX - 16 : tipX + 16;
+  const int tailX = pointsRight ? button.x + 11 : button.x + button.width - 11;
+  epaper.fillTriangle(tipX, centerY, baseX, centerY - 12, baseX,
+                      centerY + 12, TFT_WHITE);
+  epaper.fillRect(std::min(baseX, tailX), centerY - 3,
+                  std::abs(tailX - baseX) + 1, 7, TFT_WHITE);
 }
 
+void drawBackButton() { drawArrowButton(kBackButton, false); }
+
 void drawHelpButton() {
-  epaper.drawCircle(kHelpButton.x + kHelpButton.width / 2,
-                    kHelpButton.y + kHelpButton.height / 2, 18, TFT_BLACK);
-  centerText("?", kHelpButton.x + kHelpButton.width / 2,
-             kHelpButton.y + kHelpButton.height / 2, 4);
+  const int centerX = kHelpButton.x + kHelpButton.width / 2;
+  const int centerY = kHelpButton.y + kHelpButton.height / 2;
+  epaper.drawCircle(centerX, centerY, 18, TFT_BLACK);
+  centerText("?", centerX, centerY + 2, 4, TFT_BLACK, TFT_WHITE, 24);
 }
 
 void drawActivityHeader() {
@@ -317,49 +405,71 @@ void drawActivityIcon(Screen screen, int centerX, int centerY) {
     case Screen::BubbleWrap:
       for (int row = -1; row <= 1; ++row) {
         for (int column = -1; column <= 1; ++column) {
-          epaper.drawCircle(centerX + column * 34, centerY + row * 34, 12,
+          epaper.drawCircle(centerX + column * 24, centerY + row * 24, 8,
                            TFT_BLACK);
         }
       }
       break;
     case Screen::ZenRake:
-      for (int offset = -12; offset <= 12; offset += 12) {
-        epaper.drawLine(centerX - 66, centerY + offset + 20, centerX - 20,
-                        centerY + offset - 20, TFT_BLACK);
-        epaper.drawLine(centerX - 20, centerY + offset - 20, centerX + 25,
-                        centerY + offset + 20, TFT_BLACK);
-        epaper.drawLine(centerX + 25, centerY + offset + 20, centerX + 66,
-                        centerY + offset - 20, TFT_BLACK);
+      for (int offset = -7; offset <= 7; offset += 7) {
+        epaper.drawLine(centerX - 50, centerY + offset + 14, centerX - 16,
+                        centerY + offset - 14, TFT_BLACK);
+        epaper.drawLine(centerX - 16, centerY + offset - 14, centerX + 18,
+                        centerY + offset + 14, TFT_BLACK);
+        epaper.drawLine(centerX + 18, centerY + offset + 14, centerX + 50,
+                        centerY + offset - 14, TFT_BLACK);
       }
       break;
     case Screen::FlipDots:
-      for (int row = -2; row <= 2; ++row) {
-        for (int column = -3; column <= 3; ++column) {
+      for (int row = -1; row <= 1; ++row) {
+        for (int column = -2; column <= 2; ++column) {
           const bool on = (row + column) % 3 == 0;
           if (on) {
-            epaper.fillCircle(centerX + column * 23, centerY + row * 23, 8,
+            epaper.fillCircle(centerX + column * 20, centerY + row * 20, 7,
                               TFT_BLACK);
           } else {
-            epaper.drawCircle(centerX + column * 23, centerY + row * 23, 8,
+            epaper.drawCircle(centerX + column * 20, centerY + row * 20, 7,
                               TFT_BLACK);
           }
         }
       }
       break;
     case Screen::RipplePond:
-      for (int radius = 18; radius <= 66; radius += 16) {
+      for (int radius = 12; radius <= 36; radius += 12) {
         epaper.drawCircle(centerX, centerY, radius, TFT_BLACK);
       }
       break;
     case Screen::PointlessCounter:
-      epaper.fillCircle(centerX, centerY, 64, TFT_BLACK);
+      epaper.fillCircle(centerX, centerY, 38, TFT_BLACK);
       centerText("+1", centerX, centerY, 4, TFT_WHITE, TFT_BLACK);
       break;
-    case Screen::Squish:
-      epaper.fillEllipse(centerX, centerY, 74, 53, TFT_BLACK);
-      epaper.fillCircle(centerX - 24, centerY - 8, 5, TFT_WHITE);
-      epaper.fillCircle(centerX + 24, centerY - 8, 5, TFT_WHITE);
-      epaper.drawFastHLine(centerX - 20, centerY + 19, 40, TFT_WHITE);
+    case Screen::Kaleidoscope:
+      epaper.drawLine(centerX - 42, centerY - 32, centerX - 8, centerY - 6,
+                      TFT_BLACK);
+      epaper.drawLine(centerX + 42, centerY - 32, centerX + 8, centerY - 6,
+                      TFT_BLACK);
+      epaper.drawLine(centerX - 42, centerY + 32, centerX - 8, centerY + 6,
+                      TFT_BLACK);
+      epaper.drawLine(centerX + 42, centerY + 32, centerX + 8, centerY + 6,
+                      TFT_BLACK);
+      epaper.fillCircle(centerX, centerY, 7, TFT_BLACK);
+      break;
+    case Screen::Inkblot:
+      epaper.fillCircle(centerX - 18, centerY - 10, 18, TFT_BLACK);
+      epaper.fillCircle(centerX + 18, centerY - 10, 18, TFT_BLACK);
+      epaper.fillCircle(centerX - 30, centerY + 17, 13, TFT_BLACK);
+      epaper.fillCircle(centerX + 30, centerY + 17, 13, TFT_BLACK);
+      epaper.fillCircle(centerX, centerY + 12, 22, TFT_BLACK);
+      break;
+    case Screen::PebbleStack:
+      epaper.fillEllipse(centerX, centerY + 24, 48, 12, TFT_BLACK);
+      epaper.fillEllipse(centerX - 8, centerY, 40, 11, TFT_BLACK);
+      epaper.fillEllipse(centerX + 5, centerY - 22, 32, 10, TFT_BLACK);
+      break;
+    case Screen::WorryStone:
+      epaper.fillEllipse(centerX, centerY, 52, 34, TFT_BLACK);
+      epaper.drawEllipse(centerX, centerY, 30, 16, TFT_WHITE);
+      epaper.drawEllipse(centerX, centerY, 31, 17, TFT_WHITE);
       break;
     case Screen::Menu:
       drawFiddleMark(centerX, centerY);
@@ -368,16 +478,27 @@ void drawActivityIcon(Screen screen, int centerX, int centerY) {
 }
 
 void drawMenu() {
-  epaper.fillScreen(TFT_WHITE);
+  epaper.fillSprite(TFT_WHITE);
   drawStatusBar();
-  for (size_t index = 0; index < kActivityCount; ++index) {
-    const Rect& card = kMenuCards[index];
-    const Screen screen = activityScreen(index);
+  const size_t first = currentMenuPage * kActivitiesPerMenuPage;
+  const size_t visible =
+      std::min(kActivitiesPerMenuPage, kActivityCount - first);
+  for (size_t slot = 0; slot < visible; ++slot) {
+    const Rect& card = kMenuCards[slot];
+    const Screen screen = activityScreen(first + slot);
     epaper.drawRoundRect(card.x, card.y, card.width, card.height, 14, TFT_BLACK);
-    drawActivityIcon(screen, card.x + card.width / 2, card.y + 82);
-    centerText(screenName(screen), card.x + card.width / 2,
-               card.y + card.height - 28, 2);
+    drawActivityIcon(screen, card.x + card.width / 2, card.y + 55);
+    const char* label =
+        screen == Screen::PointlessCounter ? "Counter" : screenName(screen);
+    centerText(label, card.x + card.width / 2, card.y + card.height - 23, 4,
+               TFT_BLACK, TFT_WHITE, card.width - 16);
   }
+  if (currentMenuPage > 0) drawArrowButton(kPreviousPageButton, false);
+  if (currentMenuPage + 1 < kMenuPageCount) {
+    drawArrowButton(kNextPageButton, true);
+  }
+  centerText(String(currentMenuPage + 1) + " / " + String(kMenuPageCount),
+             kScreenWidth / 2, 768, 4);
 }
 
 void drawBubbleWrap() {
@@ -403,7 +524,7 @@ void drawBubbleWrap() {
     }
   }
   if (bubbles.allPopped()) {
-    centerText("FLAT.", kScreenWidth / 2, 674, 2);
+    centerText("FLAT.", kScreenWidth / 2, 674, 4);
   }
 }
 
@@ -459,7 +580,7 @@ void drawRipplePond() {
     }
   }
   if (pond.count() == 0) {
-    centerText("tap the water", kScreenWidth / 2, 405, 2);
+    centerText("tap the water", kScreenWidth / 2, 405, 4);
   }
 }
 
@@ -475,21 +596,81 @@ void drawPointlessCounter() {
   centerText("TAP", kScreenWidth / 2, 480, 4, TFT_WHITE, TFT_BLACK);
 }
 
-void drawSquish() {
+void drawMirroredKaleidoscopeSegment(const RakeSegment& segment) {
+  constexpr int centerX = kScreenWidth / 2;
+  constexpr int centerY = 406;
+  const int mirrorX1 = centerX * 2 - segment.x1;
+  const int mirrorX2 = centerX * 2 - segment.x2;
+  const int mirrorY1 = centerY * 2 - segment.y1;
+  const int mirrorY2 = centerY * 2 - segment.y2;
+  epaper.drawLine(segment.x1, segment.y1, segment.x2, segment.y2, TFT_BLACK);
+  epaper.drawLine(mirrorX1, segment.y1, mirrorX2, segment.y2, TFT_BLACK);
+  epaper.drawLine(segment.x1, mirrorY1, segment.x2, mirrorY2, TFT_BLACK);
+  epaper.drawLine(mirrorX1, mirrorY1, mirrorX2, mirrorY2, TFT_BLACK);
+}
+
+void drawKaleidoscope() {
   epaper.fillRect(0, kContentTop, kScreenWidth,
                   kContentBottom - kContentTop + 1, TFT_WHITE);
-  const int level = squish.level();
-  const int radiusX = 105 + level * 18;
-  const int radiusY = 120 - level * 10;
-  const int centerY = 405 + level * 8;
-  epaper.fillEllipse(kScreenWidth / 2, centerY, radiusX, radiusY, TFT_BLACK);
-  const int eyeSpread = 35 + level * 5;
-  epaper.fillCircle(kScreenWidth / 2 - eyeSpread, centerY - 28, 8, TFT_WHITE);
-  epaper.fillCircle(kScreenWidth / 2 + eyeSpread, centerY - 28, 8, TFT_WHITE);
-  epaper.drawFastHLine(kScreenWidth / 2 - 28 - level * 3, centerY + 32,
-                      56 + level * 6, TFT_WHITE);
-  centerText(touchActive ? "SQUISH" : "press and hold", kScreenWidth / 2, 650,
-             2);
+  epaper.drawRoundRect(18, 124, 444, 560, 14, TFT_BLACK);
+  epaper.drawFastHLine(30, 406, 420, 0xDEFB);
+  epaper.drawFastVLine(240, 136, 536, 0xDEFB);
+  for (size_t index = 0; index < kaleidoscope.count(); ++index) {
+    drawMirroredKaleidoscopeSegment(kaleidoscope.segment(index));
+  }
+}
+
+void drawInkDot(const InkDot& dot) {
+  const int mirrorX = kScreenWidth - dot.x;
+  epaper.fillCircle(dot.x, dot.y, dot.radius, TFT_BLACK);
+  epaper.fillCircle(mirrorX, dot.y, dot.radius, TFT_BLACK);
+}
+
+void drawInkblot() {
+  epaper.fillRect(0, kContentTop, kScreenWidth,
+                  kContentBottom - kContentTop + 1, TFT_WHITE);
+  epaper.drawRoundRect(18, 124, 444, 560, 14, TFT_BLACK);
+  epaper.drawFastVLine(kScreenWidth / 2, 136, 536, 0xDEFB);
+  for (size_t index = 0; index < inkblot.count(); ++index) {
+    drawInkDot(inkblot.dot(index));
+  }
+  if (inkblot.count() == 0) {
+    centerText("make a mark", kScreenWidth / 2, 405, 4);
+  }
+}
+
+void drawPebbleStack() {
+  epaper.fillRect(0, kContentTop, kScreenWidth,
+                  kContentBottom - kContentTop + 1, TFT_WHITE);
+  epaper.drawFastHLine(48, 670, 384, TFT_BLACK);
+  for (size_t index = 0; index < pebbleStack.count(); ++index) {
+    const int centerX = kScreenWidth / 2 + pebbleStack.offset(index);
+    const int centerY = 640 - static_cast<int>(index) * 47;
+    const int radiusX = 78 - static_cast<int>(index % 4) * 8;
+    const int radiusY = 19 - static_cast<int>(index % 3) * 2;
+    epaper.fillEllipse(centerX, centerY, radiusX, radiusY, TFT_BLACK);
+    epaper.fillEllipse(centerX - radiusX / 3, centerY - radiusY / 3,
+                       radiusX / 7, std::max(2, radiusY / 5), TFT_WHITE);
+  }
+  if (pebbleStack.count() == 0) {
+    centerText("tap to stack", kScreenWidth / 2, 405, 4);
+  } else if (pebbleStack.count() == PebbleStack::kMaximumPebbles) {
+    centerText("balanced.", kScreenWidth / 2, 165, 4);
+  }
+}
+
+void drawWorryStone() {
+  epaper.fillRect(0, kContentTop, kScreenWidth,
+                  kContentBottom - kContentTop + 1, TFT_WHITE);
+  constexpr int centerX = kScreenWidth / 2;
+  constexpr int centerY = 405;
+  epaper.fillEllipse(centerX, centerY, 178, 128, TFT_BLACK);
+  const int grooveCount = std::min(6, 1 + static_cast<int>(worryStone.rubs() / 8));
+  for (int groove = 0; groove < grooveCount; ++groove) {
+    epaper.drawEllipse(centerX, centerY, 82 + groove * 5,
+                       42 + groove * 3, TFT_WHITE);
+  }
+  centerText(String(worryStone.rubs()) + " RUBS", centerX, 650, 4);
 }
 
 void drawActivityContent() {
@@ -509,8 +690,17 @@ void drawActivityContent() {
     case Screen::PointlessCounter:
       drawPointlessCounter();
       break;
-    case Screen::Squish:
-      drawSquish();
+    case Screen::Kaleidoscope:
+      drawKaleidoscope();
+      break;
+    case Screen::Inkblot:
+      drawInkblot();
+      break;
+    case Screen::PebbleStack:
+      drawPebbleStack();
+      break;
+    case Screen::WorryStone:
+      drawWorryStone();
       break;
     case Screen::Menu:
       return;
@@ -528,7 +718,7 @@ void drawHelpOverlay() {
   centerText(screenName(currentScreen), kScreenWidth / 2, panel.y + 74, 4);
 
   String text = helpText(currentScreen);
-  const int maximumCharacters = 34;
+  const int maximumCharacters = 24;
   int y = panel.y + 160;
   while (text.length() > 0 && y < panel.y + panel.height - 80) {
     int split = std::min(maximumCharacters, static_cast<int>(text.length()));
@@ -536,7 +726,8 @@ void drawHelpOverlay() {
       const int space = text.lastIndexOf(' ', split);
       if (space > 0) split = space;
     }
-    centerText(text.substring(0, split), kScreenWidth / 2, y, 2);
+    centerText(text.substring(0, split), kScreenWidth / 2, y, 4, TFT_BLACK,
+               TFT_WHITE, panel.width - 40);
     text.remove(0, split);
     text.trim();
     y += 32;
@@ -547,45 +738,48 @@ void drawHelpOverlay() {
   epaper.fillCircle(closeX, closeY, 24, TFT_BLACK);
   epaper.drawLine(closeX - 9, closeY - 9, closeX + 9, closeY + 9, TFT_WHITE);
   epaper.drawLine(closeX + 9, closeY - 9, closeX - 9, closeY + 9, TFT_WHITE);
-  centerText("OK = BACK  |  HOLD OK = SLEEP", kScreenWidth / 2,
-             panel.y + panel.height - 45, 2);
+  centerText("OK: BACK   HOLD: SLEEP", kScreenWidth / 2,
+             panel.y + panel.height - 45, 4, TFT_BLACK, TFT_WHITE,
+             panel.width - 30);
 }
 
 void drawCurrentScreen() {
   if (currentScreen == Screen::Menu) {
     drawMenu();
   } else {
-    epaper.fillScreen(TFT_WHITE);
+    epaper.fillSprite(TFT_WHITE);
     drawStatusBar();
     drawActivityHeader();
     drawActivityContent();
-    drawFooterButton(currentScreen == Screen::ZenRake ? "CLEAR" : "RESET");
+    const bool clearCanvas =
+        currentScreen == Screen::ZenRake ||
+        currentScreen == Screen::Kaleidoscope ||
+        currentScreen == Screen::Inkblot;
+    drawFooterButton(clearCanvas ? "CLEAR" : "RESET");
   }
   if (helpVisible) drawHelpOverlay();
 }
 
 void drawStatus(const char* title, const char* subtitle) {
-  epaper.fillScreen(TFT_WHITE);
+  epaper.fillSprite(TFT_WHITE);
   drawFiddleMark(kScreenWidth / 2, 270);
   centerText(title, kScreenWidth / 2, 390, 4);
-  centerText(subtitle, kScreenWidth / 2, 445, 2);
+  centerText(subtitle, kScreenWidth / 2, 445, 4);
 }
 
 void drawSleepSplash() {
-  epaper.fillScreen(TFT_WHITE);
+  epaper.fillSprite(TFT_WHITE);
   drawFiddleMark(kScreenWidth / 2, 270);
   centerText(kBrandName, kScreenWidth / 2, 390, 4);
-  centerText("Press OK to fiddle again", kScreenWidth / 2, 450, 2);
+  centerText("Press OK to fiddle again", kScreenWidth / 2, 450, 4);
 }
 
 void drawChargeSplash(int percent) {
-  epaper.fillScreen(TFT_WHITE);
-  drawFiddleMark(kScreenWidth / 2, 250);
-  centerText("BATTERY LOW", kScreenWidth / 2, 365, 4);
-  if (percent >= 0) {
-    centerText(String(percent) + "%", kScreenWidth / 2, 435, 4);
-  }
-  centerText(kBrandName, kScreenWidth / 2, 535, 2);
+  epaper.fillSprite(TFT_WHITE);
+  centerText("BATTERY LOW", kScreenWidth / 2, 130, 4);
+  centerText(String(percent) + "% REMAINING", kScreenWidth / 2, 180, 4);
+  drawFiddleLogo(kScreenWidth / 2, 390, 280);
+  centerText(kBrandName, kScreenWidth / 2, 500, 4);
 }
 
 bool refreshRegion(const E1005FastRefresh::Region& region,
@@ -601,15 +795,45 @@ bool refreshRegion(const E1005FastRefresh::Region& region,
   return fastRefresh.begin() == E1005FastRefresh::Result::Ok;
 }
 
-bool refreshScreen(const char* action) {
-  epaper.sleep();
-  epaper.update();
-  const E1005FastRefresh::Result result = fastRefresh.begin();
-  if (result == E1005FastRefresh::Result::Ok) return true;
-  LOG.printf("[fiddle] %s full refresh failed: %s\n", action,
-             E1005FastRefresh::resultMessage(result));
-  touchReady = false;
-  return false;
+E1005FastRefresh::Region activityRegion(Screen screen) {
+  switch (screen) {
+    case Screen::BubbleWrap:
+      return kBubbleRegion;
+    case Screen::ZenRake:
+      return kZenRegion;
+    case Screen::FlipDots:
+      return kFlipRegion;
+    case Screen::RipplePond:
+      return kPondRegion;
+    case Screen::PointlessCounter:
+      return kCounterRegion;
+    case Screen::Kaleidoscope:
+      return kKaleidoscopeRegion;
+    case Screen::Inkblot:
+      return kInkblotRegion;
+    case Screen::PebbleStack:
+      return kPebbleRegion;
+    case Screen::WorryStone:
+      return kWorryStoneRegion;
+    case Screen::Menu:
+      return kScreenRegion;
+  }
+  return kContentRegion;
+}
+
+void markTouchDirty(const E1005FastRefresh::Region& region) {
+  if (!touchDirty) {
+    touchDirty = true;
+    touchDirtyRegion = region;
+    return;
+  }
+  const int left = std::min(touchDirtyRegion.x, region.x);
+  const int top = std::min(touchDirtyRegion.y, region.y);
+  const int right = std::max(touchDirtyRegion.x + touchDirtyRegion.width,
+                             region.x + region.width);
+  const int bottom = std::max(touchDirtyRegion.y + touchDirtyRegion.height,
+                              region.y + region.height);
+  touchDirtyRegion = {left, top, right - left, bottom - top};
 }
 
 uint32_t stateChecksum(const PersistedState& state) {
@@ -627,6 +851,7 @@ void saveResumeState() {
   state.magic = kPersistedMagic;
   state.version = kPersistedVersion;
   state.screen = static_cast<uint8_t>(currentScreen);
+  state.menuPage = currentMenuPage;
   state.bubbles = bubbles.snapshot();
   state.rakeCount = static_cast<uint16_t>(rake.count());
   for (size_t index = 0; index < rake.count(); ++index) {
@@ -638,7 +863,20 @@ void saveResumeState() {
     state.ripples[index] = pond.ripple(index);
   }
   state.counter = counter.value();
-  state.squishLevel = squish.level();
+  state.kaleidoscopeCount = static_cast<uint16_t>(kaleidoscope.count());
+  for (size_t index = 0; index < kaleidoscope.count(); ++index) {
+    state.kaleidoscopeSegments[index] = kaleidoscope.segment(index);
+  }
+  state.inkblotCount = static_cast<uint8_t>(inkblot.count());
+  for (size_t index = 0; index < inkblot.count(); ++index) {
+    state.inkDots[index] = inkblot.dot(index);
+  }
+  state.pebbleCount = static_cast<uint8_t>(pebbleStack.count());
+  for (size_t index = 0; index < pebbleStack.count(); ++index) {
+    state.pebbleOffsets[index] =
+        static_cast<int8_t>(pebbleStack.offset(index));
+  }
+  state.worryRubs = worryStone.rubs();
   state.checksum = stateChecksum(state);
   persistedState = state;
 }
@@ -648,9 +886,13 @@ bool restoreResumeState() {
   const PersistedState state = persistedState;
   if (state.magic != kPersistedMagic ||
       state.version != kPersistedVersion ||
-      state.screen > static_cast<uint8_t>(Screen::Squish) ||
+      state.screen > static_cast<uint8_t>(Screen::WorryStone) ||
+      state.menuPage >= kMenuPageCount ||
       state.rakeCount > ZenRake::kMaximumSegments ||
       state.rippleCount > RipplePond::kMaximumRipples ||
+      state.kaleidoscopeCount > Kaleidoscope::kMaximumSegments ||
+      state.inkblotCount > Inkblot::kMaximumDots ||
+      state.pebbleCount > PebbleStack::kMaximumPebbles ||
       state.checksum != stateChecksum(state)) {
     LOG.println("[fiddle] saved state is invalid");
     return false;
@@ -660,12 +902,16 @@ bool restoreResumeState() {
   }
 
   currentScreen = static_cast<Screen>(state.screen);
+  currentMenuPage = state.menuPage;
   bubbles.restore(state.bubbles);
   rake.restore(state.rakeSegments, state.rakeCount);
   flipDots.restore(state.flipDots);
   pond.restore(state.ripples, state.rippleCount);
   counter.restore(state.counter);
-  squish.restore(state.squishLevel);
+  kaleidoscope.restore(state.kaleidoscopeSegments, state.kaleidoscopeCount);
+  inkblot.restore(state.inkDots, state.inkblotCount);
+  pebbleStack.restore(state.pebbleOffsets, state.pebbleCount);
+  worryStone.restore(state.worryRubs);
   return true;
 }
 
@@ -706,10 +952,7 @@ bool pollButtonEvent(ButtonEvent& event) {
 void recordActivity() { lastActivityAtMs = millis(); }
 
 bool inputHandlingActive() {
-  if (touchActive ||
-      (currentScreen == Screen::Squish && squishRelaxing)) {
-    return true;
-  }
+  if (touchActive) return true;
   for (const ButtonState& button : buttons) {
     if (button.sampledLevel != button.stableLevel ||
         button.stableLevel == LOW) {
@@ -814,44 +1057,58 @@ void resetCurrentActivity() {
     case Screen::PointlessCounter:
       counter.reset();
       break;
-    case Screen::Squish:
-      squish.reset();
-      squishRelaxing = false;
+    case Screen::Kaleidoscope:
+      kaleidoscope.reset();
+      break;
+    case Screen::Inkblot:
+      inkblot.reset();
+      break;
+    case Screen::PebbleStack:
+      pebbleStack.reset();
+      break;
+    case Screen::WorryStone:
+      worryStone.reset();
       break;
     case Screen::Menu:
       return;
   }
   drawActivityContent();
-  refreshRegion(kContentRegion, "reset activity");
+  refreshRegion(activityRegion(currentScreen), "reset activity");
 }
 
 void showMenu() {
+  if (currentScreen != Screen::Menu) {
+    currentMenuPage =
+        static_cast<uint8_t>(activityIndex(currentScreen) /
+                             kActivitiesPerMenuPage);
+  }
   helpVisible = false;
-  squishRelaxing = false;
   currentScreen = Screen::Menu;
   drawMenu();
-  refreshScreen("show menu");
+  refreshRegion(kScreenRegion, "show menu");
+}
+
+void showMenuPage(uint8_t page) {
+  if (page >= kMenuPageCount || page == currentMenuPage) return;
+  currentMenuPage = page;
+  drawMenu();
+  refreshRegion(kScreenRegion, "show menu page");
 }
 
 void showActivity(Screen screen) {
   helpVisible = false;
-  if (screen != Screen::Squish) squishRelaxing = false;
   currentScreen = screen;
   if (screen == Screen::RipplePond && pond.count() > 0) {
     nextRippleAgeAtMs = millis() + kRippleAgeIntervalMs;
   }
   drawCurrentScreen();
-  refreshScreen("show activity");
+  refreshRegion(kScreenRegion, "show activity");
 }
 
 void toggleHelp() {
   helpVisible = !helpVisible;
-  if (currentScreen == Screen::Squish) {
-    squishRelaxing = !helpVisible && squish.level() > 0;
-    if (squishRelaxing) nextSquishStepAtMs = millis() + kSquishStepMs;
-  }
   drawCurrentScreen();
-  refreshScreen(helpVisible ? "show help" : "close help");
+  refreshRegion(kHelpRegion, helpVisible ? "show help" : "close help");
 }
 
 bool bubbleCellForPoint(int x, int y, int& row, int& column) {
@@ -877,33 +1134,48 @@ bool flipCellForPoint(int x, int y, int& row, int& column) {
 
 void handleTouchPoint(const Gt911Touch::Point& point, bool first) {
   recordActivity();
+  if (touchConsumed) return;
   if (first) {
     if (helpVisible) {
+      touchConsumed = true;
       toggleHelp();
       return;
     }
     if (currentScreen == Screen::Menu) {
-      for (size_t index = 0; index < kActivityCount; ++index) {
-        if (kMenuCards[index].contains(point.x, point.y)) {
-          hardware::beep();
+      const size_t firstActivity =
+          static_cast<size_t>(currentMenuPage) * kActivitiesPerMenuPage;
+      for (size_t slot = 0; slot < kActivitiesPerMenuPage; ++slot) {
+        const size_t index = firstActivity + slot;
+        if (index >= kActivityCount) break;
+        if (kMenuCards[slot].contains(point.x, point.y)) {
+          touchConsumed = true;
           showActivity(activityScreen(index));
           return;
         }
       }
+      if (kPreviousPageButton.contains(point.x, point.y) &&
+          currentMenuPage > 0) {
+        touchConsumed = true;
+        showMenuPage(currentMenuPage - 1);
+      } else if (kNextPageButton.contains(point.x, point.y) &&
+                 currentMenuPage + 1 < kMenuPageCount) {
+        touchConsumed = true;
+        showMenuPage(currentMenuPage + 1);
+      }
       return;
     }
     if (kBackButton.contains(point.x, point.y)) {
-      hardware::beep();
+      touchConsumed = true;
       showMenu();
       return;
     }
     if (kHelpButton.contains(point.x, point.y)) {
-      hardware::beep();
+      touchConsumed = true;
       toggleHelp();
       return;
     }
     if (kResetButton.contains(point.x, point.y)) {
-      hardware::beep();
+      touchConsumed = true;
       resetCurrentActivity();
       return;
     }
@@ -917,9 +1189,15 @@ void handleTouchPoint(const Gt911Touch::Point& point, bool first) {
       int column = 0;
       if (bubbleCellForPoint(point.x, point.y, row, column) &&
           bubbles.pop(row, column)) {
-        hardware::beep();
         drawBubbleWrap();
-        touchDirty = true;
+        constexpr int left = 42;
+        constexpr int top = 128;
+        constexpr int cell = 66;
+        markTouchDirty(
+            {left + column * cell, top + row * cell, cell, cell});
+        if (bubbles.allPopped()) {
+          markTouchDirty({160, 654, 160, 40});
+        }
       }
       break;
     }
@@ -930,7 +1208,11 @@ void handleTouchPoint(const Gt911Touch::Point& point, bool first) {
         if (dx * dx + dy * dy >= 64 &&
             rake.add(touchLast.x, touchLast.y, point.x, point.y)) {
           drawZenRake();
-          touchDirty = true;
+          const int left = std::min(touchLast.x, point.x) - 8;
+          const int top = std::min(touchLast.y, point.y) - 4;
+          const int right = std::max(touchLast.x, point.x) + 8;
+          const int bottom = std::max(touchLast.y, point.y) + 4;
+          markTouchDirty({left, top, right - left + 1, bottom - top + 1});
         }
       }
       break;
@@ -942,7 +1224,12 @@ void handleTouchPoint(const Gt911Touch::Point& point, bool first) {
       if (cell != lastFlipCell && flipDots.toggle(row, column)) {
         lastFlipCell = cell;
         drawFlipDots();
-        touchDirty = true;
+        constexpr int left = 48;
+        constexpr int top = 126;
+        constexpr int cellWidth = 48;
+        constexpr int cellHeight = 46;
+        markTouchDirty({left + column * cellWidth, top + row * cellHeight,
+                        cellWidth, cellHeight});
       }
       break;
     }
@@ -952,24 +1239,86 @@ void handleTouchPoint(const Gt911Touch::Point& point, bool first) {
         pond.add(point.x, point.y);
         nextRippleAgeAtMs = millis() + kRippleAgeIntervalMs;
         drawRipplePond();
-        touchDirty = true;
+        markTouchDirty(kPondRegion);
       }
       break;
     case Screen::PointlessCounter:
       if (first && counter.increment()) {
-        hardware::beep();
         drawPointlessCounter();
-        touchDirty = true;
+        markTouchDirty(kCounterRegion);
       }
       break;
-    case Screen::Squish:
-      if (first) {
-        squishRelaxing = false;
-        nextSquishStepAtMs = millis();
-        drawSquish();
-        touchDirty = true;
+    case Screen::Kaleidoscope:
+      if (!first) {
+        const int previousX =
+            std::max(30, std::min(static_cast<int>(touchLast.x), 450));
+        const int previousY =
+            std::max(136, std::min(static_cast<int>(touchLast.y), 676));
+        const int currentX =
+            std::max(30, std::min(static_cast<int>(point.x), 450));
+        const int currentY =
+            std::max(136, std::min(static_cast<int>(point.y), 676));
+        const int dx = currentX - previousX;
+        const int dy = currentY - previousY;
+        if (dx * dx + dy * dy >= 36 &&
+            kaleidoscope.add(previousX, previousY, currentX, currentY)) {
+          const RakeSegment& segment =
+              kaleidoscope.segment(kaleidoscope.count() - 1);
+          drawMirroredKaleidoscopeSegment(segment);
+          const int left = std::min(segment.x1, segment.x2) - 3;
+          const int right = std::max(segment.x1, segment.x2) + 3;
+          const int top = std::min(segment.y1, segment.y2) - 3;
+          const int bottom = std::max(segment.y1, segment.y2) + 3;
+          markTouchDirty({left, top, right - left + 1, bottom - top + 1});
+          markTouchDirty({kScreenWidth - right, top, right - left + 1,
+                          bottom - top + 1});
+          markTouchDirty(
+              {left, 812 - bottom, right - left + 1, bottom - top + 1});
+          markTouchDirty({kScreenWidth - right, 812 - bottom,
+                          right - left + 1, bottom - top + 1});
+        }
       }
       break;
+    case Screen::Inkblot: {
+      const int x = std::max(
+          30, std::min(static_cast<int>(point.x), kScreenWidth / 2 - 2));
+      const int y =
+          std::max(150, std::min(static_cast<int>(point.y), 658));
+      const int dx = point.x - touchLast.x;
+      const int dy = point.y - touchLast.y;
+      if ((first || dx * dx + dy * dy >= 49) &&
+          inkblot.add(x, y,
+                      static_cast<uint8_t>(7 + (inkblot.count() * 5) % 13))) {
+        const InkDot& dot = inkblot.dot(inkblot.count() - 1);
+        if (inkblot.count() == 1) {
+          drawInkblot();
+          markTouchDirty(kInkblotRegion);
+        } else {
+          drawInkDot(dot);
+          const int size = dot.radius * 2 + 5;
+          markTouchDirty(
+              {dot.x - dot.radius - 2, dot.y - dot.radius - 2, size, size});
+          markTouchDirty({kScreenWidth - dot.x - dot.radius - 2,
+                          dot.y - dot.radius - 2, size, size});
+        }
+      }
+      break;
+    }
+    case Screen::PebbleStack:
+      if (first && pebbleStack.add((point.x - kScreenWidth / 2) / 3)) {
+        drawPebbleStack();
+        markTouchDirty(kPebbleRegion);
+      }
+      break;
+    case Screen::WorryStone: {
+      const int dx = point.x - touchLast.x;
+      const int dy = point.y - touchLast.y;
+      if ((first || dx * dx + dy * dy >= 100) && worryStone.rub()) {
+        drawWorryStone();
+        markTouchDirty(kWorryStoneRegion);
+      }
+      break;
+    }
     case Screen::Menu:
       break;
   }
@@ -983,15 +1332,13 @@ void pollTouch() {
   if (result == Gt911Touch::PollResult::Release) {
     if (touchActive) {
       touchActive = false;
+      touchConsumed = false;
       lastFlipCell = -1;
-      if (currentScreen == Screen::Squish && !helpVisible &&
-          kActivityArea.contains(touchStart.x, touchStart.y)) {
-        squishRelaxing = true;
-        nextSquishStepAtMs = millis() + kSquishStepMs;
-      } else if (touchDirty) {
-        refreshRegion(kContentRegion, "touch activity");
+      if (touchDirty) {
+        refreshRegion(touchDirtyRegion, "touch activity");
       }
       touchDirty = false;
+      touchDirtyRegion = {};
     }
     return;
   }
@@ -999,6 +1346,7 @@ void pollTouch() {
   const bool first = !touchActive;
   if (first) {
     touchActive = true;
+    touchConsumed = false;
     touchStart = point;
     touchLast = point;
     lastFlipCell = -1;
@@ -1015,51 +1363,38 @@ void updateAnimations() {
     pond.advance();
     nextRippleAgeAtMs = now + kRippleAgeIntervalMs;
     drawRipplePond();
-    refreshRegion(kContentRegion, "age ripples");
+    refreshRegion(kPondRegion, "age ripples");
   }
 
-  if (currentScreen != Screen::Squish) return;
-  if (touchActive && static_cast<int32_t>(now - nextSquishStepAtMs) >= 0) {
-    nextSquishStepAtMs = now + kSquishStepMs;
-    if (squish.inflate()) {
-      drawSquish();
-      refreshRegion(kContentRegion, "squish");
-    }
-  } else if (squishRelaxing &&
-             static_cast<int32_t>(now - nextSquishStepAtMs) >= 0) {
-    nextSquishStepAtMs = now + kSquishStepMs;
-    if (squish.relax()) {
-      drawSquish();
-      refreshRegion(kContentRegion, "relax squish");
-    } else {
-      squishRelaxing = false;
-    }
-  }
 }
 
 void handleButton(const ButtonEvent& event) {
   recordActivity();
   if (event.button->pin == board::PIN_BUTTON_0) {
     if (event.heldMs >= kDeepSleepHoldMs) {
-      hardware::beep();
       powerDownAndSleep();
     } else if (helpVisible) {
-      hardware::beep();
       toggleHelp();
     } else if (currentScreen != Screen::Menu) {
-      hardware::beep();
       showMenu();
     }
     return;
   }
 
-  if (helpVisible || currentScreen == Screen::Menu) return;
+  if (helpVisible) return;
+  if (currentScreen == Screen::Menu) {
+    if (event.button->pin == board::PIN_BUTTON_1 && currentMenuPage > 0) {
+      showMenuPage(currentMenuPage - 1);
+    } else if (event.button->pin == board::PIN_BUTTON_2 &&
+               currentMenuPage + 1 < kMenuPageCount) {
+      showMenuPage(currentMenuPage + 1);
+    }
+    return;
+  }
   const size_t index = activityIndex(currentScreen);
   if (event.button->pin == board::PIN_BUTTON_1) {
-    hardware::beep();
     showActivity(activityScreen((index + kActivityCount - 1) % kActivityCount));
   } else if (event.button->pin == board::PIN_BUTTON_2) {
-    hardware::beep();
     showActivity(activityScreen((index + 1) % kActivityCount));
   }
 }
@@ -1149,7 +1484,6 @@ void setup() {
   delay(50);
   LOG.printf("\n[fiddle] %s firmware %s\n", kAppName,
              board::FIRMWARE_VERSION);
-  hardware::beep();
 
   const bool resumed = restoreResumeState();
   pinMode(board::PIN_SD_CS, OUTPUT);

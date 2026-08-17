@@ -193,31 +193,110 @@ class PointlessCounter {
   uint32_t value_ = 0;
 };
 
-class Squish {
+class Kaleidoscope {
  public:
-  static constexpr uint8_t kMaximumLevel = 5;
+  static constexpr size_t kMaximumSegments = 80;
 
-  bool inflate() {
-    if (level_ >= kMaximumLevel) return false;
-    ++level_;
+  bool add(int x1, int y1, int x2, int y2) {
+    if (count_ >= kMaximumSegments || (x1 == x2 && y1 == y2)) return false;
+    segments_[count_++] = {
+        static_cast<int16_t>(x1), static_cast<int16_t>(y1),
+        static_cast<int16_t>(x2), static_cast<int16_t>(y2)};
     return true;
   }
 
-  bool relax() {
-    if (level_ == 0) return false;
-    --level_;
-    return true;
-  }
+  size_t count() const { return count_; }
+  const RakeSegment& segment(size_t index) const { return segments_[index]; }
+  void reset() { count_ = 0; }
 
-  uint8_t level() const { return level_; }
-  void reset() { level_ = 0; }
-  void restore(uint8_t level) {
-    level_ = level > kMaximumLevel ? kMaximumLevel : level;
+  void restore(const RakeSegment* segments, size_t count) {
+    count_ = count > kMaximumSegments ? kMaximumSegments : count;
+    for (size_t index = 0; index < count_; ++index) {
+      segments_[index] = segments[index];
+    }
   }
 
  private:
-  uint8_t level_ = 0;
+  RakeSegment segments_[kMaximumSegments] = {};
+  size_t count_ = 0;
+};
+
+struct InkDot {
+  int16_t x = 0;
+  int16_t y = 0;
+  uint8_t radius = 0;
+};
+
+class Inkblot {
+ public:
+  static constexpr size_t kMaximumDots = 64;
+
+  bool add(int x, int y, uint8_t radius) {
+    if (count_ >= kMaximumDots || radius == 0) return false;
+    dots_[count_++] = {
+        static_cast<int16_t>(x), static_cast<int16_t>(y), radius};
+    return true;
+  }
+
+  size_t count() const { return count_; }
+  const InkDot& dot(size_t index) const { return dots_[index]; }
+  void reset() { count_ = 0; }
+
+  void restore(const InkDot* dots, size_t count) {
+    count_ = 0;
+    const size_t capped = count > kMaximumDots ? kMaximumDots : count;
+    for (size_t index = 0; index < capped; ++index) {
+      if (dots[index].radius > 0) dots_[count_++] = dots[index];
+    }
+  }
+
+ private:
+  InkDot dots_[kMaximumDots] = {};
+  size_t count_ = 0;
+};
+
+class PebbleStack {
+ public:
+  static constexpr size_t kMaximumPebbles = 10;
+
+  bool add(int offset) {
+    if (count_ >= kMaximumPebbles) return false;
+    if (offset < -80) offset = -80;
+    if (offset > 80) offset = 80;
+    offsets_[count_++] = static_cast<int8_t>(offset);
+    return true;
+  }
+
+  size_t count() const { return count_; }
+  int offset(size_t index) const { return offsets_[index]; }
+  void reset() { count_ = 0; }
+
+  void restore(const int8_t* offsets, size_t count) {
+    count_ = count > kMaximumPebbles ? kMaximumPebbles : count;
+    for (size_t index = 0; index < count_; ++index) {
+      offsets_[index] = offsets[index];
+    }
+  }
+
+ private:
+  int8_t offsets_[kMaximumPebbles] = {};
+  size_t count_ = 0;
+};
+
+class WorryStone {
+ public:
+  bool rub() {
+    if (rubs_ == std::numeric_limits<uint16_t>::max()) return false;
+    ++rubs_;
+    return true;
+  }
+
+  uint16_t rubs() const { return rubs_; }
+  void reset() { rubs_ = 0; }
+  void restore(uint16_t rubs) { rubs_ = rubs; }
+
+ private:
+  uint16_t rubs_ = 0;
 };
 
 }  // namespace sticky_fiddle
-

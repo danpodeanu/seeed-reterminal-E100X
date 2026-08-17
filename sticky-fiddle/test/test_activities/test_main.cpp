@@ -68,16 +68,41 @@ void test_counter_saturates_and_resets() {
   TEST_ASSERT_EQUAL_UINT32(0, counter.value());
 }
 
-void test_squish_inflates_and_relaxes() {
-  Squish squish;
-  for (uint8_t level = 0; level < Squish::kMaximumLevel; ++level) {
-    TEST_ASSERT_TRUE(squish.inflate());
+void test_kaleidoscope_caps_segments() {
+  Kaleidoscope kaleidoscope;
+  for (size_t index = 0; index < Kaleidoscope::kMaximumSegments; ++index) {
+    TEST_ASSERT_TRUE(kaleidoscope.add(index, 1, index + 1, 2));
   }
-  TEST_ASSERT_FALSE(squish.inflate());
-  for (uint8_t level = 0; level < Squish::kMaximumLevel; ++level) {
-    TEST_ASSERT_TRUE(squish.relax());
+  TEST_ASSERT_FALSE(kaleidoscope.add(0, 0, 1, 1));
+}
+
+void test_inkblot_restores_valid_dots() {
+  Inkblot inkblot;
+  TEST_ASSERT_TRUE(inkblot.add(120, 220, 14));
+  Inkblot restored;
+  const InkDot dots[] = {inkblot.dot(0), {100, 100, 0}};
+  restored.restore(dots, 2);
+  TEST_ASSERT_EQUAL_UINT(1, restored.count());
+  TEST_ASSERT_EQUAL_INT(120, restored.dot(0).x);
+}
+
+void test_pebble_stack_clamps_offsets() {
+  PebbleStack pebbles;
+  TEST_ASSERT_TRUE(pebbles.add(200));
+  TEST_ASSERT_EQUAL_INT(80, pebbles.offset(0));
+  for (size_t index = 1; index < PebbleStack::kMaximumPebbles; ++index) {
+    TEST_ASSERT_TRUE(pebbles.add(0));
   }
-  TEST_ASSERT_FALSE(squish.relax());
+  TEST_ASSERT_FALSE(pebbles.add(0));
+}
+
+void test_worry_stone_counts_rubs() {
+  WorryStone stone;
+  TEST_ASSERT_TRUE(stone.rub());
+  TEST_ASSERT_TRUE(stone.rub());
+  TEST_ASSERT_EQUAL_UINT16(2, stone.rubs());
+  stone.reset();
+  TEST_ASSERT_EQUAL_UINT16(0, stone.rubs());
 }
 
 int main(int, char**) {
@@ -88,6 +113,9 @@ int main(int, char**) {
   RUN_TEST(test_flip_dots_toggle_and_restore);
   RUN_TEST(test_ripples_age_out);
   RUN_TEST(test_counter_saturates_and_resets);
-  RUN_TEST(test_squish_inflates_and_relaxes);
+  RUN_TEST(test_kaleidoscope_caps_segments);
+  RUN_TEST(test_inkblot_restores_valid_dots);
+  RUN_TEST(test_pebble_stack_clamps_offsets);
+  RUN_TEST(test_worry_stone_counts_rubs);
   return UNITY_END();
 }

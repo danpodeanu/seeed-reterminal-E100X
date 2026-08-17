@@ -32,7 +32,7 @@ details.
 | [Weather Viewer](weather-viewer/) | A low-power current-conditions and three-day forecast display using QWeather or Open-Meteo, with local environmental readings, severe-weather alerts, Unicode location names, and deep sleep. | Available |
 | [Photo Viewer](photo-viewer/) | A private, SD-card photo frame with panel-native preprocessing, full model-specific color, quiet hours, daily time sync, and deep sleep. | Available |
 | [Sticky Arcade](sticky-arcade/) | Eighteen E1005 activities with fast refresh and resumable state: seventeen touch games plus a read-only SD browser and EPUB reader. | Available on E1005 |
-| [Sticky Fiddle](sticky-fiddle/) | Six no-pressure E1005 touch activities for idle hands: Bubble Wrap, Zen Rake, Flip-Dot Board, Ripple Pond, Pointless Counter, and Squish. | Available on E1005 |
+| [Sticky Fiddle](sticky-fiddle/) | Nine no-pressure E1005 touch activities for idle hands, including Bubble Wrap, Zen Rake, Kaleidoscope, Inkblot, Pebble Stack, and Worry Stone. | Available on E1005 |
 
 ## XKCD Viewer example
 
@@ -114,7 +114,7 @@ different framework or architecture where that better suits their use case.
 ├── weather-viewer/       # Standalone weather display firmware
 ├── photo-viewer/         # SD-card photo-frame firmware and preparation tool
 ├── sticky-arcade/        # Seventeen touch games and an EPUB reader for E1005
-├── sticky-fiddle/        # Six no-pressure touch activities for E1005
+├── sticky-fiddle/        # Nine no-pressure touch activities for E1005
 ├── tools/                # Hardware utilities (i2c-scan, panel-test, sd-web)
 └── README.md             # This project index
 ```

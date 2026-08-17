@@ -1,6 +1,6 @@
 # Sticky Fiddle
 
-Sticky Fiddle is a deliberately pointless collection of six tactile activities
+Sticky Fiddle is a deliberately pointless collection of nine tactile activities
 for the reTerminal E1005 ("Seeed Sticky"). It is designed for idle hands during
 meetings: no scores, failures, puzzles, or concentration required.
 
@@ -13,10 +13,15 @@ meetings: no scores, failures, puzzles, or concentration required.
 | Flip-Dot Board | Tap or drag across the 8x12 grid to flip dots. |
 | Ripple Pond | Tap the pond to add concentric ripples that gradually fade. |
 | Pointless Counter | Tap the large button to increment a persistent counter. |
-| Squish | Press and hold the blob to flatten it; release it to recover. |
+| Kaleidoscope | Drag to draw four mirrored strokes at once. |
+| Inkblot | Tap or drag to grow a symmetric inkblot. |
+| Pebble Stack | Tap left or right to add pleasantly uneven pebbles. |
+| Worry Stone | Rub the stone to deepen its central groove. |
 
-Each activity has a reset or clear button. UP and DOWN move directly between
-activities.
+Eight activities appear on the first picker page and one on the second. The
+on-screen arrows and the UP/DOWN buttons page through the picker. Within an
+activity, UP and DOWN move directly between activities. Each activity has a
+reset or clear button.
 
 ## Shared controls and power behavior
 
@@ -28,7 +33,8 @@ activities.
 - Press OK to resume with the current activity and state restored from RTC
   memory.
 - Battery status is sampled once per minute. Below 5%, the app saves state,
-  shows a minimal low-battery screen, and sleeps unless USB-C power is present.
+  shows the standard Sticky low-battery screen, and sleeps unless USB-C power
+  is present.
 
 The app uses the E1005 differential-refresh path for interaction and light
 sleep between input events. USB framebuffer capture and SD-card firmware
@@ -59,4 +65,3 @@ pio run -d sticky-fiddle -e reterminal_e1005 -t upload
 
 Sticky Fiddle is E1005-only because it depends on the integrated touch screen,
 480x800 portrait layout, battery gauge, and E1005 fast-refresh controller.
-
