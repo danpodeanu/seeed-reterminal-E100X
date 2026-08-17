@@ -7,13 +7,14 @@
 // in a bare `while` loop inside the panel driver - buttons are dead
 // and only a hard power cycle recovers.
 //
-// This helper arms the ESP-IDF task watchdog around a single panel
-// refresh so that if the driver blocks longer than `timeoutSeconds`,
-// the watchdog panics and reboots the device. On the next boot the
-// viewer just picks up where it left off. On a normal refresh (Gray16
-// takes ~15-20 s on E1003) the wrapper is essentially free.
+// Seeed_GFX also sends TCON_SLEEP immediately after starting a Gray16 update.
+// Usually HRDY remains low until the update completes, but it can briefly be
+// high before the LUT engine asserts busy. If sleep lands in that window, the
+// panel can remain stuck in an inverted intermediate frame. This helper wakes
+// the TCON after update(), waits for LUTAFSR to become idle, then sleeps it
+// again under the same watchdog.
 //
-// The guard is a no-op on other panels: E1001/E1002/E1004 haven't
+// The guard is a no-op on other panels: E1001/E1002/E1004/E1005 haven't
 // exhibited the freeze in field use, and the fast paths on those
 // panels have tighter timings that would risk false-positive resets.
 
@@ -31,8 +32,9 @@ namespace panel_watchdog {
 // timeout, then subscribe the current task. Any esp_task_wdt_* call
 // that returns something other than ESP_OK is treated as a soft error
 // - we still run the refresh so a WDT hiccup can never brick a wake.
-template <typename Refresh>
-inline void guard(Refresh&& refresh, uint32_t timeoutSeconds = 120) {
+template <typename Panel, typename Refresh>
+inline void guard(Panel& panel, Refresh&& refresh,
+                  uint32_t timeoutSeconds = 120) {
   const esp_task_wdt_config_t cfg = {
       /*timeout_ms=*/timeoutSeconds * 1000U,
       /*idle_core_mask=*/0,        // don't monitor idle tasks
@@ -42,11 +44,15 @@ inline void guard(Refresh&& refresh, uint32_t timeoutSeconds = 120) {
   // fall through to init() otherwise.
   if (esp_task_wdt_reconfigure(&cfg) != ESP_OK) {
     esp_task_wdt_init(&cfg);
-  }  const bool subscribed = esp_task_wdt_add(nullptr) == ESP_OK;
+  }
+  const bool subscribed = esp_task_wdt_add(nullptr) == ESP_OK;
   LOG.printf("[wdt] panel refresh guarded, panic reset in %us%s\n",
              (unsigned)timeoutSeconds,
              subscribed ? "" : " (subscribe failed)");
   refresh();
+  panel.wake();
+  panel.tconWaitForDisplayReady();
+  panel.sleep();
   // Always try to unsubscribe on exit - not just when our add()
   // returned ESP_OK. arduino-esp32's startup can auto-subscribe the
   // loopTask under some menuconfigs; in that case our add() returns
@@ -80,8 +86,9 @@ inline void disarmCurrentTask() {
 #else  // Non-E1003 panels: no-op wrapper.
 
 namespace panel_watchdog {
-template <typename Refresh>
-inline void guard(Refresh&& refresh, uint32_t /*timeoutSeconds*/ = 120) {
+template <typename Panel, typename Refresh>
+inline void guard(Panel& /*panel*/, Refresh&& refresh,
+                  uint32_t /*timeoutSeconds*/ = 120) {
   refresh();
 }
 inline void disarmCurrentTask() {}

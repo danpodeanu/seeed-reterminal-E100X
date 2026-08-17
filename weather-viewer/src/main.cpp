@@ -155,10 +155,25 @@ bool screenshotRequested = false;
 bool framebufferReady = false;
 sensors::Readings sensorReadings;
 
+#if RETERMINAL_MODEL == 1003
+float panelWaveformTemperatureC() {
+  if (!sensorReadings.climateValid) return 16.0f;
+  const int rounded = static_cast<int>(lroundf(sensorReadings.temperatureC));
+  return static_cast<float>(constrain(rounded, 0, 50));
+}
+#endif
+
 RTC_DATA_ATTR time_t lastNtpSyncEpoch = 0;
 bool quietSleepNotice = false;
 
 void beginPanel() {
+#if RETERMINAL_MODEL == 1003
+  if (!sensorReadings.climateValid) {
+    sensorReadings.climateValid = climate::readSht4x(
+        sht4, sensorReadings.temperatureC, sensorReadings.humidityPct,
+        config::SENSOR_READ_ATTEMPTS, config::SENSOR_RETRY_DELAY_MS);
+  }
+#endif
 #if RETERMINAL_MODEL == 1005
   // Sticky's SD card shares SCK/MOSI with the panel but has a separate
   // power rail. Power and deselect an inserted card before panel traffic
@@ -169,6 +184,12 @@ void beginPanel() {
   delay(board::SD_POWER_SETTLE_MS);
 #endif
   epaper_setup::begin(epaper);
+#if RETERMINAL_MODEL == 1003
+  epaper.setTemp(panelWaveformTemperatureC);
+  LOG.printf("[panel] waveform temperature=%.0fC%s\n",
+             panelWaveformTemperatureC(),
+             sensorReadings.climateValid ? "" : " (fallback)");
+#endif
 #if RETERMINAL_MODEL == 1005
   epaper.setRotation(weather_config::runtime::panelRotation());
   LOG.printf("[panel] orientation=%s rotation=%d geometry=%dx%d\n",
@@ -193,7 +214,7 @@ void updatePanel() {
     screenshot::saveScreenshotPng(epaper, panelWidth(), panelHeight());
     screenshotRequested = false;
   }
-  panel_watchdog::guard([]() { epaper.update(); });
+  panel_watchdog::guard(epaper, []() { epaper.update(); });
   framebufferReady = true;
 }
 
@@ -1829,7 +1850,7 @@ void setup() {
       LOG.printf("[portal] splash drawn in %u ms; committing to panel\n",
                  static_cast<unsigned>(millis() - drawStart));
       const uint32_t updateStart = millis();
-      panel_watchdog::guard([]() { epaper.update(); });
+      panel_watchdog::guard(epaper, []() { epaper.update(); });
       framebufferReady = true;
       LOG.printf("[portal] panel refresh complete in %u ms\n",
                  static_cast<unsigned>(millis() - updateStart));

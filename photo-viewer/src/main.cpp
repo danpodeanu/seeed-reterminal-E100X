@@ -157,6 +157,14 @@ bool framebufferReady = false;
 std::vector<String> photoList;
 sensors::Readings sensorReadings;
 
+#if RETERMINAL_MODEL == 1003
+float panelWaveformTemperatureC() {
+  if (!sensorReadings.climateValid) return 16.0f;
+  const int rounded = static_cast<int>(lroundf(sensorReadings.temperatureC));
+  return static_cast<float>(constrain(rounded, 0, 50));
+}
+#endif
+
 RTC_DATA_ATTR time_t lastNtpSyncEpoch = 0;
 RTC_DATA_ATTR int32_t currentPhotoIndex = -1;
 // SD-portal mode flag. Persists across deep sleep and ESP.restart() so
@@ -196,6 +204,13 @@ inline bool compactPortraitLayout() {
 }
 
 void beginPanel() {
+#if RETERMINAL_MODEL == 1003
+  if (!sensorReadings.climateValid) {
+    sensorReadings.climateValid = climate::readSht4x(
+        sht4, sensorReadings.temperatureC, sensorReadings.humidityPct,
+        config::SENSOR_READ_ATTEMPTS, config::SENSOR_RETRY_DELAY_MS);
+  }
+#endif
 #if RETERMINAL_MODEL == 1005
   if (sdReady) {
     SD.end();
@@ -207,6 +222,12 @@ void beginPanel() {
   delay(board::SD_POWER_SETTLE_MS);
 #endif
   epaper_setup::begin(epaper);
+#if RETERMINAL_MODEL == 1003
+  epaper.setTemp(panelWaveformTemperatureC);
+  LOG.printf("[panel] waveform temperature=%.0fC%s\n",
+             panelWaveformTemperatureC(),
+             sensorReadings.climateValid ? "" : " (fallback)");
+#endif
 #if RETERMINAL_MODEL == 1005
   epaper.setRotation(photo_config::runtime::panelRotation());
   LOG.printf("[panel] orientation=%s rotation=%d geometry=%dx%d\n",
@@ -354,7 +375,7 @@ void drawStatusBadges() {
 }
 
 void updatePanel() {
-  panel_watchdog::guard([]() { epaper.update(); });
+  panel_watchdog::guard(epaper, []() { epaper.update(); });
   framebufferReady = true;
 }
 
@@ -1161,7 +1182,7 @@ void renderPortalOnPanel(const String& ssid, const String& password,
   config_portal::ui::renderPortalScreen<EPaper>(
       epaper, panelWidth(), panelHeight(), PANEL_BLACK,
       PANEL_WHITE, info);
-  panel_watchdog::guard([]() { epaper.update(); });
+  panel_watchdog::guard(epaper, []() { epaper.update(); });
   framebufferReady = true;
 }
 
