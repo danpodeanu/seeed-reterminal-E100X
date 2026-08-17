@@ -81,6 +81,7 @@ constexpr E1005FastRefresh::Region kFlipRegion = {48, 126, 384, 552};
 constexpr E1005FastRefresh::Region kPondRegion = {
     0, kContentTop, kScreenWidth, kContentBottom - kContentTop + 1};
 constexpr E1005FastRefresh::Region kCounterRegion = {40, 200, 400, 400};
+constexpr E1005FastRefresh::Region kCounterValueRegion = {40, 335, 400, 110};
 constexpr E1005FastRefresh::Region kKaleidoscopeRegion = {
     0, kContentTop, kScreenWidth, kContentBottom - kContentTop + 1};
 constexpr E1005FastRefresh::Region kInkblotRegion = {
@@ -88,6 +89,11 @@ constexpr E1005FastRefresh::Region kInkblotRegion = {
 constexpr E1005FastRefresh::Region kPebbleRegion = {38, 150, 404, 530};
 constexpr E1005FastRefresh::Region kWorryStoneRegion = {
     0, kContentTop, kScreenWidth, kContentBottom - kContentTop + 1};
+constexpr E1005FastRefresh::Region kRipplePromptRegion = {120, 380, 240, 50};
+constexpr E1005FastRefresh::Region kPebblePromptRegion = {120, 380, 240, 50};
+constexpr E1005FastRefresh::Region kPebbleBalancedRegion = {120, 140, 240, 50};
+constexpr E1005FastRefresh::Region kWorryStoneBodyRegion = {55, 270, 370, 270};
+constexpr E1005FastRefresh::Region kWorryStoneCountRegion = {100, 625, 280, 50};
 
 struct Rect {
   int x;
@@ -564,6 +570,21 @@ void drawFlipDots() {
   }
 }
 
+void drawRipple(const Ripple& ripple) {
+  const int baseRadius = 16 + ripple.age * 10;
+  const int rings = RipplePond::kMaximumAge - ripple.age;
+  for (int ring = 0; ring < rings; ++ring) {
+    epaper.drawCircle(ripple.x, ripple.y, baseRadius + ring * 18, TFT_BLACK);
+  }
+}
+
+E1005FastRefresh::Region rippleRegion(const Ripple& ripple) {
+  const int rings = RipplePond::kMaximumAge - ripple.age;
+  const int radius = 16 + ripple.age * 10 + (rings - 1) * 18 + 2;
+  return {ripple.x - radius, ripple.y - radius, radius * 2 + 1,
+          radius * 2 + 1};
+}
+
 void drawRipplePond() {
   epaper.fillRect(0, kContentTop, kScreenWidth,
                   kContentBottom - kContentTop + 1, TFT_WHITE);
@@ -572,12 +593,7 @@ void drawRipplePond() {
     epaper.drawFastHLine(45, y, 390, 0xDEFB);
   }
   for (size_t index = 0; index < pond.count(); ++index) {
-    const Ripple& ripple = pond.ripple(index);
-    const int baseRadius = 16 + ripple.age * 10;
-    const int rings = RipplePond::kMaximumAge - ripple.age;
-    for (int ring = 0; ring < rings; ++ring) {
-      epaper.drawCircle(ripple.x, ripple.y, baseRadius + ring * 18, TFT_BLACK);
-    }
+    drawRipple(pond.ripple(index));
   }
   if (pond.count() == 0) {
     centerText("tap the water", kScreenWidth / 2, 405, 4);
@@ -659,13 +675,26 @@ void drawPebbleStack() {
   }
 }
 
+E1005FastRefresh::Region pebbleRegion(size_t index) {
+  const int centerX = kScreenWidth / 2 + pebbleStack.offset(index);
+  const int centerY = 640 - static_cast<int>(index) * 47;
+  const int radiusX = 78 - static_cast<int>(index % 4) * 8;
+  const int radiusY = 19 - static_cast<int>(index % 3) * 2;
+  return {centerX - radiusX - 2, centerY - radiusY - 2, radiusX * 2 + 5,
+          radiusY * 2 + 5};
+}
+
+int worryStoneGrooveCount(uint16_t rubs) {
+  return std::min(6, 1 + static_cast<int>(rubs / 8));
+}
+
 void drawWorryStone() {
   epaper.fillRect(0, kContentTop, kScreenWidth,
                   kContentBottom - kContentTop + 1, TFT_WHITE);
   constexpr int centerX = kScreenWidth / 2;
   constexpr int centerY = 405;
   epaper.fillEllipse(centerX, centerY, 178, 128, TFT_BLACK);
-  const int grooveCount = std::min(6, 1 + static_cast<int>(worryStone.rubs() / 8));
+  const int grooveCount = worryStoneGrooveCount(worryStone.rubs());
   for (int groove = 0; groove < grooveCount; ++groove) {
     epaper.drawEllipse(centerX, centerY, 82 + groove * 5,
                        42 + groove * 3, TFT_WHITE);
@@ -787,7 +816,17 @@ bool refreshRegion(const E1005FastRefresh::Region& region,
   if (!fastRefresh.ready()) return false;
   E1005FastRefresh::Timing timing;
   const E1005FastRefresh::Result result = fastRefresh.refresh(region, timing);
-  if (result == E1005FastRefresh::Result::Ok) return true;
+  if (result == E1005FastRefresh::Result::Ok) {
+    LOG.printf(
+        "[fiddle] %s refresh=%lu us "
+        "(prepare=%lu transfer=%lu panel=%lu reseed=%lu)\n",
+        action, static_cast<unsigned long>(timing.totalUs),
+        static_cast<unsigned long>(timing.prepareUs),
+        static_cast<unsigned long>(timing.transferUs),
+        static_cast<unsigned long>(timing.panelUs),
+        static_cast<unsigned long>(timing.reseedUs));
+    return true;
+  }
   LOG.printf("[fiddle] %s refresh failed: %s\n", action,
              E1005FastRefresh::resultMessage(result));
   epaper.sleep();
@@ -834,6 +873,14 @@ void markTouchDirty(const E1005FastRefresh::Region& region) {
   const int bottom = std::max(touchDirtyRegion.y + touchDirtyRegion.height,
                               region.y + region.height);
   touchDirtyRegion = {left, top, right - left, bottom - top};
+}
+
+void flushTouchDirty(const char* action) {
+  if (!touchDirty) return;
+  const E1005FastRefresh::Region region = touchDirtyRegion;
+  touchDirty = false;
+  touchDirtyRegion = {};
+  refreshRegion(region, action);
 }
 
 uint32_t stateChecksum(const PersistedState& state) {
@@ -1198,6 +1245,7 @@ void handleTouchPoint(const Gt911Touch::Point& point, bool first) {
         if (bubbles.allPopped()) {
           markTouchDirty({160, 654, 160, 40});
         }
+        flushTouchDirty("pop bubble");
       }
       break;
     }
@@ -1236,16 +1284,25 @@ void handleTouchPoint(const Gt911Touch::Point& point, bool first) {
     case Screen::RipplePond:
       if (first && point.x >= 28 && point.x <= 452 && point.y >= 134 &&
           point.y <= 674) {
+        const bool removedPrompt = pond.count() == 0;
+        const bool replacedRipple =
+            pond.count() == RipplePond::kMaximumRipples;
+        Ripple replaced = {};
+        if (replacedRipple) replaced = pond.ripple(0);
         pond.add(point.x, point.y);
         nextRippleAgeAtMs = millis() + kRippleAgeIntervalMs;
         drawRipplePond();
-        markTouchDirty(kPondRegion);
+        if (removedPrompt) markTouchDirty(kRipplePromptRegion);
+        if (replacedRipple) markTouchDirty(rippleRegion(replaced));
+        markTouchDirty(rippleRegion(pond.ripple(pond.count() - 1)));
+        flushTouchDirty("add ripple");
       }
       break;
     case Screen::PointlessCounter:
       if (first && counter.increment()) {
         drawPointlessCounter();
-        markTouchDirty(kCounterRegion);
+        markTouchDirty(kCounterValueRegion);
+        flushTouchDirty("increment counter");
       }
       break;
     case Screen::Kaleidoscope:
@@ -1306,16 +1363,26 @@ void handleTouchPoint(const Gt911Touch::Point& point, bool first) {
     }
     case Screen::PebbleStack:
       if (first && pebbleStack.add((point.x - kScreenWidth / 2) / 3)) {
+        const size_t index = pebbleStack.count() - 1;
         drawPebbleStack();
-        markTouchDirty(kPebbleRegion);
+        markTouchDirty(pebbleRegion(index));
+        if (index == 0) markTouchDirty(kPebblePromptRegion);
+        if (pebbleStack.count() == PebbleStack::kMaximumPebbles) {
+          markTouchDirty(kPebbleBalancedRegion);
+        }
+        flushTouchDirty("add pebble");
       }
       break;
     case Screen::WorryStone: {
       const int dx = point.x - touchLast.x;
       const int dy = point.y - touchLast.y;
+      const int previousGrooves = worryStoneGrooveCount(worryStone.rubs());
       if ((first || dx * dx + dy * dy >= 100) && worryStone.rub()) {
         drawWorryStone();
-        markTouchDirty(kWorryStoneRegion);
+        markTouchDirty(kWorryStoneCountRegion);
+        if (worryStoneGrooveCount(worryStone.rubs()) != previousGrooves) {
+          markTouchDirty(kWorryStoneBodyRegion);
+        }
       }
       break;
     }
@@ -1334,11 +1401,7 @@ void pollTouch() {
       touchActive = false;
       touchConsumed = false;
       lastFlipCell = -1;
-      if (touchDirty) {
-        refreshRegion(touchDirtyRegion, "touch activity");
-      }
-      touchDirty = false;
-      touchDirtyRegion = {};
+      flushTouchDirty("touch activity");
     }
     return;
   }
