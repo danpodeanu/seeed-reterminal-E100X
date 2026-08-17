@@ -4,12 +4,12 @@
 #include <Wire.h>
 #include <driver/gpio.h>
 #include <driver/uart.h>
+#include <esp_heap_caps.h>
 #include <esp_sleep.h>
 #include <esp_system.h>
 
 #include <algorithm>
 #include <cstddef>
-#include <cstring>
 
 #include "app_logger.h"
 #include "battery_gauge.h"
@@ -64,8 +64,6 @@ constexpr uint32_t kDeepSleepHoldMs = 2000;
 constexpr uint32_t kInactivitySleepMs = 5UL * 60UL * 1000UL;
 constexpr uint32_t kBatteryCheckIntervalMs = 60UL * 1000UL;
 constexpr uint32_t kRippleAgeIntervalMs = 2500;
-constexpr uint32_t kPersistedMagic = 0x46494444UL;
-constexpr uint16_t kPersistedVersion = 2;
 constexpr char kAppName[] = "Sticky Fiddle";
 constexpr char kBrandName[] = "STICKY FIDDLE";
 constexpr E1005FastRefresh::Region kScreenRegion = {
@@ -139,30 +137,6 @@ constexpr size_t kActivitiesPerMenuPage = 8;
 constexpr size_t kMenuPageCount =
     (kActivityCount + kActivitiesPerMenuPage - 1) / kActivitiesPerMenuPage;
 
-struct PersistedState {
-  uint32_t magic;
-  uint16_t version;
-  uint8_t screen;
-  uint8_t menuPage;
-  uint64_t bubbles;
-  uint16_t rakeCount;
-  RakeSegment rakeSegments[ZenRake::kMaximumSegments];
-  uint32_t flipDots[FlipDots::kWordCount];
-  uint8_t rippleCount;
-  Ripple ripples[RipplePond::kMaximumRipples];
-  uint32_t counter;
-  uint16_t kaleidoscopeCount;
-  RakeSegment kaleidoscopeSegments[Kaleidoscope::kMaximumSegments];
-  uint8_t inkblotCount;
-  InkDot inkDots[Inkblot::kMaximumDots];
-  uint8_t pebbleCount;
-  int8_t pebbleOffsets[PebbleStack::kMaximumPebbles];
-  uint16_t worryRubs;
-  uint32_t checksum;
-};
-
-RTC_DATA_ATTR PersistedState persistedState = {};
-
 struct ButtonState {
   int pin;
   const char* name;
@@ -187,6 +161,9 @@ TwoWire touchWire(1);
 Gt911Touch touch;
 E1005FastRefresh fastRefresh(epaper);
 BubbleWrap bubbles;
+RakeSegment* zenRakeStorage = nullptr;
+RakeSegment* kaleidoscopeStorage = nullptr;
+InkDot* inkblotStorage = nullptr;
 ZenRake rake;
 FlipDots flipDots;
 RipplePond pond;
@@ -216,6 +193,31 @@ uint32_t nextRippleAgeAtMs = 0;
 Gt911Touch::Point touchStart = {};
 Gt911Touch::Point touchLast = {};
 E1005FastRefresh::Region touchDirtyRegion = {};
+
+bool initializeDrawingStorage() {
+  zenRakeStorage = static_cast<RakeSegment*>(heap_caps_malloc(
+      sizeof(RakeSegment) * ZenRake::kMaximumSegments,
+      MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+  kaleidoscopeStorage = static_cast<RakeSegment*>(heap_caps_malloc(
+      sizeof(RakeSegment) * Kaleidoscope::kMaximumSegments,
+      MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+  inkblotStorage = static_cast<InkDot*>(heap_caps_malloc(
+      sizeof(InkDot) * Inkblot::kMaximumDots,
+      MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
+  if (!zenRakeStorage || !kaleidoscopeStorage || !inkblotStorage) {
+    heap_caps_free(zenRakeStorage);
+    heap_caps_free(kaleidoscopeStorage);
+    heap_caps_free(inkblotStorage);
+    zenRakeStorage = nullptr;
+    kaleidoscopeStorage = nullptr;
+    inkblotStorage = nullptr;
+    return false;
+  }
+  return rake.setStorage(zenRakeStorage, ZenRake::kMaximumSegments) &&
+         kaleidoscope.setStorage(kaleidoscopeStorage,
+                                 Kaleidoscope::kMaximumSegments) &&
+         inkblot.setStorage(inkblotStorage, Inkblot::kMaximumDots);
+}
 
 const char* screenName(Screen screen) {
   switch (screen) {
@@ -688,7 +690,7 @@ E1005FastRefresh::Region pebbleRegion(size_t index) {
           radiusY * 2 + 5};
 }
 
-int worryStoneGrooveCount(uint16_t rubs) {
+int worryStoneGrooveCount(uint64_t rubs) {
   return std::min(6, 1 + static_cast<int>(rubs / 8));
 }
 
@@ -935,85 +937,6 @@ void redrawRolledTouchActivity() {
   touchNeedsRedraw = false;
 }
 
-uint32_t stateChecksum(const PersistedState& state) {
-  const auto* bytes = reinterpret_cast<const uint8_t*>(&state);
-  uint32_t checksum = 2166136261UL;
-  for (size_t index = 0; index < offsetof(PersistedState, checksum); ++index) {
-    checksum ^= bytes[index];
-    checksum *= 16777619UL;
-  }
-  return checksum;
-}
-
-void saveResumeState() {
-  PersistedState state = {};
-  state.magic = kPersistedMagic;
-  state.version = kPersistedVersion;
-  state.screen = static_cast<uint8_t>(currentScreen);
-  state.menuPage = currentMenuPage;
-  state.bubbles = bubbles.snapshot();
-  state.rakeCount = static_cast<uint16_t>(rake.count());
-  for (size_t index = 0; index < rake.count(); ++index) {
-    state.rakeSegments[index] = rake.segment(index);
-  }
-  memcpy(state.flipDots, flipDots.snapshot(), sizeof(state.flipDots));
-  state.rippleCount = static_cast<uint8_t>(pond.count());
-  for (size_t index = 0; index < pond.count(); ++index) {
-    state.ripples[index] = pond.ripple(index);
-  }
-  state.counter = counter.value();
-  state.kaleidoscopeCount = static_cast<uint16_t>(kaleidoscope.count());
-  for (size_t index = 0; index < kaleidoscope.count(); ++index) {
-    state.kaleidoscopeSegments[index] = kaleidoscope.segment(index);
-  }
-  state.inkblotCount = static_cast<uint8_t>(inkblot.count());
-  for (size_t index = 0; index < inkblot.count(); ++index) {
-    state.inkDots[index] = inkblot.dot(index);
-  }
-  state.pebbleCount = static_cast<uint8_t>(pebbleStack.count());
-  for (size_t index = 0; index < pebbleStack.count(); ++index) {
-    state.pebbleOffsets[index] =
-        static_cast<int8_t>(pebbleStack.offset(index));
-  }
-  state.worryRubs = worryStone.rubs();
-  state.checksum = stateChecksum(state);
-  persistedState = state;
-}
-
-bool restoreResumeState() {
-  if (esp_sleep_get_wakeup_cause() != ESP_SLEEP_WAKEUP_EXT1) return false;
-  const PersistedState state = persistedState;
-  if (state.magic != kPersistedMagic ||
-      state.version != kPersistedVersion ||
-      state.screen > static_cast<uint8_t>(Screen::WorryStone) ||
-      state.menuPage >= kMenuPageCount ||
-      state.rakeCount > ZenRake::kMaximumSegments ||
-      state.rippleCount > RipplePond::kMaximumRipples ||
-      state.kaleidoscopeCount > Kaleidoscope::kMaximumSegments ||
-      state.inkblotCount > Inkblot::kMaximumDots ||
-      state.pebbleCount > PebbleStack::kMaximumPebbles ||
-      state.checksum != stateChecksum(state)) {
-    LOG.println("[fiddle] saved state is invalid");
-    return false;
-  }
-  for (size_t index = 0; index < state.rippleCount; ++index) {
-    if (state.ripples[index].age >= RipplePond::kMaximumAge) return false;
-  }
-
-  currentScreen = static_cast<Screen>(state.screen);
-  currentMenuPage = state.menuPage;
-  bubbles.restore(state.bubbles);
-  rake.restore(state.rakeSegments, state.rakeCount);
-  flipDots.restore(state.flipDots);
-  pond.restore(state.ripples, state.rippleCount);
-  counter.restore(state.counter);
-  kaleidoscope.restore(state.kaleidoscopeSegments, state.kaleidoscopeCount);
-  inkblot.restore(state.inkDots, state.inkblotCount);
-  pebbleStack.restore(state.pebbleOffsets, state.pebbleCount);
-  worryStone.restore(state.worryRubs);
-  return true;
-}
-
 void configureButtons() {
   for (ButtonState& button : buttons) {
     pinMode(button.pin, INPUT_PULLUP);
@@ -1114,7 +1037,6 @@ void powerDownAndSleep(bool lowBattery = false, int percent = -1) {
     ESP.restart();
   }
 
-  saveResumeState();
   if (lowBattery) {
     drawChargeSplash(percent);
   } else {
@@ -1611,8 +1533,13 @@ void setup() {
   delay(50);
   LOG.printf("\n[fiddle] %s firmware %s\n", kAppName,
              board::FIRMWARE_VERSION);
+  if (!initializeDrawingStorage()) {
+    LOG.println("[fiddle] cannot allocate drawing histories in PSRAM");
+    LOG.flush();
+    delay(1000);
+    ESP.restart();
+  }
 
-  const bool resumed = restoreResumeState();
   pinMode(board::PIN_SD_CS, OUTPUT);
   digitalWrite(board::PIN_SD_CS, HIGH);
   peripheral_power::enableSd();
@@ -1636,7 +1563,8 @@ void setup() {
   sdCardReady = false;
   peripheral_power::disableSd();
 
-  if (!resumed) currentScreen = Screen::Menu;
+  currentScreen = Screen::Menu;
+  currentMenuPage = 0;
   drawCurrentScreen();
   epaper.update();
   sd_ota::confirmRunningImage();

@@ -12,7 +12,7 @@ meetings: no scores, failures, puzzles, or concentration required.
 | Zen Rake | Drag through the sand to leave three parallel grooves. |
 | Flip-Dot Board | Tap or drag across the 8x12 grid to flip dots. |
 | Ripple Pond | Tap the pond to add concentric ripples that gradually fade. |
-| Pointless Counter | Tap the large button to increment a persistent counter. |
+| Pointless Counter | Tap the large button to increment a counter. |
 | Kaleidoscope | Drag to draw four mirrored strokes at once. |
 | Inkblot | Tap or drag to grow a symmetric inkblot. |
 | Pebble Stack | Tap left or right to add pleasantly uneven pebbles. |
@@ -23,8 +23,8 @@ on-screen arrows and the UP/DOWN buttons page through the picker. Within an
 activity, UP and DOWN move directly between activities. Each activity has a
 reset or clear button.
 
-Zen Rake, Kaleidoscope, and Inkblot keep accepting input indefinitely. Once
-their saved history is full, the oldest marks are retired as new ones arrive.
+Zen Rake, Kaleidoscope, and Inkblot keep up to 10,000 marks in PSRAM before
+retiring the oldest marks.
 
 ## Shared controls and power behavior
 
@@ -33,11 +33,10 @@ their saved history is full, the oldest marks are retired as new ones arrive.
   A short OK press on the picker does nothing.
 - Hold OK for at least two seconds to enter deep sleep.
 - Five minutes without input also enters deep sleep.
-- Press OK to resume with the current activity and state restored from RTC
-  memory.
-- Battery status is sampled once per minute. Below 5%, the app saves state,
-  shows the standard Sticky low-battery screen, and sleeps unless USB-C power
-  is present.
+- Press OK to wake into a fresh activity picker; activity state is not retained
+  across restarts or deep sleep.
+- Battery status is sampled once per minute. Below 5%, the app shows the
+  standard Sticky low-battery screen and sleeps unless USB-C power is present.
 
 The app uses the E1005 differential-refresh path for interaction and light
 sleep between input events. USB framebuffer capture and SD-card firmware

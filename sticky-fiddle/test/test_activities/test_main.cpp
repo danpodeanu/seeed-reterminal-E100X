@@ -4,6 +4,11 @@
 
 using namespace sticky_fiddle;
 
+RakeSegment zenRakeStorage[ZenRake::kMaximumSegments] = {};
+RakeSegment kaleidoscopeStorage[Kaleidoscope::kMaximumSegments] = {};
+InkDot inkblotStorage[Inkblot::kMaximumDots] = {};
+InkDot restoredInkblotStorage[Inkblot::kMaximumDots] = {};
+
 void setUp() {}
 void tearDown() {}
 
@@ -31,7 +36,7 @@ void test_bubble_wrap_detects_completion() {
 }
 
 void test_zen_rake_rejects_empty_and_rolls_history() {
-  ZenRake rake;
+  ZenRake rake(zenRakeStorage, ZenRake::kMaximumSegments);
   TEST_ASSERT_FALSE(rake.add(1, 1, 1, 1));
   for (size_t index = 0; index < ZenRake::kMaximumSegments; ++index) {
     TEST_ASSERT_TRUE(rake.add(index, 1, index + 1, 2));
@@ -63,15 +68,16 @@ void test_ripples_age_out() {
 
 void test_counter_saturates_and_resets() {
   PointlessCounter counter;
-  counter.restore(UINT32_MAX);
+  counter.restore(UINT64_MAX);
   TEST_ASSERT_FALSE(counter.increment());
-  TEST_ASSERT_EQUAL_UINT32(UINT32_MAX, counter.value());
+  TEST_ASSERT_EQUAL_UINT64(UINT64_MAX, counter.value());
   counter.reset();
-  TEST_ASSERT_EQUAL_UINT32(0, counter.value());
+  TEST_ASSERT_EQUAL_UINT64(0, counter.value());
 }
 
 void test_kaleidoscope_rolls_segments() {
-  Kaleidoscope kaleidoscope;
+  Kaleidoscope kaleidoscope(kaleidoscopeStorage,
+                            Kaleidoscope::kMaximumSegments);
   for (size_t index = 0; index < Kaleidoscope::kMaximumSegments; ++index) {
     TEST_ASSERT_TRUE(kaleidoscope.add(index, 1, index + 1, 2));
   }
@@ -84,9 +90,9 @@ void test_kaleidoscope_rolls_segments() {
 }
 
 void test_inkblot_restores_valid_dots() {
-  Inkblot inkblot;
+  Inkblot inkblot(inkblotStorage, Inkblot::kMaximumDots);
   TEST_ASSERT_TRUE(inkblot.add(120, 220, 14));
-  Inkblot restored;
+  Inkblot restored(restoredInkblotStorage, Inkblot::kMaximumDots);
   const InkDot dots[] = {inkblot.dot(0), {100, 100, 0}};
   restored.restore(dots, 2);
   TEST_ASSERT_EQUAL_UINT(1, restored.count());
@@ -94,7 +100,7 @@ void test_inkblot_restores_valid_dots() {
 }
 
 void test_inkblot_rolls_dots() {
-  Inkblot inkblot;
+  Inkblot inkblot(inkblotStorage, Inkblot::kMaximumDots);
   for (size_t index = 0; index < Inkblot::kMaximumDots; ++index) {
     TEST_ASSERT_TRUE(inkblot.add(index, 200, 10));
   }

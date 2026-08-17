@@ -58,17 +58,31 @@ struct RakeSegment {
 
 class ZenRake {
  public:
-  static constexpr size_t kMaximumSegments = 96;
+  static constexpr size_t kMaximumSegments = 10000;
+
+  ZenRake() = default;
+  ZenRake(RakeSegment* segments, size_t capacity) {
+    setStorage(segments, capacity);
+  }
+
+  bool setStorage(RakeSegment* segments, size_t capacity) {
+    segments_ = segments;
+    capacity_ = segments && capacity < kMaximumSegments
+                    ? capacity
+                    : (segments ? kMaximumSegments : 0);
+    reset();
+    return capacity_ > 0;
+  }
 
   bool add(int x1, int y1, int x2, int y2) {
-    if (x1 == x2 && y1 == y2) return false;
+    if (capacity_ == 0 || (x1 == x2 && y1 == y2)) return false;
     size_t writeIndex = 0;
-    if (count_ < kMaximumSegments) {
-      writeIndex = (head_ + count_) % kMaximumSegments;
+    if (count_ < capacity_) {
+      writeIndex = (head_ + count_) % capacity_;
       ++count_;
     } else {
       writeIndex = head_;
-      head_ = (head_ + 1) % kMaximumSegments;
+      head_ = (head_ + 1) % capacity_;
     }
     segments_[writeIndex] = {
         static_cast<int16_t>(x1), static_cast<int16_t>(y1),
@@ -78,7 +92,7 @@ class ZenRake {
 
   size_t count() const { return count_; }
   const RakeSegment& segment(size_t index) const {
-    return segments_[(head_ + index) % kMaximumSegments];
+    return segments_[(head_ + index) % capacity_];
   }
   void reset() {
     head_ = 0;
@@ -87,14 +101,15 @@ class ZenRake {
 
   void restore(const RakeSegment* segments, size_t count) {
     head_ = 0;
-    count_ = count > kMaximumSegments ? kMaximumSegments : count;
+    count_ = count > capacity_ ? capacity_ : count;
     for (size_t index = 0; index < count_; ++index) {
       segments_[index] = segments[index];
     }
   }
 
  private:
-  RakeSegment segments_[kMaximumSegments] = {};
+  RakeSegment* segments_ = nullptr;
+  size_t capacity_ = 0;
   size_t head_ = 0;
   size_t count_ = 0;
 };
@@ -195,32 +210,46 @@ class RipplePond {
 class PointlessCounter {
  public:
   bool increment() {
-    if (value_ == std::numeric_limits<uint32_t>::max()) return false;
+    if (value_ == std::numeric_limits<uint64_t>::max()) return false;
     ++value_;
     return true;
   }
 
-  uint32_t value() const { return value_; }
+  uint64_t value() const { return value_; }
   void reset() { value_ = 0; }
-  void restore(uint32_t value) { value_ = value; }
+  void restore(uint64_t value) { value_ = value; }
 
  private:
-  uint32_t value_ = 0;
+  uint64_t value_ = 0;
 };
 
 class Kaleidoscope {
  public:
-  static constexpr size_t kMaximumSegments = 80;
+  static constexpr size_t kMaximumSegments = 10000;
+
+  Kaleidoscope() = default;
+  Kaleidoscope(RakeSegment* segments, size_t capacity) {
+    setStorage(segments, capacity);
+  }
+
+  bool setStorage(RakeSegment* segments, size_t capacity) {
+    segments_ = segments;
+    capacity_ = segments && capacity < kMaximumSegments
+                    ? capacity
+                    : (segments ? kMaximumSegments : 0);
+    reset();
+    return capacity_ > 0;
+  }
 
   bool add(int x1, int y1, int x2, int y2) {
-    if (x1 == x2 && y1 == y2) return false;
+    if (capacity_ == 0 || (x1 == x2 && y1 == y2)) return false;
     size_t writeIndex = 0;
-    if (count_ < kMaximumSegments) {
-      writeIndex = (head_ + count_) % kMaximumSegments;
+    if (count_ < capacity_) {
+      writeIndex = (head_ + count_) % capacity_;
       ++count_;
     } else {
       writeIndex = head_;
-      head_ = (head_ + 1) % kMaximumSegments;
+      head_ = (head_ + 1) % capacity_;
     }
     segments_[writeIndex] = {
         static_cast<int16_t>(x1), static_cast<int16_t>(y1),
@@ -230,7 +259,7 @@ class Kaleidoscope {
 
   size_t count() const { return count_; }
   const RakeSegment& segment(size_t index) const {
-    return segments_[(head_ + index) % kMaximumSegments];
+    return segments_[(head_ + index) % capacity_];
   }
   void reset() {
     head_ = 0;
@@ -239,14 +268,15 @@ class Kaleidoscope {
 
   void restore(const RakeSegment* segments, size_t count) {
     head_ = 0;
-    count_ = count > kMaximumSegments ? kMaximumSegments : count;
+    count_ = count > capacity_ ? capacity_ : count;
     for (size_t index = 0; index < count_; ++index) {
       segments_[index] = segments[index];
     }
   }
 
  private:
-  RakeSegment segments_[kMaximumSegments] = {};
+  RakeSegment* segments_ = nullptr;
+  size_t capacity_ = 0;
   size_t head_ = 0;
   size_t count_ = 0;
 };
@@ -259,17 +289,31 @@ struct InkDot {
 
 class Inkblot {
  public:
-  static constexpr size_t kMaximumDots = 64;
+  static constexpr size_t kMaximumDots = 10000;
+
+  Inkblot() = default;
+  Inkblot(InkDot* dots, size_t capacity) {
+    setStorage(dots, capacity);
+  }
+
+  bool setStorage(InkDot* dots, size_t capacity) {
+    dots_ = dots;
+    capacity_ = dots && capacity < kMaximumDots
+                    ? capacity
+                    : (dots ? kMaximumDots : 0);
+    reset();
+    return capacity_ > 0;
+  }
 
   bool add(int x, int y, uint8_t radius) {
-    if (radius == 0) return false;
+    if (capacity_ == 0 || radius == 0) return false;
     size_t writeIndex = 0;
-    if (count_ < kMaximumDots) {
-      writeIndex = (head_ + count_) % kMaximumDots;
+    if (count_ < capacity_) {
+      writeIndex = (head_ + count_) % capacity_;
       ++count_;
     } else {
       writeIndex = head_;
-      head_ = (head_ + 1) % kMaximumDots;
+      head_ = (head_ + 1) % capacity_;
     }
     dots_[writeIndex] = {
         static_cast<int16_t>(x), static_cast<int16_t>(y), radius};
@@ -278,7 +322,7 @@ class Inkblot {
 
   size_t count() const { return count_; }
   const InkDot& dot(size_t index) const {
-    return dots_[(head_ + index) % kMaximumDots];
+    return dots_[(head_ + index) % capacity_];
   }
   void reset() {
     head_ = 0;
@@ -288,14 +332,15 @@ class Inkblot {
   void restore(const InkDot* dots, size_t count) {
     head_ = 0;
     count_ = 0;
-    const size_t capped = count > kMaximumDots ? kMaximumDots : count;
+    const size_t capped = count > capacity_ ? capacity_ : count;
     for (size_t index = 0; index < capped; ++index) {
       if (dots[index].radius > 0) dots_[count_++] = dots[index];
     }
   }
 
  private:
-  InkDot dots_[kMaximumDots] = {};
+  InkDot* dots_ = nullptr;
+  size_t capacity_ = 0;
   size_t head_ = 0;
   size_t count_ = 0;
 };
@@ -331,17 +376,17 @@ class PebbleStack {
 class WorryStone {
  public:
   bool rub() {
-    if (rubs_ == std::numeric_limits<uint16_t>::max()) return false;
+    if (rubs_ == std::numeric_limits<uint64_t>::max()) return false;
     ++rubs_;
     return true;
   }
 
-  uint16_t rubs() const { return rubs_; }
+  uint64_t rubs() const { return rubs_; }
   void reset() { rubs_ = 0; }
-  void restore(uint16_t rubs) { rubs_ = rubs; }
+  void restore(uint64_t rubs) { rubs_ = rubs; }
 
  private:
-  uint16_t rubs_ = 0;
+  uint64_t rubs_ = 0;
 };
 
 }  // namespace sticky_fiddle
