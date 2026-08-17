@@ -85,11 +85,6 @@ jobs:
       - name: Install PlatformIO
         run: python -m pip install --upgrade platformio esptool intelhex resvg_py Pillow
 
-      - name: Create placeholder credentials
-        if: matrix.app != 'sticky-arcade' && matrix.app != 'sticky-fiddle'
-        working-directory: ${{ matrix.app }}
-        run: cp include/secrets.h.example include/secrets.h
-
       - name: Build firmware
         working-directory: ${{ matrix.app }}
         run: pio run -e "${{ matrix.board }}"

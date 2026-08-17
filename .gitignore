@@ -7,8 +7,10 @@ screenshot-*.png
 # Local staging folder for generated .vlw fonts (see tools/fonts/make_vlw.py).
 /out/
 
-# Wi-Fi / QWeather credentials header. Optional at build time -- copy the
-# matching secrets.h.example if you want compile-time defaults for
-# automated provisioning; otherwise configure via the on-device portal.
-# Kept out of version control so real credentials never leak.
+# Ignore credentials headers by default. The three viewer headers below are
+# tracked only as standard mock files and must remain identical to their
+# secrets.h.example counterparts.
 **/include/secrets.h
+!xkcd-viewer/include/secrets.h
+!weather-viewer/include/secrets.h
+!photo-viewer/include/secrets.h

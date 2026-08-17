@@ -32,7 +32,9 @@ jobs:
             test -f "$project/platformio-test.ini"
             test -f "$project/include/app_logic.h"
             test -f "$project/test/test_app_logic/test_main.cpp"
+            test -f "$project/include/secrets.h"
             test -f "$project/include/secrets.h.example"
+            cmp "$project/include/secrets.h" "$project/include/secrets.h.example"
           done
           test -f sticky-arcade/README.md
           test -f sticky-arcade/platformio.ini
@@ -56,13 +58,20 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          forbidden="$(
+          generated="$(
             git ls-files |
-              grep -E '(^|/)\.pio/|(^|/)firmware\.(bin|elf|map)$|(^|/)include/secrets\.h$' ||
+              grep -E '(^|/)\.pio/|(^|/)firmware\.(bin|elf|map)$' ||
               true
           )"
-          if [[ -n "$forbidden" ]]; then
-            echo "Private or generated files must not be committed:"
-            echo "$forbidden"
+          if [[ -n "$generated" ]]; then
+            echo "Generated files must not be committed:"
+            echo "$generated"
+            exit 1
+          fi
+          expected_secrets=$'photo-viewer/include/secrets.h\nweather-viewer/include/secrets.h\nxkcd-viewer/include/secrets.h'
+          tracked_secrets="$(git ls-files '*/include/secrets.h')"
+          if [[ "$tracked_secrets" != "$expected_secrets" ]]; then
+            echo "Only standard viewer mock secrets may be tracked:"
+            echo "$tracked_secrets"
             exit 1
           fi

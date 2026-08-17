@@ -211,19 +211,12 @@ the firmware.
 
 ### Building from source
 
-Install [PlatformIO Core](https://platformio.org/install/cli), then
-create the credentials header from the tracked template — the
-firmware includes it directly, so this step is required even if you
-leave the placeholders alone:
-
-```bash
-cd weather-viewer
-cp include/secrets.h.example include/secrets.h
-```
-
-The real `secrets.h` is covered by `.gitignore` so it never lands in
-version control. Editing it is optional and covered in
-[Compile-time configuration](#compile-time-configuration) below.
+Install [PlatformIO Core](https://platformio.org/install/cli). A safe
+`include/secrets.h` containing standard placeholders is tracked, so a
+clean checkout builds without an extra setup step. Editing it for
+compile-time provisioning is optional and covered in
+[Compile-time configuration](#compile-time-configuration) below; never
+commit a customized copy.
 
 Build the environment matching the physical device:
 
@@ -473,10 +466,10 @@ data, exact rain onset remains an hourly forecast estimate rather
 than a radar nowcast.
 
 HTTPS certificate verification is disabled because the firmware does
-not carry a CA bundle. Any Wi-Fi or QWeather credentials you add to
-`include/secrets.h` are compiled into the binary — keep the file
-private (it is `.gitignore`d) and do not publish firmware binaries
-built from a customised copy.
+not carry a CA bundle. The tracked `include/secrets.h` contains only
+placeholders. Any Wi-Fi or QWeather credentials added to a local
+customized copy are compiled into the binary; never commit that copy
+or publish its firmware binaries.
 
 ### Operational notes
 

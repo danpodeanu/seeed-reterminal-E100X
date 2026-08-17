@@ -169,19 +169,12 @@ the firmware.
 
 ### Building from source
 
-Install [PlatformIO Core](https://platformio.org/install/cli), then
-create the credentials header from the tracked template — the
-firmware includes it directly, so this step is required even if you
-leave the placeholders alone:
-
-```bash
-cd xkcd-viewer
-cp include/secrets.h.example include/secrets.h
-```
-
-The real `secrets.h` is covered by `.gitignore` so it never lands in
-version control. Editing it is optional and covered in
-[Compile-time configuration](#compile-time-configuration) below.
+Install [PlatformIO Core](https://platformio.org/install/cli). A safe
+`include/secrets.h` containing standard placeholders is tracked, so a
+clean checkout builds without an extra setup step. Editing it for
+compile-time provisioning is optional and covered in
+[Compile-time configuration](#compile-time-configuration) below; never
+commit a customized copy.
 
 List the available serial ports:
 
@@ -285,10 +278,10 @@ which selects Seeed_GFX setup 520, 521, 522, or 523. Model-specific
 power-control pins are selected automatically.
 
 HTTPS certificate verification is disabled because the firmware does
-not carry a CA bundle. Any Wi-Fi credentials you add to
-`include/secrets.h` are compiled into the binary — keep the file
-private (it is `.gitignore`d) and do not publish firmware binaries
-built from a customised copy.
+not carry a CA bundle. The tracked `include/secrets.h` contains only
+placeholders. Any Wi-Fi credentials added to a local customized copy
+are compiled into the binary; never commit that copy or publish its
+firmware binaries.
 
 ### Time and NTP
 

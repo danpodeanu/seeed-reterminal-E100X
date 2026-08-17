@@ -283,19 +283,12 @@ the firmware.
 
 ### Building from source
 
-Install [PlatformIO Core](https://platformio.org/install/cli), then
-create the credentials header from the tracked template — the
-firmware includes it directly, so this step is required even if you
-leave the placeholders alone:
-
-```bash
-cd photo-viewer
-cp include/secrets.h.example include/secrets.h
-```
-
-The real `secrets.h` is covered by `.gitignore` so it never lands in
-version control. Editing it is optional and covered in
-[Settings reference](#settings-reference) below.
+Install [PlatformIO Core](https://platformio.org/install/cli). A safe
+`include/secrets.h` containing standard placeholders is tracked, so a
+clean checkout builds without an extra setup step. Editing it for
+compile-time provisioning is optional and covered in
+[Settings reference](#settings-reference) below; never commit a
+customized copy.
 
 Build and upload for the exact model, for example:
 

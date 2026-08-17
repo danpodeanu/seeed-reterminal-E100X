@@ -8,12 +8,7 @@ git config core.hooksPath .githooks
 
 ## `pre-commit`
 
-Refuses to commit `include/secrets.h` from any viewer or tool. The
-file holds private Wi-Fi and provider credentials, is covered by
-`.gitignore`, and never belongs in version control. The hook is a
-belt-and-braces backstop for the case where someone forces a stage
-with `git add -f` or edits an already-tracked copy from an older
-checkout.
-
-Bypass with `git commit --no-verify` only when you are absolutely
-sure the staged file contains no real credentials.
+Allows the tracked mock `include/secrets.h` files for XKCD, weather,
+and photo viewer only while each is byte-for-byte identical to its
+staged `secrets.h.example`. It rejects customized viewer credentials
+and every other `include/secrets.h`.
