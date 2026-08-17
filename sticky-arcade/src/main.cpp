@@ -2551,23 +2551,9 @@ void drawStatus(const char* title, const char* detail) {
 }
 
 void drawRepoQr() {
-  constexpr int kScale = 2;
-  constexpr int kQuietModules = 4;
-  constexpr int kQrPixels =
-      (repo_qr::kModules + kQuietModules * 2) * kScale;
-  constexpr int kMargin = 12;
-  const int left = kScreenWidth - kQrPixels - kMargin;
-  const int top = kScreenHeight - kQrPixels - kMargin;
-  epaper.fillRect(left, top, kQrPixels, kQrPixels, TFT_WHITE);
-  for (int row = 0; row < repo_qr::kModules; ++row) {
-    for (int column = 0; column < repo_qr::kModules; ++column) {
-      const uint32_t mask = 1UL << (repo_qr::kModules - 1 - column);
-      if ((repo_qr::kRows[row] & mask) == 0) continue;
-      epaper.fillRect(left + (column + kQuietModules) * kScale,
-                      top + (row + kQuietModules) * kScale, kScale, kScale,
-                      TFT_BLACK);
-    }
-  }
+  repo_qr::drawBottomRight(epaper, kScreenWidth, kScreenHeight,
+                           /*moduleSize=*/2, /*margin=*/12, TFT_BLACK,
+                           TFT_WHITE);
 }
 
 void drawSleepSplash() {

@@ -48,6 +48,7 @@
 #include "text_render.h"
 #include "photo_manifest.h"
 #include "quiet_hours.h"
+#include "repo_qr.h"
 #include "sensors.h"
 #include "low_battery.h"
 #include "image_loader.h"
@@ -382,7 +383,8 @@ void updatePanel() {
 void renderStatus(const String& message, const String& detail = "",
                   const String& lineAbove = "",
                   const String& helpBelow = "",
-                  const String& subHelpBelow = "") {
+                  const String& subHelpBelow = "",
+                  bool showRepositoryQr = false) {
   epaper.fillSprite(PANEL_WHITE);
   epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, true);
   epaper.setTextDatum(MC_DATUM);
@@ -425,6 +427,11 @@ void renderStatus(const String& message, const String& detail = "",
   epaper.setFreeFont(nullptr);
   epaper.setTextFont(2);
   drawStatusBadges();
+  if (showRepositoryQr) {
+    repo_qr::drawBottomRight(epaper, panelWidth(), panelHeight(),
+                             max(2, config::ui(2)), config::ui(12),
+                             PANEL_BLACK, PANEL_WHITE);
+  }
   updatePanel();
 }
 
@@ -1636,7 +1643,7 @@ void setup() {
                  "",
                  String("From sleep, press ") + PRIMARY_BUTTON_LABEL +
                      " to upload",
-                 macAndVersion);
+                 macAndVersion, true);
   }
   epaper.initGrayMode(GRAY_LEVEL4);
 #elif RETERMINAL_MODEL == 1003
@@ -1651,7 +1658,7 @@ void setup() {
                  "",
                  String("From sleep, press ") + PRIMARY_BUTTON_LABEL +
                      " to upload",
-                 macAndVersion);
+                 macAndVersion, true);
   }
 #endif
 

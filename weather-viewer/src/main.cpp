@@ -39,6 +39,7 @@
 #include "units.h"
 #include "weather_format.h"
 #include "quiet_hours.h"
+#include "repo_qr.h"
 #include "sensors.h"
 #include "low_battery.h"
 #include "pcf8563_utc.h"
@@ -577,7 +578,8 @@ void renderStatus(const String& message, const String& detail = "",
                   const String& lineAbove = "",
                   const String& helpBelow = "",
                   const String& subLineAbove = "",
-                  const String& subHelpBelow = "") {
+                  const String& subHelpBelow = "",
+                  bool showRepositoryQr = false) {
   epaper.fillSprite(PANEL_WHITE);
   setBodyTextColor(PANEL_BLACK);
   epaper.setTextDatum(MC_DATUM);
@@ -636,6 +638,11 @@ void renderStatus(const String& message, const String& detail = "",
   epaper.setFreeFont(nullptr);
   epaper.setTextFont(2);
   drawBadges();
+  if (showRepositoryQr) {
+    repo_qr::drawBottomRight(epaper, panelWidth(), panelHeight(),
+                             max(2, config::ui(2)), config::ui(12),
+                             PANEL_BLACK, PANEL_WHITE);
+  }
   updatePanel();
 }
 
@@ -2078,7 +2085,7 @@ void setup() {
     renderStatus("Connecting to " + String(weather_wifi::ssid()), connectionDetail,
                  locationLabel,
                  configurationGestureHint(false),
-                 "", macAndVersion);
+                 "", macAndVersion, true);
   }
 #if RETERMINAL_MODEL == 1001
   epaper.initGrayMode(GRAY_LEVEL4);
@@ -2104,7 +2111,7 @@ void setup() {
             ? "Clock not synced - times inaccurate, QWeather may fail"
             : "Clock not synced - displayed times may be inaccurate";
     renderStatus("Connecting to " + String(weather_wifi::ssid()), warning, locationLabel,
-                 "", "", macAndVersion);
+                 "", "", macAndVersion, true);
   }
   local_time::configureTimezone(weather_config::runtime::timezone());
   quiet_hours::configure({weather_config::runtime::quietHoursEnabled(),

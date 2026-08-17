@@ -39,6 +39,7 @@
 #include "xkcd_index.h"
 #include "xkcd_cache_schema.h"
 #include "quiet_hours.h"
+#include "repo_qr.h"
 #include "sensors.h"
 #include "low_battery.h"
 #include "dither.h"
@@ -663,7 +664,8 @@ void drawBadges(uint32_t background = PANEL_WHITE,
 void renderStatus(const String& message, const String& detail = "",
                   const String& lineAbove = "",
                   const String& helpBelow = "",
-                  const String& subHelpBelow = "") {
+                  const String& subHelpBelow = "",
+                  bool showRepositoryQr = false) {
   epaper.fillSprite(PANEL_WHITE);
   epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, true);
   epaper.setTextDatum(MC_DATUM);
@@ -709,6 +711,11 @@ void renderStatus(const String& message, const String& detail = "",
   smoothFontManager.selectGfx(nullptr);
   epaper.setTextFont(2);
   drawBadges();
+  if (showRepositoryQr) {
+    repo_qr::drawBottomRight(epaper, panelWidth(), panelHeight(),
+                             max(2, config::ui(2)), config::ui(12),
+                             PANEL_BLACK, PANEL_WHITE);
+  }
   updatePanel();
 }
 
@@ -1927,7 +1934,7 @@ void setup() {
     renderStatus("Connecting to " + String(xkcd_wifi::ssid()), connectionDetail,
                  "",
                  configurationGestureHint(false),
-                 macAndVersion);
+                 macAndVersion, true);
   }
 #if RETERMINAL_MODEL == 1001
   epaper.initGrayMode(GRAY_LEVEL4);
