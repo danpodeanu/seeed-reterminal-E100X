@@ -62,8 +62,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install PlatformIO
-        run: python -m pip install --upgrade platformio
+        run: python -m pip install --upgrade platformio intelhex
 
       - name: Build
         run: pio run -e reterminal_e1005
-
