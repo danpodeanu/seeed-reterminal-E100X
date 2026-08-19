@@ -22,11 +22,25 @@ namespace panel_watchdog {
 
 template <typename Panel>
 inline bool runWaveform(Panel& panel, uint16_t width, uint16_t height,
-                        uint16_t mode, const char* name) {
+                        uint16_t mode, const char* name,
+                        bool requireActiveState) {
   constexpr uint16_t kLutStatusRegister = 0x1224;
   constexpr uint32_t kLutStartTimeoutMs = 250;
   const uint32_t startedAt = millis();
   panel.tconDisplayArea(0, 0, width, height, mode);
+
+  if (!requireActiveState) {
+    // ED103TC2 INIT visibly clears the panel but does not assert LUTAFSR on
+    // every IT8951 firmware. Let the command settle, then wait if a LUT engine
+    // is reported; subsequent commands are also protected by the HRDY gate.
+    delay(10);
+    while (panel.tconReadReg(kLutStatusRegister) != 0) {
+      delay(1);
+    }
+    LOG.printf("[panel] E1003 %s waveform settled after %lu ms\n", name,
+               static_cast<unsigned long>(millis() - startedAt));
+    return true;
+  }
 
   uint16_t lutStatus = 0;
   do {
@@ -70,8 +84,8 @@ inline void refreshPanel(Panel& panel) {
   panel.wake();
   panel.setTconWindowsData(0, 0, width - 1, height - 1);
   panel.tconLoadImage(framebuffer, 0, 0, width, height, false);
-  if (!runWaveform(panel, width, height, 0x00, "INIT")) return;
-  if (!runWaveform(panel, width, height, 0x02, "GC16")) return;
+  if (!runWaveform(panel, width, height, 0x00, "INIT", false)) return;
+  if (!runWaveform(panel, width, height, 0x02, "GC16", true)) return;
   panel.sleep();
 }
 
