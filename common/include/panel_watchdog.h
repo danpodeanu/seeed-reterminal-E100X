@@ -4,9 +4,10 @@
 // path starts the IT8951 waveform and immediately sends TCON_SLEEP without
 // waiting for LUTAFSR to return idle. If sleep lands before the waveform
 // completes, the panel can remain in a dark/inverted intermediate frame.
-// The E1003 path below reproduces the driver's full-frame upload but waits for
-// LUT completion before the first sleep command. Monochrome refreshes keep
-// using update(), whose 1-bpp driver path already performs this wait.
+// The E1003 path below reproduces the driver's full-frame upload, requires the
+// LUT engine to become active, then waits for completion before the first sleep
+// command. Monochrome refreshes keep using update(), whose 1-bpp driver path
+// already performs a completion wait.
 //
 // The guard is a no-op on other panels: E1001/E1002/E1004/E1005 haven't
 // exhibited the freeze in field use, and the fast paths on those
@@ -34,8 +35,36 @@ inline void refreshPanel(Panel& panel) {
   panel.wake();
   panel.setTconWindowsData(0, 0, width - 1, height - 1);
   panel.tconLoadImage(framebuffer, 0, 0, width, height, false);
+  constexpr uint16_t kLutStatusRegister = 0x1224;
+  constexpr uint32_t kLutStartTimeoutMs = 250;
+  const uint32_t waveformStartedAt = millis();
   panel.tconDisplayArea(0, 0, width, height, 0x02);
-  panel.tconWaitForDisplayReady();
+
+  uint16_t lutStatus = 0;
+  do {
+    delay(1);
+    lutStatus = panel.tconReadReg(kLutStatusRegister);
+  } while (lutStatus == 0 &&
+           millis() - waveformStartedAt < kLutStartTimeoutMs);
+
+  if (lutStatus == 0) {
+    LOG.printf(
+        "[panel] ERROR: E1003 GC16 waveform did not become active within "
+        "%lu ms; leaving IT8951 awake\n",
+        static_cast<unsigned long>(kLutStartTimeoutMs));
+    return;
+  }
+
+  const uint32_t waveformActiveAt = millis();
+  do {
+    delay(1);
+    lutStatus = panel.tconReadReg(kLutStatusRegister);
+  } while (lutStatus != 0);
+  LOG.printf(
+      "[panel] E1003 GC16 waveform active after %lu ms, complete after "
+      "%lu ms\n",
+      static_cast<unsigned long>(waveformActiveAt - waveformStartedAt),
+      static_cast<unsigned long>(millis() - waveformStartedAt));
   panel.sleep();
 }
 
