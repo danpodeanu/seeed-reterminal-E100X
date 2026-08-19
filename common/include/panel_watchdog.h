@@ -1,13 +1,13 @@
 #pragma once
 
-// Guard panel refreshes against controller stalls. Seeed_GFX's E1003 Gray16
-// path starts the IT8951 waveform and immediately sends TCON_SLEEP without
-// waiting for LUTAFSR to return idle. If sleep lands before the waveform
-// completes, the panel can remain in a dark/inverted intermediate frame.
-// The E1003 path below reproduces the driver's full-frame upload, requires the
-// LUT engine to become active, then waits for completion before the first sleep
-// command. Monochrome refreshes keep using update(), whose 1-bpp driver path
-// already performs a completion wait.
+// Guard E1003 panel refreshes against incomplete and ghosted frames.
+// Seeed_GFX's Gray16 path only runs GC16, then sleeps the IT8951 immediately.
+// The controller is reset on every ESP32 wake while the physical panel retains
+// its previous image, so GC16 alone can draw the new frame over stale pixels.
+// A full INIT waveform re-establishes the panel state before GC16. Each phase
+// must become active and return idle before the controller is put to sleep.
+// Monochrome refreshes keep using update(), whose 1-bpp driver path already
+// performs a completion wait.
 //
 // The guard is a no-op on other panels: E1001/E1002/E1004/E1005 haven't
 // exhibited the freeze in field use, and the fast paths on those
@@ -19,6 +19,41 @@
 #include "app_logger.h"
 
 namespace panel_watchdog {
+
+template <typename Panel>
+inline bool runWaveform(Panel& panel, uint16_t width, uint16_t height,
+                        uint16_t mode, const char* name) {
+  constexpr uint16_t kLutStatusRegister = 0x1224;
+  constexpr uint32_t kLutStartTimeoutMs = 250;
+  const uint32_t startedAt = millis();
+  panel.tconDisplayArea(0, 0, width, height, mode);
+
+  uint16_t lutStatus = 0;
+  do {
+    delay(1);
+    lutStatus = panel.tconReadReg(kLutStatusRegister);
+  } while (lutStatus == 0 && millis() - startedAt < kLutStartTimeoutMs);
+
+  if (lutStatus == 0) {
+    LOG.printf(
+        "[panel] ERROR: E1003 %s waveform did not become active within "
+        "%lu ms; leaving IT8951 awake\n",
+        name, static_cast<unsigned long>(kLutStartTimeoutMs));
+    return false;
+  }
+
+  const uint32_t activeAt = millis();
+  do {
+    delay(1);
+    lutStatus = panel.tconReadReg(kLutStatusRegister);
+  } while (lutStatus != 0);
+  LOG.printf(
+      "[panel] E1003 %s waveform active after %lu ms, complete after "
+      "%lu ms\n",
+      name, static_cast<unsigned long>(activeAt - startedAt),
+      static_cast<unsigned long>(millis() - startedAt));
+  return true;
+}
 
 template <typename Panel>
 inline void refreshPanel(Panel& panel) {
@@ -35,36 +70,8 @@ inline void refreshPanel(Panel& panel) {
   panel.wake();
   panel.setTconWindowsData(0, 0, width - 1, height - 1);
   panel.tconLoadImage(framebuffer, 0, 0, width, height, false);
-  constexpr uint16_t kLutStatusRegister = 0x1224;
-  constexpr uint32_t kLutStartTimeoutMs = 250;
-  const uint32_t waveformStartedAt = millis();
-  panel.tconDisplayArea(0, 0, width, height, 0x02);
-
-  uint16_t lutStatus = 0;
-  do {
-    delay(1);
-    lutStatus = panel.tconReadReg(kLutStatusRegister);
-  } while (lutStatus == 0 &&
-           millis() - waveformStartedAt < kLutStartTimeoutMs);
-
-  if (lutStatus == 0) {
-    LOG.printf(
-        "[panel] ERROR: E1003 GC16 waveform did not become active within "
-        "%lu ms; leaving IT8951 awake\n",
-        static_cast<unsigned long>(kLutStartTimeoutMs));
-    return;
-  }
-
-  const uint32_t waveformActiveAt = millis();
-  do {
-    delay(1);
-    lutStatus = panel.tconReadReg(kLutStatusRegister);
-  } while (lutStatus != 0);
-  LOG.printf(
-      "[panel] E1003 GC16 waveform active after %lu ms, complete after "
-      "%lu ms\n",
-      static_cast<unsigned long>(waveformActiveAt - waveformStartedAt),
-      static_cast<unsigned long>(millis() - waveformStartedAt));
+  if (!runWaveform(panel, width, height, 0x00, "INIT")) return;
+  if (!runWaveform(panel, width, height, 0x02, "GC16")) return;
   panel.sleep();
 }
 
