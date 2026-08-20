@@ -4,10 +4,11 @@
 // Seeed_GFX's Gray16 path only runs GC16, then sleeps the IT8951 immediately.
 // The controller is reset on every ESP32 wake while the physical panel retains
 // its previous image, so GC16 alone can draw the new frame over stale pixels.
-// A full INIT waveform re-establishes the panel state before GC16. On the
-// ED103TC2 firmware INIT also clears the controller image buffer, so the target
-// frame must be uploaded again before GC16. Each observable phase must return
-// idle before the controller is put to sleep.
+// A full INIT waveform re-establishes the panel state before GC16. Run INIT
+// before uploading the target so the large image is transferred exactly once;
+// repeated packed-image loads can leave the IT8951 write pointer offset and
+// circularly shift every display row. Each observable phase must return idle
+// before the controller is put to sleep.
 // Monochrome refreshes keep using update(), whose 1-bpp driver path already
 // performs a completion wait.
 //
@@ -84,10 +85,9 @@ inline void refreshPanel(Panel& panel) {
       static_cast<const uint8_t*>(panel.getPointer());
 
   panel.wake();
-  panel.setTconWindowsData(0, 0, width - 1, height - 1);
-  panel.tconLoadImage(framebuffer, 0, 0, width, height, false);
   if (!runWaveform(panel, width, height, 0x00, "INIT", false)) return;
-  LOG.println("[panel] E1003 re-uploading image after INIT clear");
+  LOG.println("[panel] E1003 uploading image after INIT clear");
+  panel.setTconWindowsData(0, 0, width - 1, height - 1);
   panel.tconLoadImage(framebuffer, 0, 0, width, height, false);
   if (!runWaveform(panel, width, height, 0x02, "GC16", true)) return;
   panel.sleep();
