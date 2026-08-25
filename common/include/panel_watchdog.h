@@ -1,14 +1,11 @@
 #pragma once
 
-// Guard E1003 panel refreshes against incomplete and ghosted frames.
-// Seeed_GFX's Gray16 path only runs GC16, then sleeps the IT8951 immediately.
-// The controller is reset on every ESP32 wake while the physical panel retains
-// its previous image, so GC16 alone can draw the new frame over stale pixels.
-// A full INIT waveform re-establishes the panel state before GC16. Run INIT
-// before uploading the target so the large image is transferred exactly once;
-// repeated packed-image loads can leave the IT8951 write pointer offset and
-// circularly shift every display row. Each observable phase must return idle
-// before the controller is put to sleep.
+// Guard E1003 panel refreshes against incomplete frames.
+// Seeed_GFX's Gray16 path starts GC16, then sleeps the IT8951 immediately.
+// Wait until GC16 has demonstrably started and completed before sleeping.
+// Keep the refresh to the single GC16 waveform used by Seeed's official
+// ED103TC2 example: preceding it with INIT doubles the panel-bias load and can
+// leave a low-battery panel in INIT's dark intermediate state.
 // Monochrome refreshes keep using update(), whose 1-bpp driver path already
 // performs a completion wait.
 //
@@ -20,38 +17,95 @@
 #include <Arduino.h>
 #include <esp_task_wdt.h>
 #include "app_logger.h"
+#include "board_pins.h"
 
 namespace panel_watchdog {
 
+struct VoltageTrace {
+  static constexpr uint32_t kSampleIntervalMs = 50;
+  static constexpr uint32_t kSamplesPerReading = 4;
+
+  bool valid = false;
+  uint32_t beforeMv = 0;
+  uint32_t minimumMv = UINT32_MAX;
+  uint32_t afterMv = 0;
+  uint32_t nextSampleAt = 0;
+
+  void begin() {
+    pinMode(board::PIN_BATTERY_ENABLE, OUTPUT);
+    if (digitalRead(board::PIN_BATTERY_ENABLE) != HIGH) {
+      digitalWrite(board::PIN_BATTERY_ENABLE, HIGH);
+      delay(20);
+    }
+    analogReadResolution(12);
+    analogSetPinAttenuation(board::PIN_BATTERY_ADC, ADC_11db);
+    sample(true);
+  }
+
+  void sampleIfDue() {
+    if (static_cast<int32_t>(millis() - nextSampleAt) >= 0) sample(false);
+  }
+
+  void finish() {
+    sample(true);
+    if (!valid) {
+      LOG.println("[panel] E1003 GC16 battery trace unavailable");
+      return;
+    }
+    LOG.printf(
+        "[panel] E1003 GC16 battery before=%lu.%03luV min=%lu.%03luV "
+        "after=%lu.%03luV sag=%lumV\n",
+        static_cast<unsigned long>(beforeMv / 1000),
+        static_cast<unsigned long>(beforeMv % 1000),
+        static_cast<unsigned long>(minimumMv / 1000),
+        static_cast<unsigned long>(minimumMv % 1000),
+        static_cast<unsigned long>(afterMv / 1000),
+        static_cast<unsigned long>(afterMv % 1000),
+        static_cast<unsigned long>(beforeMv > minimumMv
+                                      ? beforeMv - minimumMv
+                                      : 0));
+  }
+
+ private:
+  void sample(bool force) {
+    const uint32_t now = millis();
+    if (!force && static_cast<int32_t>(now - nextSampleAt) < 0) return;
+
+    uint32_t totalMv = 0;
+    for (uint32_t i = 0; i < kSamplesPerReading; ++i) {
+      totalMv += analogReadMilliVolts(board::PIN_BATTERY_ADC);
+    }
+    const uint32_t cellMv = (totalMv / kSamplesPerReading) * 2;
+    nextSampleAt = now + kSampleIntervalMs;
+    if (cellMv < 2500 || cellMv > 5000) return;
+
+    if (!valid) beforeMv = cellMv;
+    valid = true;
+    afterMv = cellMv;
+    if (cellMv < minimumMv) minimumMv = cellMv;
+  }
+};
+
 template <typename Panel>
 inline bool runWaveform(Panel& panel, uint16_t width, uint16_t height,
-                        uint16_t mode, const char* name,
-                        bool requireActiveState) {
+                        uint16_t mode, const char* name) {
   constexpr uint16_t kLutStatusRegister = 0x1224;
   constexpr uint32_t kLutStartTimeoutMs = 250;
+  constexpr uint32_t kLutPollIntervalMs = 10;
+  VoltageTrace voltage;
+  voltage.begin();
   const uint32_t startedAt = millis();
   panel.tconDisplayArea(0, 0, width, height, mode);
 
-  if (!requireActiveState) {
-    // ED103TC2 INIT visibly clears the panel but does not assert LUTAFSR on
-    // every IT8951 firmware. Let the command settle, then wait if a LUT engine
-    // is reported; subsequent commands are also protected by the HRDY gate.
-    delay(10);
-    while (panel.tconReadReg(kLutStatusRegister) != 0) {
-      delay(1);
-    }
-    LOG.printf("[panel] E1003 %s waveform settled after %lu ms\n", name,
-               static_cast<unsigned long>(millis() - startedAt));
-    return true;
-  }
-
   uint16_t lutStatus = 0;
   do {
-    delay(1);
+    delay(kLutPollIntervalMs);
     lutStatus = panel.tconReadReg(kLutStatusRegister);
+    voltage.sampleIfDue();
   } while (lutStatus == 0 && millis() - startedAt < kLutStartTimeoutMs);
 
   if (lutStatus == 0) {
+    voltage.finish();
     LOG.printf(
         "[panel] ERROR: E1003 %s waveform did not become active within "
         "%lu ms; leaving IT8951 awake\n",
@@ -61,9 +115,11 @@ inline bool runWaveform(Panel& panel, uint16_t width, uint16_t height,
 
   const uint32_t activeAt = millis();
   do {
-    delay(1);
+    delay(kLutPollIntervalMs);
     lutStatus = panel.tconReadReg(kLutStatusRegister);
+    voltage.sampleIfDue();
   } while (lutStatus != 0);
+  voltage.finish();
   LOG.printf(
       "[panel] E1003 %s waveform active after %lu ms, complete after "
       "%lu ms\n",
@@ -85,11 +141,10 @@ inline void refreshPanel(Panel& panel) {
       static_cast<const uint8_t*>(panel.getPointer());
 
   panel.wake();
-  if (!runWaveform(panel, width, height, 0x00, "INIT", false)) return;
-  LOG.println("[panel] E1003 uploading image after INIT clear");
+  LOG.println("[panel] E1003 uploading image for single GC16 refresh");
   panel.setTconWindowsData(0, 0, width - 1, height - 1);
   panel.tconLoadImage(framebuffer, 0, 0, width, height, false);
-  if (!runWaveform(panel, width, height, 0x02, "GC16", true)) return;
+  if (!runWaveform(panel, width, height, 0x02, "GC16")) return;
   panel.sleep();
 }
 
