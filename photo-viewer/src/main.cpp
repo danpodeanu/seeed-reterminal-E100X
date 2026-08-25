@@ -1064,6 +1064,7 @@ void powerDownAndSleep(uint64_t sleepSeconds = 0) {
   pinMode(board::PIN_SD_MISO, INPUT);
   peripheral_power::disableSd();
 #endif
+  epaper_setup::shutdownPanelPower();
   peripheral_power::disable();
   if (PIN_BATTERY_ENABLE >= 0) {
     pinMode(PIN_BATTERY_ENABLE, OUTPUT);

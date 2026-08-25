@@ -11,6 +11,14 @@ namespace epaper_setup {
 // call begin() below rather than invoking EPaper::begin() directly.
 void prepare();
 
+// Power-cycle the E1003 panel-bias rail and IT8951 core before controller
+// initialization. Other models have no separate rails and treat this as a no-op.
+void resetPanelPower();
+
+// Shut down and hold the E1003 display rails off through deep sleep.
+// Call only after the panel controller has entered sleep.
+void shutdownPanelPower();
+
 // Finish attaching the panel's SPI bus to real GPIOs and enable the
 // shared peripheral power rail.
 //
@@ -37,6 +45,7 @@ void finalize(SPIClass& panelSpi);
 template <typename EPaper>
 void begin(EPaper& epaper) {
   prepare();
+  resetPanelPower();
   epaper.begin();
   epaper.setRotation(panel_traits::DISPLAY_ROTATION);
   finalize(epaper.getSPIinstance());

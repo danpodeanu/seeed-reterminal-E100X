@@ -1399,6 +1399,7 @@ void powerDownAndSleep(uint64_t sleepSeconds = xkcd_config::runtime::sleepSecond
   pinMode(board::PIN_SD_MISO, INPUT);
   peripheral_power::disableSd();
 #endif
+  epaper_setup::shutdownPanelPower();
   peripheral_power::disable();
   if (PIN_BATTERY_ENABLE >= 0) {
     pinMode(PIN_BATTERY_ENABLE, OUTPUT);

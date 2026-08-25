@@ -217,7 +217,7 @@ inline void refreshPanel(Panel& panel) {
 // that returns something other than ESP_OK is treated as a soft error
 // - we still run the refresh so a WDT hiccup can never brick a wake.
 template <typename Panel>
-inline void refresh(Panel& panel, uint32_t timeoutSeconds = 120) {
+inline void refresh(Panel& panel, uint32_t timeoutSeconds = 20) {
   const esp_task_wdt_config_t cfg = {
       /*timeout_ms=*/timeoutSeconds * 1000U,
       /*idle_core_mask=*/0,        // don't monitor idle tasks
