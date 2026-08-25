@@ -2,7 +2,8 @@
 
 // Guard E1003 panel refreshes against incomplete frames.
 // Seeed_GFX's Gray16 path starts GC16, then sleeps the IT8951 immediately.
-// Wait until GC16 has demonstrably started and completed before sleeping.
+// Wait until GC16 has demonstrably completed, or apply a conservative minimum
+// awake interval when this IT8951 firmware does not expose LUT status.
 // Keep the refresh to the single GC16 waveform used by Seeed's official
 // ED103TC2 example: preceding it with INIT doubles the panel-bias load and can
 // leave a low-battery panel in INIT's dark intermediate state.
@@ -21,6 +22,44 @@
 
 namespace panel_watchdog {
 
+constexpr uint32_t kRetainedTraceMagic = 0xE1003B47;
+
+struct RetainedVoltageTrace {
+  uint32_t magic;
+  uint32_t beforeMv;
+  uint32_t minimumMv;
+  uint32_t afterMv;
+  uint32_t durationMs;
+  bool statusObserved;
+};
+
+static RTC_DATA_ATTR RetainedVoltageTrace retainedVoltageTrace = {};
+
+inline void reportRetainedTraceOnce() {
+  static bool reported = false;
+  if (reported) return;
+  reported = true;
+  if (retainedVoltageTrace.magic != kRetainedTraceMagic) return;
+
+  LOG.printf(
+      "[panel] previous E1003 GC16 battery before=%lu.%03luV "
+      "min=%lu.%03luV after=%lu.%03luV sag=%lumV duration=%lums "
+      "status=%s\n",
+      static_cast<unsigned long>(retainedVoltageTrace.beforeMv / 1000),
+      static_cast<unsigned long>(retainedVoltageTrace.beforeMv % 1000),
+      static_cast<unsigned long>(retainedVoltageTrace.minimumMv / 1000),
+      static_cast<unsigned long>(retainedVoltageTrace.minimumMv % 1000),
+      static_cast<unsigned long>(retainedVoltageTrace.afterMv / 1000),
+      static_cast<unsigned long>(retainedVoltageTrace.afterMv % 1000),
+      static_cast<unsigned long>(
+          retainedVoltageTrace.beforeMv > retainedVoltageTrace.minimumMv
+              ? retainedVoltageTrace.beforeMv -
+                    retainedVoltageTrace.minimumMv
+              : 0),
+      static_cast<unsigned long>(retainedVoltageTrace.durationMs),
+      retainedVoltageTrace.statusObserved ? "observed" : "timed-fallback");
+}
+
 struct VoltageTrace {
   static constexpr uint32_t kSampleIntervalMs = 50;
   static constexpr uint32_t kSamplesPerReading = 4;
@@ -32,6 +71,7 @@ struct VoltageTrace {
   uint32_t nextSampleAt = 0;
 
   void begin() {
+    retainedVoltageTrace.magic = 0;
     pinMode(board::PIN_BATTERY_ENABLE, OUTPUT);
     if (digitalRead(board::PIN_BATTERY_ENABLE) != HIGH) {
       digitalWrite(board::PIN_BATTERY_ENABLE, HIGH);
@@ -46,12 +86,15 @@ struct VoltageTrace {
     if (static_cast<int32_t>(millis() - nextSampleAt) >= 0) sample(false);
   }
 
-  void finish() {
+  void finish(bool statusObserved, uint32_t durationMs) {
     sample(true);
     if (!valid) {
       LOG.println("[panel] E1003 GC16 battery trace unavailable");
       return;
     }
+    retainedVoltageTrace = {
+        kRetainedTraceMagic, beforeMv, minimumMv, afterMv, durationMs,
+        statusObserved};
     LOG.printf(
         "[panel] E1003 GC16 battery before=%lu.%03luV min=%lu.%03luV "
         "after=%lu.%03luV sag=%lumV\n",
@@ -91,7 +134,9 @@ inline bool runWaveform(Panel& panel, uint16_t width, uint16_t height,
                         uint16_t mode, const char* name) {
   constexpr uint16_t kLutStatusRegister = 0x1224;
   constexpr uint32_t kLutStartTimeoutMs = 250;
-  constexpr uint32_t kLutPollIntervalMs = 10;
+  constexpr uint32_t kLutStartPollIntervalMs = 1;
+  constexpr uint32_t kLutActivePollIntervalMs = 10;
+  constexpr uint32_t kUnobservableWaveformWaitMs = 5000;
   VoltageTrace voltage;
   voltage.begin();
   const uint32_t startedAt = millis();
@@ -99,37 +144,53 @@ inline bool runWaveform(Panel& panel, uint16_t width, uint16_t height,
 
   uint16_t lutStatus = 0;
   do {
-    delay(kLutPollIntervalMs);
+    delay(kLutStartPollIntervalMs);
     lutStatus = panel.tconReadReg(kLutStatusRegister);
     voltage.sampleIfDue();
   } while (lutStatus == 0 && millis() - startedAt < kLutStartTimeoutMs);
 
   if (lutStatus == 0) {
-    voltage.finish();
     LOG.printf(
-        "[panel] ERROR: E1003 %s waveform did not become active within "
-        "%lu ms; leaving IT8951 awake\n",
-        name, static_cast<unsigned long>(kLutStartTimeoutMs));
-    return false;
+        "[panel] WARNING: E1003 %s status not observable within %lu ms; "
+        "holding controller awake for at least %lu ms\n",
+        name, static_cast<unsigned long>(kLutStartTimeoutMs),
+        static_cast<unsigned long>(kUnobservableWaveformWaitMs));
+    while (lutStatus == 0 &&
+           millis() - startedAt < kUnobservableWaveformWaitMs) {
+      delay(kLutActivePollIntervalMs);
+      lutStatus = panel.tconReadReg(kLutStatusRegister);
+      voltage.sampleIfDue();
+    }
+    if (lutStatus == 0) {
+      const uint32_t durationMs = millis() - startedAt;
+      voltage.finish(false, durationMs);
+      LOG.printf(
+          "[panel] E1003 %s conservative completion wait finished after "
+          "%lu ms\n",
+          name, static_cast<unsigned long>(durationMs));
+      return true;
+    }
   }
 
   const uint32_t activeAt = millis();
   do {
-    delay(kLutPollIntervalMs);
+    delay(kLutActivePollIntervalMs);
     lutStatus = panel.tconReadReg(kLutStatusRegister);
     voltage.sampleIfDue();
   } while (lutStatus != 0);
-  voltage.finish();
+  const uint32_t durationMs = millis() - startedAt;
+  voltage.finish(true, durationMs);
   LOG.printf(
       "[panel] E1003 %s waveform active after %lu ms, complete after "
       "%lu ms\n",
       name, static_cast<unsigned long>(activeAt - startedAt),
-      static_cast<unsigned long>(millis() - startedAt));
+      static_cast<unsigned long>(durationMs));
   return true;
 }
 
 template <typename Panel>
 inline void refreshPanel(Panel& panel) {
+  reportRetainedTraceOnce();
   if (panel.getColorDepth() != 4) {
     panel.update();
     return;
