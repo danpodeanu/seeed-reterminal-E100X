@@ -19,10 +19,12 @@
 #include <esp_task_wdt.h>
 #include "app_logger.h"
 #include "board_pins.h"
+#include "charger.h"
 
 namespace panel_watchdog {
 
 constexpr uint32_t kRetainedTraceMagic = 0xE1003B47;
+constexpr uint32_t kMinimumBatteryRefreshMv = 3720;
 
 struct RetainedVoltageTrace {
   uint32_t magic;
@@ -58,6 +60,25 @@ inline void reportRetainedTraceOnce() {
               : 0),
       static_cast<unsigned long>(retainedVoltageTrace.durationMs),
       retainedVoltageTrace.statusObserved ? "observed" : "timed-fallback");
+  retainedVoltageTrace.magic = 0;
+}
+
+inline bool sampleBatteryCellMv(uint32_t& cellMv,
+                                uint32_t sampleCount = 4) {
+  pinMode(board::PIN_BATTERY_ENABLE, OUTPUT);
+  if (digitalRead(board::PIN_BATTERY_ENABLE) != HIGH) {
+    digitalWrite(board::PIN_BATTERY_ENABLE, HIGH);
+    delay(20);
+  }
+  analogReadResolution(12);
+  analogSetPinAttenuation(board::PIN_BATTERY_ADC, ADC_11db);
+
+  uint32_t totalMv = 0;
+  for (uint32_t i = 0; i < sampleCount; ++i) {
+    totalMv += analogReadMilliVolts(board::PIN_BATTERY_ADC);
+  }
+  cellMv = (totalMv / sampleCount) * 2;
+  return cellMv >= 2500 && cellMv <= 5000;
 }
 
 struct VoltageTrace {
@@ -72,13 +93,6 @@ struct VoltageTrace {
 
   void begin() {
     retainedVoltageTrace.magic = 0;
-    pinMode(board::PIN_BATTERY_ENABLE, OUTPUT);
-    if (digitalRead(board::PIN_BATTERY_ENABLE) != HIGH) {
-      digitalWrite(board::PIN_BATTERY_ENABLE, HIGH);
-      delay(20);
-    }
-    analogReadResolution(12);
-    analogSetPinAttenuation(board::PIN_BATTERY_ADC, ADC_11db);
     sample(true);
   }
 
@@ -114,13 +128,9 @@ struct VoltageTrace {
     const uint32_t now = millis();
     if (!force && static_cast<int32_t>(now - nextSampleAt) < 0) return;
 
-    uint32_t totalMv = 0;
-    for (uint32_t i = 0; i < kSamplesPerReading; ++i) {
-      totalMv += analogReadMilliVolts(board::PIN_BATTERY_ADC);
-    }
-    const uint32_t cellMv = (totalMv / kSamplesPerReading) * 2;
+    uint32_t cellMv = 0;
     nextSampleAt = now + kSampleIntervalMs;
-    if (cellMv < 2500 || cellMv > 5000) return;
+    if (!sampleBatteryCellMv(cellMv, kSamplesPerReading)) return;
 
     if (!valid) beforeMv = cellMv;
     valid = true;
@@ -201,6 +211,31 @@ inline void refreshPanel(Panel& panel) {
   const auto* framebuffer =
       static_cast<const uint8_t*>(panel.getPointer());
 
+  uint32_t batteryMv = 0;
+  const bool batteryValid = sampleBatteryCellMv(batteryMv, 8);
+  const charger::Status power = charger::readSy6974b();
+  if (batteryValid && power.valid &&
+      power.state == charger::State::Disconnected &&
+      batteryMv < kMinimumBatteryRefreshMv) {
+    LOG.printf(
+        "[panel] WARNING: E1003 grayscale refresh skipped at %lu.%03luV "
+        "on battery (minimum %lu.%03luV); preserving current image\n",
+        static_cast<unsigned long>(batteryMv / 1000),
+        static_cast<unsigned long>(batteryMv % 1000),
+        static_cast<unsigned long>(kMinimumBatteryRefreshMv / 1000),
+        static_cast<unsigned long>(kMinimumBatteryRefreshMv % 1000));
+    return;
+  }
+  if (batteryValid) {
+    LOG.printf("[panel] E1003 refresh preflight=%lu.%03luV power=%s\n",
+               static_cast<unsigned long>(batteryMv / 1000),
+               static_cast<unsigned long>(batteryMv % 1000),
+               power.valid
+                   ? (power.state == charger::State::Connected ? "external"
+                                                                : "battery")
+                   : "unknown");
+  }
+
   panel.wake();
   LOG.println("[panel] E1003 uploading image for single GC16 refresh");
   panel.setTconWindowsData(0, 0, width - 1, height - 1);
@@ -237,17 +272,17 @@ inline void refresh(Panel& panel, uint32_t timeoutSeconds = 20) {
   // returned ESP_OK. arduino-esp32's startup can auto-subscribe the
   // loopTask under some menuconfigs; in that case our add() returns
   // ESP_ERR_INVALID_STATE ("already subscribed") but the task is
-  // still bound to the reconfigured 120 s timeout we just installed.
+  // still bound to the reconfigured timeout we just installed.
   // If we then skip the delete, any long-running code path after the
   // refresh - most notably the config portal, whose infinite HTTP
   // loop never returns to Arduino's loop() (where arduino-esp32
-  // would feed the WDT) - panics the CPU ~120 s in. Deleting
+  // would feed the WDT) - eventually panics the CPU. Deleting
   // unconditionally makes the guard scope tight: the WDT is only
   // watching us while refresh() runs; anything after that is on its
   // own timing. Ignore the return value - "not subscribed" is fine.
   esp_task_wdt_delete(nullptr);
   // Deliberately leave TWDT running - reverting to the Arduino default
-  // requires re-init and it's harmless to leave a 120 s guard armed
+  // requires re-init and it's harmless to leave the longer guard armed
   // through sleep prep; the next wake reconfigures it anyway.
 }
 
