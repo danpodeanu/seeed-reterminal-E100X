@@ -2,6 +2,7 @@
 
 #include <SPI.h>
 
+#include "app_logger.h"
 #include "panel_traits.h"
 
 // Bring-up glue that every consumer of the reTerminal e-paper stack uses.
@@ -47,6 +48,27 @@ void begin(EPaper& epaper) {
   prepare();
   resetPanelPower();
   epaper.begin();
+#if RETERMINAL_MODEL == 1003
+  constexpr uint16_t kExpectedVcomMv = 1400;
+  uint16_t actualVcomMv = 0;
+  for (uint8_t attempt = 1; attempt <= 3; ++attempt) {
+    epaper.setTconVcom(kExpectedVcomMv);
+    delay(20);
+    actualVcomMv = epaper.getTconVcom();
+    if (actualVcomMv == kExpectedVcomMv) break;
+    if (attempt < 3) delay(100);
+  }
+  if (actualVcomMv == kExpectedVcomMv) {
+    LOG.printf("[panel] E1003 VCOM verified at -%u.%03uV\n",
+               static_cast<unsigned>(actualVcomMv / 1000),
+               static_cast<unsigned>(actualVcomMv % 1000));
+  } else {
+    LOG.printf(
+        "[panel] ERROR: E1003 VCOM readback=%u mV, expected=%u mV\n",
+        static_cast<unsigned>(actualVcomMv),
+        static_cast<unsigned>(kExpectedVcomMv));
+  }
+#endif
   epaper.setRotation(panel_traits::DISPLAY_ROTATION);
   finalize(epaper.getSPIinstance());
 }

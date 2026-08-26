@@ -13,16 +13,25 @@ constexpr int PIN_PERIPHERAL_ENABLE = 39;
 constexpr int PIN_BATTERY_ENABLE = 40;
 constexpr int PIN_PANEL_BIAS_ENABLE = 11;
 constexpr int PIN_PANEL_CONTROLLER_ENABLE = 21;
+constexpr int PIN_PANEL_CS = 10;
+constexpr int PIN_PANEL_RESET = 12;
+constexpr int PIN_PANEL_READY = 13;
 #elif RETERMINAL_MODEL == 1005
 constexpr int PIN_PERIPHERAL_ENABLE = 47;
 constexpr int PIN_BATTERY_ENABLE = -1;
 constexpr int PIN_PANEL_BIAS_ENABLE = -1;
 constexpr int PIN_PANEL_CONTROLLER_ENABLE = -1;
+constexpr int PIN_PANEL_CS = -1;
+constexpr int PIN_PANEL_RESET = -1;
+constexpr int PIN_PANEL_READY = -1;
 #else
 constexpr int PIN_PERIPHERAL_ENABLE = 16;
 constexpr int PIN_BATTERY_ENABLE = 21;
 constexpr int PIN_PANEL_BIAS_ENABLE = -1;
 constexpr int PIN_PANEL_CONTROLLER_ENABLE = -1;
+constexpr int PIN_PANEL_CS = -1;
+constexpr int PIN_PANEL_RESET = -1;
+constexpr int PIN_PANEL_READY = -1;
 #endif
 
 #if RETERMINAL_MODEL == 1005

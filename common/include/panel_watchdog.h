@@ -1,12 +1,11 @@
 #pragma once
 
-// Guard E1003 panel refreshes against incomplete and stale optical state.
-// The IT8951 documentation requires INIT after the controller has been fully
-// powered down because its memory no longer represents the retained panel
-// image. Upload once, run INIT to reset the optical state, then run GC16 from
-// the same controller buffer. Wait until each waveform has demonstrably
-// completed, or apply a conservative minimum awake interval when this IT8951
-// firmware does not expose LUT status.
+// Guard E1003 panel refreshes against incomplete frames. Use one GC16 waveform
+// after the shared startup path has fully discharged the controller, settled
+// both display rails, and verified VCOM. A preceding INIT waveform doubles the
+// panel-bias load and produced an inverted frame during battery testing.
+// Wait until GC16 has demonstrably completed, or apply a conservative minimum
+// awake interval when this IT8951 firmware does not expose LUT status.
 // Monochrome refreshes keep using update(), whose 1-bpp driver path already
 // performs a completion wait.
 //
@@ -23,7 +22,7 @@
 
 namespace panel_watchdog {
 
-constexpr uint32_t kRetainedTraceMagic = 0xE1003B48;
+constexpr uint32_t kRetainedTraceMagic = 0xE1003B49;
 
 struct RetainedVoltageTrace {
   uint32_t magic;
@@ -31,6 +30,7 @@ struct RetainedVoltageTrace {
   uint32_t minimumMv;
   uint32_t afterMv;
   uint32_t durationMs;
+  uint16_t vcomMv;
   uint16_t waveformMode;
   bool statusObserved;
 };
@@ -50,7 +50,7 @@ inline void reportRetainedTraceOnce() {
   LOG.printf(
       "[panel] previous E1003 %s battery before=%lu.%03luV "
       "min=%lu.%03luV after=%lu.%03luV sag=%lumV duration=%lums "
-      "status=%s\n",
+      "vcom=-%u.%03uV status=%s\n",
       waveformName,
       static_cast<unsigned long>(retainedVoltageTrace.beforeMv / 1000),
       static_cast<unsigned long>(retainedVoltageTrace.beforeMv % 1000),
@@ -64,6 +64,8 @@ inline void reportRetainedTraceOnce() {
                     retainedVoltageTrace.minimumMv
               : 0),
       static_cast<unsigned long>(retainedVoltageTrace.durationMs),
+      static_cast<unsigned>(retainedVoltageTrace.vcomMv / 1000),
+      static_cast<unsigned>(retainedVoltageTrace.vcomMv % 1000),
       retainedVoltageTrace.statusObserved ? "observed" : "timed-fallback");
   retainedVoltageTrace.magic = 0;
 }
@@ -105,7 +107,8 @@ struct VoltageTrace {
     if (static_cast<int32_t>(millis() - nextSampleAt) >= 0) sample(false);
   }
 
-  void finish(uint16_t waveformMode, const char* waveformName,
+  void finish(uint16_t vcomMv, uint16_t waveformMode,
+              const char* waveformName,
               bool statusObserved, uint32_t durationMs) {
     sample(true);
     if (!valid) {
@@ -115,7 +118,7 @@ struct VoltageTrace {
     }
     retainedVoltageTrace = {
         kRetainedTraceMagic, beforeMv, minimumMv, afterMv, durationMs,
-        waveformMode, statusObserved};
+        vcomMv, waveformMode, statusObserved};
     LOG.printf(
         "[panel] E1003 %s battery before=%lu.%03luV min=%lu.%03luV "
         "after=%lu.%03luV sag=%lumV\n",
@@ -149,7 +152,7 @@ struct VoltageTrace {
 
 template <typename Panel>
 inline bool runWaveform(Panel& panel, uint16_t width, uint16_t height,
-                        uint16_t mode, const char* name) {
+                        uint16_t mode, const char* name, uint16_t vcomMv) {
   constexpr uint16_t kLutStatusRegister = 0x1224;
   constexpr uint32_t kLutStartTimeoutMs = 250;
   constexpr uint32_t kLutStartPollIntervalMs = 1;
@@ -181,7 +184,7 @@ inline bool runWaveform(Panel& panel, uint16_t width, uint16_t height,
     }
     if (lutStatus == 0) {
       const uint32_t durationMs = millis() - startedAt;
-      voltage.finish(mode, name, false, durationMs);
+      voltage.finish(vcomMv, mode, name, false, durationMs);
       LOG.printf(
           "[panel] E1003 %s conservative completion wait finished after "
           "%lu ms\n",
@@ -197,7 +200,7 @@ inline bool runWaveform(Panel& panel, uint16_t width, uint16_t height,
     voltage.sampleIfDue();
   } while (lutStatus != 0);
   const uint32_t durationMs = millis() - startedAt;
-  voltage.finish(mode, name, true, durationMs);
+  voltage.finish(vcomMv, mode, name, true, durationMs);
   LOG.printf(
       "[panel] E1003 %s waveform active after %lu ms, complete after "
       "%lu ms\n",
@@ -233,12 +236,14 @@ inline void refreshPanel(Panel& panel) {
   }
 
   panel.wake();
-  LOG.println(
-      "[panel] E1003 uploading image once for INIT + GC16 refresh");
+  const uint16_t vcomMv = panel.getTconVcom();
+  LOG.printf("[panel] E1003 refresh VCOM readback=-%u.%03uV\n",
+             static_cast<unsigned>(vcomMv / 1000),
+             static_cast<unsigned>(vcomMv % 1000));
+  LOG.println("[panel] E1003 uploading image for single GC16 refresh");
   panel.setTconWindowsData(0, 0, width - 1, height - 1);
   panel.tconLoadImage(framebuffer, 0, 0, width, height, false);
-  if (!runWaveform(panel, width, height, 0x00, "INIT")) return;
-  if (!runWaveform(panel, width, height, 0x02, "GC16")) return;
+  if (!runWaveform(panel, width, height, 0x02, "GC16", vcomMv)) return;
   panel.sleep();
 }
 
