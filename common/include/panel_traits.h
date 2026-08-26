@@ -27,6 +27,10 @@ inline constexpr int HEIGHT = 1404;
 inline constexpr int UI_SCALE_NUMERATOR = 9;
 inline constexpr int UI_SCALE_DENOMINATOR = 4;
 inline constexpr SizeClass SIZE_CLASS = SizeClass::LargeLandscape;
+// Seeed's production E1003 firmware uses these FastEPD IT8951 settings.
+inline constexpr int E1003_VCOM_MV = 1500;
+inline constexpr int E1003_VCOM_SET_SELECTOR = 0x0001;
+inline constexpr int E1003_WAVEFORM_TEMP_C = 14;
 #elif RETERMINAL_MODEL == 1004
 inline constexpr int WIDTH = 1200;
 inline constexpr int HEIGHT = 1600;

@@ -49,24 +49,34 @@ void begin(EPaper& epaper) {
   resetPanelPower();
   epaper.begin();
 #if RETERMINAL_MODEL == 1003
-  constexpr uint16_t kExpectedVcomMv = 1400;
+  constexpr uint16_t kVcomCommand = 0x0039;
+  constexpr uint16_t kExpectedVcomMv =
+      static_cast<uint16_t>(panel_traits::E1003_VCOM_MV);
   uint16_t actualVcomMv = 0;
   for (uint8_t attempt = 1; attempt <= 3; ++attempt) {
-    epaper.setTconVcom(kExpectedVcomMv);
+    epaper.tconWriteCmdCode(kVcomCommand);
+    epaper.tconWirteData(
+        static_cast<uint16_t>(panel_traits::E1003_VCOM_SET_SELECTOR));
+    epaper.tconWirteData(kExpectedVcomMv);
     delay(20);
     actualVcomMv = epaper.getTconVcom();
     if (actualVcomMv == kExpectedVcomMv) break;
     if (attempt < 3) delay(100);
   }
   if (actualVcomMv == kExpectedVcomMv) {
-    LOG.printf("[panel] E1003 VCOM verified at -%u.%03uV\n",
+    LOG.printf("[panel] E1003 FastEPD VCOM verified at -%u.%03uV "
+               "(selector=0x%04X)\n",
                static_cast<unsigned>(actualVcomMv / 1000),
-               static_cast<unsigned>(actualVcomMv % 1000));
+               static_cast<unsigned>(actualVcomMv % 1000),
+               static_cast<unsigned>(
+                   panel_traits::E1003_VCOM_SET_SELECTOR));
   } else {
     LOG.printf(
-        "[panel] ERROR: E1003 VCOM readback=%u mV, expected=%u mV\n",
+        "[panel] ERROR: E1003 FastEPD VCOM readback=%u mV, "
+        "expected=%u mV (selector=0x%04X)\n",
         static_cast<unsigned>(actualVcomMv),
-        static_cast<unsigned>(kExpectedVcomMv));
+        static_cast<unsigned>(kExpectedVcomMv),
+        static_cast<unsigned>(panel_traits::E1003_VCOM_SET_SELECTOR));
   }
 #endif
   epaper.setRotation(panel_traits::DISPLAY_ROTATION);

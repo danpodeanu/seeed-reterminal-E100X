@@ -1,11 +1,10 @@
 #pragma once
 
-// Guard E1003 panel refreshes against incomplete frames. At low battery, first
-// refresh a uniform white 1bpp frame with GC16, matching Seeed's SenseCraft HMI
-// ghost-clean path, then upload and refresh the requested Gray16 frame. A
-// preceding INIT waveform produced an inverted frame during battery testing.
-// Wait until target GC16 has demonstrably completed, or apply a conservative
-// minimum awake interval when this IT8951 firmware does not expose LUT status.
+// Guard E1003 panel refreshes against incomplete frames. The controller profile
+// and refresh order mirror the FastEPD revision used by Seeed's production
+// E1003 firmware: fixed 14C waveform selection, one 4bpp upload, one GC16,
+// LUT-idle completion, then standby. Earlier INIT and white-GC16 preclean
+// experiments both produced inverted or corrupted battery-powered frames.
 // Monochrome refreshes keep using update(), whose 1-bpp driver path already
 // performs a completion wait.
 //
@@ -15,17 +14,15 @@
 
 #if RETERMINAL_MODEL == 1003
 #include <Arduino.h>
-#include <cstring>
-#include <esp_heap_caps.h>
 #include <esp_task_wdt.h>
 #include "app_logger.h"
 #include "board_pins.h"
 #include "charger.h"
+#include "panel_traits.h"
 
 namespace panel_watchdog {
 
-constexpr uint32_t kRetainedTraceMagic = 0xE1003B50;
-constexpr uint32_t kLowVoltageWhiteCleanMv = 3720;
+constexpr uint32_t kRetainedTraceMagic = 0xE1003B51;
 
 struct RetainedVoltageTrace {
   uint32_t magic;
@@ -35,8 +32,8 @@ struct RetainedVoltageTrace {
   uint32_t durationMs;
   uint16_t vcomMv;
   uint16_t waveformMode;
-  bool whiteCleanApplied;
-  bool statusObserved;
+  uint16_t waveformTemperatureC;
+  uint16_t vcomSelector;
 };
 
 static RTC_DATA_ATTR RetainedVoltageTrace retainedVoltageTrace = {};
@@ -53,8 +50,9 @@ inline void reportRetainedTraceOnce() {
           : (retainedVoltageTrace.waveformMode == 0x02 ? "GC16" : "unknown");
   LOG.printf(
       "[panel] previous E1003 %s battery before=%lu.%03luV "
-      "min=%lu.%03luV after=%lu.%03luV sag=%lumV duration=%lums "
-      "vcom=-%u.%03uV preclean=%s status=%s\n",
+      "endpoint-min=%lu.%03luV after=%lu.%03luV sag=%lumV "
+      "duration=%lums vcom=-%u.%03uV selector=0x%04X temp=%uC "
+      "profile=FastEPD\n",
       waveformName,
       static_cast<unsigned long>(retainedVoltageTrace.beforeMv / 1000),
       static_cast<unsigned long>(retainedVoltageTrace.beforeMv % 1000),
@@ -70,8 +68,8 @@ inline void reportRetainedTraceOnce() {
       static_cast<unsigned long>(retainedVoltageTrace.durationMs),
       static_cast<unsigned>(retainedVoltageTrace.vcomMv / 1000),
       static_cast<unsigned>(retainedVoltageTrace.vcomMv % 1000),
-      retainedVoltageTrace.whiteCleanApplied ? "white-GC16" : "none",
-      retainedVoltageTrace.statusObserved ? "observed" : "timed-fallback");
+      static_cast<unsigned>(retainedVoltageTrace.vcomSelector),
+      static_cast<unsigned>(retainedVoltageTrace.waveformTemperatureC));
   retainedVoltageTrace.magic = 0;
 }
 
@@ -94,28 +92,21 @@ inline bool sampleBatteryCellMv(uint32_t& cellMv,
 }
 
 struct VoltageTrace {
-  static constexpr uint32_t kSampleIntervalMs = 50;
   static constexpr uint32_t kSamplesPerReading = 4;
 
   bool valid = false;
   uint32_t beforeMv = 0;
   uint32_t minimumMv = UINT32_MAX;
   uint32_t afterMv = 0;
-  uint32_t nextSampleAt = 0;
 
   void begin() {
     retainedVoltageTrace.magic = 0;
-    sample(true);
-  }
-
-  void sampleIfDue() {
-    if (static_cast<int32_t>(millis() - nextSampleAt) >= 0) sample(false);
+    sample();
   }
 
   void finish(uint16_t vcomMv, uint16_t waveformMode,
-              const char* waveformName, bool whiteCleanApplied,
-              bool statusObserved, uint32_t durationMs) {
-    sample(true);
+              const char* waveformName, uint32_t durationMs) {
+    sample();
     if (!valid) {
       LOG.printf("[panel] E1003 %s battery trace unavailable\n",
                  waveformName);
@@ -123,10 +114,12 @@ struct VoltageTrace {
     }
     retainedVoltageTrace = {
         kRetainedTraceMagic, beforeMv, minimumMv, afterMv, durationMs,
-        vcomMv, waveformMode, whiteCleanApplied, statusObserved};
+        vcomMv, waveformMode,
+        static_cast<uint16_t>(panel_traits::E1003_WAVEFORM_TEMP_C),
+        static_cast<uint16_t>(panel_traits::E1003_VCOM_SET_SELECTOR)};
     LOG.printf(
-        "[panel] E1003 %s battery before=%lu.%03luV min=%lu.%03luV "
-        "after=%lu.%03luV sag=%lumV\n",
+        "[panel] E1003 %s battery before=%lu.%03luV "
+        "endpoint-min=%lu.%03luV after=%lu.%03luV sag=%lumV\n",
         waveformName,
         static_cast<unsigned long>(beforeMv / 1000),
         static_cast<unsigned long>(beforeMv % 1000),
@@ -140,12 +133,8 @@ struct VoltageTrace {
   }
 
  private:
-  void sample(bool force) {
-    const uint32_t now = millis();
-    if (!force && static_cast<int32_t>(now - nextSampleAt) < 0) return;
-
+  void sample() {
     uint32_t cellMv = 0;
-    nextSampleAt = now + kSampleIntervalMs;
     if (!sampleBatteryCellMv(cellMv, kSamplesPerReading)) return;
 
     if (!valid) beforeMv = cellMv;
@@ -156,99 +145,19 @@ struct VoltageTrace {
 };
 
 template <typename Panel>
-inline bool runWhiteCleaningRefresh(Panel& panel, uint16_t width,
-                                    uint16_t height) {
-  const size_t bufferSize =
-      (static_cast<size_t>(width) * height + 7U) / 8U;
-  auto* whiteFrame = static_cast<uint8_t*>(
-      heap_caps_malloc(bufferSize, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT));
-  if (whiteFrame == nullptr) {
-    LOG.printf(
-        "[panel] ERROR: E1003 white-clean allocation failed (%lu bytes)\n",
-        static_cast<unsigned long>(bufferSize));
-    return false;
-  }
-  memset(whiteFrame, 0xFF, bufferSize);
-
-  uint32_t beforeMv = 0;
-  uint32_t afterMv = 0;
-  sampleBatteryCellMv(beforeMv, 8);
-  const uint32_t startedAt = millis();
-  LOG.println(
-      "[panel] E1003 low-voltage preclean: uploading white 1bpp frame");
-  panel.tconLoad1bppImage(whiteFrame, 0, 0, width, height, false);
-  heap_caps_free(whiteFrame);
-  panel.tconDisplayArea1bpp(0, 0, width, height, 0x02, 0x00, 0xFF);
-  sampleBatteryCellMv(afterMv, 8);
-  LOG.printf(
-      "[panel] E1003 white GC16 preclean complete after %lums "
-      "battery=%lu.%03luV->%lu.%03luV\n",
-      static_cast<unsigned long>(millis() - startedAt),
-      static_cast<unsigned long>(beforeMv / 1000),
-      static_cast<unsigned long>(beforeMv % 1000),
-      static_cast<unsigned long>(afterMv / 1000),
-      static_cast<unsigned long>(afterMv % 1000));
-  return true;
-}
-
-template <typename Panel>
-inline bool runWaveform(Panel& panel, uint16_t width, uint16_t height,
-                        uint16_t mode, const char* name, uint16_t vcomMv,
-                        bool whiteCleanApplied) {
-  constexpr uint16_t kLutStatusRegister = 0x1224;
-  constexpr uint32_t kLutStartTimeoutMs = 250;
-  constexpr uint32_t kLutStartPollIntervalMs = 1;
-  constexpr uint32_t kLutActivePollIntervalMs = 10;
-  constexpr uint32_t kUnobservableWaveformWaitMs = 5000;
+inline void runWaveform(Panel& panel, uint16_t width, uint16_t height,
+                        uint16_t mode, const char* name, uint16_t vcomMv) {
   VoltageTrace voltage;
   voltage.begin();
   const uint32_t startedAt = millis();
   panel.tconDisplayArea(0, 0, width, height, mode);
-
-  uint16_t lutStatus = 0;
-  do {
-    delay(kLutStartPollIntervalMs);
-    lutStatus = panel.tconReadReg(kLutStatusRegister);
-    voltage.sampleIfDue();
-  } while (lutStatus == 0 && millis() - startedAt < kLutStartTimeoutMs);
-
-  if (lutStatus == 0) {
-    LOG.printf(
-        "[panel] WARNING: E1003 %s status not observable within %lu ms; "
-        "holding controller awake for at least %lu ms\n",
-        name, static_cast<unsigned long>(kLutStartTimeoutMs),
-        static_cast<unsigned long>(kUnobservableWaveformWaitMs));
-    while (lutStatus == 0 &&
-           millis() - startedAt < kUnobservableWaveformWaitMs) {
-      delay(kLutActivePollIntervalMs);
-      lutStatus = panel.tconReadReg(kLutStatusRegister);
-      voltage.sampleIfDue();
-    }
-    if (lutStatus == 0) {
-      const uint32_t durationMs = millis() - startedAt;
-      voltage.finish(vcomMv, mode, name, whiteCleanApplied, false, durationMs);
-      LOG.printf(
-          "[panel] E1003 %s conservative completion wait finished after "
-          "%lu ms\n",
-          name, static_cast<unsigned long>(durationMs));
-      return true;
-    }
-  }
-
-  const uint32_t activeAt = millis();
-  do {
-    delay(kLutActivePollIntervalMs);
-    lutStatus = panel.tconReadReg(kLutStatusRegister);
-    voltage.sampleIfDue();
-  } while (lutStatus != 0);
+  panel.tconWaitForDisplayReady();
   const uint32_t durationMs = millis() - startedAt;
-  voltage.finish(vcomMv, mode, name, whiteCleanApplied, true, durationMs);
+  voltage.finish(vcomMv, mode, name, durationMs);
   LOG.printf(
-      "[panel] E1003 %s waveform active after %lu ms, complete after "
-      "%lu ms\n",
-      name, static_cast<unsigned long>(activeAt - startedAt),
+      "[panel] E1003 %s FastEPD completion wait finished after %lu ms\n",
+      name,
       static_cast<unsigned long>(durationMs));
-  return true;
 }
 
 template <typename Panel>
@@ -278,32 +187,35 @@ inline void refreshPanel(Panel& panel) {
   }
 
   panel.wake();
+  panel.setTconTemp(
+      static_cast<uint16_t>(panel_traits::E1003_WAVEFORM_TEMP_C));
+  const uint16_t waveformTemperatureC = panel.getTconTemp();
   const uint16_t vcomMv = panel.getTconVcom();
-  LOG.printf("[panel] E1003 refresh VCOM readback=-%u.%03uV\n",
-             static_cast<unsigned>(vcomMv / 1000),
-             static_cast<unsigned>(vcomMv % 1000));
-  const bool externalPower =
-      power.valid && power.state == charger::State::Connected;
-  const bool whiteCleanApplied =
-      batteryValid && batteryMv < kLowVoltageWhiteCleanMv && !externalPower;
-  if (whiteCleanApplied) {
-    LOG.printf(
-        "[panel] E1003 battery below %lu.%03luV; applying white GC16 "
-        "preclean\n",
-        static_cast<unsigned long>(kLowVoltageWhiteCleanMv / 1000),
-        static_cast<unsigned long>(kLowVoltageWhiteCleanMv % 1000));
-    if (!runWhiteCleaningRefresh(panel, width, height)) {
-      panel.sleep();
-      return;
-    }
+  LOG.printf(
+      "[panel] E1003 FastEPD profile VCOM=-%u.%03uV selector=0x%04X "
+      "temperature=%uC\n",
+      static_cast<unsigned>(vcomMv / 1000),
+      static_cast<unsigned>(vcomMv % 1000),
+      static_cast<unsigned>(panel_traits::E1003_VCOM_SET_SELECTOR),
+      static_cast<unsigned>(waveformTemperatureC));
+  if (vcomMv != panel_traits::E1003_VCOM_MV ||
+      waveformTemperatureC != panel_traits::E1003_WAVEFORM_TEMP_C) {
+    LOG.println(
+        "[panel] ERROR: E1003 FastEPD controller profile readback mismatch");
   }
-  LOG.println("[panel] E1003 uploading image for single GC16 refresh");
+
+  constexpr uint16_t kOneBppModeRegister = 0x113A;
+  panel.tconWaitForDisplayReady();
+  panel.tconWriteReg(
+      kOneBppModeRegister,
+      panel.tconReadReg(kOneBppModeRegister) & ~(static_cast<uint16_t>(1) << 2));
+  LOG.println(
+      "[panel] E1003 uploading image for FastEPD single GC16 refresh");
   panel.setTconWindowsData(0, 0, width - 1, height - 1);
   panel.tconLoadImage(framebuffer, 0, 0, width, height, false);
-  if (!runWaveform(panel, width, height, 0x02, "GC16", vcomMv,
-                   whiteCleanApplied)) {
-    return;
-  }
+  runWaveform(panel, width, height, 0x02, "GC16", vcomMv);
+  panel.tconStandby();
+  delay(10);
   panel.sleep();
 }
 
