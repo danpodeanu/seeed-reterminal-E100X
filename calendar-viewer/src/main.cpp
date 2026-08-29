@@ -64,6 +64,8 @@ using namespace theme;
 constexpr const char* kFrameValidKey = "frame_valid";
 constexpr const char* kFrameHashKey = "frame_hash";
 constexpr const char* kFrameKindKey = "frame_kind";
+// Increment when rendering changes without changing the underlying data.
+constexpr uint32_t kCalendarFrameRevision = 1;
 
 enum class FrameKind : uint8_t {
   None = 0,
@@ -245,6 +247,7 @@ uint64_t frameFingerprint(const calendar::Data& data,
                           const WeatherData& weather,
                           const String& footer, time_t now) {
   calendar_logic::Fingerprint hash;
+  hash.addValue(kCalendarFrameRevision);
   const uint64_t calendarHash = calendar_logic::dataFingerprint(data, window);
   hash.addValue(calendarHash);
   hash.addValue(data.truncated);
