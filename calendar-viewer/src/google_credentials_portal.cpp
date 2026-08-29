@@ -59,7 +59,7 @@ void sendStatus() {
 void sendPage() {
   noStore();
   String page;
-  page.reserve(g_pageStart.length() + 4200);
+  page.reserve(g_pageStart.length() + 4600);
   page = g_pageStart;
   page += F("<section class=\"card\"><h2>Google service account</h2>"
             "<p class=\"help\">Upload the IAM JSON key downloaded from Google Cloud. "
@@ -73,6 +73,9 @@ void sendPage() {
             "with the service account email shown below, or configure Workspace domain-wide "
             "delegation and set the delegated user in Settings.</p><p id=\"identity\">Checking...</p>"
             "<button class=\"danger\" id=\"clear\" type=\"button\">Remove credential</button></section>"
+            "<section class=\"card\"><h2>Return to calendar</h2>"
+            "<p class=\"help\">Restart the device and return to Calendar Viewer.</p>"
+            "<button class=\"secondary\" id=\"reboot\" type=\"button\">Reboot to viewer</button></section>"
             "<script>const s=document.getElementById('status'),i=document.getElementById('identity');"
             "function msg(t,ok=false){s.className='msg '+(ok?'ok':'err');s.textContent=t}"
             "async function refresh(){const r=await fetch('/google-credentials.json',{cache:'no-store'});"
@@ -84,7 +87,10 @@ void sendPage() {
             "msg(j.ok?'Credential saved.':j.error,j.ok);await refresh()};"
             "document.getElementById('clear').onclick=async()=>{if(!confirm('Remove the stored Google credential?'))return;"
             "const r=await fetch('/google-credentials/clear',{method:'POST'});const j=await r.json();"
-            "msg(j.ok?'Credential removed.':j.error,j.ok);await refresh()};refresh();"
+            "msg(j.ok?'Credential removed.':j.error,j.ok);await refresh()};"
+            "document.getElementById('reboot').onclick=async()=>{const b=document.getElementById('reboot');"
+            "b.disabled=true;b.textContent='Rebooting...';try{await fetch('/reboot',{method:'POST'})}catch(e){}};"
+            "refresh();"
             "</script></main></body></html>");
   g_server->send(200, "text/html; charset=utf-8", page);
 }

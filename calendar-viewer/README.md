@@ -106,14 +106,17 @@ reported as a feed error instead of silently producing a different schedule.
 4. Share each calendar with the service-account email shown by the portal,
    granting at least **See all event details**.
 5. Select **Google** under Calendar source. Leave **Google calendar IDs** blank
-   to load shared calendars, or enter a comma-separated allowlist. Up to 12
-   calendars and 128 visible events are loaded per refresh.
+   to discover shared calendars, or enter comma-separated IDs to query those
+   calendars directly. Up to 12 calendars and 128 visible events are loaded per
+   refresh.
 6. Save and reboot.
 
-For Workspace domain-wide delegation, authorize the service account's OAuth
-client ID for
-`https://www.googleapis.com/auth/calendar.readonly`, then set **Google
-delegated user** to the user whose calendars should be read.
+Direct ID queries request
+`https://www.googleapis.com/auth/calendar.events.readonly`; calendar discovery
+requests `https://www.googleapis.com/auth/calendar.readonly`. For Workspace
+domain-wide delegation, authorize the service account's OAuth client ID for
+both scopes, then set **Google delegated user** to the user whose calendars
+should be read.
 
 The uploaded JSON is capped at 8 KiB and parsed in RAM. Only the required
 service-account fields are saved in the `calendar` NVS namespace; the private
@@ -142,9 +145,10 @@ configured quiet hours.
 After a successful fetch, Calendar Viewer fingerprints the visible date
 window, event data and colors, rounded indoor readings, weather summary, and
 render-affecting settings. If that fingerprint matches the last successful
-frame, panel initialization and refresh are skipped. If a calendar download
-fails and a prior frame exists, the retained e-paper image is left untouched
-and the device retries after five minutes.
+frame, panel initialization and refresh are skipped. iCalendar download
+failures preserve an existing calendar frame and retry after five minutes.
+Google failures display the API error and retry on the normal configured
+schedule; an unchanged error does not cause another panel refresh.
 
 ## Configuration storage
 
@@ -174,5 +178,7 @@ pio run -e reterminal_e1003
 pio run -e reterminal_e1004
 ```
 
-Serial logging uses UART1 on GPIO43/GPIO44 at 115200 baud. Calendar URLs,
-OAuth tokens, and private keys are deliberately omitted from logs.
+Serial logging uses UART1 on GPIO43/GPIO44 at 115200 baud. Google request
+stages, HTTP statuses, response sizes, sanitized API errors, page counts, and
+event counts are logged. Calendar URLs, OAuth tokens, signed JWTs, and private
+keys are deliberately omitted.

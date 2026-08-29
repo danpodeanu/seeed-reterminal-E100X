@@ -421,6 +421,14 @@ String portalHint() {
   return "Hold green for 2s to configure";
 }
 
+uint64_t scheduledSleepSeconds(const struct tm& localNow) {
+  uint64_t sleepSeconds = calendar_config::runtime::sleepSeconds();
+  if (quiet_hours::nextWakeFallsInside(localNow, sleepSeconds)) {
+    sleepSeconds = quiet_hours::secondsUntilEnd(localNow);
+  }
+  return sleepSeconds;
+}
+
 void showStatusAndSleep(const String& title, const String& detail,
                         uint64_t sleepSeconds) {
   const String footer = portalHint();
@@ -608,6 +616,14 @@ void setup() {
   wifi_sta::disable();
 
   if (!calendarUpdated) {
+    if (provider == config::CalendarProvider::Google) {
+      LOG.printf("[google] update failed; displaying error: %s\n",
+                 calendarFailure.c_str());
+      showStatusAndSleep("Google Calendar error", calendarFailure,
+                         scheduledSleepSeconds(localNow));
+      return;
+    }
+
     uint64_t previousHash = 0;
     FrameKind previousKind = FrameKind::None;
     if (loadFrameState(previousHash, previousKind) &&
@@ -655,12 +671,7 @@ void setup() {
                 "skipping panel refresh");
   }
 
-  uint64_t sleepSeconds = calendar_config::runtime::sleepSeconds();
-  if (local_time::localClock(localNow) &&
-      quiet_hours::nextWakeFallsInside(localNow, sleepSeconds)) {
-    sleepSeconds = quiet_hours::secondsUntilEnd(localNow);
-  }
-  powerDownAndSleep(sleepSeconds);
+  powerDownAndSleep(scheduledSleepSeconds(localNow));
 }
 
 void loop() {
