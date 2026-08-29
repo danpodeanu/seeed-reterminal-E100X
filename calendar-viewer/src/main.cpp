@@ -212,8 +212,9 @@ void addRoundedSensors(calendar_logic::Fingerprint& hash,
   hash.addValue(readings.batteryValid);
   if (readings.batteryValid) {
     hash.addValue(readings.batteryPct);
-    hash.addValue(readings.externalPower);
   }
+  hash.addValue(readings.externalPowerValid);
+  if (readings.externalPowerValid) hash.addValue(readings.externalPower);
 }
 
 void addRoundedWeather(calendar_logic::Fingerprint& hash,

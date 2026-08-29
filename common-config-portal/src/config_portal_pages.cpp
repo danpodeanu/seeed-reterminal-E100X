@@ -95,17 +95,17 @@ void appendChrome(String& html, const Config& cfg, const char* title,
             "*{box-sizing:border-box}body{font-family:system-ui,-apple-system,sans-serif;margin:0;background:#f6f7f9;color:#172033;line-height:1.45}"
             "header.portal-header{padding:1rem;background:#14213d;color:#fff}main{max-width:760px;margin:auto;padding:1rem}"
             "nav a{color:#bfdbfe;margin-right:1rem;text-decoration:none}nav a.active{color:#fff;font-weight:700}"
-            ".card,fieldset{background:#fff;border:1px solid #d7dce5;border-radius:10px;padding:1rem;margin:0 0 1rem}"
+            ".card,fieldset{background:#fff;border:1px solid #d7dce5;border-radius:10px;padding:1rem;margin:0 0 1rem}.card h2{margin-top:0}"
             "label{display:block;font-weight:650;margin:.8rem 0 .25rem}input,select,button{font:inherit;font-size:1rem}"
-            "input[type=text],input[type=password],input[type=number],select{width:100%;padding:.65rem;border:1px solid #b8c0cc;border-radius:7px;background:#fff;color:#111827}"
+            "input[type=text],input[type=password],input[type=number],input[type=file],select{width:100%;padding:.65rem;border:1px solid #b8c0cc;border-radius:7px;background:#fff;color:#111827}"
             "button{background:#1d4ed8;color:#fff;border:0;border-radius:7px;padding:.7rem 1rem;min-height:44px;cursor:pointer;margin:.4rem .4rem .4rem 0}"
-            "button.secondary{background:#475569}.help{font-size:.9rem;color:#64748b}.msg{min-height:1.5rem}.err{color:#b91c1c}.ok{color:#166534}"
+            "button.secondary{background:#475569}button.danger{background:#b91c1c}.help{font-size:.9rem;color:#64748b}.msg{min-height:1.5rem;white-space:pre-wrap}.err{color:#b91c1c}.ok{color:#166534}"
             ".ssid-list{list-style:none;margin:.5rem 0 0;padding:0;border:1px solid #d7dce5;border-radius:7px;overflow:hidden;max-height:14rem;overflow-y:auto}"
             ".ssid-list li{display:flex;justify-content:space-between;align-items:center;gap:.5rem;padding:.55rem .75rem;border-bottom:1px solid #eef1f5;cursor:pointer}"
             ".ssid-list li:last-child{border-bottom:0}.ssid-list li:hover,.ssid-list li:focus{background:#eef2ff;outline:none}"
             ".ssid-list .ssid-name{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}"
             ".ssid-list .ssid-meta{font-size:.85rem;color:#64748b;flex-shrink:0}"
-            "@media(prefers-color-scheme:dark){body{background:#0f172a;color:#e5e7eb}header.portal-header{background:#020617}.card,fieldset{background:#111827;border-color:#334155}input[type=text],input[type=password],input[type=number],select{background:#0f172a;color:#e5e7eb;border-color:#475569}.help{color:#94a3b8}.ssid-list{border-color:#334155}.ssid-list li{border-bottom-color:#1f2937}.ssid-list li:hover,.ssid-list li:focus{background:#1e293b}.ssid-list .ssid-meta{color:#94a3b8}}"
+            "@media(prefers-color-scheme:dark){body{background:#0f172a;color:#e5e7eb}header.portal-header{background:#020617}.card,fieldset{background:#111827;border-color:#334155}input[type=text],input[type=password],input[type=number],input[type=file],select{background:#0f172a;color:#e5e7eb;border-color:#475569}.help{color:#94a3b8}.ssid-list{border-color:#334155}.ssid-list li{border-bottom-color:#1f2937}.ssid-list li:hover,.ssid-list li:focus{background:#1e293b}.ssid-list .ssid-meta{color:#94a3b8}}"
             "</style></head><body>");
   appendHeader(html, cfg, settings, active);
   html += F("<main>");
@@ -342,6 +342,15 @@ String renderNavStripHtml(const Config& cfg, const char* activeKey) {
   html += F("<nav>");
   appendNavLinks(html, cfg, cfg.appSchema != nullptr, activeKey ? activeKey : "");
   html += F("</nav>");
+  return html;
+}
+
+String renderPageStartHtml(const Config& cfg, const char* title,
+                           const char* activeKey) {
+  String html;
+  html.reserve(3072);
+  appendChrome(html, cfg, title ? title : "Configuration",
+               cfg.appSchema != nullptr, activeKey ? activeKey : "");
   return html;
 }
 

@@ -118,6 +118,11 @@ void loop();
 // Config::extraTabs) without spinning up a second HTTP listener.
 WebServer* webServer();
 
+// Render the shared document head, stylesheet, header, and opening <main> tag.
+// Extra pages append their content and close with </main></body></html>.
+String renderPageStartHtml(const Config& cfg, const char* title,
+                           const char* activeKey);
+
 // Render a nav-strip HTML fragment identical to the one the portal chrome
 // emits inside <nav>...</nav>. Handy for extra pages that share the portal
 // server but render their own layout - pass the same Config that was used
