@@ -2,13 +2,11 @@
 
 A low-power calendar dashboard for the Seeed Studio reTerminal E1001, E1002,
 E1003, and E1004. It loads a public iCalendar feed or Google calendars,
-renders Today, Week, and Month views with calendar colors, shows indoor
-temperature and humidity plus a weather summary, and then returns to deep
-sleep.
+renders today's agenda together with week and month calendars, shows indoor
+temperature and humidity plus a weather summary, and then returns to deep sleep.
 
 The device reconnects at the configured interval, but refreshes the e-paper
-panel only when visible calendar, weather, sensor, view, or date content has
-changed.
+panel only when visible calendar, weather, sensor, or date content has changed.
 
 ## Features
 
@@ -19,10 +17,10 @@ changed.
   Workspace domain-wide delegation.
 - Calendar and event colors mapped to each panel's native grayscale or
   six-color palette.
-- Today, Week, and Month layouts selected with the front buttons.
-- A persistent right sidebar with today's agenda above a compact weather card.
-- Native calendar, climate, location, weather, and alert icons, with
-  color-blocked dashboard accents on the six-color models.
+- A fixed dashboard with the current week above a six-week month grid and
+  today's agenda above a compact weather card in the sidebar.
+- Shared Meteocons weather artwork plus native calendar, climate, location, and
+  alert icons, with blue and dithered-orange accents on six-color models.
 - Indoor SHT4x temperature/humidity and battery status in the header.
 - Open-Meteo or QWeather summary, with optional severe-weather alerts.
 - Captive-portal configuration for Wi-Fi, calendar, timezone, NTP, quiet
@@ -133,21 +131,19 @@ for temporary provider failures; no SD card is required.
 
 | Action from deep sleep | Result |
 | --- | --- |
-| Tap green | Switch to Today and refresh |
-| Tap right | Cycle Today -> Week -> Month |
-| Tap left | Cycle Today -> Month -> Week |
+| Tap any front button | Refresh calendar and weather |
 | Hold green for at least 1 second | Open the configuration portal |
 | Wait for the timer | Check for calendar and weather updates |
 
-The selected view is persisted. Button wakes bypass HTTP caches. Scheduled
-wakes are suppressed during configured quiet hours.
+Button wakes bypass HTTP caches. Scheduled wakes are suppressed during
+configured quiet hours.
 
 After a successful fetch, Calendar Viewer fingerprints the visible date
-window, event data and colors, selected view, rounded indoor readings, weather
-summary, and render-affecting settings. If that fingerprint matches the last
-successful frame, panel initialization and refresh are skipped. If a calendar
-download fails and a prior frame exists, the retained e-paper image is left
-untouched and the device retries after five minutes.
+window, event data and colors, rounded indoor readings, weather summary, and
+render-affecting settings. If that fingerprint matches the last successful
+frame, panel initialization and refresh are skipped. If a calendar download
+fails and a prior frame exists, the retained e-paper image is left untouched
+and the device retries after five minutes.
 
 ## Configuration storage
 

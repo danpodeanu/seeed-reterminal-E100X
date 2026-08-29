@@ -22,7 +22,6 @@ enum class WindSpeedUnit {
 };
 
 constexpr CalendarProvider CALENDAR_PROVIDER = CalendarProvider::Ical;
-constexpr CalendarView CALENDAR_VIEW = CalendarView::Today;
 constexpr WeekStart WEEK_START = WeekStart::Monday;
 constexpr char ICAL_URL[] = "";
 constexpr char GOOGLE_CALENDAR_IDS[] = "";

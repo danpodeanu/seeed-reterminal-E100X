@@ -1,9 +1,9 @@
 #pragma once
 
-// Weather-condition icon renderer for the weather viewer.
+// Shared weather-condition icon renderer.
 //
 // The 26 icons are baked into flash at build time by
-// weather-viewer/tools/generate_weather_icons.py (invoked via a
+// common-weather/tools/generate_weather_icons.py (invoked via a
 // PlatformIO pre-script) and embedded through the auto-generated
 // weather_icons_data.h header. No SD card, no LittleFS, no PSRAM
 // allocation -- the sprites live in the app binary and are read
@@ -13,7 +13,7 @@
 // style, MIT-licensed). See LICENSES/METEOCONS.txt for the upstream
 // license; small tweaks (stroke +15%, sun/moon offsets in the partly-
 // cloudy variants, animation stripping) are baked into the SVGs kept
-// under weather-viewer/icons/svg/.
+// under common-weather/icons/svg/.
 //
 // Usage:
 //   #include "weather_icons.h"

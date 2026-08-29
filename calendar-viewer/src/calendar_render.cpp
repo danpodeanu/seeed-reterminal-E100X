@@ -12,6 +12,7 @@
 #include "text_render.h"
 #include "theme.h"
 #include "weather_app_logic.h"
+#include "weather_icons.h"
 
 namespace calendar_render {
 namespace {
@@ -56,6 +57,14 @@ void selectFont(EPaper& epaper, FontSize size, bool bold = true) {
     epaper.setFreeFont(bold ? &FreeSansBold9pt7b : &FreeSans9pt7b);
   }
 #endif
+}
+
+void fillWarmRect(EPaper& epaper, int x, int y, int width, int height) {
+  // Six-color panels synthesize orange from two supported pigments.
+  text_render::fillDitheredRect(
+      epaper, x, y, width, height, config::PANEL_WIDTH, config::PANEL_HEIGHT,
+      PANEL_WARM_BASE, PANEL_WARM_DITHER != PANEL_WARM_BASE,
+      PANEL_WARM_DITHER, 5);
 }
 
 void drawCalendarIcon(EPaper& epaper, int x, int y, int size,
@@ -126,134 +135,6 @@ void drawAlertIcon(EPaper& epaper, int centerX, int centerY, int size,
                   markWidth, std::max(2, size / 3), background);
   epaper.fillCircle(centerX, centerY + size / 3,
                     std::max(1, markWidth / 2), background);
-}
-
-void drawSunIcon(EPaper& epaper, int centerX, int centerY, int size,
-                 uint32_t ink) {
-  const int radius = std::max(3, size / 5);
-  const int rayStart = radius + std::max(2, size / 12);
-  const int rayEnd = size / 2;
-  const int thickness = std::max(1, size / 14);
-  epaper.fillCircle(centerX, centerY, radius, ink);
-  epaper.fillRect(centerX - thickness / 2, centerY - rayEnd, thickness,
-                  rayEnd - rayStart + 1, ink);
-  epaper.fillRect(centerX - thickness / 2, centerY + rayStart, thickness,
-                  rayEnd - rayStart + 1, ink);
-  epaper.fillRect(centerX - rayEnd, centerY - thickness / 2,
-                  rayEnd - rayStart + 1, thickness, ink);
-  epaper.fillRect(centerX + rayStart, centerY - thickness / 2,
-                  rayEnd - rayStart + 1, thickness, ink);
-  const int diagonal = std::max(1, size / 3);
-  epaper.drawLine(centerX - diagonal, centerY - diagonal,
-                  centerX - rayStart * 2 / 3,
-                  centerY - rayStart * 2 / 3, ink);
-  epaper.drawLine(centerX + rayStart * 2 / 3,
-                  centerY - rayStart * 2 / 3,
-                  centerX + diagonal, centerY - diagonal, ink);
-  epaper.drawLine(centerX - diagonal, centerY + diagonal,
-                  centerX - rayStart * 2 / 3,
-                  centerY + rayStart * 2 / 3, ink);
-  epaper.drawLine(centerX + rayStart * 2 / 3,
-                  centerY + rayStart * 2 / 3,
-                  centerX + diagonal, centerY + diagonal, ink);
-}
-
-void drawMoonIcon(EPaper& epaper, int centerX, int centerY, int size,
-                  uint32_t ink, uint32_t background) {
-  const int radius = std::max(4, size * 2 / 5);
-  epaper.fillCircle(centerX, centerY, radius, ink);
-  epaper.fillCircle(centerX + radius / 2, centerY - radius / 3,
-                    std::max(2, radius * 4 / 5), background);
-}
-
-void drawCloudIcon(EPaper& epaper, int centerX, int centerY, int size,
-                   uint32_t ink) {
-  const int baseY = centerY + size / 7;
-  const int leftRadius = std::max(3, size / 5);
-  const int topRadius = std::max(4, size / 4);
-  const int rightRadius = std::max(3, size / 6);
-  epaper.fillCircle(centerX - size / 5, baseY, leftRadius, ink);
-  epaper.fillCircle(centerX + size / 14, centerY - size / 12,
-                    topRadius, ink);
-  epaper.fillCircle(centerX + size / 4, baseY, rightRadius, ink);
-  epaper.fillRect(centerX - size * 2 / 5, baseY,
-                  size * 4 / 5, std::max(2, size / 5), ink);
-}
-
-void drawSnowflake(EPaper& epaper, int centerX, int centerY, int size,
-                   uint32_t ink) {
-  const int radius = std::max(2, size / 2);
-  epaper.drawFastHLine(centerX - radius, centerY, radius * 2 + 1, ink);
-  epaper.drawFastVLine(centerX, centerY - radius, radius * 2 + 1, ink);
-  epaper.drawLine(centerX - radius, centerY - radius,
-                  centerX + radius, centerY + radius, ink);
-  epaper.drawLine(centerX - radius, centerY + radius,
-                  centerX + radius, centerY - radius, ink);
-}
-
-void drawWeatherIcon(EPaper& epaper, int centerX, int centerY, int size,
-                     int code, bool isDay, uint32_t background) {
-  const bool thunder = code >= 95;
-  const bool snow = (code >= 71 && code <= 77) ||
-                    (code >= 85 && code <= 86);
-  const bool rain = (code >= 51 && code <= 67) ||
-                    (code >= 80 && code <= 82);
-  const bool fog = code == 45 || code == 48;
-  const bool clear = code == 0;
-  const bool partlyCloudy = code == 1 || code == 2;
-
-  if (clear) {
-    if (isDay) {
-      drawSunIcon(epaper, centerX, centerY, size, COLOR_SUN);
-    } else {
-      drawMoonIcon(epaper, centerX, centerY, size, PANEL_ACCENT,
-                   background);
-    }
-    return;
-  }
-
-  if (partlyCloudy) {
-    if (isDay) {
-      drawSunIcon(epaper, centerX - size / 5, centerY - size / 5,
-                  size * 2 / 3, COLOR_SUN);
-    } else {
-      drawMoonIcon(epaper, centerX - size / 5, centerY - size / 5,
-                   size * 2 / 3, PANEL_ACCENT, background);
-    }
-  }
-  drawCloudIcon(epaper, centerX, centerY - size / 12, size * 3 / 4,
-                PANEL_BLACK);
-
-  const int effectY = centerY + size / 3;
-  if (thunder) {
-    epaper.fillTriangle(centerX + size / 12, effectY - size / 10,
-                        centerX - size / 8, effectY + size / 8,
-                        centerX, effectY + size / 8, COLOR_ALERT);
-    epaper.fillTriangle(centerX, effectY + size / 10,
-                        centerX + size / 8, effectY + size / 10,
-                        centerX - size / 12, effectY + size / 2,
-                        COLOR_ALERT);
-  } else if (snow) {
-    drawSnowflake(epaper, centerX - size / 5, effectY, size / 7,
-                  COLOR_RAIN);
-    drawSnowflake(epaper, centerX + size / 5, effectY + size / 10,
-                  size / 7, COLOR_RAIN);
-  } else if (rain) {
-    const int drop = std::max(3, size / 7);
-    epaper.drawLine(centerX - size / 4, effectY,
-                    centerX - size / 4 - drop / 2, effectY + drop,
-                    COLOR_RAIN);
-    epaper.drawLine(centerX, effectY, centerX - drop / 2,
-                    effectY + drop, COLOR_RAIN);
-    epaper.drawLine(centerX + size / 4, effectY,
-                    centerX + size / 4 - drop / 2, effectY + drop,
-                    COLOR_RAIN);
-  } else if (fog) {
-    epaper.drawFastHLine(centerX - size / 3, effectY,
-                        size * 2 / 3, PANEL_MUTED);
-    epaper.drawFastHLine(centerX - size / 4, effectY + size / 8,
-                        size / 2, PANEL_MUTED);
-  }
 }
 
 uint32_t nearestCalendarInk(uint32_t rgb) {
@@ -346,7 +227,7 @@ String wind(float kmh) {
   return String(value, 0) + " " + unit;
 }
 
-void drawHeader(EPaper& epaper, config::CalendarView view, time_t now,
+void drawHeader(EPaper& epaper, time_t now,
                 const sensors::Readings& indoor) {
 #if RETERMINAL_MODEL == 1003
   constexpr int height = 132;
@@ -358,11 +239,10 @@ void drawHeader(EPaper& epaper, config::CalendarView view, time_t now,
   constexpr int height = 64;
   constexpr int margin = 16;
 #endif
-  epaper.fillRect(0, 0, config::PANEL_WIDTH, height,
-                  PANEL_HEADER_BACKGROUND);
+  fillWarmRect(epaper, 0, 0, config::PANEL_WIDTH, height);
   epaper.drawFastHLine(0, height - 1, config::PANEL_WIDTH, PANEL_BLACK);
   epaper.setTextDatum(ML_DATUM);
-  epaper.setTextColor(PANEL_BLACK, PANEL_HEADER_BACKGROUND, true);
+  epaper.setTextColor(PANEL_BLACK);
   const int calendarIconSize = config::ui(18);
   drawCalendarIcon(epaper, margin,
                    height / 2 - calendarIconSize * 7 / 16,
@@ -373,20 +253,6 @@ void drawHeader(EPaper& epaper, config::CalendarView view, time_t now,
                     margin + calendarIconSize + config::ui(9), height / 2);
 
   selectFont(epaper, FontSize::Small);
-  String viewLabel;
-  if (view == config::CalendarView::Week) viewLabel = "WEEK";
-  else if (view == config::CalendarView::Month) viewLabel = "MONTH";
-  else viewLabel = "TODAY";
-  const int viewWidth = config::ui(88);
-  const int viewHeight = config::ui(28);
-  const int viewLeft = (config::PANEL_WIDTH - viewWidth) / 2;
-  const int viewTop = (height - viewHeight) / 2;
-  epaper.fillRoundRect(viewLeft, viewTop, viewWidth, viewHeight,
-                       std::max(3, config::ui(5)), PANEL_ACCENT);
-  epaper.setTextColor(PANEL_ACCENT_TEXT, PANEL_ACCENT, true);
-  epaper.setTextDatum(MC_DATUM);
-  epaper.drawString(viewLabel, config::PANEL_WIDTH / 2, height / 2);
-
   const int batteryWidth = config::ui(22);
   const int batteryHeight = config::ui(12);
   const int terminalWidth = std::max(3, config::ui(5));
@@ -399,7 +265,7 @@ void drawHeader(EPaper& epaper, config::CalendarView view, time_t now,
   const String percent =
       indoor.batteryValid ? String(indoor.batteryPct) + "%" : "--%";
 
-  epaper.setTextColor(PANEL_BLACK, PANEL_HEADER_BACKGROUND, true);
+  epaper.setTextColor(PANEL_BLACK);
   epaper.setTextDatum(MR_DATUM);
   const int percentRight = batteryX - config::ui(9);
   epaper.drawString(percent, percentRight, height / 2);
@@ -427,7 +293,7 @@ void drawHeader(EPaper& epaper, config::CalendarView view, time_t now,
   text_render::drawBatteryGauge(
       epaper, batteryX, batteryY, batteryWidth, batteryHeight, batteryPct,
       outline, terminalWidth, terminalHeight, PANEL_BLACK,
-      PANEL_HEADER_BACKGROUND,
+      PANEL_WHITE,
       indoor.externalPowerValid && indoor.externalPower);
   epaper.setTextDatum(TL_DATUM);
 }
@@ -512,9 +378,8 @@ void drawWeatherCard(EPaper& epaper, const BodyGeometry& body,
       25;
 #endif
 
-  epaper.fillRect(body.weatherLeft + 1, body.weatherTop + 1,
-                  body.weatherWidth - 2, headerHeight - 1,
-                  PANEL_WEATHER_HEADER);
+  fillWarmRect(epaper, body.weatherLeft + 1, body.weatherTop + 1,
+               body.weatherWidth - 2, headerHeight - 1);
   epaper.drawFastHLine(body.weatherLeft, body.weatherTop + headerHeight,
                       body.weatherWidth, PANEL_BLACK);
   const int locationIconSize = std::max(10, config::ui(13));
@@ -523,7 +388,7 @@ void drawWeatherCard(EPaper& epaper, const BodyGeometry& body,
   const int headerCenterY = body.weatherTop + headerHeight / 2;
   drawLocationIcon(epaper, locationIconX, headerCenterY,
                    locationIconSize, PANEL_ACCENT, PANEL_WEATHER_HEADER);
-  epaper.setTextColor(PANEL_BLACK, PANEL_WEATHER_HEADER, true);
+  epaper.setTextColor(PANEL_BLACK);
   epaper.setTextDatum(ML_DATUM);
   selectFont(epaper, FontSize::Small);
   epaper.drawString(
@@ -577,9 +442,8 @@ void drawWeatherCard(EPaper& epaper, const BodyGeometry& body,
   const int iconCenterX =
       body.weatherLeft + margin + iconSize / 2;
   const int iconCenterY = contentTop + margin + iconSize / 2;
-  drawWeatherIcon(epaper, iconCenterX, iconCenterY, iconSize,
-                  weather.weatherCode, weather.isDay,
-                  PANEL_WEATHER_BACKGROUND);
+  weather_icons::draw(epaper, iconCenterX, iconCenterY, iconSize,
+                      weather.weatherCode, weather.isDay, PANEL_BLACK);
 
   selectFont(epaper, FontSize::Large);
   epaper.setTextColor(PANEL_BLACK, PANEL_WEATHER_BACKGROUND, true);
@@ -758,91 +622,6 @@ void drawDayCard(EPaper& epaper, const ::calendar::Data& data,
   }
 }
 
-void drawToday(EPaper& epaper, const ::calendar::Data& data,
-               const BodyGeometry& body, time_t dayStart) {
-  const auto events = eventsForDay(data, dayStart);
-  epaper.setTextDatum(TL_DATUM);
-  epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, true);
-  if (events.empty()) {
-    selectFont(epaper, FontSize::Medium, false);
-    epaper.drawString("No events today", body.left + 20, body.top + 30);
-    return;
-  }
-
-  const int rowHeight =
-#if RETERMINAL_MODEL == 1003
-      132;
-#elif RETERMINAL_MODEL == 1004
-      105;
-#else
-      62;
-#endif
-  const int maxRows = std::max(1, body.height / rowHeight);
-  const int timeWidth =
-#if RETERMINAL_MODEL == 1003
-      170;
-#elif RETERMINAL_MODEL == 1004
-      115;
-#else
-      70;
-#endif
-  int y = body.top;
-  int shown = 0;
-  for (const ::calendar::Event* event : events) {
-    if (shown >= maxRows) break;
-    const uint32_t ink = nearestCalendarInk(event->colorRgb);
-    epaper.fillRect(body.left, y + 5,
-#if RETERMINAL_MODEL == 1003
-                   14,
-#else
-                   7,
-#endif
-                   rowHeight - 10, ink);
-    selectFont(epaper, FontSize::Small);
-    epaper.setTextColor(PANEL_ACCENT, PANEL_WHITE, true);
-    epaper.drawString(event->allDay ? "All day" : formatTime(event->start),
-                      body.left + 22, y + 8);
-    epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, true);
-    epaper.drawString(
-        ellipsize(epaper, event->title, body.width - timeWidth - 34),
-        body.left + timeWidth, y + 8);
-    if (!event->location.empty()) {
-      selectFont(epaper, FontSize::Tiny, false);
-      const int locationIconSize = std::max(8, config::ui(9));
-      const int locationY =
-          y +
-#if RETERMINAL_MODEL == 1003
-          62;
-#else
-          34;
-#endif
-      const int locationIconX =
-          body.left + timeWidth + locationIconSize / 2;
-      drawLocationIcon(epaper, locationIconX,
-                       locationY + epaper.fontHeight(1) / 2,
-                       locationIconSize, PANEL_ACCENT, PANEL_WHITE);
-      const int locationTextX =
-          body.left + timeWidth + locationIconSize + config::ui(4);
-      epaper.drawString(
-          ellipsize(epaper, event->location,
-                    body.left + body.width - locationTextX - 12),
-          locationTextX, locationY);
-    }
-    epaper.drawFastHLine(body.left, y + rowHeight - 1, body.width,
-                        PANEL_MUTED);
-    y += rowHeight;
-    ++shown;
-  }
-  if (static_cast<size_t>(shown) < events.size()) {
-    selectFont(epaper, FontSize::Tiny);
-    epaper.setTextDatum(BR_DATUM);
-    epaper.drawString("+" + String(events.size() - shown) + " more",
-                      body.left + body.width - 4,
-                      body.top + body.height - 4);
-    epaper.setTextDatum(TL_DATUM);
-  }
-}
-
 const char* weekdayLabel(int index, config::WeekStart weekStart) {
   static const char* kMonday[] = {"Mon", "Tue", "Wed", "Thu",
                                    "Fri", "Sat", "Sun"};
@@ -897,17 +676,21 @@ void drawGrid(EPaper& epaper, const ::calendar::Data& data,
           monthView && (dayTm.tm_year != anchorTm.tm_year ||
                         dayTm.tm_mon != anchorTm.tm_mon);
       if (today) {
-        epaper.fillRect(x + 1, y + 1, cellWidth - 2,
+        fillWarmRect(epaper, x + 1, y + 1, cellWidth - 2,
 #if RETERMINAL_MODEL == 1003
-                       54,
+                     std::min(54, cellHeight - 1)
 #else
-                       30,
+                     std::min(30, cellHeight - 1)
 #endif
-                       PANEL_TODAY_BACKGROUND);
+        );
       }
       epaper.setTextDatum(TL_DATUM);
-      epaper.setTextColor(outsideMonth ? PANEL_MUTED : PANEL_BLACK,
-                         today ? PANEL_TODAY_BACKGROUND : PANEL_WHITE, true);
+      const uint32_t dateInk = outsideMonth ? PANEL_MUTED : PANEL_BLACK;
+      if (today) {
+        epaper.setTextColor(dateInk);
+      } else {
+        epaper.setTextColor(dateInk, PANEL_WHITE, true);
+      }
       selectFont(epaper, FontSize::Tiny, today);
       epaper.drawString(String(dayTm.tm_mday), x + 5, y + 3);
 
@@ -926,11 +709,39 @@ void drawGrid(EPaper& epaper, const ::calendar::Data& data,
 #else
           23;
 #endif
-      const int capacity = std::max(1, (cellHeight - (eventY - y) - 4) /
-                                           lineHeight);
+      const int capacity = std::max(
+          0, (cellHeight - (eventY - y) - 4) / lineHeight);
+      if (capacity == 0) {
+        const int dotSize =
+#if RETERMINAL_MODEL == 1003
+            10;
+#elif RETERMINAL_MODEL == 1004
+            8;
+#else
+            5;
+#endif
+        const int dotGap = std::max(2, dotSize / 2);
+        const int maxDots =
+            std::max(1, (cellWidth - 8 + dotGap) / (dotSize + dotGap));
+        const int visible =
+            std::min(static_cast<int>(dayEvents.size()), maxDots);
+        const int dotY = y + cellHeight - dotSize - 3;
+        for (int index = 0; index < visible; ++index) {
+          const uint32_t ink =
+              nearestCalendarInk(dayEvents[index]->colorRgb);
+          epaper.fillCircle(
+              x + 4 + dotSize / 2 + index * (dotSize + dotGap),
+              dotY + dotSize / 2, std::max(1, dotSize / 2), ink);
+        }
+        continue;
+      }
       int shown = 0;
+      int eventCapacity = capacity;
+      if (static_cast<int>(dayEvents.size()) > capacity && capacity > 1) {
+        --eventCapacity;
+      }
       for (const ::calendar::Event* event : dayEvents) {
-        if (shown >= capacity) break;
+        if (shown >= eventCapacity) break;
         const uint32_t ink = nearestCalendarInk(event->colorRgb);
         epaper.fillRect(x + 4, eventY + 4,
 #if RETERMINAL_MODEL == 1003
@@ -962,6 +773,7 @@ void drawGrid(EPaper& epaper, const ::calendar::Data& data,
       }
     }
   }
+  epaper.drawRect(body.left, body.top, body.width, body.height, PANEL_BLACK);
   epaper.setTextDatum(TL_DATUM);
 }
 
@@ -1019,22 +831,36 @@ void status(EPaper& epaper, const String& title, const String& detail,
 }
 
 void calendar(EPaper& epaper, const ::calendar::Data& data,
-              const ::calendar::Window& window, config::CalendarView view,
-              config::WeekStart weekStart, time_t now,
+              const ::calendar::Window& window, config::WeekStart weekStart,
+              time_t now,
               const sensors::Readings& indoor, const WeatherData& weather,
               const String& footer) {
   epaper.fillSprite(PANEL_WHITE);
-  drawHeader(epaper, view, now, indoor);
+  drawHeader(epaper, now, indoor);
   const BodyGeometry body = bodyGeometry();
   drawDayCard(epaper, data, body, calendar_logic::localMidnight(now));
   drawWeatherCard(epaper, body, weather);
-  if (view == config::CalendarView::Today) {
-    drawToday(epaper, data, body, window.start);
-  } else if (view == config::CalendarView::Week) {
-    drawGrid(epaper, data, body, window.start, 1, weekStart, now, false);
-  } else {
-    drawGrid(epaper, data, body, window.start, 6, weekStart, now, true);
-  }
+
+  BodyGeometry week = body;
+  BodyGeometry month = body;
+#if RETERMINAL_MODEL == 1003
+  constexpr int sectionGap = 24;
+  constexpr int weekHeight = 420;
+#elif RETERMINAL_MODEL == 1004
+  constexpr int sectionGap = 20;
+  constexpr int weekHeight = 360;
+#else
+  constexpr int sectionGap = 12;
+  constexpr int weekHeight = 158;
+#endif
+  week.height = weekHeight;
+  month.top = week.top + week.height + sectionGap;
+  month.height = body.top + body.height - month.top;
+
+  drawGrid(epaper, data, week,
+           calendar_logic::startOfWeek(now, weekStart), 1, weekStart, now,
+           false);
+  drawGrid(epaper, data, month, window.start, 6, weekStart, now, true);
   drawFooter(epaper, footer, data);
 }
 

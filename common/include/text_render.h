@@ -169,22 +169,15 @@ inline void drawBatteryGauge(EPaper& epaper, int x, int y, int w, int h,
   }
 }
 
-// Fill a horizontal band of the panel with `background` and, when
-// `dithered` is true, sprinkle `ditherColor` pixels through it using
-// a 4x4 Bayer pattern so panels whose native palette lacks the exact
-// gray needed for the status strip still get a smooth-looking fill.
-// `top` and `height` are clamped to `[0, panelHeight)`.
 template <typename EPaper>
-inline void fillStatusBackground(EPaper& epaper, int top, int height,
-                                 int panelWidth, int panelHeight,
-                                 uint32_t background, bool dithered,
-                                 uint32_t ditherColor,
-                                 uint8_t ditherThreshold) {
-  epaper.fillRect(0, top, panelWidth, height, background);
+inline void fillDitheredRect(EPaper& epaper, int left, int top, int width,
+                             int height, int panelWidth, int panelHeight,
+                             uint32_t background, bool dithered,
+                             uint32_t ditherColor,
+                             uint8_t ditherThreshold) {
+  epaper.fillRect(left, top, width, height, background);
   if (!dithered) return;
 
-  // Ordered neutral patterns provide intermediate shades when the panel
-  // palette has no suitable native gray.
   static constexpr uint8_t bayer4[4][4] = {
       {0, 8, 2, 10},
       {12, 4, 14, 6},
@@ -192,13 +185,26 @@ inline void fillStatusBackground(EPaper& epaper, int top, int height,
       {15, 7, 13, 5},
   };
   const int bottom = min(panelHeight, top + height);
+  const int right = min(panelWidth, left + width);
   for (int y = max(0, top); y < bottom; ++y) {
-    for (int x = 0; x < panelWidth; ++x) {
+    for (int x = max(0, left); x < right; ++x) {
       if (bayer4[y & 3][x & 3] < ditherThreshold) {
         epaper.drawPixel(x, y, ditherColor);
       }
     }
   }
+}
+
+// Fill a horizontal panel band, optionally using a 4x4 Bayer pattern to
+// synthesize a shade that is not available in the panel's native palette.
+template <typename EPaper>
+inline void fillStatusBackground(EPaper& epaper, int top, int height,
+                                 int panelWidth, int panelHeight,
+                                 uint32_t background, bool dithered,
+                                 uint32_t ditherColor,
+                                 uint8_t ditherThreshold) {
+  fillDitheredRect(epaper, 0, top, panelWidth, height, panelWidth, panelHeight,
+                   background, dithered, ditherColor, ditherThreshold);
 }
 
 }  // namespace text_render

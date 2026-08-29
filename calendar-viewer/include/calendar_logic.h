@@ -13,28 +13,6 @@
 
 namespace calendar_logic {
 
-inline config::CalendarView nextView(config::CalendarView view) {
-  switch (view) {
-    case config::CalendarView::Today:
-      return config::CalendarView::Week;
-    case config::CalendarView::Week:
-      return config::CalendarView::Month;
-    default:
-      return config::CalendarView::Today;
-  }
-}
-
-inline config::CalendarView previousView(config::CalendarView view) {
-  switch (view) {
-    case config::CalendarView::Today:
-      return config::CalendarView::Month;
-    case config::CalendarView::Week:
-      return config::CalendarView::Today;
-    default:
-      return config::CalendarView::Week;
-  }
-}
-
 inline bool hasConfiguredCalendarProvider(
     config::CalendarProvider provider, const char* icalUrl,
     bool googleCredentialsConfigured) {

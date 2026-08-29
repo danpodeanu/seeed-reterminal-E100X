@@ -8,7 +8,6 @@ using config_portal::FieldType;
 using config_portal::Section;
 
 const char* const kCalendarProviderValues[] = {"Ical", "Google", nullptr};
-const char* const kViewValues[] = {"Today", "Week", "Month", nullptr};
 const char* const kWeekStartValues[] = {"Monday", "Sunday", nullptr};
 const char* const kWeatherProviderValues[] = {"OpenMeteo", "QWeather", nullptr};
 const char* const kTempUnitValues[] = {"Celsius", "Fahrenheit", nullptr};
@@ -31,11 +30,8 @@ const Field kCalendarFields[] = {
 };
 
 const Field kPresentationFields[] = {
-    {kKeyCalendarView, "Default calendar view",
-     "Right and left buttons cycle Today, Week, and Month and remember the selection.",
-     FieldType::Enum, "Today", kViewValues, 0, 0, nullptr},
     {kKeyWeekStart, "First day of week",
-     "Used by weekly and monthly calendar grids.",
+     "Used by the weekly and monthly calendar grids.",
      FieldType::Enum, "Monday", kWeekStartValues, 0, 0, nullptr},
 };
 

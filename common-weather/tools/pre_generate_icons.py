@@ -1,9 +1,8 @@
 """PlatformIO pre-script that regenerates weather_icons_data.h when
-any of its inputs change.
+any of its shared icon inputs change.
 
-Registered via ``extra_scripts = pre:tools/pre_generate_icons.py`` in
-each ``reterminal_e100*`` env. Runs before compilation so the header
-sees ``RETERMINAL_MODEL`` at Python-time.
+Registered by each app that uses the common weather icons. Runs before
+compilation so the header sees ``RETERMINAL_MODEL`` at Python-time.
 
 Idempotent: recomputes a stamp file of (model, generator hash, svg
 hashes) and skips regeneration when nothing has changed. That keeps
@@ -23,9 +22,10 @@ from pathlib import Path
 
 Import("env")  # type: ignore  # provided by PlatformIO
 
-PROJECT_DIR = Path(env["PROJECT_DIR"])  # noqa: F821  # PlatformIO env
-TOOLS_DIR = PROJECT_DIR / "tools"
-SVG_DIR = PROJECT_DIR / "icons" / "svg"
+PROJECT_DIR = Path(env["PROJECT_DIR"]).resolve()  # noqa: F821
+PACKAGE_DIR = PROJECT_DIR.parent / "common-weather"
+TOOLS_DIR = PACKAGE_DIR / "tools"
+SVG_DIR = PACKAGE_DIR / "icons" / "svg"
 
 # Per-env output dir so parallel `pio run` for different boards can't
 # clobber each other's generated headers. The dir is added to the
@@ -74,7 +74,7 @@ def _stamp_matches(stamp: dict) -> bool:
 
 def _run_generator(model: int) -> None:
     cmd = [sys.executable, str(GENERATOR), str(model), str(OUT_PATH)]
-    print(f"weather-viewer: generating {OUT_PATH.name} for model={model}")
+    print(f"common-weather: generating {OUT_PATH.name} for model={model}")
     subprocess.check_call(cmd)
 
 
@@ -86,7 +86,7 @@ def _main() -> None:
     stamp = _compute_stamp(model)
     if _stamp_matches(stamp):
         print(
-            f"weather-viewer: {OUT_PATH.name} up to date (model={model})"
+            f"common-weather: {OUT_PATH.name} up to date (model={model})"
         )
         return
     _run_generator(model)

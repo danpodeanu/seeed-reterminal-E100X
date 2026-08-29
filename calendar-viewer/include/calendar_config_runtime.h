@@ -14,9 +14,7 @@ config::CalendarProvider calendarProvider();
 const char* icalUrl();
 const char* googleCalendarIds();
 const char* googleDelegatedUser();
-config::CalendarView calendarView();
 config::WeekStart weekStart();
-bool setCalendarView(config::CalendarView view);
 
 uint64_t sleepSeconds();
 const char* timezone();
@@ -46,7 +44,6 @@ bool debugShowStatusBadges();
 bool lowBatteryWarn();
 
 const char* calendarProviderName();
-const char* calendarViewName();
 
 }  // namespace runtime
 }  // namespace calendar_config

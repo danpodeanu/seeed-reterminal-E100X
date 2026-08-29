@@ -242,14 +242,12 @@ void addRoundedWeather(calendar_logic::Fingerprint& hash,
 
 uint64_t frameFingerprint(const calendar::Data& data,
                           const calendar::Window& window,
-                          config::CalendarView view,
                           const WeatherData& weather,
                           const String& footer, time_t now) {
   calendar_logic::Fingerprint hash;
   const uint64_t calendarHash = calendar_logic::dataFingerprint(data, window);
   hash.addValue(calendarHash);
   hash.addValue(data.truncated);
-  hash.addValue(view);
   hash.addValue(calendar_config::runtime::weekStart());
   hash.add(std::string(calendar_config::runtime::timezone()));
   hash.add(std::string(calendar_config::runtime::locationName()));
@@ -395,20 +393,22 @@ void renderPortal() {
 
 enum class PrimaryGesture {
   None,
-  Today,
+  Refresh,
   Portal,
 };
 
-PrimaryGesture primaryGesture(bool pressedAtBoot) {
+PrimaryGesture primaryGesture(bool pressedAtBoot, bool wokeFromGreen) {
   if (!pressedAtBoot) return PrimaryGesture::None;
   hardware::beep();
-  const uint32_t started = millis();
+  // Deep-sleep wake begins when the button is pressed, before setup() runs.
+  // Include that startup time so a physical one-second hold is sufficient.
+  const uint32_t started = wokeFromGreen ? 0 : millis();
   while (!digitalRead(PIN_BUTTON_GREEN) && millis() - started < 1500) {
     delay(5);
   }
   const uint32_t held = millis() - started;
   if (held >= 1000) return PrimaryGesture::Portal;
-  return PrimaryGesture::Today;
+  return PrimaryGesture::Refresh;
 }
 
 String portalHint() {
@@ -454,8 +454,6 @@ void setup() {
   const uint64_t wakePins =
       buttonWake ? esp_sleep_get_ext1_wakeup_status() : 0;
   const bool greenWake = (wakePins & (1ULL << PIN_BUTTON_GREEN)) != 0;
-  const bool rightWake = (wakePins & (1ULL << PIN_BUTTON_RIGHT)) != 0;
-  const bool leftWake = (wakePins & (1ULL << PIN_BUTTON_LEFT)) != 0;
 
   pinMode(PIN_BUTTON_GREEN, INPUT_PULLUP);
   pinMode(PIN_BUTTON_RIGHT, INPUT_PULLUP);
@@ -471,9 +469,8 @@ void setup() {
     hardware::beep();
     gesture = PrimaryGesture::Portal;
   } else {
-    gesture =
-        primaryGesture(greenWake ||
-                       (coldBoot && !digitalRead(PIN_BUTTON_GREEN)));
+    gesture = primaryGesture(
+        greenWake || (coldBoot && !digitalRead(PIN_BUTTON_GREEN)), greenWake);
   }
   const bool noWifi = !calendar_wifi::haveCredentials();
   const config::CalendarProvider provider =
@@ -490,32 +487,13 @@ void setup() {
     renderPortal();
     return;
   }
-  if (gesture == PrimaryGesture::Today) {
-    if (!calendar_config::runtime::setCalendarView(
-            config::CalendarView::Today)) {
-      LOG.println("[view] could not persist Today view");
-    }
-  } else if (rightWake && !leftWake) {
-    if (!calendar_config::runtime::setCalendarView(
-            calendar_logic::nextView(
-                calendar_config::runtime::calendarView()))) {
-      LOG.println("[view] could not persist next view");
-    }
-  } else if (leftWake && !rightWake) {
-    if (!calendar_config::runtime::setCalendarView(
-            calendar_logic::previousView(
-                calendar_config::runtime::calendarView()))) {
-      LOG.println("[view] could not persist previous view");
-    }
-  }
 
   if (app_logic::startupBeepRequired(coldBoot, buttonWake) &&
       gesture == PrimaryGesture::None) {
     hardware::beep();
   }
-  LOG.printf("[boot] Calendar Viewer %s / %s / fw %s / view=%s\n",
-             MODEL_NAME, COLOR_MODE_NAME, board::FIRMWARE_VERSION,
-             calendar_config::runtime::calendarViewName());
+  LOG.printf("[boot] Calendar Viewer %s / %s / fw %s\n",
+             MODEL_NAME, COLOR_MODE_NAME, board::FIRMWARE_VERSION);
 
   rtc_sync::restoreSystemClock();
   struct tm localNow = {};
@@ -596,10 +574,9 @@ void setup() {
   }
 
   const time_t now = time(nullptr);
-  const config::CalendarView view =
-      calendar_config::runtime::calendarView();
   const calendar::Window window = calendar_logic::displayWindow(
-      view, now, calendar_config::runtime::weekStart());
+      config::CalendarView::Month, now,
+      calendar_config::runtime::weekStart());
   calendar::Data calendarData;
   String calendarFailure;
   const bool calendarUpdated =
@@ -656,7 +633,7 @@ void setup() {
     if (weather.fromCache) footer += " / cached weather";
   }
   const uint64_t nextHash =
-      frameFingerprint(calendarData, window, view, weather, footer, now);
+      frameFingerprint(calendarData, window, weather, footer, now);
   uint64_t previousHash = 0;
   FrameKind previousKind = FrameKind::None;
   const bool havePreviousFrame =
@@ -668,9 +645,8 @@ void setup() {
     beginPanel();
     initializePanelColorMode();
     calendar_render::calendar(
-        epaper, calendarData, window, view,
-        calendar_config::runtime::weekStart(), now, sensorReadings, weather,
-        footer);
+        epaper, calendarData, window, calendar_config::runtime::weekStart(),
+        now, sensorReadings, weather, footer);
     refreshPanel();
     if (!saveFrameState(nextHash, FrameKind::Calendar)) {
       LOG.println("[display] warning: frame fingerprint was not saved");

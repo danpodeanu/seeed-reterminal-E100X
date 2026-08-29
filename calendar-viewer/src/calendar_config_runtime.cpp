@@ -1,7 +1,5 @@
 #include "calendar_config_runtime.h"
 
-#include <Preferences.h>
-
 #include "calendar_config_schema.h"
 #include "config_storage.h"
 #include "secrets.h"
@@ -15,7 +13,6 @@ struct Cache {
   String icalUrl = config::ICAL_URL;
   String googleCalendarIds = config::GOOGLE_CALENDAR_IDS;
   String googleDelegatedUser = config::GOOGLE_DELEGATED_USER;
-  config::CalendarView calendarView = config::CALENDAR_VIEW;
   config::WeekStart weekStart = config::WEEK_START;
 
   uint64_t sleepSeconds = config::SLEEP_SECONDS;
@@ -72,12 +69,6 @@ config::CalendarProvider parseCalendarProvider(const String& value) {
                             : config::CalendarProvider::Ical;
 }
 
-config::CalendarView parseView(const String& value) {
-  if (value == "Week") return config::CalendarView::Week;
-  if (value == "Month") return config::CalendarView::Month;
-  return config::CalendarView::Today;
-}
-
 config::WeekStart parseWeekStart(const String& value) {
   return value == "Sunday" ? config::WeekStart::Sunday
                             : config::WeekStart::Monday;
@@ -99,17 +90,6 @@ config::WindSpeedUnit parseWindUnit(const String& value) {
              : config::WindSpeedUnit::KilometresPerHour;
 }
 
-const char* viewStorageValue(config::CalendarView view) {
-  switch (view) {
-    case config::CalendarView::Week:
-      return "Week";
-    case config::CalendarView::Month:
-      return "Month";
-    default:
-      return "Today";
-  }
-}
-
 }  // namespace
 
 void load() {
@@ -122,8 +102,6 @@ void load() {
       prefs, kSchema, kKeyGoogleCalendarIds);
   g_cache.googleDelegatedUser = config_portal::storage::getString(
       prefs, kSchema, kKeyGoogleDelegatedUser);
-  g_cache.calendarView = parseView(
-      config_portal::storage::getString(prefs, kSchema, kKeyCalendarView));
   g_cache.weekStart = parseWeekStart(
       config_portal::storage::getString(prefs, kSchema, kKeyWeekStart));
 
@@ -185,18 +163,7 @@ const char* googleCalendarIds() { return g_cache.googleCalendarIds.c_str(); }
 const char* googleDelegatedUser() {
   return g_cache.googleDelegatedUser.c_str();
 }
-config::CalendarView calendarView() { return g_cache.calendarView; }
 config::WeekStart weekStart() { return g_cache.weekStart; }
-
-bool setCalendarView(config::CalendarView view) {
-  Preferences prefs;
-  if (!prefs.begin(kNamespace, false)) return false;
-  const size_t written = prefs.putString(kKeyCalendarView, viewStorageValue(view));
-  prefs.end();
-  if (written == 0) return false;
-  g_cache.calendarView = view;
-  return true;
-}
 
 uint64_t sleepSeconds() { return g_cache.sleepSeconds; }
 const char* timezone() { return g_cache.timezone.c_str(); }
@@ -229,10 +196,6 @@ bool lowBatteryWarn() { return g_cache.lowBatteryWarn; }
 const char* calendarProviderName() {
   return calendarProvider() == config::CalendarProvider::Google ? "Google"
                                                                 : "iCalendar";
-}
-
-const char* calendarViewName() {
-  return viewStorageValue(calendarView());
 }
 
 }  // namespace runtime

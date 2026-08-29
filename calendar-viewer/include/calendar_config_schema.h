@@ -11,7 +11,6 @@ constexpr const char* kKeyCalendarProvider = "cal_provider";
 constexpr const char* kKeyIcalUrl = "ical_url";
 constexpr const char* kKeyGoogleCalendarIds = "gcal_ids";
 constexpr const char* kKeyGoogleDelegatedUser = "gcal_user";
-constexpr const char* kKeyCalendarView = "view";
 constexpr const char* kKeyWeekStart = "week_start";
 
 constexpr const char* kKeySleepSeconds = "sleep_secs";
