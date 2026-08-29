@@ -67,6 +67,13 @@ void fillWarmRect(EPaper& epaper, int x, int y, int width, int height) {
       PANEL_WARM_DITHER, 5);
 }
 
+void fillTodayRect(EPaper& epaper, int x, int y, int width, int height) {
+  text_render::fillDitheredRect(
+      epaper, x, y, width, height, config::PANEL_WIDTH, config::PANEL_HEIGHT,
+      PANEL_TODAY_BASE, PANEL_TODAY_DITHER != PANEL_TODAY_BASE,
+      PANEL_TODAY_DITHER, 5);
+}
+
 void drawCalendarIcon(EPaper& epaper, int x, int y, int size,
                       uint32_t ink) {
   const int width = size;
@@ -250,18 +257,18 @@ void drawHeader(EPaper& epaper, time_t now,
   constexpr int height = 64;
   constexpr int margin = 16;
 #endif
-  fillWarmRect(epaper, 0, 0, config::PANEL_WIDTH, height);
+  epaper.fillRect(0, 0, config::PANEL_WIDTH, height,
+                  PANEL_HEADER_BACKGROUND);
   epaper.drawFastHLine(0, height - 1, config::PANEL_WIDTH, PANEL_BLACK);
-  epaper.setTextDatum(ML_DATUM);
-  epaper.setTextColor(PANEL_BLACK);
+  epaper.setTextColor(PANEL_BLACK, PANEL_HEADER_BACKGROUND, true);
   const int calendarIconSize = config::ui(18);
   drawCalendarIcon(epaper, margin,
                    height / 2 - calendarIconSize * 7 / 16,
                    calendarIconSize, PANEL_ACCENT);
   selectFont(epaper, FontSize::Medium);
-  String heading = formatDate(now, "%A, %e %B");
-  epaper.drawString(heading,
-                    margin + calendarIconSize + config::ui(9), height / 2);
+  const String heading = formatDate(now, "%A, %e %B");
+  epaper.setTextDatum(MC_DATUM);
+  epaper.drawString(heading, config::PANEL_WIDTH / 2, height / 2);
 
   selectFont(epaper, FontSize::Small);
   const int batteryWidth = config::ui(22);
@@ -269,7 +276,7 @@ void drawHeader(EPaper& epaper, time_t now,
   const int terminalWidth = std::max(3, config::ui(5));
   const int batteryX =
       config::PANEL_WIDTH - margin - terminalWidth - batteryWidth;
-  const int batteryY = height / 2 + 2 - batteryHeight / 2;
+  const int batteryY = std::max(3, margin / 2);
   const int outline = std::max(1, config::ui(1));
   const int terminalHeight = std::max(3, config::ui(5));
   const int batteryPct = indoor.batteryValid ? indoor.batteryPct : -1;
@@ -279,7 +286,7 @@ void drawHeader(EPaper& epaper, time_t now,
   epaper.setTextColor(PANEL_BLACK);
   epaper.setTextDatum(MR_DATUM);
   const int percentRight = batteryX - config::ui(9);
-  epaper.drawString(percent, percentRight, height / 2);
+  epaper.drawString(percent, percentRight, batteryY + batteryHeight / 2);
   text_render::drawBatteryGauge(
       epaper, batteryX, batteryY, batteryWidth, batteryHeight, batteryPct,
       outline, terminalWidth, terminalHeight, PANEL_BLACK,
@@ -587,7 +594,6 @@ void drawDayCard(EPaper& epaper, const ::calendar::Data& data,
   const int headerIconSize = std::max(10, config::ui(14));
 
   const int contentLeft = body.dayLeft + margin;
-  const int contentWidth = body.dayWidth - 2 * margin;
   epaper.fillRect(body.dayLeft + 1, body.dayTop + 1,
                   body.dayWidth - 2, headerHeight - 1,
                   PANEL_SECTION_HEADER);
@@ -633,12 +639,14 @@ void drawDayCard(EPaper& epaper, const ::calendar::Data& data,
   for (int index = 0; index < shown; ++index) {
     const ::calendar::Event& event = *events[index];
     const uint32_t ink = nearestCalendarInk(event.colorRgb);
+    const int barLeft = body.dayLeft + 1;
     const int barTop = y + 2;
+    const int barWidth = body.dayWidth - 2;
     const int barHeight = rowHeight - 4;
     const int textPadding = config::ui(5);
-    const int textLeft = contentLeft + textPadding;
-    const int textWidth = contentWidth - 2 * textPadding;
-    epaper.fillRect(contentLeft, barTop, contentWidth, barHeight, ink);
+    const int textLeft = barLeft + textPadding;
+    const int textWidth = barWidth - 2 * textPadding;
+    epaper.fillRect(barLeft, barTop, barWidth, barHeight, ink);
     selectFont(epaper, FontSize::Tiny, true);
     const String timeLabel =
         event.allDay ? "All day"
@@ -678,7 +686,6 @@ void drawGrid(EPaper& epaper, const ::calendar::Data& data,
 #else
       34;
 #endif
-  const int cellWidth = body.width / 7;
   const int cellHeight = (body.height - headerHeight) / rows;
   epaper.fillRect(body.left, body.top, body.width, headerHeight,
                   PANEL_SECTION_HEADER);
@@ -686,8 +693,10 @@ void drawGrid(EPaper& epaper, const ::calendar::Data& data,
   epaper.setTextColor(PANEL_SECTION_HEADER_TEXT, PANEL_SECTION_HEADER, true);
   selectFont(epaper, FontSize::Tiny);
   for (int column = 0; column < 7; ++column) {
+    const int columnLeft = body.left + body.width * column / 7;
+    const int columnRight = body.left + body.width * (column + 1) / 7;
     epaper.drawString(weekdayLabel(column, weekStart),
-                      body.left + column * cellWidth + cellWidth / 2,
+                      (columnLeft + columnRight) / 2,
                       body.top + headerHeight / 2);
   }
   epaper.drawFastHLine(body.left, body.top + headerHeight, body.width,
@@ -700,7 +709,9 @@ void drawGrid(EPaper& epaper, const ::calendar::Data& data,
     for (int column = 0; column < 7; ++column) {
       const int cell = row * 7 + column;
       const time_t day = calendar_logic::addLocalDays(gridStart, cell);
-      const int x = body.left + column * cellWidth;
+      const int x = body.left + body.width * column / 7;
+      const int nextX = body.left + body.width * (column + 1) / 7;
+      const int cellWidth = nextX - x;
       const int y = body.top + headerHeight + row * cellHeight;
       if (column > 0) epaper.drawFastVLine(x, y, cellHeight, PANEL_MUTED);
       if (row > 0) epaper.drawFastHLine(x, y, cellWidth, PANEL_MUTED);
@@ -712,13 +723,8 @@ void drawGrid(EPaper& epaper, const ::calendar::Data& data,
           monthView && (dayTm.tm_year != anchorTm.tm_year ||
                         dayTm.tm_mon != anchorTm.tm_mon);
       if (today) {
-        epaper.fillRect(x + 1, y + 1, cellWidth - 2,
-#if RETERMINAL_MODEL == 1003
-                       std::min(54, cellHeight - 1),
-#else
-                       std::min(30, cellHeight - 1),
-#endif
-                       PANEL_TODAY_BACKGROUND);
+        fillTodayRect(epaper, x + 1, y + 1, cellWidth - 1,
+                      cellHeight - 1);
       }
       epaper.setTextDatum(TL_DATUM);
       const uint32_t dateInk = outsideMonth ? PANEL_MUTED : PANEL_BLACK;
@@ -779,9 +785,9 @@ void drawGrid(EPaper& epaper, const ::calendar::Data& data,
       for (const ::calendar::Event* event : dayEvents) {
         if (shown >= eventCapacity) break;
         const uint32_t ink = nearestCalendarInk(event->colorRgb);
-        const int barLeft = x + 3;
+        const int barLeft = x + 1;
         const int barTop = eventY + 1;
-        const int barWidth = cellWidth - 6;
+        const int barWidth = cellWidth - 1;
         const int barHeight = lineHeight - 2;
         const int textPadding = config::ui(4);
         const int textX = barLeft + textPadding;
@@ -798,7 +804,11 @@ void drawGrid(EPaper& epaper, const ::calendar::Data& data,
       }
       if (shown < static_cast<int>(dayEvents.size())) {
         selectFont(epaper, FontSize::Tiny);
-        epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, true);
+        if (today) {
+          epaper.setTextColor(PANEL_BLACK);
+        } else {
+          epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, true);
+        }
         epaper.setTextDatum(BR_DATUM);
         epaper.drawString("+" + String(dayEvents.size() - shown),
                           x + cellWidth - 4, y + cellHeight - 3);
