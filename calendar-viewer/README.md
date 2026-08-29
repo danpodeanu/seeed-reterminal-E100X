@@ -21,6 +21,8 @@ changed.
   six-color palette.
 - Today, Week, and Month layouts selected with the front buttons.
 - A persistent right sidebar with today's agenda above a compact weather card.
+- Native calendar, climate, location, weather, and alert icons, with
+  color-blocked dashboard accents on the six-color models.
 - Indoor SHT4x temperature/humidity and battery status in the header.
 - Open-Meteo or QWeather summary, with optional severe-weather alerts.
 - Captive-portal configuration for Wi-Fi, calendar, timezone, NTP, quiet

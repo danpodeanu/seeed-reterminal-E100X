@@ -222,6 +222,7 @@ void addRoundedWeather(calendar_logic::Fingerprint& hash,
   hash.addValue(weather.valid);
   if (!weather.valid) return;
   hash.addValue(weather.weatherCode);
+  hash.addValue(weather.isDay);
   const int current = static_cast<int>(lroundf(weather.temperatureC));
   const int low = isfinite(weather.days[0].minimumC)
                       ? static_cast<int>(lroundf(weather.days[0].minimumC))

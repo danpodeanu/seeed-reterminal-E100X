@@ -20,6 +20,7 @@ constexpr const char* kFeels = "w_feels";
 constexpr const char* kHumidity = "w_hum";
 constexpr const char* kWind = "w_wind";
 constexpr const char* kCode = "w_code";
+constexpr const char* kIsDay = "w_is_day";
 constexpr const char* kHigh = "w_high";
 constexpr const char* kLow = "w_low";
 constexpr const char* kAlert = "w_alert";
@@ -57,6 +58,7 @@ bool loadCached(WeatherData& weather, uint64_t maximumAgeSeconds,
     weather.humidityPct = prefs.getFloat(kHumidity, NAN);
     weather.windKmh = prefs.getFloat(kWind, NAN);
     weather.weatherCode = prefs.getInt(kCode, -1);
+    weather.isDay = prefs.getBool(kIsDay, true);
     weather.days[0].maximumC = prefs.getFloat(kHigh, NAN);
     weather.days[0].minimumC = prefs.getFloat(kLow, NAN);
     weather.alertTitle = prefs.getString(kAlert, "");
@@ -90,6 +92,7 @@ bool saveCached(const WeatherData& weather, String& failureReason) {
       prefs.putFloat(kHumidity, weather.humidityPct) > 0 &&
       prefs.putFloat(kWind, weather.windKmh) > 0 &&
       prefs.putInt(kCode, weather.weatherCode) > 0 &&
+      prefs.putBool(kIsDay, weather.isDay) > 0 &&
       prefs.putFloat(kHigh, weather.days[0].maximumC) > 0 &&
       prefs.putFloat(kLow, weather.days[0].minimumC) > 0 &&
       prefs.putString(kAlert, weather.alertTitle) >= weather.alertTitle.length();
