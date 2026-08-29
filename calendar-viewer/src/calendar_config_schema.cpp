@@ -22,7 +22,7 @@ const Field kCalendarFields[] = {
      "HTTP(S) link to a public .ics feed. Prefer HTTPS. Saved only in device NVS and redacted after save.",
      FieldType::Secret, "", nullptr, 0, 2048, nullptr},
     {kKeyGoogleCalendarIds, "Google calendar IDs",
-     "Optional comma-separated IDs to query directly. Leave blank to discover calendars visible to the service account.",
+     "Optional comma-separated IDs to query directly. The device adds them to the service account's CalendarList when needed so their colors can be read.",
      FieldType::String, "", nullptr, 0, 512, nullptr},
     {kKeyGoogleDelegatedUser, "Google delegated user",
      "Optional Workspace user email for domain-wide delegation. Leave blank for calendars shared directly with the service account.",

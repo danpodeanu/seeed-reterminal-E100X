@@ -112,11 +112,13 @@ reported as a feed error instead of silently producing a different schedule.
 6. Save and reboot.
 
 Direct ID queries request
-`https://www.googleapis.com/auth/calendar.events.readonly`; calendar discovery
-requests `https://www.googleapis.com/auth/calendar.readonly`. For Workspace
-domain-wide delegation, authorize the service account's OAuth client ID for
-both scopes, then set **Google delegated user** to the user whose calendars
-should be read.
+`https://www.googleapis.com/auth/calendar.readonly` and
+`https://www.googleapis.com/auth/calendar.calendarlist`. If a configured
+calendar is absent from the service account's CalendarList, the device adds the
+subscription so it can inherit that calendar entry's default color. This does
+not modify calendar contents. For Workspace domain-wide delegation, authorize
+the service account's OAuth client ID for both scopes, then set **Google
+delegated user** to the user whose calendars and display colors should be read.
 
 The uploaded JSON is capped at 8 KiB and parsed in RAM. Only the required
 service-account fields are saved in the `calendar` NVS namespace; the private

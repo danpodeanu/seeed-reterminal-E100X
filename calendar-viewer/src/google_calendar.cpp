@@ -34,8 +34,14 @@ struct GoogleCalendar {
 
 constexpr const char* kCalendarReadOnlyScope =
     "https://www.googleapis.com/auth/calendar.readonly";
-constexpr const char* kEventsReadOnlyScope =
-    "https://www.googleapis.com/auth/calendar.events.readonly";
+constexpr const char* kConfiguredCalendarScopes =
+    "https://www.googleapis.com/auth/calendar.readonly "
+    "https://www.googleapis.com/auth/calendar.calendarlist";
+
+enum class GoogleRequestMethod {
+  Get,
+  Post,
+};
 
 void scrub(String& value) {
   for (size_t i = 0; i < value.length(); ++i) value.setCharAt(i, '\0');
@@ -235,11 +241,15 @@ bool buildServiceAccountJwt(const google_credentials::Credentials& credentials,
   return true;
 }
 
-bool googleRequest(const String& operation, const String& url,
-                   const String& bearerToken, String& body,
-                   String& failureReason) {
-  body = "";
-  LOG.printf("[google] GET %s\n", operation.c_str());
+bool googleRequest(GoogleRequestMethod method, const String& operation,
+                   const String& url, const String& bearerToken,
+                   const String& requestBody, String& responseBody,
+                   String& failureReason, int* responseStatus) {
+  responseBody = "";
+  if (responseStatus != nullptr) *responseStatus = 0;
+  const char* methodName =
+      method == GoogleRequestMethod::Get ? "GET" : "POST";
+  LOG.printf("[google] %s %s\n", methodName, operation.c_str());
   tls_client::DefaultRootClient client;
   client.setTimeout(config::HTTP_TIMEOUT_MS);
   HTTPClient http;
@@ -255,7 +265,13 @@ bool googleRequest(const String& operation, const String& url,
   http.addHeader("Authorization", "Bearer " + bearerToken);
   http.addHeader("Accept", "application/json");
   http.addHeader("Accept-Encoding", "identity");
-  const int status = http.GET();
+  if (method == GoogleRequestMethod::Post) {
+    http.addHeader("Content-Type", "application/json");
+  }
+  const int status = method == GoogleRequestMethod::Get
+                         ? http.GET()
+                         : http.POST(requestBody);
+  if (responseStatus != nullptr) *responseStatus = status;
   if (status <= 0) {
     const String detail = HTTPClient::errorToString(status);
     failureReason = operation + " request failed";
@@ -268,7 +284,8 @@ bool googleRequest(const String& operation, const String& url,
   const size_t maximumResponse =
       status == HTTP_CODE_OK ? 512U * 1024U : 64U * 1024U;
   const bool bodyRead = calendar_http::readBody(
-      http, maximumResponse, config::HTTP_TIMEOUT_MS, body, failureReason);
+      http, maximumResponse, config::HTTP_TIMEOUT_MS, responseBody,
+      failureReason);
   http.end();
   if (!bodyRead) {
     failureReason = operation + " response failed: " + failureReason;
@@ -276,15 +293,33 @@ bool googleRequest(const String& operation, const String& url,
     return false;
   }
   LOG.printf("[google] %s -> HTTP %d, %u byte(s)\n", operation.c_str(),
-             status, static_cast<unsigned>(body.length()));
+             status, static_cast<unsigned>(responseBody.length()));
   if (status == HTTP_CODE_OK) return true;
 
-  const String detail = googleErrorMessage(body);
+  const String detail = googleErrorMessage(responseBody);
   failureReason = operation + " returned HTTP " + String(status);
   if (!detail.isEmpty()) failureReason += ": " + detail;
   LOG.printf("[google] %s\n", failureReason.c_str());
-  body = "";
+  responseBody = "";
   return false;
+}
+
+bool googleGet(const String& operation, const String& url,
+               const String& bearerToken, String& responseBody,
+               String& failureReason, int* responseStatus = nullptr) {
+  const String requestBody;
+  return googleRequest(GoogleRequestMethod::Get, operation, url, bearerToken,
+                       requestBody, responseBody, failureReason,
+                       responseStatus);
+}
+
+bool googlePostJson(const String& operation, const String& url,
+                    const String& bearerToken, const String& requestBody,
+                    String& responseBody, String& failureReason,
+                    int* responseStatus = nullptr) {
+  return googleRequest(GoogleRequestMethod::Post, operation, url, bearerToken,
+                       requestBody, responseBody, failureReason,
+                       responseStatus);
 }
 
 bool exchangeAccessToken(const google_credentials::Credentials& credentials,
@@ -459,6 +494,78 @@ bool parseEventColors(const String& body, uint32_t colors[12]) {
   return true;
 }
 
+bool parseCalendarListEntry(const String& body, GoogleCalendar& calendar,
+                            String& failureReason) {
+  JsonDocument document;
+  const DeserializationError error = deserializeJson(document, body);
+  if (error) {
+    failureReason = "Google calendar metadata returned invalid JSON: " +
+                    String(error.c_str());
+    return false;
+  }
+
+  const String returnedId = String(document["id"] | "");
+  if (returnedId.isEmpty()) {
+    failureReason = "Google calendar metadata did not include an ID";
+    return false;
+  }
+  const String background = String(document["backgroundColor"] | "");
+  constexpr uint32_t kInvalidColor = 0x1000000;
+  const uint32_t color =
+      calendar_logic::parseRgb(background.c_str(), kInvalidColor);
+  if (color == kInvalidColor) {
+    failureReason =
+        "Google calendar metadata did not include a valid background color";
+    return false;
+  }
+
+  calendar.id = returnedId;
+  calendar.name = String(
+      document["summaryOverride"] | (document["summary"] | returnedId.c_str()));
+  calendar.color = color;
+  const String accessRole = String(document["accessRole"] | "unknown");
+  LOG.printf("[google] calendar metadata: %s, access=%s, color=%s\n",
+             calendar.name.c_str(), accessRole.c_str(),
+             background.c_str());
+  return true;
+}
+
+bool ensureCalendarListEntry(GoogleCalendar& calendar,
+                             const String& accessToken,
+                             String& failureReason) {
+  const String fields =
+      "fields=id,summary,summaryOverride,accessRole,colorId,"
+      "backgroundColor,foregroundColor";
+  const String entryUrl =
+      "https://www.googleapis.com/calendar/v3/users/me/calendarList/" +
+      urlEncode(calendar.id) + "?" + fields;
+  String response;
+  int status = 0;
+  if (googleGet("Google calendar metadata", entryUrl, accessToken, response,
+                failureReason, &status)) {
+    return parseCalendarListEntry(response, calendar, failureReason);
+  }
+  if (status != HTTP_CODE_NOT_FOUND) return false;
+
+  LOG.printf("[google] calendar %s is not in CalendarList; adding it\n",
+             calendar.id.c_str());
+  JsonDocument requestDocument;
+  requestDocument["id"] = calendar.id;
+  String requestBody;
+  serializeJson(requestDocument, requestBody);
+  response = "";
+  failureReason = "";
+  const String insertUrl =
+      "https://www.googleapis.com/calendar/v3/users/me/calendarList"
+      "?" +
+      fields;
+  if (!googlePostJson("Google calendar-list insert", insertUrl, accessToken,
+                      requestBody, response, failureReason)) {
+    return false;
+  }
+  return parseCalendarListEntry(response, calendar, failureReason);
+}
+
 bool parseGoogleDate(JsonVariantConst value, time_t& timestamp,
                      bool& allDay) {
   const char* dateTime = value["dateTime"] | "";
@@ -542,7 +649,7 @@ bool fetchGoogle(const calendar::Window& window, calendar::Data& out,
 
   const std::vector<String> requested = configuredIds();
   const char* scope =
-      requested.empty() ? kCalendarReadOnlyScope : kEventsReadOnlyScope;
+      requested.empty() ? kCalendarReadOnlyScope : kConfiguredCalendarScopes;
   LOG.printf("[google] starting calendar refresh using %s mode\n",
              requested.empty() ? "calendar discovery" : "configured IDs");
 
@@ -566,8 +673,8 @@ bool fetchGoogle(const calendar::Window& window, calendar::Data& out,
         "https://www.googleapis.com/calendar/v3/users/me/calendarList"
         "?maxResults=250&minAccessRole=reader"
         "&fields=items(id,summary,summaryOverride,backgroundColor)";
-    if (!googleRequest("Google calendar list", listUrl, accessToken, response,
-                       failureReason)) {
+    if (!googleGet("Google calendar list", listUrl, accessToken, response,
+                   failureReason)) {
       scrub(accessToken);
       return false;
     }
@@ -587,6 +694,12 @@ bool fetchGoogle(const calendar::Window& window, calendar::Data& out,
       GoogleCalendar calendar;
       calendar.id = id;
       calendar.name = id;
+      if (!ensureCalendarListEntry(calendar, accessToken, failureReason)) {
+        LOG.printf("[google] calendar metadata failed for %s: %s\n",
+                   id.c_str(), failureReason.c_str());
+        scrub(accessToken);
+        return false;
+      }
       calendars.push_back(calendar);
     }
     LOG.printf("[google] querying %u configured calendar ID(s) directly\n",
@@ -603,12 +716,10 @@ bool fetchGoogle(const calendar::Window& window, calendar::Data& out,
   uint32_t eventColors[12] = {
       0, 0x7986CB, 0x33B679, 0x8E24AA, 0xE67C73, 0xF6BF26, 0xF4511E,
       0x039BE5, 0x616161, 0x3F51B5, 0x0B8043, 0xD50000};
-  if (!requested.empty()) {
-    LOG.printf("[google] using the built-in Google event-color palette\n");
-  } else if (googleRequest("Google event colors",
-                           "https://www.googleapis.com/calendar/v3/colors"
-                           "?fields=event",
-                           accessToken, response, failureReason)) {
+  if (googleGet("Google event colors",
+                "https://www.googleapis.com/calendar/v3/colors"
+                "?fields=event",
+                accessToken, response, failureReason)) {
     if (parseEventColors(response, eventColors)) {
       LOG.printf("[google] loaded event colors\n");
     } else {
@@ -654,8 +765,8 @@ bool fetchGoogle(const calendar::Window& window, calendar::Data& out,
       if (!pageToken.isEmpty()) {
         url += "&pageToken=" + urlEncode(pageToken);
       }
-      if (!googleRequest("Google events", url, accessToken, response,
-                        failureReason)) {
+      if (!googleGet("Google events", url, accessToken, response,
+                     failureReason)) {
         scrub(accessToken);
         return false;
       }
