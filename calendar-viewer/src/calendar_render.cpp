@@ -178,6 +178,17 @@ uint32_t nearestCalendarInk(uint32_t rgb) {
 #endif
 }
 
+uint32_t eventTextInk(uint32_t background) {
+#if RETERMINAL_MODEL == 1002 || RETERMINAL_MODEL == 1004
+  return background == TFT_WHITE || background == TFT_YELLOW ? TFT_BLACK
+                                                              : TFT_WHITE;
+#elif RETERMINAL_MODEL == 1003
+  return background >= TFT_GRAY_8 ? TFT_GRAY_0 : TFT_GRAY_15;
+#else
+  return background >= TFT_GRAY_2 ? TFT_GRAY_0 : TFT_GRAY_3;
+#endif
+}
+
 String ellipsize(EPaper& epaper, const std::string& value, int width) {
   return text_render::ellipsize(epaper, String(value.c_str()), width);
 }
@@ -565,14 +576,6 @@ void drawDayCard(EPaper& epaper, const ::calendar::Data& data,
 #else
       44;
 #endif
-  const int markerWidth =
-#if RETERMINAL_MODEL == 1003
-      10;
-#elif RETERMINAL_MODEL == 1004
-      7;
-#else
-      4;
-#endif
   const int titleOffset =
 #if RETERMINAL_MODEL == 1003
       34;
@@ -630,27 +633,26 @@ void drawDayCard(EPaper& epaper, const ::calendar::Data& data,
   for (int index = 0; index < shown; ++index) {
     const ::calendar::Event& event = *events[index];
     const uint32_t ink = nearestCalendarInk(event.colorRgb);
-    epaper.fillRect(contentLeft, y + 5, markerWidth, rowHeight - 10, ink);
-    const int textLeft = contentLeft + markerWidth + config::ui(5);
-    const int textWidth =
-        body.dayLeft + body.dayWidth - margin - textLeft;
-    selectFont(epaper, FontSize::Tiny);
+    const int barTop = y + 2;
+    const int barHeight = rowHeight - 4;
+    const int textPadding = config::ui(5);
+    const int textLeft = contentLeft + textPadding;
+    const int textWidth = contentWidth - 2 * textPadding;
+    epaper.fillRect(contentLeft, barTop, contentWidth, barHeight, ink);
+    selectFont(epaper, FontSize::Tiny, true);
     const String timeLabel =
         event.allDay ? "All day"
                      : event.start < dayStart ? "Ongoing"
                                               : formatTime(event.start);
-    epaper.setTextColor(PANEL_ACCENT, PANEL_WHITE, true);
+    epaper.setTextColor(eventTextInk(ink), ink, true);
     epaper.drawString(timeLabel, textLeft, y + 2);
-    selectFont(epaper, FontSize::Tiny, false);
-    epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, true);
     epaper.drawString(ellipsize(epaper, event.title, textWidth),
                       textLeft, y + titleOffset);
-    epaper.drawFastHLine(contentLeft, y + rowHeight - 1, contentWidth,
-                        PANEL_MUTED);
     y += rowHeight;
   }
   if (shown < static_cast<int>(events.size())) {
     selectFont(epaper, FontSize::Tiny);
+    epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, true);
     epaper.drawString("+" + String(events.size() - shown) + " more",
                       contentLeft, y + config::ui(5));
   }
@@ -777,30 +779,26 @@ void drawGrid(EPaper& epaper, const ::calendar::Data& data,
       for (const ::calendar::Event* event : dayEvents) {
         if (shown >= eventCapacity) break;
         const uint32_t ink = nearestCalendarInk(event->colorRgb);
-        epaper.fillRect(x + 4, eventY + 4,
-#if RETERMINAL_MODEL == 1003
-                       10,
-#else
-                       5,
-#endif
-                       lineHeight - 8, ink);
-        selectFont(epaper, FontSize::Tiny, false);
-        epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, true);
-        const int textX =
-#if RETERMINAL_MODEL == 1003
-            x + 20;
-#else
-            x + 12;
-#endif
+        const int barLeft = x + 3;
+        const int barTop = eventY + 1;
+        const int barWidth = cellWidth - 6;
+        const int barHeight = lineHeight - 2;
+        const int textPadding = config::ui(4);
+        const int textX = barLeft + textPadding;
+        epaper.fillRect(barLeft, barTop, barWidth, barHeight, ink);
+        selectFont(epaper, FontSize::Tiny, true);
+        epaper.setTextColor(eventTextInk(ink), ink, true);
+        epaper.setTextDatum(ML_DATUM);
         epaper.drawString(
             ellipsize(epaper, event->title,
-                      cellWidth - (textX - x) - 4),
-            textX, eventY);
+                      barWidth - 2 * textPadding),
+            textX, barTop + barHeight / 2);
         eventY += lineHeight;
         ++shown;
       }
       if (shown < static_cast<int>(dayEvents.size())) {
         selectFont(epaper, FontSize::Tiny);
+        epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, true);
         epaper.setTextDatum(BR_DATUM);
         epaper.drawString("+" + String(dayEvents.size() - shown),
                           x + cellWidth - 4, y + cellHeight - 3);
