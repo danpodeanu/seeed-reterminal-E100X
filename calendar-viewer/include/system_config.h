@@ -15,8 +15,15 @@
 namespace config {
 
 constexpr int MODEL = panel_traits::MODEL;
-constexpr int PANEL_WIDTH = panel_traits::WIDTH;
-constexpr int PANEL_HEIGHT = panel_traits::HEIGHT;
+constexpr bool ROTATE_PANEL_TO_LANDSCAPE = MODEL == 1004;
+constexpr int PANEL_ROTATION =
+    ROTATE_PANEL_TO_LANDSCAPE ? 1 : panel_traits::DISPLAY_ROTATION;
+constexpr int PANEL_WIDTH =
+    ROTATE_PANEL_TO_LANDSCAPE ? panel_traits::HEIGHT : panel_traits::WIDTH;
+constexpr int PANEL_HEIGHT =
+    ROTATE_PANEL_TO_LANDSCAPE ? panel_traits::WIDTH : panel_traits::HEIGHT;
+static_assert(PANEL_WIDTH > PANEL_HEIGHT,
+              "Calendar Viewer requires landscape panel geometry");
 
 constexpr int ui(int e1001Pixels) {
   return panel_traits::scaleUi(e1001Pixels);

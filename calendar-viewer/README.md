@@ -34,10 +34,10 @@ changed.
 
 | Environment | Panel | Calendar colors |
 | --- | --- | --- |
-| `reterminal_e1001` | 800x480 UC8179 | 4-level gray |
-| `reterminal_e1002` | 800x480 ED2208 | six-color |
-| `reterminal_e1003` | 1872x1404 ED103TC2 | 16-level gray |
-| `reterminal_e1004` | 1200x1600 T133A01 | six-color |
+| `reterminal_e1001` | 800x480 landscape UC8179 | 4-level gray |
+| `reterminal_e1002` | 800x480 landscape ED2208 | six-color |
+| `reterminal_e1003` | 1872x1404 landscape ED103TC2 | 16-level gray |
+| `reterminal_e1004` | 1600x1200 landscape T133A01 | six-color |
 
 Use the environment matching the physical device; panel drivers and
 dimensions differ between models.

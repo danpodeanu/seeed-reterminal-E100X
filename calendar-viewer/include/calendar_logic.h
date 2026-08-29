@@ -35,6 +35,15 @@ inline config::CalendarView previousView(config::CalendarView view) {
   }
 }
 
+inline bool hasConfiguredCalendarProvider(
+    config::CalendarProvider provider, const char* icalUrl,
+    bool googleCredentialsConfigured) {
+  if (provider == config::CalendarProvider::Google) {
+    return googleCredentialsConfigured;
+  }
+  return icalUrl != nullptr && icalUrl[0] != '\0';
+}
+
 inline time_t localMidnight(time_t value) {
   struct tm local = {};
   if (localtime_r(&value, &local) == nullptr) return 0;

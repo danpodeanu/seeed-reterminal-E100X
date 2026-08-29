@@ -24,6 +24,7 @@
 #include "config_portal.h"
 #include "config_portal_ui.h"
 #include "epaper_setup.h"
+#include "google_credentials.h"
 #include "google_credentials_portal.h"
 #include "hardware.h"
 #include "local_time.h"
@@ -96,6 +97,7 @@ void beginPanel() {
   }
 #endif
   epaper_setup::begin(epaper);
+  epaper.setRotation(config::PANEL_ROTATION);
 #if RETERMINAL_MODEL == 1003
   epaper.setTemp(panelWaveformTemperatureC);
 #endif
@@ -408,7 +410,7 @@ PrimaryGesture primaryGesture(bool pressedAtBoot) {
 }
 
 String portalHint() {
-  return "Hold green 1s from sleep to configure";
+  return "Press green to configure";
 }
 
 void showStatusAndSleep(const String& title, const String& detail,
@@ -457,10 +459,32 @@ void setup() {
   pinMode(PIN_BUTTON_RIGHT, INPUT_PULLUP);
   pinMode(PIN_BUTTON_LEFT, INPUT_PULLUP);
 
-  const PrimaryGesture gesture =
-      primaryGesture(greenWake || (coldBoot && !digitalRead(PIN_BUTTON_GREEN)));
+  uint64_t previousFrameHash = 0;
+  FrameKind previousFrameKind = FrameKind::None;
+  const bool greenWakeFromStatus =
+      greenWake && loadFrameState(previousFrameHash, previousFrameKind) &&
+      previousFrameKind == FrameKind::Status;
+  PrimaryGesture gesture = PrimaryGesture::None;
+  if (greenWakeFromStatus) {
+    hardware::beep();
+    gesture = PrimaryGesture::Portal;
+  } else {
+    gesture =
+        primaryGesture(greenWake ||
+                       (coldBoot && !digitalRead(PIN_BUTTON_GREEN)));
+  }
   const bool noWifi = !calendar_wifi::haveCredentials();
-  if (gesture == PrimaryGesture::Portal || (coldBoot && noWifi)) {
+  const config::CalendarProvider provider =
+      calendar_config::runtime::calendarProvider();
+  const bool googleCredentialsConfigured =
+      provider == config::CalendarProvider::Google &&
+      google_credentials::configured();
+  const bool noCalendarProvider =
+      !calendar_logic::hasConfiguredCalendarProvider(
+          provider, calendar_config::runtime::icalUrl(),
+          googleCredentialsConfigured);
+  if (gesture == PrimaryGesture::Portal ||
+      (coldBoot && (noWifi || noCalendarProvider))) {
     renderPortal();
     return;
   }

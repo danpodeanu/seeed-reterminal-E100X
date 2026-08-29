@@ -207,7 +207,7 @@ BodyGeometry bodyGeometry() {
 #if RETERMINAL_MODEL == 1003
   value = {32, 156, 1340, 1192, 1404, 156, 436, 1192};
 #elif RETERMINAL_MODEL == 1004
-  value = {24, 132, 1152, 1230, 24, 1384, 1152, 190};
+  value = {24, 132, 1168, 1044, 1216, 132, 360, 1044};
 #else
   value = {12, 76, 596, 390, 620, 76, 168, 390};
 #endif
@@ -251,43 +251,6 @@ void drawWeatherCard(EPaper& epaper, const BodyGeometry& body,
     epaper.drawString("Weather unavailable", x, y);
     return;
   }
-
-#if RETERMINAL_MODEL == 1004
-  selectFont(epaper, FontSize::Large);
-  epaper.drawString(temperature(weather.temperatureC), x, y);
-
-  selectFont(epaper, FontSize::Small, false);
-  epaper.drawString(
-      text_render::ellipsize(
-          epaper, String(app_logic::conditionName(weather.weatherCode)), 310),
-      x + 205, y + 10);
-
-  const int detailX = x + 555;
-  const int detailWidth = availableWidth - 555;
-  String wideDetails;
-  if (isfinite(weather.days[0].minimumC) &&
-      isfinite(weather.days[0].maximumC)) {
-    wideDetails = "Low " + temperature(weather.days[0].minimumC, false) +
-                  "\xC2\xB0  High " +
-                  temperature(weather.days[0].maximumC, false) + "\xC2\xB0";
-  }
-  epaper.drawString(text_render::ellipsize(epaper, wideDetails, detailWidth),
-                    detailX, y);
-  const String wideWindLabel = wind(weather.windKmh);
-  if (!wideWindLabel.isEmpty()) {
-    epaper.drawString("Wind " + wideWindLabel, detailX, y + 40);
-  }
-  if (!weather.alertTitle.isEmpty()) {
-    selectFont(epaper, FontSize::Tiny);
-    epaper.fillRect(detailX - 5, y + 80, detailWidth + 5, 43, PANEL_LIGHT);
-    epaper.setTextColor(PANEL_BLACK, PANEL_LIGHT, true);
-    epaper.drawString(
-        text_render::ellipsize(epaper, "! " + weather.alertTitle,
-                               detailWidth - 8),
-        detailX, y + 87);
-  }
-  return;
-#endif
 
   selectFont(epaper, FontSize::Large);
   epaper.drawString(temperature(weather.temperatureC), x, y);

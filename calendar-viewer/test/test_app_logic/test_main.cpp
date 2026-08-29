@@ -60,6 +60,21 @@ void test_view_navigation_wraps_in_both_directions() {
           calendar_logic::previousView(config::CalendarView::Today)));
 }
 
+void test_calendar_provider_configuration_requires_selected_source() {
+  TEST_ASSERT_TRUE(calendar_logic::hasConfiguredCalendarProvider(
+      config::CalendarProvider::Ical, "https://example.com/calendar.ics",
+      false));
+  TEST_ASSERT_FALSE(calendar_logic::hasConfiguredCalendarProvider(
+      config::CalendarProvider::Ical, "", true));
+  TEST_ASSERT_FALSE(calendar_logic::hasConfiguredCalendarProvider(
+      config::CalendarProvider::Ical, nullptr, true));
+  TEST_ASSERT_TRUE(calendar_logic::hasConfiguredCalendarProvider(
+      config::CalendarProvider::Google, "", true));
+  TEST_ASSERT_FALSE(calendar_logic::hasConfiguredCalendarProvider(
+      config::CalendarProvider::Google, "https://example.com/calendar.ics",
+      false));
+}
+
 void test_display_windows_respect_week_start_and_month_grid() {
   const time_t saturday = utc(2026, 8, 29, 12);
   const calendar::Window mondayWeek = calendar_logic::displayWindow(
@@ -624,6 +639,7 @@ void test_color_parsing_accepts_hex_and_rejects_invalid_values() {
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_view_navigation_wraps_in_both_directions);
+  RUN_TEST(test_calendar_provider_configuration_requires_selected_source);
   RUN_TEST(test_display_windows_respect_week_start_and_month_grid);
   RUN_TEST(test_ical_parser_reads_timed_all_day_folded_text_and_colors);
   RUN_TEST(test_ical_parser_expands_recurrence_and_applies_exdates);
