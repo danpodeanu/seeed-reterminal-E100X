@@ -269,27 +269,6 @@ void drawHeader(EPaper& epaper, time_t now,
   epaper.setTextDatum(MR_DATUM);
   const int percentRight = batteryX - config::ui(9);
   epaper.drawString(percent, percentRight, height / 2);
-  if (indoor.climateValid) {
-    const int iconHeight = config::ui(12);
-    const String humidity = String(indoor.humidityPct, 0) + "%";
-    const int humidityRight =
-        percentRight - epaper.textWidth(percent) - config::ui(14);
-    epaper.drawString(humidity, humidityRight, height / 2);
-    const int dropletX =
-        humidityRight - epaper.textWidth(humidity) - config::ui(6);
-    drawDropletIcon(epaper, dropletX, height / 2, iconHeight,
-                    COLOR_HUMIDITY);
-
-    const String indoorTemperature = temperature(indoor.temperatureC);
-    const int temperatureRight =
-        dropletX - iconHeight / 2 - config::ui(9);
-    epaper.drawString(indoorTemperature, temperatureRight, height / 2);
-    const int thermometerX =
-        temperatureRight - epaper.textWidth(indoorTemperature) -
-        config::ui(6);
-    drawThermometerIcon(epaper, thermometerX, height / 2, iconHeight,
-                        COLOR_TEMPERATURE);
-  }
   text_render::drawBatteryGauge(
       epaper, batteryX, batteryY, batteryWidth, batteryHeight, batteryPct,
       outline, terminalWidth, terminalHeight, PANEL_BLACK,
@@ -331,8 +310,48 @@ BodyGeometry bodyGeometry() {
   return value;
 }
 
+void drawIndoorClimate(EPaper& epaper, const BodyGeometry& body,
+                       const sensors::Readings& indoor, int top, int height) {
+  epaper.drawFastHLine(body.weatherLeft, top, body.weatherWidth, PANEL_BLACK);
+  selectFont(epaper, FontSize::Tiny);
+  epaper.setTextColor(PANEL_BLACK, PANEL_WEATHER_BACKGROUND, true);
+  if (!indoor.climateValid) {
+    epaper.setTextDatum(MC_DATUM);
+    epaper.drawString("Indoor --",
+                      body.weatherLeft + body.weatherWidth / 2,
+                      top + height / 2);
+    return;
+  }
+
+  const int iconHeight = std::max(8, config::ui(11));
+  const int gap = config::ui(5);
+  const int halfWidth = body.weatherWidth / 2;
+  const int centerY = top + height / 2;
+  const String indoorTemperature = temperature(indoor.temperatureC);
+  const String humidity = String(indoor.humidityPct, 0) + "%";
+
+  epaper.setTextDatum(ML_DATUM);
+  const int temperatureGroupWidth =
+      iconHeight + gap + epaper.textWidth(indoorTemperature);
+  const int temperatureLeft =
+      body.weatherLeft + (halfWidth - temperatureGroupWidth) / 2;
+  drawThermometerIcon(epaper, temperatureLeft + iconHeight / 2, centerY,
+                      iconHeight, COLOR_TEMPERATURE);
+  epaper.drawString(indoorTemperature,
+                    temperatureLeft + iconHeight + gap, centerY);
+
+  const int humidityGroupWidth = iconHeight + gap + epaper.textWidth(humidity);
+  const int humidityLeft =
+      body.weatherLeft + halfWidth +
+      (body.weatherWidth - halfWidth - humidityGroupWidth) / 2;
+  drawDropletIcon(epaper, humidityLeft + iconHeight / 2, centerY,
+                  iconHeight, COLOR_HUMIDITY);
+  epaper.drawString(humidity, humidityLeft + iconHeight + gap, centerY);
+}
+
 void drawWeatherCard(EPaper& epaper, const BodyGeometry& body,
-                     const WeatherData& weather) {
+                     const WeatherData& weather,
+                     const sensors::Readings& indoor) {
   epaper.fillRect(body.weatherLeft, body.weatherTop, body.weatherWidth,
                   body.weatherHeight, PANEL_WEATHER_BACKGROUND);
   epaper.drawRect(body.weatherLeft, body.weatherTop, body.weatherWidth,
@@ -367,7 +386,15 @@ void drawWeatherCard(EPaper& epaper, const BodyGeometry& body,
 #elif RETERMINAL_MODEL == 1004
       52;
 #else
-      40;
+      34;
+#endif
+  const int climateHeight =
+#if RETERMINAL_MODEL == 1003
+      52;
+#elif RETERMINAL_MODEL == 1004
+      44;
+#else
+      28;
 #endif
   const int detailStep =
 #if RETERMINAL_MODEL == 1003
@@ -401,9 +428,11 @@ void drawWeatherCard(EPaper& epaper, const BodyGeometry& body,
 
   const int contentTop = body.weatherTop + headerHeight;
   const int cardBottom = body.weatherTop + body.weatherHeight;
-  int contentBottom = cardBottom - margin;
+  const int climateTop = cardBottom - climateHeight;
+  drawIndoorClimate(epaper, body, indoor, climateTop, climateHeight);
+  int contentBottom = climateTop - config::ui(5);
   if (!weather.alertTitle.isEmpty()) {
-    const int alertTop = cardBottom - alertHeight;
+    const int alertTop = climateTop - alertHeight;
     epaper.fillRect(body.weatherLeft + 1, alertTop,
                     body.weatherWidth - 2, alertHeight - 1, COLOR_ALERT);
     const int alertIconSize = std::max(10, config::ui(13));
@@ -463,7 +492,12 @@ void drawWeatherCard(EPaper& epaper, const BodyGeometry& body,
   selectFont(epaper, FontSize::Small, false);
 #endif
   epaper.setTextDatum(TL_DATUM);
-  int y = contentTop + margin + iconSize + config::ui(16);
+  int y = contentTop + margin + iconSize +
+#if RETERMINAL_MODEL == 1001 || RETERMINAL_MODEL == 1002
+          4;
+#else
+          config::ui(16);
+#endif
   const int availableWidth = body.weatherWidth - margin * 2;
   auto drawDetail = [&](const String& value) {
     if (value.isEmpty() || y + epaper.fontHeight(1) > contentBottom) {
@@ -839,7 +873,7 @@ void calendar(EPaper& epaper, const ::calendar::Data& data,
   drawHeader(epaper, now, indoor);
   const BodyGeometry body = bodyGeometry();
   drawDayCard(epaper, data, body, calendar_logic::localMidnight(now));
-  drawWeatherCard(epaper, body, weather);
+  drawWeatherCard(epaper, body, weather, indoor);
 
   BodyGeometry week = body;
   BodyGeometry month = body;

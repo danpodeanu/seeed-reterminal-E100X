@@ -21,7 +21,8 @@ panel only when visible calendar, weather, sensor, or date content has changed.
   today's agenda above a compact weather card in the sidebar.
 - Shared Meteocons weather artwork plus native calendar, climate, location, and
   alert icons, with blue and dithered-orange accents on six-color models.
-- Indoor SHT4x temperature/humidity and battery status in the header.
+- Indoor SHT4x temperature/humidity in the weather card and battery status in
+  the header.
 - Open-Meteo or QWeather summary, with optional severe-weather alerts.
 - Captive-portal configuration for Wi-Fi, calendar, timezone, NTP, quiet
   hours, weather, refresh cadence, and diagnostics.
@@ -70,8 +71,8 @@ and settings QR codes. Scan both codes, then save the Wi-Fi, calendar, and
 weather settings.
 
 To reopen the portal later, wake the sleeping device while holding the green
-button for at least one second. Press the green button again to leave the
-portal after saving.
+button for at least two seconds. Press it again to leave the portal after
+saving.
 
 ### 3. Configure a calendar source
 
@@ -132,7 +133,7 @@ for temporary provider failures; no SD card is required.
 | Action from deep sleep | Result |
 | --- | --- |
 | Tap any front button | Refresh calendar and weather |
-| Hold green for at least 1 second | Open the configuration portal |
+| Hold green for at least 2 seconds | Open the configuration portal |
 | Wait for the timer | Check for calendar and weather updates |
 
 Button wakes bypass HTTP caches. Scheduled wakes are suppressed during

@@ -370,19 +370,21 @@ void renderPortal() {
   refreshPanel();
   panel_watchdog::disarmCurrentTask();
 
+  bool exitButtonArmed = digitalRead(PIN_BUTTON_GREEN);
   uint32_t buttonLowSince = 0;
   while (!config_portal::rebootRequested()) {
     config_portal::loop();
     usbScreenCapture.poll(epaper, config::PANEL_WIDTH, config::PANEL_HEIGHT);
     const uint32_t now = millis();
-    if (!digitalRead(PIN_BUTTON_GREEN)) {
+    if (digitalRead(PIN_BUTTON_GREEN)) {
+      exitButtonArmed = true;
+      buttonLowSince = 0;
+    } else if (exitButtonArmed) {
       if (buttonLowSince == 0) buttonLowSince = now;
       if (now - buttonLowSince >= 50) {
         hardware::beep();
         break;
       }
-    } else {
-      buttonLowSince = 0;
     }
     delay(5);
   }
@@ -397,22 +399,26 @@ enum class PrimaryGesture {
   Portal,
 };
 
-PrimaryGesture primaryGesture(bool pressedAtBoot, bool wokeFromGreen) {
+PrimaryGesture primaryGesture(bool pressedAtBoot) {
   if (!pressedAtBoot) return PrimaryGesture::None;
   hardware::beep();
-  // Deep-sleep wake begins when the button is pressed, before setup() runs.
-  // Include that startup time so a physical one-second hold is sufficient.
-  const uint32_t started = wokeFromGreen ? 0 : millis();
-  while (!digitalRead(PIN_BUTTON_GREEN) && millis() - started < 1500) {
-    delay(5);
+  constexpr uint32_t kHoldMs = 2000;
+  const uint32_t started = millis();
+  while (digitalRead(PIN_BUTTON_GREEN) == LOW &&
+         millis() - started < kHoldMs) {
+    delay(10);
   }
-  const uint32_t held = millis() - started;
-  if (held >= 1000) return PrimaryGesture::Portal;
+  if (digitalRead(PIN_BUTTON_GREEN) == LOW) {
+    hardware::beep();
+    LOG.println("[gesture] green held for 2s; entering configuration portal");
+    return PrimaryGesture::Portal;
+  }
+  LOG.println("[gesture] green released before 2s; refreshing");
   return PrimaryGesture::Refresh;
 }
 
 String portalHint() {
-  return "Press green to configure";
+  return "Hold green for 2s to configure";
 }
 
 void showStatusAndSleep(const String& title, const String& detail,
@@ -453,25 +459,17 @@ void setup() {
   if (coldBoot) invalidateFrameState();
   const uint64_t wakePins =
       buttonWake ? esp_sleep_get_ext1_wakeup_status() : 0;
-  const bool greenWake = (wakePins & (1ULL << PIN_BUTTON_GREEN)) != 0;
 
   pinMode(PIN_BUTTON_GREEN, INPUT_PULLUP);
   pinMode(PIN_BUTTON_RIGHT, INPUT_PULLUP);
   pinMode(PIN_BUTTON_LEFT, INPUT_PULLUP);
+  const bool greenWake =
+      (wakePins & (1ULL << PIN_BUTTON_GREEN)) != 0 ||
+      (buttonWake && !digitalRead(PIN_BUTTON_GREEN));
 
-  uint64_t previousFrameHash = 0;
-  FrameKind previousFrameKind = FrameKind::None;
-  const bool greenWakeFromStatus =
-      greenWake && loadFrameState(previousFrameHash, previousFrameKind) &&
-      previousFrameKind == FrameKind::Status;
   PrimaryGesture gesture = PrimaryGesture::None;
-  if (greenWakeFromStatus) {
-    hardware::beep();
-    gesture = PrimaryGesture::Portal;
-  } else {
-    gesture = primaryGesture(
-        greenWake || (coldBoot && !digitalRead(PIN_BUTTON_GREEN)), greenWake);
-  }
+  gesture = primaryGesture(
+      greenWake || (coldBoot && !digitalRead(PIN_BUTTON_GREEN)));
   const bool noWifi = !calendar_wifi::haveCredentials();
   const config::CalendarProvider provider =
       calendar_config::runtime::calendarProvider();
