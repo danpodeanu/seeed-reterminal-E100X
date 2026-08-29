@@ -57,6 +57,13 @@ struct Config {
   using WifiFallbackFn = String (*)(const char* key);
   WifiFallbackFn wifiFallback = nullptr;
 
+  // Optional callback invoked after a Wi-Fi password is explicitly changed.
+  // It is not called for the redacted sentinel, which means "keep the
+  // existing password". Apps with compile-time fallback credentials can use
+  // this to distinguish an intentionally empty password from an absent key.
+  using WifiPasswordSavedFn = bool (*)(bool passwordIsEmpty, String& error);
+  WifiPasswordSavedFn onWifiPasswordSaved = nullptr;
+
   // Optional array of extra navigation tabs the portal chrome renders
   // between Settings and Reset. The pages behind these tabs must be
   // registered on webServer() (returned by webServer() after begin())

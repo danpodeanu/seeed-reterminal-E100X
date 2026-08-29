@@ -1,0 +1,7 @@
+{
+  "name": "reterminal-common-weather",
+  "version": "1.0.0",
+  "description": "Shared weather provider and data model for reTerminal viewers",
+  "frameworks": ["arduino"],
+  "platforms": ["espressif32"]
+}

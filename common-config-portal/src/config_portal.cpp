@@ -155,6 +155,28 @@ void handleSave(const Schema& schema, storage::Storage& store, bool reboot,
   }
 }
 
+void handleWifiSave() {
+  String err;
+  std::map<String, String> submitted;
+  if (!json::parseSubmissionJson(*g_config.wifiSchema,
+                                 g_server->arg("plain"), submitted, &err)) {
+    sendJson(400, json::errorJson(err.c_str()));
+    return;
+  }
+  if (!storage::save(g_wifiStorage, *g_config.wifiSchema, submitted, &err)) {
+    sendJson(400, json::errorJson(err.c_str()));
+    return;
+  }
+  const auto password = submitted.find("password");
+  if (g_config.onWifiPasswordSaved && password != submitted.end() &&
+      password->second != kSecretSentinel &&
+      !g_config.onWifiPasswordSaved(password->second.isEmpty(), err)) {
+    sendJson(500, json::errorJson(err.c_str()));
+    return;
+  }
+  sendJson(200, "{\"ok\":true}");
+}
+
 void handleScan() {
   const uint32_t now = millis();
   if (g_scanJson.length() > 2 && now - g_scanMs < 10000U) {
@@ -361,7 +383,7 @@ bool begin(const Config& cfg) {
   g_server->on("/", redirectRoot);
   g_server->on("/wifi", []() { sendHtml(200, renderWifiPage(g_config, *g_config.wifiSchema, g_config.appSchema)); });
   g_server->on("/wifi.json", HTTP_GET, handleWifiValues);
-  g_server->on("/wifi.json", HTTP_POST, []() { handleSave(*g_config.wifiSchema, g_wifiStorage, false); });
+  g_server->on("/wifi.json", HTTP_POST, handleWifiSave);
   g_server->on("/scan.json", handleScan);
   g_server->on("/settings", []() { if (!g_config.appSchema) handleNotFound(); else sendHtml(200, renderSettingsPage(g_config, *g_config.appSchema, *g_config.wifiSchema)); });
   g_server->on("/settings.json", HTTP_GET, []() { if (!g_config.appSchema) handleNotFound(); else handleValues(*g_config.appSchema, g_appStorage); });

@@ -20,9 +20,8 @@ const E1005_BOARD = "reterminal_e1005";
 const boardSel = document.getElementById("board");
 const appSel = document.getElementById("app");
 const e1005OnlyApps = new Set(["sticky-arcade", "sticky-fiddle"]);
-const e1005OnlyOptions = Array.from(appSel.options).filter((option) =>
-  e1005OnlyApps.has(option.value)
-);
+const e1001ToE1004OnlyApps = new Set(["calendar-viewer"]);
+const appOptions = Array.from(appSel.options);
 const installer = document.getElementById("installer");
 const status = document.getElementById("status");
 
@@ -47,7 +46,9 @@ function otaFirmwareCandidates(app, board) {
 }
 
 function appSupportedOnBoard(app, board) {
-  return !e1005OnlyApps.has(app) || board === E1005_BOARD;
+  if (e1005OnlyApps.has(app)) return board === E1005_BOARD;
+  if (e1001ToE1004OnlyApps.has(app)) return board !== E1005_BOARD;
+  return true;
 }
 
 function bootAssetUrl(stem, board) {
@@ -132,7 +133,10 @@ async function refresh() {
   const board = boardSel.value;
   installer.hidden = true;
   if (!appSupportedOnBoard(app, board)) {
-    setStatus(`${app} is available only for reTerminal E1005.`, true);
+    const supportedBoards = e1005OnlyApps.has(app)
+      ? "reTerminal E1005"
+      : "reTerminal E1001-E1004";
+    setStatus(`${app} is available only for ${supportedBoards}.`, true);
     return;
   }
   const bootUrls = [
@@ -162,7 +166,7 @@ async function refresh() {
 }
 
 function updateAppAvailability() {
-  for (const option of e1005OnlyOptions) {
+  for (const option of appOptions) {
     option.disabled = !appSupportedOnBoard(option.value, boardSel.value);
   }
   if (!appSupportedOnBoard(appSel.value, boardSel.value)) {

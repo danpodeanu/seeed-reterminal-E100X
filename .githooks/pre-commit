@@ -1,5 +1,5 @@
 #!/bin/sh
-# Permit only the three tracked mock secrets headers. Each must remain
+# Permit only the four tracked mock secrets headers. Each must remain
 # byte-for-byte identical to its staged secrets.h.example counterpart.
 # Other secrets headers and customized credentials must never be committed.
 #
@@ -15,7 +15,7 @@ staged=$(git diff --cached --name-only --diff-filter=ACM \
 invalid=""
 for f in $staged; do
   case "$f" in
-    xkcd-viewer/include/secrets.h|weather-viewer/include/secrets.h|photo-viewer/include/secrets.h)
+    xkcd-viewer/include/secrets.h|weather-viewer/include/secrets.h|photo-viewer/include/secrets.h|calendar-viewer/include/secrets.h)
       example="${f}.example"
       if ! git cat-file -e ":${example}" 2>/dev/null ||
          [ "$(git rev-parse ":${f}")" != "$(git rev-parse ":${example}")" ]; then

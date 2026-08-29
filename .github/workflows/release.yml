@@ -30,7 +30,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        app: [xkcd-viewer, weather-viewer, photo-viewer, sticky-arcade, sticky-fiddle]
+        app: [xkcd-viewer, weather-viewer, photo-viewer, calendar-viewer, sticky-arcade, sticky-fiddle]
         board:
           - reterminal_e1001
           - reterminal_e1002
@@ -38,6 +38,8 @@ jobs:
           - reterminal_e1004
           - reterminal_e1005
         exclude:
+          - app: calendar-viewer
+            board: reterminal_e1005
           - app: sticky-arcade
             board: reterminal_e1001
           - app: sticky-arcade

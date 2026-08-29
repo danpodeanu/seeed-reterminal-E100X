@@ -1,5 +1,7 @@
 #pragma once
 
+// Shared provider interface; each consuming app supplies runtime settings.
+
 #include <Arduino.h>
 
 #include "config.h"

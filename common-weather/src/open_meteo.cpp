@@ -7,9 +7,10 @@
 #include <string.h>
 
 #include "app_logger.h"
-#include "app_logic.h"
+#include "weather_app_logic.h"
 #include "config.h"
 #include "local_time.h"
+#include "trusted_client.h"
 #include "weather_config_runtime.h"
 #include "weather_data.h"
 #include "weather_provider.h"
@@ -54,8 +55,8 @@ void fetchNwsAlerts(WeatherData& weather) {
   weather.alertSeverity = "";
   weather.alertOtherCount = 0;
 
-  WiFiClientSecure client;
-  client.setInsecure();
+  tls_client::DefaultRootClient client;
+  if (!local_time::clockIsValid()) client.setInsecure();
   client.setTimeout(config::HTTP_TIMEOUT_MS);
   HTTPClient http;
   http.setConnectTimeout(config::HTTP_TIMEOUT_MS);
@@ -298,8 +299,8 @@ bool fetchOpenMeteo(WeatherData& weather, String& responseBody,
                     String& failureReason, bool bypassHttpCache) {
   responseBody = "";
   failureReason = "";
-  WiFiClientSecure client;
-  client.setInsecure();
+  tls_client::DefaultRootClient client;
+  if (!local_time::clockIsValid()) client.setInsecure();
   client.setTimeout(config::HTTP_TIMEOUT_MS);
   HTTPClient http;
   http.setConnectTimeout(config::HTTP_TIMEOUT_MS);

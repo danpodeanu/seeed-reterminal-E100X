@@ -11,7 +11,7 @@ const TimezoneOption kTimezoneOptions[] = {
     {"Lisbon (WET/WEST)",                     "WET0WEST,M3.5.0/1,M10.5.0/2"},
     {"Paris / Berlin / Rome (CET/CEST)",      "CET-1CEST,M3.5.0,M10.5.0/3"},
     {"Athens / Helsinki (EET/EEST)",          "EET-2EEST,M3.5.0/3,M10.5.0/4"},
-    {"Cairo (EET, no DST)",                   "EET-2"},
+    {"Cairo (EET/EEST)",                      "EET-2EEST,M4.5.5/0,M10.5.4/24"},
     {"Istanbul / Moscow (+03, no DST)",       "<+03>-3"},
     {"Dubai (+04, no DST)",                   "<+04>-4"},
     {"Karachi (PKT)",                         "PKT-5"},

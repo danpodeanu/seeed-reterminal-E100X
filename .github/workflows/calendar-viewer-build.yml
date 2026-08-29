@@ -1,22 +1,20 @@
-name: Weather Viewer build
+name: Calendar Viewer build
 
 on:
   push:
     paths:
-      - "weather-viewer/**"
+      - "calendar-viewer/**"
       - "common/**"
       - "common-weather/**"
       - "common-config-portal/**"
-      - "common-sd-web/**"
-      - ".github/workflows/weather-viewer-build.yml"
+      - ".github/workflows/calendar-viewer-build.yml"
   pull_request:
     paths:
-      - "weather-viewer/**"
+      - "calendar-viewer/**"
       - "common/**"
       - "common-weather/**"
       - "common-config-portal/**"
-      - "common-sd-web/**"
-      - ".github/workflows/weather-viewer-build.yml"
+      - ".github/workflows/calendar-viewer-build.yml"
   workflow_dispatch:
 
 permissions:
@@ -28,7 +26,7 @@ concurrency:
 
 defaults:
   run:
-    working-directory: weather-viewer
+    working-directory: calendar-viewer
 
 jobs:
   unit-tests:
@@ -63,7 +61,6 @@ jobs:
           - reterminal_e1002
           - reterminal_e1003
           - reterminal_e1004
-          - reterminal_e1005
 
     steps:
       - name: Check out repository
@@ -75,7 +72,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install PlatformIO
-        run: python -m pip install --upgrade platformio intelhex resvg_py Pillow
+        run: python -m pip install --upgrade platformio intelhex
 
       - name: Build
         run: pio run -e "${{ matrix.environment }}"

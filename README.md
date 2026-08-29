@@ -2,6 +2,7 @@
 
 [![XKCD Viewer build](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/xkcd-viewer-build.yml/badge.svg?branch=main&event=push)](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/xkcd-viewer-build.yml)
 [![Weather Viewer build](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/weather-viewer-build.yml/badge.svg?branch=main&event=push)](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/weather-viewer-build.yml)
+[![Calendar Viewer build](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/calendar-viewer-build.yml/badge.svg?branch=main&event=push)](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/calendar-viewer-build.yml)
 [![Photo Viewer build](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/photo-viewer-build.yml/badge.svg?branch=main&event=push)](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/photo-viewer-build.yml)
 [![Sticky Arcade build](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/sticky-arcade-build.yml/badge.svg?branch=main&event=push)](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/sticky-arcade-build.yml)
 [![Sticky Fiddle build](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/sticky-fiddle-build.yml/badge.svg?branch=main&event=push)](https://github.com/danpodeanu/seeed-reterminal-E100X/actions/workflows/sticky-fiddle-build.yml)
@@ -30,6 +31,7 @@ details.
 | --- | --- | --- |
 | [XKCD Viewer](xkcd-viewer/) | A battery-powered random XKCD display with model-aware scaling, optional SD caching, Unicode titles, environmental readings, and deep sleep. | Available |
 | [Weather Viewer](weather-viewer/) | A low-power current-conditions and three-day forecast display using QWeather or Open-Meteo, with local environmental readings, severe-weather alerts, Unicode location names, and deep sleep. | Available |
+| [Calendar Viewer](calendar-viewer/) | Today, week, and month calendars from iCalendar or Google Calendar, with provider colors, indoor climate, weather, and change-only e-paper refreshes. | Available on E1001-E1004 |
 | [Photo Viewer](photo-viewer/) | A private, SD-card photo frame with panel-native preprocessing, full model-specific color, quiet hours, daily time sync, and deep sleep. | Available |
 | [Sticky Arcade](sticky-arcade/) | Eighteen E1005 activities with fast refresh and resumable state: seventeen touch games plus a read-only SD browser and EPUB reader. | Available on E1005 |
 | [Sticky Fiddle](sticky-fiddle/) | Nine no-pressure E1005 touch activities for idle hands, including Bubble Wrap, Zen Rake, Kaleidoscope, Inkblot, Pebble Stack, and Worry Stone. | Available on E1005 |
@@ -96,7 +98,6 @@ puzzle-source attribution.
 
 Possible additions include:
 
-- A low-power clock and calendar.
 - A household information dashboard.
 - RSS, news, transit, or status displays.
 
@@ -109,7 +110,9 @@ different framework or architecture where that better suits their use case.
 .
 ├── .github/workflows/    # Repository-level build checks
 ├── common/               # Shared driver, board pin, and helper code (e-paper setup, SD, RTC, sensors)
+├── common-weather/       # Weather providers shared by calendar and weather viewers
 ├── docs/                 # Web flasher (GitHub Pages)
+├── calendar-viewer/      # iCalendar and Google Calendar display firmware
 ├── xkcd-viewer/          # Standalone XKCD display firmware
 ├── weather-viewer/       # Standalone weather display firmware
 ├── photo-viewer/         # SD-card photo-frame firmware and preparation tool
@@ -131,11 +134,11 @@ family. Panel resolution, color capabilities, peripherals, and pin mappings
 differ between models, so consult each application's README before building or
 uploading firmware.
 
-All three viewer applications support E1001-E1005, including the monochrome
-Seeed reTerminal E1005 ("Seeed Sticky") in portrait and both landscape
-directions. Sticky Arcade and Sticky Fiddle are intentionally E1005-only
-because they depend on the integrated touch screen. E1005 hardware tools live
-under `tools/`.
+XKCD Viewer, Weather Viewer, and Photo Viewer support E1001-E1005, including
+the monochrome Seeed reTerminal E1005 ("Seeed Sticky") in portrait and both
+landscape directions. Calendar Viewer supports E1001-E1004. Sticky Arcade and
+Sticky Fiddle are intentionally E1005-only because they depend on the
+integrated touch screen. E1005 hardware tools live under `tools/`.
 Model-specific firmware for supported combinations is included in releases.
 
 ## Getting started
@@ -182,7 +185,8 @@ directly from Chrome or Edge over USB. See
 Firmware can be updated by dropping a single `.bin` file onto the SD card -
 no cable, no serial console, no host tooling. The device verifies the image
 before rebooting into it, so a wrong-model or corrupted file cannot brick a
-running unit.
+running unit. Calendar Viewer intentionally does not mount or write an SD card;
+update it through the web flasher or PlatformIO instead.
 
 1. Download the **`-ota.bin`** release asset for your app + board from the [Releases page](https://github.com/danpodeanu/seeed-reterminal-E100X/releases) - for example, `firmware-weather-viewer-reterminal_e1003-ota.bin`. The matching `-full.bin` is only for USB / web-flasher first-flash and will **not** work over SD (see below).
 2. Copy it to the root of the SD card as **`/update.bin`** (the filename is fixed and the same across apps and boards; the device tells them apart by an embedded tag inside the image).
@@ -218,10 +222,11 @@ cd xkcd-viewer
 pio test -c platformio-test.ini -e native_test
 ```
 
-Use the same command inside `weather-viewer` or `photo-viewer`. Their GitHub
-Actions workflows run these tests on every relevant push and pull request.
+Use the same command inside `weather-viewer`, `calendar-viewer`, or
+`photo-viewer`. Their GitHub Actions workflows run these tests on every
+relevant push and pull request.
 
-Release qualification builds all 16 supported application/board combinations.
+Release qualification builds all 21 supported application/board combinations.
 
 ## Contributing
 

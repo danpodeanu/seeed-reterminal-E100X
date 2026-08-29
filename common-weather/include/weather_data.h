@@ -1,5 +1,7 @@
 #pragma once
 
+// Provider-neutral weather data shared by weather and calendar viewers.
+
 #include <Arduino.h>
 #include <math.h>
 #include <time.h>

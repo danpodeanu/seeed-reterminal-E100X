@@ -13,30 +13,13 @@
 #include <time.h>
 
 #include "app_logger.h"
-#include "app_logic.h"
+#include "weather_app_logic.h"
 #include "config.h"
 #include "local_time.h"
-#include "secrets.h"
+#include "trusted_client.h"
 #include "weather_config_runtime.h"
 #include "weather_data.h"
 #include "weather_provider.h"
-
-// The QWeather secrets baked into secrets.h are the boot-time fallback
-// path -- weather_config::runtime::qweatherHost() etc. return them when
-// NVS has no override. Provide the same #ifndef safety net for any
-// secrets.h that omits a field so the firmware still compiles.
-#ifndef QWEATHER_API_HOST
-#define QWEATHER_API_HOST "devapi.qweather.com"
-#endif
-#ifndef QWEATHER_PROJECT_ID
-#define QWEATHER_PROJECT_ID ""
-#endif
-#ifndef QWEATHER_CREDENTIAL_ID
-#define QWEATHER_CREDENTIAL_ID ""
-#endif
-#ifndef QWEATHER_PRIVATE_KEY_HEX
-#define QWEATHER_PRIVATE_KEY_HEX ""
-#endif
 
 namespace weather_provider {
 
@@ -268,8 +251,8 @@ bool buildJwt(String& jwt, String& failureReason) {
 bool fetchEndpoint(const String& url, const String& bearerToken, String& body,
                    String& failureReason, bool bypassHttpCache) {
   body = "";
-  WiFiClientSecure client;
-  client.setInsecure();
+  tls_client::DefaultRootClient client;
+  if (!local_time::clockIsValid()) client.setInsecure();
   client.setTimeout(config::HTTP_TIMEOUT_MS);
   HTTPClient http;
   http.setConnectTimeout(config::HTTP_TIMEOUT_MS);
