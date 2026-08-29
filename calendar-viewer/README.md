@@ -18,7 +18,8 @@ panel only when visible calendar, weather, sensor, or date content has changed.
 - Calendar and event colors mapped to each panel's native grayscale or
   six-color palette.
 - A fixed dashboard with the current week above a six-week month grid and
-  today's agenda above a compact weather card in the sidebar.
+  today's agenda above a compact weather card in the sidebar. Week and month
+  grids mark the current day in green on six-color panels.
 - Shared Meteocons weather artwork plus native calendar, climate, location, and
   alert icons, with blue and dithered-orange accents on six-color models.
 - Indoor SHT4x temperature/humidity in the weather card and battery status in
@@ -99,26 +100,42 @@ reported as a feed error instead of silently producing a different schedule.
 
 #### Google Calendar
 
-1. In Google Cloud, enable the **Google Calendar API**.
-2. Create a service account and download one JSON key from
-   **IAM & Admin -> Service Accounts -> Keys**.
-3. Open the device portal's **Google IAM** tab and upload that JSON file.
-4. Share each calendar with the service-account email shown by the portal,
-   granting at least **See all event details**.
-5. Select **Google** under Calendar source. Leave **Google calendar IDs** blank
-   to discover shared calendars, or enter comma-separated IDs to query those
-   calendars directly. Up to 12 calendars and 128 visible events are loaded per
-   refresh.
-6. Save and reboot.
+1. In a Google Cloud project, open **APIs & Services -> Library** and enable
+   **Google Calendar API**.
+2. Open **IAM & Admin -> Service Accounts**, create a service account, then
+   select **Keys -> Add key -> Create new key -> JSON**. Keep the downloaded
+   file private.
+3. In Google Calendar, open the target calendar's **Settings and sharing**.
+   Under **Share with specific people or groups**, add the service account's
+   `client_email` from the JSON file. Grant **Make changes to events** (or the
+   equivalent **Make changes and see all event details** permission).
+4. In the same calendar settings, open **Integrate calendar** and copy
+   **Calendar ID**. It often resembles
+   `c_abc123@group.calendar.google.com`. Do not use the service-account email as
+   the Calendar ID.
+5. Open the device configuration portal, select **Google** under Calendar
+   source, and paste one or more comma-separated Calendar IDs into **Google
+   calendar IDs**. Up to 12 calendars and 128 visible events are loaded per
+   refresh. Leave this field blank only to discover calendars already present
+   in the service account's CalendarList.
+6. Open the portal's **Google IAM** tab, upload the downloaded JSON key, then
+   select **Reboot to viewer**.
 
-Direct ID queries request
+For configured IDs, Calendar Viewer requests
 `https://www.googleapis.com/auth/calendar.readonly` and
-`https://www.googleapis.com/auth/calendar.calendarlist`. If a configured
-calendar is absent from the service account's CalendarList, the device adds the
-subscription so it can inherit that calendar entry's default color. This does
-not modify calendar contents. For Workspace domain-wide delegation, authorize
-the service account's OAuth client ID for both scopes, then set **Google
-delegated user** to the user whose calendars and display colors should be read.
+`https://www.googleapis.com/auth/calendar.calendarlist`. On the first refresh,
+it reads each CalendarList entry and adds a missing subscription to the service
+account's list. This allows events without their own `colorId` to inherit the
+calendar entry's `backgroundColor`; explicitly colored events use Google's
+event-color palette. Adding the subscription does not modify calendar events.
+
+If color-enabled authentication or CalendarList access is unavailable, the
+firmware continues with
+`https://www.googleapis.com/auth/calendar.events.readonly`. Events still load,
+using the built-in color palette and default calendar color. For Workspace
+domain-wide delegation, authorize the service account's OAuth client ID for all
+three scopes above, then set **Google delegated user** to the user whose
+calendars and display colors should be read.
 
 The uploaded JSON is capped at 8 KiB and parsed in RAM. Only the required
 service-account fields are saved in the `calendar` NVS namespace; the private

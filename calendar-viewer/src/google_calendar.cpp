@@ -37,6 +37,8 @@ constexpr const char* kCalendarReadOnlyScope =
 constexpr const char* kConfiguredCalendarScopes =
     "https://www.googleapis.com/auth/calendar.readonly "
     "https://www.googleapis.com/auth/calendar.calendarlist";
+constexpr const char* kEventsReadOnlyScope =
+    "https://www.googleapis.com/auth/calendar.events.readonly";
 
 enum class GoogleRequestMethod {
   Get,
@@ -414,6 +416,24 @@ bool exchangeAccessToken(const google_credentials::Credentials& credentials,
   return true;
 }
 
+bool replaceWithEventOnlyToken(String& accessToken, String& failureReason) {
+  google_credentials::Credentials credentials;
+  if (!google_credentials::load(credentials, failureReason)) return false;
+
+  String fallbackToken;
+  const bool exchanged = exchangeAccessToken(
+      credentials, kEventsReadOnlyScope, fallbackToken, failureReason);
+  scrub(credentials.privateKey);
+  if (!exchanged) {
+    scrub(fallbackToken);
+    return false;
+  }
+
+  scrub(accessToken);
+  accessToken = fallbackToken;
+  return true;
+}
+
 String urlEncode(const String& value) {
   static const char kHex[] = "0123456789ABCDEF";
   String encoded;
@@ -650,6 +670,7 @@ bool fetchGoogle(const calendar::Window& window, calendar::Data& out,
   const std::vector<String> requested = configuredIds();
   const char* scope =
       requested.empty() ? kCalendarReadOnlyScope : kConfiguredCalendarScopes;
+  bool colorMetadataEnabled = true;
   LOG.printf("[google] starting calendar refresh using %s mode\n",
              requested.empty() ? "calendar discovery" : "configured IDs");
 
@@ -661,13 +682,33 @@ bool fetchGoogle(const calendar::Window& window, calendar::Data& out,
   }
   String accessToken;
   if (!exchangeAccessToken(credentials, scope, accessToken, failureReason)) {
-    scrub(credentials.privateKey);
-    return false;
+    if (requested.empty()) {
+      scrub(credentials.privateKey);
+      return false;
+    }
+
+    const String colorAuthFailure = failureReason;
+    LOG.printf("[google] color-enabled authentication failed: %s; retrying "
+               "with event-only scope\n",
+               colorAuthFailure.c_str());
+    scrub(accessToken);
+    failureReason = "";
+    if (!exchangeAccessToken(credentials, kEventsReadOnlyScope, accessToken,
+                             failureReason)) {
+      failureReason =
+          "Color-enabled authentication failed: " + colorAuthFailure +
+          "; event-only fallback failed: " + failureReason;
+      scrub(credentials.privateKey);
+      return false;
+    }
+    colorMetadataEnabled = false;
+    LOG.printf("[google] event-only authentication fallback succeeded\n");
   }
   scrub(credentials.privateKey);
 
   String response;
   std::vector<GoogleCalendar> calendars;
+  bool metadataFallbackNeeded = false;
   if (requested.empty()) {
     const String listUrl =
         "https://www.googleapis.com/calendar/v3/users/me/calendarList"
@@ -694,11 +735,14 @@ bool fetchGoogle(const calendar::Window& window, calendar::Data& out,
       GoogleCalendar calendar;
       calendar.id = id;
       calendar.name = id;
-      if (!ensureCalendarListEntry(calendar, accessToken, failureReason)) {
-        LOG.printf("[google] calendar metadata failed for %s: %s\n",
-                   id.c_str(), failureReason.c_str());
-        scrub(accessToken);
-        return false;
+      if (colorMetadataEnabled) {
+        String metadataFailure;
+        if (!ensureCalendarListEntry(calendar, accessToken, metadataFailure)) {
+          LOG.printf("[google] calendar metadata unavailable for %s: %s; "
+                     "continuing with event-only colors\n",
+                     id.c_str(), metadataFailure.c_str());
+          metadataFallbackNeeded = true;
+        }
       }
       calendars.push_back(calendar);
     }
@@ -713,13 +757,28 @@ bool fetchGoogle(const calendar::Window& window, calendar::Data& out,
     return false;
   }
 
+  if (metadataFallbackNeeded && colorMetadataEnabled) {
+    String fallbackFailure;
+    if (replaceWithEventOnlyToken(accessToken, fallbackFailure)) {
+      colorMetadataEnabled = false;
+      LOG.printf("[google] switched to event-only authentication after "
+                 "calendar metadata failure\n");
+    } else {
+      LOG.printf("[google] event-only authentication fallback failed: %s; "
+                 "continuing with the existing token\n",
+                 fallbackFailure.c_str());
+    }
+  }
+
   uint32_t eventColors[12] = {
       0, 0x7986CB, 0x33B679, 0x8E24AA, 0xE67C73, 0xF6BF26, 0xF4511E,
       0x039BE5, 0x616161, 0x3F51B5, 0x0B8043, 0xD50000};
-  if (googleGet("Google event colors",
-                "https://www.googleapis.com/calendar/v3/colors"
-                "?fields=event",
-                accessToken, response, failureReason)) {
+  if (!colorMetadataEnabled) {
+    LOG.printf("[google] using the built-in Google event-color palette\n");
+  } else if (googleGet("Google event colors",
+                       "https://www.googleapis.com/calendar/v3/colors"
+                       "?fields=event",
+                       accessToken, response, failureReason)) {
     if (parseEventColors(response, eventColors)) {
       LOG.printf("[google] loaded event colors\n");
     } else {
@@ -729,6 +788,18 @@ bool fetchGoogle(const calendar::Window& window, calendar::Data& out,
     LOG.printf("[google] event colors unavailable: %s; using defaults\n",
                failureReason.c_str());
     failureReason = "";
+    if (!requested.empty()) {
+      String fallbackFailure;
+      if (replaceWithEventOnlyToken(accessToken, fallbackFailure)) {
+        colorMetadataEnabled = false;
+        LOG.printf("[google] switched to event-only authentication after "
+                   "event-color lookup failure\n");
+      } else {
+        LOG.printf("[google] event-only authentication fallback failed: %s; "
+                   "continuing with the existing token\n",
+                   fallbackFailure.c_str());
+      }
+    }
   }
   response = "";
 

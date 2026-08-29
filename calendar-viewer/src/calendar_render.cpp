@@ -710,13 +710,13 @@ void drawGrid(EPaper& epaper, const ::calendar::Data& data,
           monthView && (dayTm.tm_year != anchorTm.tm_year ||
                         dayTm.tm_mon != anchorTm.tm_mon);
       if (today) {
-        fillWarmRect(epaper, x + 1, y + 1, cellWidth - 2,
+        epaper.fillRect(x + 1, y + 1, cellWidth - 2,
 #if RETERMINAL_MODEL == 1003
-                     std::min(54, cellHeight - 1)
+                       std::min(54, cellHeight - 1),
 #else
-                     std::min(30, cellHeight - 1)
+                       std::min(30, cellHeight - 1),
 #endif
-        );
+                       PANEL_TODAY_BACKGROUND);
       }
       epaper.setTextDatum(TL_DATUM);
       const uint32_t dateInk = outsideMonth ? PANEL_MUTED : PANEL_BLACK;
