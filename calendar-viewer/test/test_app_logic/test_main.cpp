@@ -4,6 +4,7 @@
 #include <string>
 
 #include "calendar_logic.h"
+#include "calendar_render_geometry.h"
 #include "ical_parser.h"
 #include "local_time.h"
 
@@ -36,6 +37,29 @@ calendar::Data parseCalendar(const char* payload,
       failure.c_str());
   return data;
 }
+
+struct RecordingSurface {
+  struct Call {
+    int left = 0;
+    int top = 0;
+    int width = 0;
+    int height = 0;
+    uint32_t color = 0;
+  };
+
+  void drawRect(int left, int top, int width, int height, uint32_t color) {
+    drawCalls[drawCount++] = {left, top, width, height, color};
+  }
+
+  void fillRect(int left, int top, int width, int height, uint32_t color) {
+    fillCalls[fillCount++] = {left, top, width, height, color};
+  }
+
+  Call drawCalls[4];
+  Call fillCalls[2];
+  int drawCount = 0;
+  int fillCount = 0;
+};
 
 }  // namespace
 
@@ -789,6 +813,179 @@ void test_frame_component_changes_reject_incompatible_history() {
       calendar_logic::changedFrameComponents(previous, current));
 }
 
+void test_refresh_fingerprint_excludes_diagnostic_footer_and_climate() {
+  calendar_logic::FrameComponents components;
+  components.renderer = 1;
+  components.calendar = 2;
+  components.presentation = 3;
+  components.date = 4;
+  components.power = 5;
+  components.weather = 6;
+  components.indoorClimateValid = 1;
+  components.indoorTemperatureC = 20.0f;
+  components.indoorHumidityPct = 40.0f;
+
+  const uint64_t original = calendar_logic::frameRefreshFingerprint(
+      components, "Google checked 30 Aug 2026 8:42pm");
+  TEST_ASSERT_EQUAL_UINT64(
+      original, calendar_logic::frameRefreshFingerprint(
+                    components, "Google checked 30 Aug 2026 9:42pm"));
+
+  components.indoorTemperatureC = 22.0f;
+  components.indoorHumidityPct = 50.0f;
+  TEST_ASSERT_EQUAL_UINT64(
+      original,
+      calendar_logic::frameRefreshFingerprint(components, "different footer"));
+
+  components.weather++;
+  TEST_ASSERT_NOT_EQUAL(
+      original,
+      calendar_logic::frameRefreshFingerprint(components, "different footer"));
+
+  components.weather--;
+  components.renderer++;
+  TEST_ASSERT_NOT_EQUAL(
+      original,
+      calendar_logic::frameRefreshFingerprint(components, "same footer"));
+  components.renderer--;
+  components.calendar++;
+  TEST_ASSERT_NOT_EQUAL(
+      original,
+      calendar_logic::frameRefreshFingerprint(components, "same footer"));
+  components.calendar--;
+  components.presentation++;
+  TEST_ASSERT_NOT_EQUAL(
+      original,
+      calendar_logic::frameRefreshFingerprint(components, "same footer"));
+  components.presentation--;
+  components.date++;
+  TEST_ASSERT_NOT_EQUAL(
+      original,
+      calendar_logic::frameRefreshFingerprint(components, "same footer"));
+  components.date--;
+  components.power++;
+  TEST_ASSERT_NOT_EQUAL(
+      original,
+      calendar_logic::frameRefreshFingerprint(components, "same footer"));
+}
+
+void test_calendar_frame_refresh_decision_covers_each_trigger() {
+  TEST_ASSERT_TRUE(calendar_logic::shouldRefreshCalendarFrame(
+      false, false, 10, 10, 0));
+  TEST_ASSERT_TRUE(calendar_logic::shouldRefreshCalendarFrame(
+      true, false, 10, 10, 0));
+  TEST_ASSERT_TRUE(calendar_logic::shouldRefreshCalendarFrame(
+      true, true, 10, 11, 0));
+  TEST_ASSERT_TRUE(calendar_logic::shouldRefreshCalendarFrame(
+      true, true, 10, 10,
+      calendar_logic::frameComponentBit(
+          calendar_logic::FrameComponentChange::IndoorClimate)));
+  TEST_ASSERT_FALSE(calendar_logic::shouldRefreshCalendarFrame(
+      true, true, 10, 10, 0));
+}
+
+void test_header_icon_and_title_are_centered_as_one_group() {
+  const calendar_render_geometry::HeaderGroup group =
+      calendar_render_geometry::centeredHeaderGroup(1600, 39, 12, 302);
+  TEST_ASSERT_EQUAL_INT(353, group.width);
+  TEST_ASSERT_EQUAL_INT(623, group.left);
+  TEST_ASSERT_EQUAL_INT(group.left, group.iconLeft);
+  TEST_ASSERT_EQUAL_INT(674, group.textLeft);
+  TEST_ASSERT_INT_WITHIN(1, 1600, group.left * 2 + group.width);
+}
+
+void test_grid_today_geometry_and_week_label_offsets() {
+  const calendar_render_geometry::Rect cell =
+      calendar_render_geometry::gridCellInterior(24, 132, 166, 360, 3);
+  TEST_ASSERT_EQUAL_INT(27, cell.left);
+  TEST_ASSERT_EQUAL_INT(133, cell.top);
+  TEST_ASSERT_EQUAL_INT(160, cell.width);
+  TEST_ASSERT_EQUAL_INT(359, cell.height);
+  TEST_ASSERT_EQUAL_INT(2, calendar_render_geometry::todayBorderWidth(1));
+  TEST_ASSERT_EQUAL_INT(3, calendar_render_geometry::todayBorderWidth(3));
+  TEST_ASSERT_EQUAL_INT(
+      140, calendar_render_geometry::gridDayLabelTop(132, 5, 3, false));
+  TEST_ASSERT_EQUAL_INT(
+      137, calendar_render_geometry::gridDayLabelTop(132, 5, 3, true));
+}
+
+void test_agenda_band_geometry_keeps_today_larger_than_upcoming() {
+  const calendar_render_geometry::Rect compactToday =
+      calendar_render_geometry::agendaBand(
+          620, 100, 168, 48, 48, 2, 3, false);
+  const calendar_render_geometry::Rect compactUpcoming =
+      calendar_render_geometry::agendaBand(
+          620, 100, 168, 46, 48, 2, 3, true);
+  TEST_ASSERT_EQUAL_INT(622, compactToday.left);
+  TEST_ASSERT_EQUAL_INT(101, compactToday.top);
+  TEST_ASSERT_EQUAL_INT(164, compactToday.width);
+  TEST_ASSERT_EQUAL_INT(46, compactToday.height);
+  TEST_ASSERT_EQUAL_INT(622, compactUpcoming.left);
+  TEST_ASSERT_EQUAL_INT(101, compactUpcoming.top);
+  TEST_ASSERT_EQUAL_INT(164, compactUpcoming.width);
+  TEST_ASSERT_EQUAL_INT(44, compactUpcoming.height);
+
+  const calendar_render_geometry::Rect e1003Today =
+      calendar_render_geometry::agendaBand(
+          1404, 200, 436, 88, 88, 5, 7, false);
+  const calendar_render_geometry::Rect e1003Upcoming =
+      calendar_render_geometry::agendaBand(
+          1404, 200, 436, 88, 88, 5, 7, true);
+  TEST_ASSERT_EQUAL_INT(1409, e1003Today.left);
+  TEST_ASSERT_EQUAL_INT(204, e1003Today.top);
+  TEST_ASSERT_EQUAL_INT(426, e1003Today.width);
+  TEST_ASSERT_EQUAL_INT(80, e1003Today.height);
+  TEST_ASSERT_EQUAL_INT(1410, e1003Upcoming.left);
+  TEST_ASSERT_EQUAL_INT(205, e1003Upcoming.top);
+  TEST_ASSERT_EQUAL_INT(424, e1003Upcoming.width);
+  TEST_ASSERT_EQUAL_INT(78, e1003Upcoming.height);
+
+  const calendar_render_geometry::Rect today =
+      calendar_render_geometry::agendaBand(
+          1216, 200, 360, 70, 70, 3, 5, false);
+  TEST_ASSERT_EQUAL_INT(1219, today.left);
+  TEST_ASSERT_EQUAL_INT(202, today.top);
+  TEST_ASSERT_EQUAL_INT(354, today.width);
+  TEST_ASSERT_EQUAL_INT(66, today.height);
+
+  const calendar_render_geometry::Rect upcoming =
+      calendar_render_geometry::agendaBand(
+          1216, 200, 360, 66, 70, 3, 5, true);
+  TEST_ASSERT_EQUAL_INT(1220, upcoming.left);
+  TEST_ASSERT_EQUAL_INT(201, upcoming.top);
+  TEST_ASSERT_EQUAL_INT(352, upcoming.width);
+  TEST_ASSERT_EQUAL_INT(64, upcoming.height);
+  TEST_ASSERT_GREATER_THAN_INT(upcoming.width, today.width);
+  TEST_ASSERT_GREATER_THAN_INT(upcoming.height, today.height);
+}
+
+void test_today_border_and_footer_issue_expected_draw_calls() {
+  RecordingSurface surface;
+  const calendar_render_geometry::Rect today{27, 133, 160, 359};
+  calendar_render_geometry::drawBorder(
+      surface, today, 2, UINT32_C(0x010203));
+  TEST_ASSERT_EQUAL_INT(2, surface.drawCount);
+  TEST_ASSERT_EQUAL_INT(27, surface.drawCalls[0].left);
+  TEST_ASSERT_EQUAL_INT(133, surface.drawCalls[0].top);
+  TEST_ASSERT_EQUAL_INT(160, surface.drawCalls[0].width);
+  TEST_ASSERT_EQUAL_INT(359, surface.drawCalls[0].height);
+  TEST_ASSERT_EQUAL_INT(28, surface.drawCalls[1].left);
+  TEST_ASSERT_EQUAL_INT(134, surface.drawCalls[1].top);
+  TEST_ASSERT_EQUAL_INT(158, surface.drawCalls[1].width);
+  TEST_ASSERT_EQUAL_INT(357, surface.drawCalls[1].height);
+
+  const calendar_render_geometry::Rect footer =
+      calendar_render_geometry::footerBadge(1200, 420, 24);
+  calendar_render_geometry::fillPlainFooterBackground(
+      surface, footer, UINT32_C(0xFFFFFF));
+  TEST_ASSERT_EQUAL_INT(1, surface.fillCount);
+  TEST_ASSERT_EQUAL_INT(0, surface.fillCalls[0].left);
+  TEST_ASSERT_EQUAL_INT(1176, surface.fillCalls[0].top);
+  TEST_ASSERT_EQUAL_INT(420, surface.fillCalls[0].width);
+  TEST_ASSERT_EQUAL_INT(24, surface.fillCalls[0].height);
+  TEST_ASSERT_EQUAL_HEX32(UINT32_C(0xFFFFFF), surface.fillCalls[0].color);
+}
+
 void test_color_parsing_accepts_hex_and_rejects_invalid_values() {
   TEST_ASSERT_EQUAL_HEX32(0x33B679, calendar_logic::parseRgb("#33B679"));
   TEST_ASSERT_EQUAL_HEX32(0xABCDEF, calendar_logic::parseRgb("abcdef"));
@@ -927,6 +1124,12 @@ int main(int, char**) {
   RUN_TEST(test_frame_component_changes_identify_each_changed_input);
   RUN_TEST(test_indoor_climate_change_thresholds_use_last_rendered_values);
   RUN_TEST(test_frame_component_changes_reject_incompatible_history);
+  RUN_TEST(test_refresh_fingerprint_excludes_diagnostic_footer_and_climate);
+  RUN_TEST(test_calendar_frame_refresh_decision_covers_each_trigger);
+  RUN_TEST(test_header_icon_and_title_are_centered_as_one_group);
+  RUN_TEST(test_grid_today_geometry_and_week_label_offsets);
+  RUN_TEST(test_agenda_band_geometry_keeps_today_larger_than_upcoming);
+  RUN_TEST(test_today_border_and_footer_issue_expected_draw_calls);
   RUN_TEST(test_color_parsing_accepts_hex_and_rejects_invalid_values);
   RUN_TEST(test_single_google_calendar_color_controls_grid_background);
   RUN_TEST(test_agenda_compacts_upcoming_rows_for_more_count);

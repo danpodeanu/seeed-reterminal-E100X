@@ -220,7 +220,7 @@ are rejected.
 
 ## Development
 
-Run native parser and calendar-logic tests:
+Run native parser, refresh-policy, and render-geometry tests:
 
 ```bash
 pio test -c platformio-test.ini -e native_test

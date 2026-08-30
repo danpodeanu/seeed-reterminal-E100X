@@ -9,6 +9,7 @@
 #include "app_logger.h"
 #include "calendar_config_runtime.h"
 #include "calendar_logic.h"
+#include "calendar_render_geometry.h"
 #include "config.h"
 #include "dither.h"
 #include "driver.h"
@@ -76,18 +77,15 @@ void selectFont(EPaper& epaper, FontSize size, bool bold = true) {
 #endif
 }
 
-void drawTodayCell(EPaper& epaper, int x, int y, int width, int height) {
+void drawTodayCell(EPaper& epaper,
+                   const calendar_render_geometry::Rect& rect) {
   text_render::fillDitheredRect(
-      epaper, x, y, width, height, config::PANEL_WIDTH, config::PANEL_HEIGHT,
-      PANEL_TODAY_BASE, PANEL_TODAY_DITHER != PANEL_TODAY_BASE,
-      PANEL_TODAY_DITHER, 5);
-  const int borderWidth = std::max(2, config::ui(1));
-  for (int inset = 0; inset < borderWidth; ++inset) {
-    const int insetWidth = width - inset * 2;
-    const int insetHeight = height - inset * 2;
-    if (insetWidth <= 0 || insetHeight <= 0) break;
-    epaper.drawRect(x + inset, y + inset, insetWidth, insetHeight, PANEL_BLACK);
-  }
+      epaper, rect.left, rect.top, rect.width, rect.height, config::PANEL_WIDTH,
+      config::PANEL_HEIGHT, PANEL_TODAY_BASE,
+      PANEL_TODAY_DITHER != PANEL_TODAY_BASE, PANEL_TODAY_DITHER, 5);
+  calendar_render_geometry::drawBorder(
+      epaper, rect,
+      calendar_render_geometry::todayBorderWidth(config::ui(1)), PANEL_BLACK);
 }
 
 void drawCalendarIcon(EPaper& epaper, int x, int y, int size,
@@ -453,18 +451,15 @@ void drawHeader(EPaper& epaper, time_t now,
   const int calendarIconSize = config::ui(26);
   const int calendarIconGap = config::ui(8);
   const int headingWidth = epaper.textWidth(heading);
-  const int headingGroupWidth =
-      calendarIconSize + calendarIconGap + headingWidth;
-  const int headingGroupLeft =
-      (config::PANEL_WIDTH - headingGroupWidth) / 2;
+  const calendar_render_geometry::HeaderGroup headingGroup =
+      calendar_render_geometry::centeredHeaderGroup(
+          config::PANEL_WIDTH, calendarIconSize, calendarIconGap, headingWidth);
   drawCalendarIcon(epaper,
-                   headingGroupLeft,
+                   headingGroup.iconLeft,
                    height / 2 - calendarIconSize * 7 / 16,
                    calendarIconSize, PANEL_ACCENT);
   epaper.setTextDatum(ML_DATUM);
-  epaper.drawString(
-      heading, headingGroupLeft + calendarIconSize + calendarIconGap,
-      height / 2);
+  epaper.drawString(heading, headingGroup.textLeft, height / 2);
 
   selectFont(epaper, FontSize::Small);
   const int batteryWidth = config::ui(22);
@@ -838,18 +833,14 @@ void drawAgendaCard(EPaper& epaper, ColorDitherer& ditherer,
   int y = card.top + headerHeight;
   for (int index = 0; index < shown; ++index) {
     const ::calendar::Event& event = *events[index];
-    const int barInset =
-        upcoming ? std::max(1, config::ui(3) - 1)
-                 : std::max(1, config::ui(2));
-    const int rowCompression = kAgendaRowHeight - rowHeight;
-    const int baseVerticalGap =
-        upcoming ? config::ui(2) : std::max(1, config::ui(2) - 1);
-    const int verticalGap = std::max(
-        1, baseVerticalGap - std::max(0, rowCompression) / 2);
-    const int barLeft = card.left + barInset;
-    const int barTop = y + verticalGap;
-    const int barWidth = card.width - barInset * 2;
-    const int barHeight = rowHeight - verticalGap * 2;
+    const calendar_render_geometry::Rect band =
+        calendar_render_geometry::agendaBand(
+            card.left, y, card.width, rowHeight, kAgendaRowHeight,
+            config::ui(2), config::ui(3), upcoming);
+    const int barLeft = band.left;
+    const int barTop = band.top;
+    const int barWidth = band.width;
+    const int barHeight = band.height;
     const int radius = std::min(config::ui(8), barHeight / 2);
     const int textPadding = std::max(config::ui(7), radius);
     const int textLeft = barLeft + textPadding;
@@ -1001,10 +992,11 @@ void drawGrid(EPaper& epaper, ColorDitherer& ditherer,
       const bool outsideMonth =
           monthView && (dayTm.tm_year != anchorTm.tm_year ||
                         dayTm.tm_mon != anchorTm.tm_mon);
+      const calendar_render_geometry::Rect cellInterior =
+          calendar_render_geometry::gridCellInterior(
+              x, y, cellWidth, cellHeight, cellInset);
       if (today) {
-        drawTodayCell(epaper, x + cellInset, y + 1,
-                      cellWidth - cellInset * 2,
-                      cellHeight - 1);
+        drawTodayCell(epaper, cellInterior);
       }
       epaper.setTextDatum(TL_DATUM);
       const uint32_t dateInk =
@@ -1026,9 +1018,9 @@ void drawGrid(EPaper& epaper, ColorDitherer& ditherer,
         dayLabel += " ";
         dayLabel += String(dayTm.tm_mday);
       }
-      const int weekLabelOffset = monthView ? 0 : config::ui(2);
       epaper.drawString(dayLabel, x + cellInset + config::ui(3),
-                        y + config::ui(3) + weekLabelOffset);
+                        calendar_render_geometry::gridDayLabelTop(
+                            y, config::ui(3), config::ui(2), monthView));
 
       const auto dayEvents = eventsForDay(data, day);
       int eventY = y +
@@ -1159,12 +1151,15 @@ void drawFooter(EPaper& epaper, const String& footer,
   const int badgeWidth =
       std::min(config::PANEL_WIDTH,
                epaper.textWidth(label) + horizontalPadding * 2);
-  const int badgeTop = config::PANEL_HEIGHT - badgeHeight;
-  epaper.fillRect(0, badgeTop, badgeWidth, badgeHeight, PANEL_WHITE);
+  const calendar_render_geometry::Rect badge =
+      calendar_render_geometry::footerBadge(
+          config::PANEL_HEIGHT, badgeWidth, badgeHeight);
+  calendar_render_geometry::fillPlainFooterBackground(
+      epaper, badge, PANEL_WHITE);
   epaper.setTextColor(PANEL_BLACK);
   epaper.setTextDatum(ML_DATUM);
   epaper.drawString(label, horizontalPadding,
-                    badgeTop + badgeHeight / 2);
+                    badge.top + badge.height / 2);
   epaper.setTextDatum(TL_DATUM);
 }
 

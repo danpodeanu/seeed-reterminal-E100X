@@ -414,6 +414,31 @@ class Fingerprint {
   uint64_t value_ = UINT64_C(14695981039346656037);
 };
 
+inline uint64_t frameRefreshFingerprint(
+    const FrameComponents& components,
+    std::string_view diagnosticFooter) {
+  // The footer is diagnostic-only and intentionally excluded from refreshes.
+  static_cast<void>(diagnosticFooter);
+  Fingerprint hash;
+  hash.addValue(components.version);
+  hash.addValue(components.renderer);
+  hash.addValue(components.calendar);
+  hash.addValue(components.presentation);
+  hash.addValue(components.date);
+  hash.addValue(components.power);
+  hash.addValue(components.weather);
+  return hash.value();
+}
+
+inline bool shouldRefreshCalendarFrame(bool havePreviousFrame,
+                                       bool previousWasCalendar,
+                                       uint64_t previousFingerprint,
+                                       uint64_t currentFingerprint,
+                                       uint16_t componentChanges) {
+  return !havePreviousFrame || !previousWasCalendar ||
+         previousFingerprint != currentFingerprint || componentChanges != 0;
+}
+
 inline uint64_t dataFingerprint(const calendar::Data& data,
                                 const calendar::Window& window) {
   Fingerprint hash;

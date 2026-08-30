@@ -70,7 +70,7 @@ constexpr const char* kFrameHashKey = "frame_hash";
 constexpr const char* kFrameKindKey = "frame_kind";
 constexpr const char* kFrameComponentsKey = "frame_parts";
 // Increment when rendering changes without changing the underlying data.
-constexpr uint32_t kCalendarFrameRevision = 14;
+constexpr uint32_t kCalendarFrameRevision = 15;
 
 enum class FrameKind : uint8_t {
   None = 0,
@@ -293,7 +293,7 @@ struct CalendarFrameFingerprints {
 
 CalendarFrameFingerprints frameFingerprints(
     const calendar::Data& data, const calendar::Window& window,
-    const WeatherData& weather, time_t now) {
+    const WeatherData& weather, const String& diagnosticFooter, time_t now) {
   CalendarFrameFingerprints result;
   const uint64_t calendarHash = calendar_logic::dataFingerprint(data, window);
 
@@ -345,27 +345,8 @@ CalendarFrameFingerprints frameFingerprints(
   }
   result.components.date = dateHash.value();
 
-  // Climate uses thresholds below; the diagnostic footer never triggers refresh.
-  calendar_logic::Fingerprint hash;
-  hash.addValue(kCalendarFrameRevision);
-  hash.addValue(calendarHash);
-  hash.addValue(data.truncated);
-  hash.addValue(calendar_config::runtime::weekStart());
-  hash.addValue(calendar_config::runtime::timeFormat());
-  hash.addValue(
-      calendar_config::runtime::showSingleCalendarBackground());
-  hash.add(std::string(calendar_config::runtime::timezone()));
-  hash.add(std::string(calendar_config::runtime::locationName()));
-  hash.addValue(calendar_config::runtime::temperatureUnit());
-  hash.addValue(calendar_config::runtime::windSpeedUnit());
-  addRoundedPower(hash, sensorReadings);
-  addRoundedWeather(hash, weather);
-  hash.add(std::string(board::FIRMWARE_VERSION));
-  if (haveLocalDate) {
-    hash.addValue(localDate.tm_year);
-    hash.addValue(localDate.tm_yday);
-  }
-  result.combined = hash.value();
+  result.combined = calendar_logic::frameRefreshFingerprint(
+      result.components, diagnosticFooter.c_str());
   return result;
 }
 
@@ -994,7 +975,7 @@ void setup() {
     if (weather.fromCache) footer += " / cached weather";
   }
   const CalendarFrameFingerprints nextFrame =
-      frameFingerprints(calendarData, window, weather, now);
+      frameFingerprints(calendarData, window, weather, footer, now);
   uint64_t previousHash = 0;
   FrameKind previousKind = FrameKind::None;
   const bool havePreviousFrame =
@@ -1008,10 +989,9 @@ void setup() {
           ? calendar_logic::changedFrameComponents(previousComponents,
                                                   nextFrame.components)
           : 0;
-  const bool changed = !havePreviousFrame ||
-                       previousKind != FrameKind::Calendar ||
-                       previousHash != nextFrame.combined ||
-                       componentChanges != 0;
+  const bool changed = calendar_logic::shouldRefreshCalendarFrame(
+      havePreviousFrame, previousKind == FrameKind::Calendar, previousHash,
+      nextFrame.combined, componentChanges);
   if (changed || screenshotRequested) {
     if (changed) {
       logCalendarFrameChanges(
