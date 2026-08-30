@@ -6,6 +6,8 @@
 
 namespace theme {
 
+inline constexpr uint32_t CALENDAR_HEADER_RGB = 0xA4BDFC;
+
 // E1004's physical front-button order is RIGHT / LEFT / GREEN; the older
 // models use GREEN / RIGHT / LEFT on the same three GPIOs.
 #if RETERMINAL_MODEL == 1004
@@ -26,8 +28,6 @@ inline constexpr uint32_t PANEL_WARM_BASE = TFT_GRAY_2;
 inline constexpr uint32_t PANEL_WARM_DITHER = TFT_GRAY_2;
 inline constexpr uint32_t PANEL_HEADER_BACKGROUND = PANEL_WHITE;
 inline constexpr uint32_t PANEL_ACCENT = TFT_GRAY_0;
-inline constexpr uint32_t PANEL_SECTION_HEADER = TFT_GRAY_1;
-inline constexpr uint32_t PANEL_SECTION_HEADER_TEXT = TFT_GRAY_3;
 inline constexpr uint32_t PANEL_TODAY_BASE = TFT_GRAY_2;
 inline constexpr uint32_t PANEL_TODAY_DITHER = TFT_GRAY_2;
 inline constexpr uint32_t PANEL_WEATHER_HEADER = PANEL_WARM_BASE;
@@ -44,8 +44,6 @@ inline constexpr uint32_t PANEL_WARM_BASE = TFT_YELLOW;
 inline constexpr uint32_t PANEL_WARM_DITHER = TFT_RED;
 inline constexpr uint32_t PANEL_HEADER_BACKGROUND = PANEL_WHITE;
 inline constexpr uint32_t PANEL_ACCENT = TFT_BLUE;
-inline constexpr uint32_t PANEL_SECTION_HEADER = TFT_BLUE;
-inline constexpr uint32_t PANEL_SECTION_HEADER_TEXT = TFT_WHITE;
 inline constexpr uint32_t PANEL_TODAY_BASE = TFT_WHITE;
 inline constexpr uint32_t PANEL_TODAY_DITHER = TFT_GREEN;
 inline constexpr uint32_t PANEL_WEATHER_HEADER = PANEL_WARM_BASE;
@@ -62,8 +60,6 @@ inline constexpr uint32_t PANEL_WARM_BASE = TFT_GRAY_12;
 inline constexpr uint32_t PANEL_WARM_DITHER = TFT_GRAY_12;
 inline constexpr uint32_t PANEL_HEADER_BACKGROUND = PANEL_WHITE;
 inline constexpr uint32_t PANEL_ACCENT = TFT_GRAY_2;
-inline constexpr uint32_t PANEL_SECTION_HEADER = TFT_GRAY_4;
-inline constexpr uint32_t PANEL_SECTION_HEADER_TEXT = TFT_GRAY_15;
 inline constexpr uint32_t PANEL_TODAY_BASE = TFT_GRAY_12;
 inline constexpr uint32_t PANEL_TODAY_DITHER = TFT_GRAY_12;
 inline constexpr uint32_t PANEL_WEATHER_HEADER = PANEL_WARM_BASE;
@@ -80,8 +76,6 @@ inline constexpr uint32_t PANEL_WARM_BASE = TFT_YELLOW;
 inline constexpr uint32_t PANEL_WARM_DITHER = TFT_RED;
 inline constexpr uint32_t PANEL_HEADER_BACKGROUND = PANEL_WHITE;
 inline constexpr uint32_t PANEL_ACCENT = TFT_BLUE;
-inline constexpr uint32_t PANEL_SECTION_HEADER = TFT_BLUE;
-inline constexpr uint32_t PANEL_SECTION_HEADER_TEXT = TFT_WHITE;
 inline constexpr uint32_t PANEL_TODAY_BASE = TFT_WHITE;
 inline constexpr uint32_t PANEL_TODAY_DITHER = TFT_GREEN;
 inline constexpr uint32_t PANEL_WEATHER_HEADER = PANEL_WARM_BASE;

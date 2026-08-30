@@ -15,8 +15,8 @@ panel only when visible calendar, weather, sensor, or date content has changed.
   monthly, and yearly recurrence rules.
 - Google Calendar through a Google Cloud service account, with optional
   Workspace domain-wide delegation.
-- Calendar and event colors mapped to each panel's native grayscale or
-  six-color palette.
+- Calendar and event colors Floyd-Steinberg-dithered into each panel's native
+  grayscale or six-color palette.
 - A fixed dashboard with the current week above a six-week month grid and
   today's agenda above a compact weather card in the sidebar. Week and month
   grids mark the current day in green on six-color panels.
@@ -25,8 +25,8 @@ panel only when visible calendar, weather, sensor, or date content has changed.
 - Indoor SHT4x temperature/humidity in the weather card and battery status in
   the header.
 - Open-Meteo or QWeather summary, with optional severe-weather alerts.
-- Captive-portal configuration for Wi-Fi, calendar, timezone, NTP, quiet
-  hours, weather, refresh cadence, and diagnostics.
+- Captive-portal configuration for Wi-Fi, calendar, timezone, 12/24-hour time
+  format, NTP, quiet hours, weather, refresh cadence, and diagnostics.
 - DHCP networking, NTP synchronization, PCF8563 clock restoration, quiet
   hours, low-battery handling, and deep sleep.
 - iCalendar URLs, Google IAM credentials, weather credentials, and settings
@@ -142,6 +142,10 @@ service-account fields are saved in the `calendar` NVS namespace; the private
 key is never placed on SD, returned by the status endpoint, or logged. The
 portal can remove the stored credential. Standard ESP32 NVS is not encrypted
 unless flash encryption is separately provisioned on the device.
+
+Under **Settings -> Presentation**, choose Monday or Sunday as the first day of
+the week and select either the default 12-hour AM/PM clock or a 24-hour clock.
+Timed entries in the Today agenda show both their start and end times.
 
 ### 4. Configure weather
 

@@ -98,6 +98,62 @@ inline bool sameLocalDate(time_t left, time_t right) {
          a.tm_year == b.tm_year && a.tm_yday == b.tm_yday;
 }
 
+inline std::string formatClockTime(time_t value, config::TimeFormat format,
+                                  bool includeMeridiem = true) {
+  struct tm local = {};
+  if (localtime_r(&value, &local) == nullptr) return "--:--";
+
+  char buffer[16] = {};
+  if (format == config::TimeFormat::TwentyFourHour) {
+    snprintf(buffer, sizeof(buffer), "%02d:%02d", local.tm_hour, local.tm_min);
+    return buffer;
+  }
+
+  const int hour = local.tm_hour % 12 == 0 ? 12 : local.tm_hour % 12;
+  if (includeMeridiem) {
+    snprintf(buffer, sizeof(buffer), "%d:%02d %s", hour, local.tm_min,
+            local.tm_hour < 12 ? "AM" : "PM");
+  } else {
+    snprintf(buffer, sizeof(buffer), "%d:%02d", hour, local.tm_min);
+  }
+  return buffer;
+}
+
+inline std::string formatClockRange(time_t start, time_t end,
+                                   config::TimeFormat format) {
+  if (format == config::TimeFormat::TwentyFourHour) {
+    const std::string startText = formatClockTime(start, format);
+    const std::string endText = formatClockTime(end, format);
+    return startText == "--:--" || endText == "--:--"
+               ? std::string("--:--")
+               : startText + "-" + endText;
+  }
+
+  struct tm startLocal = {};
+  struct tm endLocal = {};
+  if (localtime_r(&start, &startLocal) == nullptr ||
+      localtime_r(&end, &endLocal) == nullptr) {
+    return "--:--";
+  }
+  const bool sameDate = startLocal.tm_year == endLocal.tm_year &&
+                       startLocal.tm_yday == endLocal.tm_yday;
+  const bool sameMeridiem = (startLocal.tm_hour < 12) == (endLocal.tm_hour < 12);
+  if (sameDate && sameMeridiem) {
+    return formatClockTime(start, format, false) + "-" +
+           formatClockTime(end, format);
+  }
+
+  std::string startText = formatClockTime(start, format);
+  std::string endText = formatClockTime(end, format);
+  if (startText.size() >= 3 && startText[startText.size() - 3] == ' ') {
+    startText.erase(startText.size() - 3, 1);
+  }
+  if (endText.size() >= 3 && endText[endText.size() - 3] == ' ') {
+    endText.erase(endText.size() - 3, 1);
+  }
+  return startText + "-" + endText;
+}
+
 inline uint32_t parseRgb(const char* value, uint32_t fallback = 0x4A6FA5) {
   if (value == nullptr) return fallback;
   if (*value == '#') ++value;

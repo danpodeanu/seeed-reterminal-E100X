@@ -18,4 +18,9 @@ enum class WeekStart {
   Sunday,
 };
 
+enum class TimeFormat {
+  TwelveHour,
+  TwentyFourHour,
+};
+
 }  // namespace config

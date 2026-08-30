@@ -14,6 +14,7 @@ struct Cache {
   String googleCalendarIds = config::GOOGLE_CALENDAR_IDS;
   String googleDelegatedUser = config::GOOGLE_DELEGATED_USER;
   config::WeekStart weekStart = config::WEEK_START;
+  config::TimeFormat timeFormat = config::TIME_FORMAT;
 
   uint64_t sleepSeconds = config::SLEEP_SECONDS;
   String timezone = config::TIMEZONE;
@@ -74,6 +75,11 @@ config::WeekStart parseWeekStart(const String& value) {
                             : config::WeekStart::Monday;
 }
 
+config::TimeFormat parseTimeFormat(const String& value) {
+  return value == "24-hour" ? config::TimeFormat::TwentyFourHour
+                             : config::TimeFormat::TwelveHour;
+}
+
 config::WeatherProvider parseWeatherProvider(const String& value) {
   return value == "QWeather" ? config::WeatherProvider::QWeather
                               : config::WeatherProvider::OpenMeteo;
@@ -104,6 +110,8 @@ void load() {
       prefs, kSchema, kKeyGoogleDelegatedUser);
   g_cache.weekStart = parseWeekStart(
       config_portal::storage::getString(prefs, kSchema, kKeyWeekStart));
+  g_cache.timeFormat = parseTimeFormat(
+      config_portal::storage::getString(prefs, kSchema, kKeyTimeFormat));
 
   g_cache.sleepSeconds = static_cast<uint64_t>(
       config_portal::storage::getInt(prefs, kSchema, kKeySleepSeconds));
@@ -164,6 +172,7 @@ const char* googleDelegatedUser() {
   return g_cache.googleDelegatedUser.c_str();
 }
 config::WeekStart weekStart() { return g_cache.weekStart; }
+config::TimeFormat timeFormat() { return g_cache.timeFormat; }
 
 uint64_t sleepSeconds() { return g_cache.sleepSeconds; }
 const char* timezone() { return g_cache.timezone.c_str(); }

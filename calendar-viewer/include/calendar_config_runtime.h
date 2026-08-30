@@ -15,6 +15,7 @@ const char* icalUrl();
 const char* googleCalendarIds();
 const char* googleDelegatedUser();
 config::WeekStart weekStart();
+config::TimeFormat timeFormat();
 
 uint64_t sleepSeconds();
 const char* timezone();

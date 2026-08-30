@@ -12,6 +12,7 @@ constexpr const char* kKeyIcalUrl = "ical_url";
 constexpr const char* kKeyGoogleCalendarIds = "gcal_ids";
 constexpr const char* kKeyGoogleDelegatedUser = "gcal_user";
 constexpr const char* kKeyWeekStart = "week_start";
+constexpr const char* kKeyTimeFormat = "time_format";
 
 constexpr const char* kKeySleepSeconds = "sleep_secs";
 constexpr const char* kKeyTimezone = "timezone";

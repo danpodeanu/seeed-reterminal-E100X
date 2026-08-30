@@ -621,6 +621,43 @@ void test_color_parsing_accepts_hex_and_rejects_invalid_values() {
                           calendar_logic::parseRgb("#bad", 0x123456));
 }
 
+void test_clock_time_format_supports_twelve_and_twenty_four_hour_clocks() {
+  const time_t midnight = utc(2026, 8, 30, 0, 5);
+  const time_t morning = utc(2026, 8, 30, 10, 15);
+  const time_t noon = utc(2026, 8, 30, 12, 30);
+  const time_t afternoon = utc(2026, 8, 30, 13, 45);
+
+  TEST_ASSERT_EQUAL_STRING(
+      "12:05 AM",
+      calendar_logic::formatClockTime(midnight,
+                                      config::TimeFormat::TwelveHour)
+          .c_str());
+  TEST_ASSERT_EQUAL_STRING(
+      "12:30 PM",
+      calendar_logic::formatClockTime(noon, config::TimeFormat::TwelveHour)
+          .c_str());
+  TEST_ASSERT_EQUAL_STRING(
+      "13:45",
+      calendar_logic::formatClockTime(
+          afternoon, config::TimeFormat::TwentyFourHour)
+          .c_str());
+  TEST_ASSERT_EQUAL_STRING(
+      "10:15AM-12:30PM",
+      calendar_logic::formatClockRange(morning, noon,
+                                       config::TimeFormat::TwelveHour)
+          .c_str());
+  TEST_ASSERT_EQUAL_STRING(
+      "12:30-1:45 PM",
+      calendar_logic::formatClockRange(noon, afternoon,
+                                       config::TimeFormat::TwelveHour)
+          .c_str());
+  TEST_ASSERT_EQUAL_STRING(
+      "12:30-13:45",
+      calendar_logic::formatClockRange(noon, afternoon,
+                                       config::TimeFormat::TwentyFourHour)
+          .c_str());
+}
+
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_calendar_provider_configuration_requires_selected_source);
@@ -652,5 +689,7 @@ int main(int, char**) {
   RUN_TEST(test_ical_parser_caps_event_count_and_marks_truncation);
   RUN_TEST(test_data_fingerprint_changes_with_visible_event_content_only);
   RUN_TEST(test_color_parsing_accepts_hex_and_rejects_invalid_values);
+  RUN_TEST(
+      test_clock_time_format_supports_twelve_and_twenty_four_hour_clocks);
   return UNITY_END();
 }
