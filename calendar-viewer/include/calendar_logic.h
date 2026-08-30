@@ -85,6 +85,15 @@ inline calendar::Window displayWindow(config::CalendarView view, time_t now,
   return result;
 }
 
+inline calendar::Window dashboardWindow(time_t now,
+                                        config::WeekStart firstDay) {
+  calendar::Window result =
+      displayWindow(config::CalendarView::Month, now, firstDay);
+  const time_t upcomingEnd = addLocalDays(localMidnight(now), 43);
+  if (result.end < upcomingEnd) result.end = upcomingEnd;
+  return result;
+}
+
 inline bool overlaps(time_t start, time_t end,
                      time_t windowStart, time_t windowEnd) {
   return start < windowEnd && end > windowStart;

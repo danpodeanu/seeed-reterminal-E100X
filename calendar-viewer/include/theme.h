@@ -7,6 +7,7 @@
 namespace theme {
 
 inline constexpr uint32_t CALENDAR_HEADER_RGB = 0xA4BDFC;
+inline constexpr uint32_t WEATHER_HEADER_RGB = 0xFBD75B;
 
 // E1004's physical front-button order is RIGHT / LEFT / GREEN; the older
 // models use GREEN / RIGHT / LEFT on the same three GPIOs.
@@ -24,13 +25,10 @@ inline constexpr int PIN_BUTTON_LEFT = board::PIN_BUTTON_2;
 inline constexpr uint32_t PANEL_WHITE = TFT_GRAY_3;
 inline constexpr uint32_t PANEL_BLACK = TFT_GRAY_0;
 inline constexpr uint32_t PANEL_MUTED = TFT_GRAY_1;
-inline constexpr uint32_t PANEL_WARM_BASE = TFT_GRAY_2;
-inline constexpr uint32_t PANEL_WARM_DITHER = TFT_GRAY_2;
 inline constexpr uint32_t PANEL_HEADER_BACKGROUND = PANEL_WHITE;
 inline constexpr uint32_t PANEL_ACCENT = TFT_GRAY_0;
 inline constexpr uint32_t PANEL_TODAY_BASE = TFT_GRAY_2;
 inline constexpr uint32_t PANEL_TODAY_DITHER = TFT_GRAY_2;
-inline constexpr uint32_t PANEL_WEATHER_HEADER = PANEL_WARM_BASE;
 inline constexpr uint32_t PANEL_WEATHER_BACKGROUND = TFT_GRAY_3;
 inline constexpr uint32_t COLOR_TEMPERATURE = TFT_GRAY_0;
 inline constexpr uint32_t COLOR_HUMIDITY = TFT_GRAY_1;
@@ -40,13 +38,10 @@ inline constexpr uint32_t COLOR_ALERT_TEXT = TFT_GRAY_3;
 inline constexpr uint32_t PANEL_WHITE = TFT_WHITE;
 inline constexpr uint32_t PANEL_BLACK = TFT_BLACK;
 inline constexpr uint32_t PANEL_MUTED = TFT_BLACK;
-inline constexpr uint32_t PANEL_WARM_BASE = TFT_YELLOW;
-inline constexpr uint32_t PANEL_WARM_DITHER = TFT_RED;
 inline constexpr uint32_t PANEL_HEADER_BACKGROUND = PANEL_WHITE;
 inline constexpr uint32_t PANEL_ACCENT = TFT_BLUE;
 inline constexpr uint32_t PANEL_TODAY_BASE = TFT_WHITE;
 inline constexpr uint32_t PANEL_TODAY_DITHER = TFT_GREEN;
-inline constexpr uint32_t PANEL_WEATHER_HEADER = PANEL_WARM_BASE;
 inline constexpr uint32_t PANEL_WEATHER_BACKGROUND = TFT_WHITE;
 inline constexpr uint32_t COLOR_TEMPERATURE = TFT_RED;
 inline constexpr uint32_t COLOR_HUMIDITY = TFT_BLUE;
@@ -56,13 +51,10 @@ inline constexpr uint32_t COLOR_ALERT_TEXT = TFT_WHITE;
 inline constexpr uint32_t PANEL_WHITE = TFT_GRAY_15;
 inline constexpr uint32_t PANEL_BLACK = TFT_GRAY_0;
 inline constexpr uint32_t PANEL_MUTED = TFT_GRAY_7;
-inline constexpr uint32_t PANEL_WARM_BASE = TFT_GRAY_12;
-inline constexpr uint32_t PANEL_WARM_DITHER = TFT_GRAY_12;
 inline constexpr uint32_t PANEL_HEADER_BACKGROUND = PANEL_WHITE;
 inline constexpr uint32_t PANEL_ACCENT = TFT_GRAY_2;
 inline constexpr uint32_t PANEL_TODAY_BASE = TFT_GRAY_12;
 inline constexpr uint32_t PANEL_TODAY_DITHER = TFT_GRAY_12;
-inline constexpr uint32_t PANEL_WEATHER_HEADER = PANEL_WARM_BASE;
 inline constexpr uint32_t PANEL_WEATHER_BACKGROUND = TFT_GRAY_15;
 inline constexpr uint32_t COLOR_TEMPERATURE = TFT_GRAY_0;
 inline constexpr uint32_t COLOR_HUMIDITY = TFT_GRAY_5;
@@ -72,13 +64,10 @@ inline constexpr uint32_t COLOR_ALERT_TEXT = TFT_GRAY_15;
 inline constexpr uint32_t PANEL_WHITE = TFT_WHITE;
 inline constexpr uint32_t PANEL_BLACK = TFT_BLACK;
 inline constexpr uint32_t PANEL_MUTED = TFT_BLACK;
-inline constexpr uint32_t PANEL_WARM_BASE = TFT_YELLOW;
-inline constexpr uint32_t PANEL_WARM_DITHER = TFT_RED;
 inline constexpr uint32_t PANEL_HEADER_BACKGROUND = PANEL_WHITE;
 inline constexpr uint32_t PANEL_ACCENT = TFT_BLUE;
 inline constexpr uint32_t PANEL_TODAY_BASE = TFT_WHITE;
 inline constexpr uint32_t PANEL_TODAY_DITHER = TFT_GREEN;
-inline constexpr uint32_t PANEL_WEATHER_HEADER = PANEL_WARM_BASE;
 inline constexpr uint32_t PANEL_WEATHER_BACKGROUND = TFT_WHITE;
 inline constexpr uint32_t COLOR_TEMPERATURE = TFT_RED;
 inline constexpr uint32_t COLOR_HUMIDITY = TFT_BLUE;

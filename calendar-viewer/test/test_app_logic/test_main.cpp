@@ -76,6 +76,11 @@ void test_display_windows_respect_week_start_and_month_grid() {
       config::CalendarView::Month, saturday, config::WeekStart::Monday);
   TEST_ASSERT_EQUAL_INT64(utc(2026, 7, 27), month.start);
   TEST_ASSERT_EQUAL_INT64(utc(2026, 9, 7), month.end);
+
+  const calendar::Window dashboard =
+      calendar_logic::dashboardWindow(saturday, config::WeekStart::Monday);
+  TEST_ASSERT_EQUAL_INT64(month.start, dashboard.start);
+  TEST_ASSERT_EQUAL_INT64(utc(2026, 10, 11), dashboard.end);
 }
 
 void test_ical_parser_reads_timed_all_day_folded_text_and_colors() {

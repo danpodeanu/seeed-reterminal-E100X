@@ -65,7 +65,7 @@ constexpr const char* kFrameValidKey = "frame_valid";
 constexpr const char* kFrameHashKey = "frame_hash";
 constexpr const char* kFrameKindKey = "frame_kind";
 // Increment when rendering changes without changing the underlying data.
-constexpr uint32_t kCalendarFrameRevision = 3;
+constexpr uint32_t kCalendarFrameRevision = 4;
 
 enum class FrameKind : uint8_t {
   None = 0,
@@ -422,7 +422,13 @@ PrimaryGesture primaryGesture(bool pressedAtBoot) {
 }
 
 String portalHint() {
-  return "Hold green for 2s to configure";
+  return "Press green to retry or hold green for 2s to configure";
+}
+
+String googleFailureForDisplay(String failure) {
+  failure.replace("; event-only fallback failed:",
+                  "\nEvent-only fallback failed:");
+  return failure;
 }
 
 uint64_t scheduledSleepSeconds(const struct tm& localNow) {
@@ -584,9 +590,8 @@ void setup() {
   }
 
   const time_t now = time(nullptr);
-  const calendar::Window window = calendar_logic::displayWindow(
-      config::CalendarView::Month, now,
-      calendar_config::runtime::weekStart());
+  const calendar::Window window = calendar_logic::dashboardWindow(
+      now, calendar_config::runtime::weekStart());
   calendar::Data calendarData;
   String calendarFailure;
   const bool calendarUpdated =
@@ -623,7 +628,8 @@ void setup() {
     if (provider == config::CalendarProvider::Google) {
       LOG.printf("[google] update failed; displaying error: %s\n",
                  calendarFailure.c_str());
-      showStatusAndSleep("Google Calendar error", calendarFailure,
+      showStatusAndSleep("Google Calendar error",
+                         googleFailureForDisplay(calendarFailure),
                          scheduledSleepSeconds(localNow));
       return;
     }

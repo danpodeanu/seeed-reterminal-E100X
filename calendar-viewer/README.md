@@ -18,10 +18,13 @@ panel only when visible calendar, weather, sensor, or date content has changed.
 - Calendar and event colors Floyd-Steinberg-dithered into each panel's native
   grayscale or six-color palette.
 - A fixed dashboard with the current week above a six-week month grid and
-  today's agenda above a compact weather card in the sidebar. Week and month
-  grids mark the current day in green on six-color panels.
+  separate Today and Upcoming agendas above a compact weather card in the
+  sidebar. Upcoming entries from the next six weeks include their date and
+  start/end times. Week and month grids mark the current day in green on
+  six-color panels.
 - Shared Meteocons weather artwork plus native calendar, climate, location, and
-  alert icons, with blue and dithered-orange accents on six-color models.
+  alert icons, with dithered light-blue calendar and light-yellow weather
+  headers on six-color models.
 - Indoor SHT4x temperature/humidity in the weather card and battery status in
   the header.
 - Open-Meteo or QWeather summary, with optional severe-weather alerts.
