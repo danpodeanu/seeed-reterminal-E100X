@@ -25,8 +25,8 @@ panel only when visible calendar, weather, sensor, or date content has changed.
   current day in green on six-color panels.
 - A wall-planner layout uses open column gutters, weekday/date labels inside
   the week cells, a light-blue weekday header above date-only month cells,
-  horizontal week separators, a heavier outline around today, rounded event
-  bands, and clean white agenda and weather areas.
+  horizontal week separators, rounded event bands, and clean white agenda and
+  weather areas.
 - Sunday is the default first day of the week; the Presentation settings can
   switch week and month grids to Monday-first.
 - A Presentation toggle controls the single-Google-calendar background and

@@ -47,17 +47,11 @@ struct RecordingSurface {
     uint32_t color = 0;
   };
 
-  void drawRect(int left, int top, int width, int height, uint32_t color) {
-    drawCalls[drawCount++] = {left, top, width, height, color};
-  }
-
   void fillRect(int left, int top, int width, int height, uint32_t color) {
     fillCalls[fillCount++] = {left, top, width, height, color};
   }
 
-  Call drawCalls[4];
   Call fillCalls[2];
-  int drawCount = 0;
   int fillCount = 0;
 };
 
@@ -894,15 +888,13 @@ void test_header_icon_and_title_are_centered_as_one_group() {
   TEST_ASSERT_INT_WITHIN(1, 1600, group.left * 2 + group.width);
 }
 
-void test_grid_today_geometry_and_week_label_offsets() {
+void test_grid_today_fill_and_week_label_geometry() {
   const calendar_render_geometry::Rect cell =
       calendar_render_geometry::gridCellInterior(24, 132, 166, 360, 3);
   TEST_ASSERT_EQUAL_INT(27, cell.left);
   TEST_ASSERT_EQUAL_INT(133, cell.top);
   TEST_ASSERT_EQUAL_INT(160, cell.width);
   TEST_ASSERT_EQUAL_INT(359, cell.height);
-  TEST_ASSERT_EQUAL_INT(2, calendar_render_geometry::todayBorderWidth(1));
-  TEST_ASSERT_EQUAL_INT(3, calendar_render_geometry::todayBorderWidth(3));
   TEST_ASSERT_EQUAL_INT(
       140, calendar_render_geometry::gridDayLabelTop(132, 5, 3, false));
   TEST_ASSERT_EQUAL_INT(
@@ -959,21 +951,8 @@ void test_agenda_band_geometry_keeps_today_larger_than_upcoming() {
   TEST_ASSERT_GREATER_THAN_INT(upcoming.height, today.height);
 }
 
-void test_today_border_and_footer_issue_expected_draw_calls() {
+void test_plain_footer_issues_expected_fill_call() {
   RecordingSurface surface;
-  const calendar_render_geometry::Rect today{27, 133, 160, 359};
-  calendar_render_geometry::drawBorder(
-      surface, today, 2, UINT32_C(0x010203));
-  TEST_ASSERT_EQUAL_INT(2, surface.drawCount);
-  TEST_ASSERT_EQUAL_INT(27, surface.drawCalls[0].left);
-  TEST_ASSERT_EQUAL_INT(133, surface.drawCalls[0].top);
-  TEST_ASSERT_EQUAL_INT(160, surface.drawCalls[0].width);
-  TEST_ASSERT_EQUAL_INT(359, surface.drawCalls[0].height);
-  TEST_ASSERT_EQUAL_INT(28, surface.drawCalls[1].left);
-  TEST_ASSERT_EQUAL_INT(134, surface.drawCalls[1].top);
-  TEST_ASSERT_EQUAL_INT(158, surface.drawCalls[1].width);
-  TEST_ASSERT_EQUAL_INT(357, surface.drawCalls[1].height);
-
   const calendar_render_geometry::Rect footer =
       calendar_render_geometry::footerBadge(1200, 420, 24);
   calendar_render_geometry::fillPlainFooterBackground(
@@ -1127,9 +1106,9 @@ int main(int, char**) {
   RUN_TEST(test_refresh_fingerprint_excludes_diagnostic_footer_and_climate);
   RUN_TEST(test_calendar_frame_refresh_decision_covers_each_trigger);
   RUN_TEST(test_header_icon_and_title_are_centered_as_one_group);
-  RUN_TEST(test_grid_today_geometry_and_week_label_offsets);
+  RUN_TEST(test_grid_today_fill_and_week_label_geometry);
   RUN_TEST(test_agenda_band_geometry_keeps_today_larger_than_upcoming);
-  RUN_TEST(test_today_border_and_footer_issue_expected_draw_calls);
+  RUN_TEST(test_plain_footer_issues_expected_fill_call);
   RUN_TEST(test_color_parsing_accepts_hex_and_rejects_invalid_values);
   RUN_TEST(test_single_google_calendar_color_controls_grid_background);
   RUN_TEST(test_agenda_compacts_upcoming_rows_for_more_count);

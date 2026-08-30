@@ -46,10 +46,6 @@ inline int gridDayLabelTop(int cellTop, int baseOffset, int weekOffset,
   return cellTop + baseOffset + (monthView ? 0 : weekOffset);
 }
 
-inline int todayBorderWidth(int scaledOnePixel) {
-  return std::max(2, scaledOnePixel);
-}
-
 inline Rect agendaBand(int cardLeft, int rowTop, int cardWidth, int rowHeight,
                        int preferredRowHeight, int scaledTwoPixels,
                        int scaledThreePixels, bool upcoming) {
@@ -76,17 +72,6 @@ inline Rect footerBadge(int panelHeight, int badgeWidth, int badgeHeight) {
       std::max(0, badgeWidth),
       std::max(0, badgeHeight),
   };
-}
-
-template <typename Surface>
-inline void drawBorder(Surface& surface, const Rect& rect, int borderWidth,
-                       uint32_t color) {
-  for (int inset = 0; inset < borderWidth; ++inset) {
-    const int width = rect.width - inset * 2;
-    const int height = rect.height - inset * 2;
-    if (width <= 0 || height <= 0) break;
-    surface.drawRect(rect.left + inset, rect.top + inset, width, height, color);
-  }
 }
 
 template <typename Surface>

@@ -77,15 +77,12 @@ void selectFont(EPaper& epaper, FontSize size, bool bold = true) {
 #endif
 }
 
-void drawTodayCell(EPaper& epaper,
+void fillTodayCell(EPaper& epaper,
                    const calendar_render_geometry::Rect& rect) {
   text_render::fillDitheredRect(
       epaper, rect.left, rect.top, rect.width, rect.height, config::PANEL_WIDTH,
       config::PANEL_HEIGHT, PANEL_TODAY_BASE,
       PANEL_TODAY_DITHER != PANEL_TODAY_BASE, PANEL_TODAY_DITHER, 5);
-  calendar_render_geometry::drawBorder(
-      epaper, rect,
-      calendar_render_geometry::todayBorderWidth(config::ui(1)), PANEL_BLACK);
 }
 
 void drawCalendarIcon(EPaper& epaper, int x, int y, int size,
@@ -996,7 +993,7 @@ void drawGrid(EPaper& epaper, ColorDitherer& ditherer,
           calendar_render_geometry::gridCellInterior(
               x, y, cellWidth, cellHeight, cellInset);
       if (today) {
-        drawTodayCell(epaper, cellInterior);
+        fillTodayCell(epaper, cellInterior);
       }
       epaper.setTextDatum(TL_DATUM);
       const uint32_t dateInk =
