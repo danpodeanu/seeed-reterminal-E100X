@@ -65,7 +65,7 @@ constexpr const char* kFrameValidKey = "frame_valid";
 constexpr const char* kFrameHashKey = "frame_hash";
 constexpr const char* kFrameKindKey = "frame_kind";
 // Increment when rendering changes without changing the underlying data.
-constexpr uint32_t kCalendarFrameRevision = 9;
+constexpr uint32_t kCalendarFrameRevision = 10;
 
 enum class FrameKind : uint8_t {
   None = 0,
@@ -556,6 +556,12 @@ void setup() {
                          config::FAILURE_RETRY_SECONDS);
     }
     return;
+  }
+  if (!WiFi.setSleep(false)) {
+    LOG.println(
+        "[wifi] warning: could not disable modem sleep for calendar refresh");
+  } else {
+    LOG.println("[wifi] modem sleep disabled for calendar refresh");
   }
 
   if (ntpDue) {

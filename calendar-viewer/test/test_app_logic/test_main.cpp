@@ -60,6 +60,56 @@ void test_calendar_provider_configuration_requires_selected_source() {
       false));
 }
 
+void test_google_transport_failure_classification() {
+  TEST_ASSERT_TRUE(calendar_logic::isGoogleTransportFailure(0));
+  TEST_ASSERT_TRUE(calendar_logic::isGoogleTransportFailure(-1));
+  TEST_ASSERT_TRUE(calendar_logic::isGoogleTransportFailure(-11));
+  TEST_ASSERT_FALSE(calendar_logic::isGoogleTransportFailure(200));
+  TEST_ASSERT_FALSE(calendar_logic::isGoogleTransportFailure(503));
+}
+
+void test_google_oauth_failure_classification() {
+  using calendar_logic::GoogleAuthFailure;
+
+  TEST_ASSERT_EQUAL(
+      static_cast<int>(GoogleAuthFailure::Transport),
+      static_cast<int>(
+          calendar_logic::classifyGoogleAuthFailure(-1, "invalid_scope")));
+  TEST_ASSERT_EQUAL(
+      static_cast<int>(GoogleAuthFailure::ScopeOrAuthorization),
+      static_cast<int>(
+          calendar_logic::classifyGoogleAuthFailure(400, "invalid_scope")));
+  TEST_ASSERT_EQUAL(
+      static_cast<int>(GoogleAuthFailure::ScopeOrAuthorization),
+      static_cast<int>(calendar_logic::classifyGoogleAuthFailure(
+          400, "unauthorized_client")));
+  TEST_ASSERT_EQUAL(
+      static_cast<int>(GoogleAuthFailure::ScopeOrAuthorization),
+      static_cast<int>(
+          calendar_logic::classifyGoogleAuthFailure(403, "access_denied")));
+  TEST_ASSERT_EQUAL(
+      static_cast<int>(GoogleAuthFailure::Other),
+      static_cast<int>(
+          calendar_logic::classifyGoogleAuthFailure(400, "invalid_grant")));
+  TEST_ASSERT_EQUAL(
+      static_cast<int>(GoogleAuthFailure::Other),
+      static_cast<int>(
+          calendar_logic::classifyGoogleAuthFailure(401, "")));
+  TEST_ASSERT_EQUAL(
+      static_cast<int>(GoogleAuthFailure::Other),
+      static_cast<int>(calendar_logic::classifyGoogleAuthFailure(500, "")));
+}
+
+void test_google_api_fallback_statuses() {
+  TEST_ASSERT_TRUE(calendar_logic::shouldUseGoogleEventOnlyFallback(401));
+  TEST_ASSERT_TRUE(calendar_logic::shouldUseGoogleEventOnlyFallback(403));
+  TEST_ASSERT_FALSE(calendar_logic::shouldUseGoogleEventOnlyFallback(0));
+  TEST_ASSERT_FALSE(calendar_logic::shouldUseGoogleEventOnlyFallback(-1));
+  TEST_ASSERT_FALSE(calendar_logic::shouldUseGoogleEventOnlyFallback(400));
+  TEST_ASSERT_FALSE(calendar_logic::shouldUseGoogleEventOnlyFallback(404));
+  TEST_ASSERT_FALSE(calendar_logic::shouldUseGoogleEventOnlyFallback(500));
+}
+
 void test_display_windows_respect_week_start_and_month_grid() {
   const time_t saturday = utc(2026, 8, 29, 12);
   const calendar::Window mondayWeek = calendar_logic::displayWindow(
@@ -706,6 +756,9 @@ void test_clock_time_format_supports_twelve_and_twenty_four_hour_clocks() {
 int main(int, char**) {
   UNITY_BEGIN();
   RUN_TEST(test_calendar_provider_configuration_requires_selected_source);
+  RUN_TEST(test_google_transport_failure_classification);
+  RUN_TEST(test_google_oauth_failure_classification);
+  RUN_TEST(test_google_api_fallback_statuses);
   RUN_TEST(test_display_windows_respect_week_start_and_month_grid);
   RUN_TEST(test_ical_parser_reads_timed_all_day_folded_text_and_colors);
   RUN_TEST(test_ical_parser_expands_recurrence_and_applies_exdates);

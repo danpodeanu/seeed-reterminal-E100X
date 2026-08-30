@@ -2,6 +2,7 @@
 
 #include <ArduinoJson.h>
 #include <HTTPClient.h>
+#include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include <mbedtls/ctr_drbg.h>
 #include <mbedtls/entropy.h>
@@ -44,6 +45,17 @@ constexpr const char* kEventsReadOnlyScope =
 enum class GoogleRequestMethod {
   Get,
   Post,
+};
+
+constexpr int kGoogleTransportAttempts = 2;
+constexpr uint32_t kGoogleTransportRetryDelayMs = 1000;
+constexpr uint32_t kGoogleConnectTimeoutMs = 12000;
+
+struct GoogleHttpExchange {
+  int status = 0;
+  int transportError = 0;
+  String body;
+  String failureReason;
 };
 
 void scrub(String& value) {
@@ -244,6 +256,145 @@ bool buildServiceAccountJwt(const google_credentials::Credentials& credentials,
   return true;
 }
 
+String hostFromUrl(const String& url) {
+  int start = url.indexOf("://");
+  start = start < 0 ? 0 : start + 3;
+  int end = url.indexOf('/', start);
+  if (end < 0) end = url.length();
+  String host = url.substring(start, end);
+  const int portSeparator = host.indexOf(':');
+  if (portSeparator >= 0) host.remove(portSeparator);
+  return host;
+}
+
+void logGoogleTransportDiagnostics(const String& operation,
+                                   const String& url, int httpStatus,
+                                   int transportError, int tlsError,
+                                   const char* tlsErrorText, int attempt) {
+  const String transportDetail =
+      HTTPClient::errorToString(transportError);
+  const String localIp = WiFi.localIP().toString();
+  const String gatewayIp = WiFi.gatewayIP().toString();
+  const String dnsIp = WiFi.dnsIP().toString();
+  const String host = hostFromUrl(url);
+  IPAddress resolvedIp;
+  const bool resolved =
+      !host.isEmpty() && WiFi.hostByName(host.c_str(), resolvedIp) == 1;
+  const String resolution = resolved ? resolvedIp.toString() : "failed";
+
+  LOG.printf(
+      "[google] %s transport diagnostics %d/%d: HTTP status %d, "
+      "transport %d (%s), Wi-Fi status %d, RSSI %ld dBm\n",
+      operation.c_str(), attempt, kGoogleTransportAttempts, httpStatus,
+      transportError, transportDetail.c_str(),
+      static_cast<int>(WiFi.status()), static_cast<long>(WiFi.RSSI()));
+  LOG.printf(
+      "[google] network: local %s, gateway %s, DNS %s, %s -> %s; "
+      "heap %u, largest block %u\n",
+      localIp.c_str(), gatewayIp.c_str(), dnsIp.c_str(), host.c_str(),
+      resolution.c_str(), ESP.getFreeHeap(), ESP.getMaxAllocHeap());
+  LOG.printf(
+      "[google] timeouts: connect/TLS %lu ms, response idle %lu ms\n",
+      static_cast<unsigned long>(kGoogleConnectTimeoutMs),
+      static_cast<unsigned long>(config::HTTP_TIMEOUT_MS));
+  if (tlsError < 0) {
+    LOG.printf("[google] TLS error %d: %s\n", tlsError, tlsErrorText);
+  } else {
+    LOG.println(
+        "[google] no mbedTLS error was reported; the failure may be DNS, "
+        "TCP, socket, or response-timeout related");
+  }
+}
+
+GoogleHttpExchange executeGoogleHttpOnce(
+    GoogleRequestMethod method, const String& operation, const String& url,
+    const String& bearerToken, const String& contentType,
+    const String& requestBody, size_t maximumSuccessBytes,
+    bool followRedirects, int attempt) {
+  GoogleHttpExchange exchange;
+  tls_client::DefaultRootClient client;
+  client.setTimeout(kGoogleConnectTimeoutMs);
+  client.setHandshakeTimeout(kGoogleConnectTimeoutMs / 1000);
+  HTTPClient http;
+  http.setConnectTimeout(kGoogleConnectTimeoutMs);
+  http.setTimeout(config::HTTP_TIMEOUT_MS);
+  http.setReuse(false);
+  if (followRedirects) {
+    http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+  }
+  if (!http.begin(client, url)) {
+    exchange.transportError = HTTPC_ERROR_NO_HTTP_SERVER;
+    exchange.failureReason = "could not start the HTTP request";
+    logGoogleTransportDiagnostics(
+        operation, url, exchange.status, exchange.transportError, 0, "",
+        attempt);
+    return exchange;
+  }
+  if (!bearerToken.isEmpty()) {
+    http.addHeader("Authorization", "Bearer " + bearerToken);
+  }
+  http.addHeader("Accept", "application/json");
+  http.addHeader("Accept-Encoding", "identity");
+  if (!contentType.isEmpty()) {
+    http.addHeader("Content-Type", contentType);
+  }
+  exchange.status = method == GoogleRequestMethod::Get
+                        ? http.GET()
+                        : http.POST(requestBody);
+  if (calendar_logic::isGoogleTransportFailure(exchange.status)) {
+    exchange.transportError = exchange.status;
+    const String detail = HTTPClient::errorToString(exchange.status);
+    exchange.failureReason =
+        detail.isEmpty() ? "HTTP transport failed" : detail;
+  } else {
+    const size_t maximumResponse =
+        exchange.status == HTTP_CODE_OK ? maximumSuccessBytes
+                                        : 64U * 1024U;
+    int bodyTransportError = 0;
+    if (!calendar_http::readBody(
+            http, maximumResponse, config::HTTP_TIMEOUT_MS, exchange.body,
+            exchange.failureReason, &bodyTransportError)) {
+      exchange.transportError = bodyTransportError;
+    }
+  }
+
+  char tlsErrorText[160] = {};
+  const int tlsError =
+      client.lastError(tlsErrorText, sizeof(tlsErrorText));
+  http.end();
+  if (exchange.transportError < 0) {
+    logGoogleTransportDiagnostics(
+        operation, url, exchange.status, exchange.transportError, tlsError,
+        tlsErrorText, attempt);
+  }
+  return exchange;
+}
+
+GoogleHttpExchange executeGoogleHttp(
+    GoogleRequestMethod method, const String& operation, const String& url,
+    const String& bearerToken, const String& contentType,
+    const String& requestBody, size_t maximumSuccessBytes,
+    bool followRedirects) {
+  GoogleHttpExchange exchange;
+  for (int attempt = 1; attempt <= kGoogleTransportAttempts; ++attempt) {
+    exchange = executeGoogleHttpOnce(
+        method, operation, url, bearerToken, contentType, requestBody,
+        maximumSuccessBytes, followRedirects, attempt);
+    if (exchange.transportError >= 0 ||
+        attempt == kGoogleTransportAttempts) {
+      return exchange;
+    }
+    scrub(exchange.body);
+    LOG.printf(
+        "[google] %s transport failed; retrying once with a fresh "
+        "connection in %lu ms\n",
+        operation.c_str(),
+        static_cast<unsigned long>(kGoogleTransportRetryDelayMs));
+    delay(kGoogleTransportRetryDelayMs);
+  }
+  return exchange;
+}
+
 bool googleRequest(GoogleRequestMethod method, const String& operation,
                    const String& url, const String& bearerToken,
                    const String& requestBody, String& responseBody,
@@ -253,54 +404,32 @@ bool googleRequest(GoogleRequestMethod method, const String& operation,
   const char* methodName =
       method == GoogleRequestMethod::Get ? "GET" : "POST";
   LOG.printf("[google] %s %s\n", methodName, operation.c_str());
-  tls_client::DefaultRootClient client;
-  client.setTimeout(config::HTTP_TIMEOUT_MS);
-  HTTPClient http;
-  http.setConnectTimeout(config::HTTP_TIMEOUT_MS);
-  http.setTimeout(config::HTTP_TIMEOUT_MS);
-  http.setReuse(false);
-  http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
-  if (!http.begin(client, url)) {
-    failureReason = "Could not start the " + operation + " request";
+  const String contentType =
+      method == GoogleRequestMethod::Post ? "application/json" : "";
+  GoogleHttpExchange exchange = executeGoogleHttp(
+      method, operation, url, bearerToken, contentType, requestBody,
+      512U * 1024U, true);
+  if (!exchange.failureReason.isEmpty()) {
+    failureReason = operation +
+                    (exchange.transportError < 0 ? " request failed: "
+                                                 : " response failed: ") +
+                    exchange.failureReason;
+    if (responseStatus != nullptr && exchange.transportError < 0) {
+      *responseStatus = exchange.transportError;
+    }
     LOG.printf("[google] %s\n", failureReason.c_str());
-    return false;
-  }
-  http.addHeader("Authorization", "Bearer " + bearerToken);
-  http.addHeader("Accept", "application/json");
-  http.addHeader("Accept-Encoding", "identity");
-  if (method == GoogleRequestMethod::Post) {
-    http.addHeader("Content-Type", "application/json");
-  }
-  const int status = method == GoogleRequestMethod::Get
-                         ? http.GET()
-                         : http.POST(requestBody);
-  if (responseStatus != nullptr) *responseStatus = status;
-  if (status <= 0) {
-    const String detail = HTTPClient::errorToString(status);
-    failureReason = operation + " request failed";
-    if (!detail.isEmpty()) failureReason += ": " + detail;
-    LOG.printf("[google] %s\n", failureReason.c_str());
-    http.end();
     return false;
   }
 
-  const size_t maximumResponse =
-      status == HTTP_CODE_OK ? 512U * 1024U : 64U * 1024U;
-  const bool bodyRead = calendar_http::readBody(
-      http, maximumResponse, config::HTTP_TIMEOUT_MS, responseBody,
-      failureReason);
-  http.end();
-  if (!bodyRead) {
-    failureReason = operation + " response failed: " + failureReason;
-    LOG.printf("[google] %s\n", failureReason.c_str());
-    return false;
-  }
+  responseBody = exchange.body;
+  if (responseStatus != nullptr) *responseStatus = exchange.status;
   LOG.printf("[google] %s -> HTTP %d, %u byte(s)\n", operation.c_str(),
-             status, static_cast<unsigned>(responseBody.length()));
-  if (status == HTTP_CODE_OK) return true;
+             exchange.status, static_cast<unsigned>(responseBody.length()));
+  if (exchange.status == HTTP_CODE_OK) return true;
 
   const String detail = googleErrorMessage(responseBody);
-  failureReason = operation + " returned HTTP " + String(status);
+  failureReason =
+      operation + " returned HTTP " + String(exchange.status);
   if (!detail.isEmpty()) failureReason += ": " + detail;
   LOG.printf("[google] %s\n", failureReason.c_str());
   responseBody = "";
@@ -327,7 +456,9 @@ bool googlePostJson(const String& operation, const String& url,
 
 bool exchangeAccessToken(const google_credentials::Credentials& credentials,
                          const char* scope, String& accessToken,
-                         String& failureReason) {
+                         String& failureReason,
+                         calendar_logic::GoogleAuthFailure& authFailure) {
+  authFailure = calendar_logic::GoogleAuthFailure::Other;
   String jwt;
   if (!buildServiceAccountJwt(credentials, scope, jwt, failureReason)) {
     LOG.printf("[google] JWT creation failed: %s\n", failureReason.c_str());
@@ -340,72 +471,69 @@ bool exchangeAccessToken(const google_credentials::Credentials& credentials,
              calendar_config::runtime::googleDelegatedUser()[0] == '\0'
                  ? ""
                  : ", delegated");
-  tls_client::DefaultRootClient client;
-  client.setTimeout(config::HTTP_TIMEOUT_MS);
-  HTTPClient http;
-  http.setConnectTimeout(config::HTTP_TIMEOUT_MS);
-  http.setTimeout(config::HTTP_TIMEOUT_MS);
-  http.setReuse(false);
-  if (!http.begin(client, credentials.tokenUri)) {
-    scrub(jwt);
-    failureReason = "Could not start the Google token request";
-    LOG.printf("[google] %s\n", failureReason.c_str());
-    return false;
-  }
-  http.addHeader("Content-Type", "application/x-www-form-urlencoded");
-  http.addHeader("Accept-Encoding", "identity");
   String form =
       "grant_type=urn%3Aietf%3Aparams%3Aoauth%3Agrant-type%3Ajwt-bearer&assertion=";
   form += jwt;
   scrub(jwt);
-  const int status = http.POST(form);
+  GoogleHttpExchange exchange = executeGoogleHttp(
+      GoogleRequestMethod::Post, "Google authentication",
+      credentials.tokenUri, "", "application/x-www-form-urlencoded", form,
+      64U * 1024U, false);
   scrub(form);
-  if (status <= 0) {
-    const String detail = HTTPClient::errorToString(status);
-    failureReason = "Google authentication request failed";
-    if (!detail.isEmpty()) failureReason += ": " + detail;
+  if (!exchange.failureReason.isEmpty()) {
+    authFailure = exchange.transportError < 0
+                     ? calendar_logic::GoogleAuthFailure::Transport
+                     : calendar_logic::GoogleAuthFailure::Other;
+    failureReason =
+        "Google authentication " +
+        String(exchange.transportError < 0 ? "request failed: "
+                                          : "response failed: ") +
+        exchange.failureReason;
     LOG.printf("[google] %s\n", failureReason.c_str());
-    http.end();
+    scrub(exchange.body);
     return false;
   }
 
-  LOG.printf("[google] token endpoint -> HTTP %d\n", status);
-  String response;
-  const bool bodyRead = calendar_http::readBody(
-      http, 64U * 1024U, config::HTTP_TIMEOUT_MS, response, failureReason);
-  http.end();
-  if (!bodyRead) {
-    failureReason = "Google authentication response failed: " + failureReason;
-    LOG.printf("[google] %s\n", failureReason.c_str());
-    scrub(response);
-    return false;
-  }
-  if (status != HTTP_CODE_OK) {
-    const String detail = googleErrorMessage(response);
-    failureReason = "Google authentication returned HTTP " + String(status);
+  LOG.printf("[google] token endpoint -> HTTP %d\n", exchange.status);
+  if (exchange.status != HTTP_CODE_OK) {
+    JsonDocument errorDocument;
+    String oauthError;
+    if (!deserializeJson(errorDocument, exchange.body)) {
+      oauthError = String(errorDocument["error"] | "");
+    }
+    authFailure = calendar_logic::classifyGoogleAuthFailure(
+        exchange.status,
+        std::string_view(oauthError.c_str(), oauthError.length()));
+    const String detail = googleErrorMessage(exchange.body);
+    failureReason =
+        "Google authentication returned HTTP " + String(exchange.status);
     if (!detail.isEmpty()) failureReason += ": " + detail;
     LOG.printf("[google] %s\n", failureReason.c_str());
-    scrub(response);
+    scrub(exchange.body);
     return false;
   }
 
   JsonDocument document;
   const DeserializationError parseError =
-      deserializeJson(document, response);
+      deserializeJson(document, exchange.body);
   if (parseError) {
-    scrub(response);
+    scrub(exchange.body);
     failureReason = "Google authentication returned invalid JSON: " +
-                    String(parseError.c_str());
+                   String(parseError.c_str());
     LOG.printf("[google] %s\n", failureReason.c_str());
     return false;
   }
   accessToken = String(document["access_token"] | "");
   const String errorDescription =
       String(document["error_description"] | "");
+  const String oauthError = String(document["error"] | "");
   const int expiresIn = document["expires_in"] | 0;
   document.clear();
-  scrub(response);
+  scrub(exchange.body);
   if (accessToken.isEmpty()) {
+    authFailure = calendar_logic::classifyGoogleAuthFailure(
+        exchange.status,
+        std::string_view(oauthError.c_str(), oauthError.length()));
     failureReason = errorDescription.isEmpty()
                         ? "Google authentication returned no access token"
                         : errorDescription;
@@ -414,6 +542,7 @@ bool exchangeAccessToken(const google_credentials::Credentials& credentials,
   }
   LOG.printf("[google] authentication succeeded; token expires in %d seconds\n",
              expiresIn);
+  authFailure = calendar_logic::GoogleAuthFailure::None;
   return true;
 }
 
@@ -422,8 +551,10 @@ bool replaceWithEventOnlyToken(String& accessToken, String& failureReason) {
   if (!google_credentials::load(credentials, failureReason)) return false;
 
   String fallbackToken;
+  calendar_logic::GoogleAuthFailure authFailure;
   const bool exchanged = exchangeAccessToken(
-      credentials, kEventsReadOnlyScope, fallbackToken, failureReason);
+      credentials, kEventsReadOnlyScope, fallbackToken, failureReason,
+      authFailure);
   scrub(credentials.privateKey);
   if (!exchanged) {
     scrub(fallbackToken);
@@ -559,7 +690,9 @@ bool parseCalendarListEntry(const String& body, GoogleCalendar& calendar,
 
 bool ensureCalendarListEntry(GoogleCalendar& calendar,
                              const String& accessToken,
-                             String& failureReason) {
+                             String& failureReason,
+                             int& failureStatus) {
+  failureStatus = 0;
   const String fields =
       "fields=id,summary,summaryOverride,accessRole,colorId,"
       "backgroundColor,foregroundColor";
@@ -572,7 +705,10 @@ bool ensureCalendarListEntry(GoogleCalendar& calendar,
                 failureReason, &status)) {
     return parseCalendarListEntry(response, calendar, failureReason);
   }
-  if (status != HTTP_CODE_NOT_FOUND) return false;
+  if (status != HTTP_CODE_NOT_FOUND) {
+    failureStatus = status;
+    return false;
+  }
 
   LOG.printf("[google] calendar %s is not in CalendarList; adding it\n",
              calendar.id.c_str());
@@ -586,8 +722,10 @@ bool ensureCalendarListEntry(GoogleCalendar& calendar,
       "https://www.googleapis.com/calendar/v3/users/me/calendarList"
       "?" +
       fields;
+  status = 0;
   if (!googlePostJson("Google calendar-list insert", insertUrl, accessToken,
-                      requestBody, response, failureReason)) {
+                      requestBody, response, failureReason, &status)) {
+    failureStatus = status;
     return false;
   }
   return parseCalendarListEntry(response, calendar, failureReason);
@@ -688,8 +826,12 @@ bool fetchGoogle(const calendar::Window& window, calendar::Data& out,
     return false;
   }
   String accessToken;
-  if (!exchangeAccessToken(credentials, scope, accessToken, failureReason)) {
-    if (requested.empty()) {
+  calendar_logic::GoogleAuthFailure authFailure;
+  if (!exchangeAccessToken(credentials, scope, accessToken, failureReason,
+                           authFailure)) {
+    if (requested.empty() ||
+        authFailure !=
+            calendar_logic::GoogleAuthFailure::ScopeOrAuthorization) {
       scrub(credentials.privateKey);
       return false;
     }
@@ -700,8 +842,9 @@ bool fetchGoogle(const calendar::Window& window, calendar::Data& out,
                colorAuthFailure.c_str());
     scrub(accessToken);
     failureReason = "";
+    calendar_logic::GoogleAuthFailure fallbackAuthFailure;
     if (!exchangeAccessToken(credentials, kEventsReadOnlyScope, accessToken,
-                             failureReason)) {
+                             failureReason, fallbackAuthFailure)) {
       failureReason =
           "Color-enabled authentication failed: " + colorAuthFailure +
           "; event-only fallback failed: " + failureReason;
@@ -742,13 +885,17 @@ bool fetchGoogle(const calendar::Window& window, calendar::Data& out,
       GoogleCalendar calendar;
       calendar.id = id;
       calendar.name = id;
-      if (colorMetadataEnabled) {
+      if (colorMetadataEnabled && !metadataFallbackNeeded) {
         String metadataFailure;
-        if (!ensureCalendarListEntry(calendar, accessToken, metadataFailure)) {
+        int metadataFailureStatus = 0;
+        if (!ensureCalendarListEntry(calendar, accessToken, metadataFailure,
+                                     metadataFailureStatus)) {
           LOG.printf("[google] calendar metadata unavailable for %s: %s; "
-                     "continuing with event-only colors\n",
+                     "continuing without calendar color metadata\n",
                      id.c_str(), metadataFailure.c_str());
-          metadataFallbackNeeded = true;
+          metadataFallbackNeeded =
+              calendar_logic::shouldUseGoogleEventOnlyFallback(
+                  metadataFailureStatus);
         }
       }
       calendars.push_back(calendar);
@@ -782,29 +929,37 @@ bool fetchGoogle(const calendar::Window& window, calendar::Data& out,
       0x039BE5, 0x616161, 0x3F51B5, 0x0B8043, 0xD50000};
   if (!colorMetadataEnabled) {
     LOG.printf("[google] using the built-in Google event-color palette\n");
-  } else if (googleGet("Google event colors",
-                       "https://www.googleapis.com/calendar/v3/colors"
-                       "?fields=event",
-                       accessToken, response, failureReason)) {
-    if (parseEventColors(response, eventColors)) {
-      LOG.printf("[google] loaded event colors\n");
-    } else {
-      LOG.printf("[google] event colors returned invalid JSON; using defaults\n");
-    }
   } else {
-    LOG.printf("[google] event colors unavailable: %s; using defaults\n",
-               failureReason.c_str());
-    failureReason = "";
-    if (!requested.empty()) {
-      String fallbackFailure;
-      if (replaceWithEventOnlyToken(accessToken, fallbackFailure)) {
-        colorMetadataEnabled = false;
-        LOG.printf("[google] switched to event-only authentication after "
-                   "event-color lookup failure\n");
+    int colorFailureStatus = 0;
+    if (googleGet("Google event colors",
+                  "https://www.googleapis.com/calendar/v3/colors"
+                  "?fields=event",
+                  accessToken, response, failureReason,
+                  &colorFailureStatus)) {
+      if (parseEventColors(response, eventColors)) {
+        LOG.printf("[google] loaded event colors\n");
       } else {
-        LOG.printf("[google] event-only authentication fallback failed: %s; "
-                   "continuing with the existing token\n",
-                   fallbackFailure.c_str());
+        LOG.printf(
+            "[google] event colors returned invalid JSON; using defaults\n");
+      }
+    } else {
+      LOG.printf("[google] event colors unavailable: %s; using defaults\n",
+                 failureReason.c_str());
+      failureReason = "";
+      if (!requested.empty() &&
+          calendar_logic::shouldUseGoogleEventOnlyFallback(
+              colorFailureStatus)) {
+        String fallbackFailure;
+        if (replaceWithEventOnlyToken(accessToken, fallbackFailure)) {
+          colorMetadataEnabled = false;
+          LOG.printf("[google] switched to event-only authentication after "
+                     "event-color authorization failure\n");
+        } else {
+          LOG.printf(
+              "[google] event-only authentication fallback failed: %s; "
+              "continuing with the existing token\n",
+              fallbackFailure.c_str());
+        }
       }
     }
   }

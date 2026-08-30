@@ -47,9 +47,10 @@ class LimitedStringStream final : public Stream {
 }  // namespace
 
 bool readBody(HTTPClient& http, size_t maximumBytes, uint32_t idleTimeoutMs,
-              String& body, String& failureReason) {
+              String& body, String& failureReason, int* transportError) {
   body = "";
   failureReason = "";
+  if (transportError != nullptr) *transportError = 0;
   const int declaredSize = http.getSize();
   if (declaredSize > static_cast<int>(maximumBytes)) {
     failureReason = "HTTP response exceeds the configured size limit";
@@ -79,10 +80,18 @@ bool readBody(HTTPClient& http, size_t maximumBytes, uint32_t idleTimeoutMs,
     return false;
   }
   if (written < 0) {
+    if (transportError != nullptr) *transportError = written;
     const String detail = HTTPClient::errorToString(written);
     failureReason = detail.isEmpty()
                         ? "Could not read the HTTP response"
                         : "Could not read the HTTP response: " + detail;
+    return false;
+  }
+  if (declaredSize >= 0 && written != declaredSize) {
+    if (transportError != nullptr) {
+      *transportError = HTTPC_ERROR_CONNECTION_LOST;
+    }
+    failureReason = "HTTP response ended unexpectedly";
     return false;
   }
   if (static_cast<size_t>(written) != body.length()) {

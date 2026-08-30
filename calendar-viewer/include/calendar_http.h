@@ -6,6 +6,7 @@
 namespace calendar_http {
 
 bool readBody(HTTPClient& http, size_t maximumBytes, uint32_t idleTimeoutMs,
-              String& body, String& failureReason);
+              String& body, String& failureReason,
+              int* transportError = nullptr);
 
 }  // namespace calendar_http

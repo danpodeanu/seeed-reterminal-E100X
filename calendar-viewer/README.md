@@ -23,7 +23,8 @@ panel only when visible calendar, weather, sensor, or date content has changed.
   start/end times. Week and month grids mark the current day in green on
   six-color panels.
 - A wall-planner layout uses open column gutters, weekday/date labels inside
-  each day, horizontal week separators, rounded event bands, and softly tinted
+  the week cells, a light-blue weekday header above date-only month cells,
+  horizontal week separators, rounded event bands, and softly tinted
   borderless agenda and weather cards.
 - Sunday is the default first day of the week; the Presentation settings can
   switch week and month grids to Monday-first.
@@ -141,8 +142,8 @@ event-color palette. When exactly one Google calendar is loaded and that
 background color is available, the week and month cells use its dithered color.
 Adding the subscription does not modify calendar events.
 
-If color-enabled authentication or CalendarList access is unavailable, the
-firmware continues with
+If color-enabled authentication reports an explicit scope/authorization error,
+or CalendarList access returns HTTP 401/403, the firmware continues with
 `https://www.googleapis.com/auth/calendar.events.readonly`. Events still load,
 using the built-in color palette and default calendar color. For Workspace
 domain-wide delegation, authorize the service account's OAuth client ID for all
@@ -217,5 +218,7 @@ pio run -e reterminal_e1004
 
 Serial logging uses UART1 on GPIO43/GPIO44 at 115200 baud. Google request
 stages, HTTP statuses, response sizes, sanitized API errors, page counts, and
-event counts are logged. Calendar URLs, OAuth tokens, signed JWTs, and private
-keys are deliberately omitted.
+event counts are logged. Transport failures are retried once with a fresh TLS
+connection and report sanitized Wi-Fi, DNS, TLS, and heap diagnostics.
+Calendar URLs, OAuth tokens, signed JWTs, and private keys are deliberately
+omitted.

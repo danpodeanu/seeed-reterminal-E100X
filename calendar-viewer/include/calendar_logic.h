@@ -14,6 +14,34 @@
 
 namespace calendar_logic {
 
+enum class GoogleAuthFailure {
+  None,
+  Transport,
+  ScopeOrAuthorization,
+  Other,
+};
+
+inline bool isGoogleTransportFailure(int httpStatus) {
+  return httpStatus <= 0;
+}
+
+inline GoogleAuthFailure classifyGoogleAuthFailure(
+    int httpStatus, std::string_view oauthError) {
+  if (isGoogleTransportFailure(httpStatus)) {
+    return GoogleAuthFailure::Transport;
+  }
+  if (oauthError == "invalid_scope" ||
+      oauthError == "unauthorized_client" ||
+      oauthError == "access_denied") {
+    return GoogleAuthFailure::ScopeOrAuthorization;
+  }
+  return GoogleAuthFailure::Other;
+}
+
+inline bool shouldUseGoogleEventOnlyFallback(int httpStatus) {
+  return httpStatus == 401 || httpStatus == 403;
+}
+
 inline bool hasConfiguredCalendarProvider(
     config::CalendarProvider provider, const char* icalUrl,
     bool googleCredentialsConfigured) {

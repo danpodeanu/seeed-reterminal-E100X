@@ -925,8 +925,30 @@ void drawGrid(EPaper& epaper, ColorDitherer& ditherer,
               const ::calendar::Data& data, const BodyGeometry& body,
               time_t gridStart, int rows, config::WeekStart weekStart,
               time_t now, bool monthView) {
-  const int gridHeight = body.height;
+#if RETERMINAL_MODEL == 1003
+  constexpr int kMonthHeaderHeight = 72;
+#elif RETERMINAL_MODEL == 1004
+  constexpr int kMonthHeaderHeight = 52;
+#else
+  constexpr int kMonthHeaderHeight = 34;
+#endif
+  const int headerHeight = monthView ? kMonthHeaderHeight : 0;
+  const int gridHeight = body.height - headerHeight;
   const int cellInset = std::max(1, config::ui(2));
+  if (monthView) {
+    ditherer.fillRect(epaper, body.left, body.top, body.width, headerHeight,
+                     CALENDAR_HEADER_RGB);
+    epaper.setTextDatum(MC_DATUM);
+    epaper.setTextColor(eventTextInk(CALENDAR_HEADER_RGB));
+    selectFont(epaper, FontSize::Tiny);
+    for (int column = 0; column < 7; ++column) {
+      const int columnLeft = body.left + body.width * column / 7;
+      const int columnRight = body.left + body.width * (column + 1) / 7;
+      epaper.drawString(weekdayLabel(column, weekStart),
+                       (columnLeft + columnRight) / 2,
+                       body.top + headerHeight / 2);
+    }
+  }
   const time_t monthAnchor = calendar_logic::startOfMonth(now);
   uint32_t calendarBackgroundRgb = 0;
   const bool haveCalendarBackground =
@@ -943,8 +965,9 @@ void drawGrid(EPaper& epaper, ColorDitherer& ditherer,
       const int x = body.left + body.width * column / 7;
       const int nextX = body.left + body.width * (column + 1) / 7;
       const int cellWidth = nextX - x;
-      const int y = body.top + gridHeight * row / rows;
-      const int nextY = body.top + gridHeight * (row + 1) / rows;
+      const int y = body.top + headerHeight + gridHeight * row / rows;
+      const int nextY =
+          body.top + headerHeight + gridHeight * (row + 1) / rows;
       const int cellHeight = nextY - y;
       struct tm dayTm = {};
       localtime_r(&day, &dayTm);
@@ -982,10 +1005,15 @@ void drawGrid(EPaper& epaper, ColorDitherer& ditherer,
 #else
       selectFont(epaper, FontSize::Medium, true);
 #endif
-      String dayLabel = weekdayLabel(column, weekStart);
-      dayLabel.toUpperCase();
-      dayLabel += " ";
-      dayLabel += String(dayTm.tm_mday);
+      String dayLabel;
+      if (monthView) {
+        dayLabel = String(dayTm.tm_mday);
+      } else {
+        dayLabel = weekdayLabel(column, weekStart);
+        dayLabel.toUpperCase();
+        dayLabel += " ";
+        dayLabel += String(dayTm.tm_mday);
+      }
       epaper.drawString(dayLabel, x + cellInset + config::ui(3),
                         y + config::ui(3));
 
