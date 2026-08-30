@@ -702,6 +702,59 @@ void test_data_fingerprint_changes_with_visible_event_content_only() {
       fallbackColor, calendar_logic::dataFingerprint(data, window));
 }
 
+void test_frame_component_changes_identify_each_changed_input() {
+  using calendar_logic::FrameComponentChange;
+  calendar_logic::FrameComponents previous;
+  previous.renderer = 1;
+  previous.calendar = 2;
+  previous.presentation = 3;
+  previous.date = 4;
+  previous.indoorClimate = 5;
+  previous.power = 6;
+  previous.weather = 7;
+  previous.footer = 8;
+
+  calendar_logic::FrameComponents current = previous;
+  TEST_ASSERT_EQUAL_HEX16(
+      0, calendar_logic::changedFrameComponents(previous, current));
+
+  current.renderer++;
+  current.calendar++;
+  current.date++;
+  current.power++;
+  const uint16_t expected =
+      calendar_logic::frameComponentBit(FrameComponentChange::Renderer) |
+      calendar_logic::frameComponentBit(FrameComponentChange::Calendar) |
+      calendar_logic::frameComponentBit(FrameComponentChange::Date) |
+      calendar_logic::frameComponentBit(FrameComponentChange::Power);
+  const uint16_t changes =
+      calendar_logic::changedFrameComponents(previous, current);
+  TEST_ASSERT_EQUAL_HEX16(expected, changes);
+  TEST_ASSERT_TRUE(calendar_logic::frameComponentChanged(
+      changes, FrameComponentChange::Calendar));
+  TEST_ASSERT_FALSE(calendar_logic::frameComponentChanged(
+      changes, FrameComponentChange::Weather));
+
+  current.presentation++;
+  current.indoorClimate++;
+  current.weather++;
+  current.footer++;
+  TEST_ASSERT_EQUAL_HEX16(
+      calendar_logic::kAllFrameComponentChanges,
+      calendar_logic::changedFrameComponents(previous, current));
+}
+
+void test_frame_component_changes_reject_incompatible_history() {
+  calendar_logic::FrameComponents previous;
+  calendar_logic::FrameComponents current;
+  previous.version = 0;
+  TEST_ASSERT_FALSE(calendar_logic::frameComponentsCompatible(previous));
+  TEST_ASSERT_TRUE(calendar_logic::frameComponentsCompatible(current));
+  TEST_ASSERT_EQUAL_HEX16(
+      calendar_logic::kAllFrameComponentChanges,
+      calendar_logic::changedFrameComponents(previous, current));
+}
+
 void test_color_parsing_accepts_hex_and_rejects_invalid_values() {
   TEST_ASSERT_EQUAL_HEX32(0x33B679, calendar_logic::parseRgb("#33B679"));
   TEST_ASSERT_EQUAL_HEX32(0xABCDEF, calendar_logic::parseRgb("abcdef"));
@@ -812,6 +865,8 @@ int main(int, char**) {
   RUN_TEST(test_unsupported_recurrence_selectors_are_rejected);
   RUN_TEST(test_ical_parser_caps_event_count_and_marks_truncation);
   RUN_TEST(test_data_fingerprint_changes_with_visible_event_content_only);
+  RUN_TEST(test_frame_component_changes_identify_each_changed_input);
+  RUN_TEST(test_frame_component_changes_reject_incompatible_history);
   RUN_TEST(test_color_parsing_accepts_hex_and_rejects_invalid_values);
   RUN_TEST(test_single_google_calendar_color_controls_grid_background);
   RUN_TEST(test_agenda_uses_partial_row_space_for_more_count);

@@ -187,7 +187,10 @@ configured quiet hours.
 After a successful fetch, Calendar Viewer fingerprints the visible date
 window, event data and colors, rounded indoor readings, weather summary, and
 render-affecting settings. If that fingerprint matches the last successful
-frame, panel initialization and refresh are skipped. iCalendar download
+frame, panel initialization and refresh are skipped. Before a changed frame is
+refreshed, the serial log identifies each changed component and reports useful
+current values for calendar data, local date, weather, indoor climate, power,
+presentation settings, footer, and renderer/firmware. iCalendar download
 failures preserve an existing calendar frame and retry after five minutes.
 Google failures display the API error and retry on the normal configured
 schedule; an unchanged error does not cause another panel refresh.
@@ -232,6 +235,7 @@ pio run -e reterminal_e1004
 Serial logging uses UART1 on GPIO43/GPIO44 at 115200 baud. Google request
 stages, HTTP statuses, response sizes, sanitized API errors, page counts, and
 event counts are logged. Transport failures are retried once with a fresh TLS
-connection and report sanitized Wi-Fi, DNS, TLS, and heap diagnostics.
-Calendar URLs, OAuth tokens, signed JWTs, and private keys are deliberately
-omitted.
+connection and report sanitized Wi-Fi, DNS, TLS, and heap diagnostics. Display
+refresh logs list the render components that changed without exposing calendar
+URLs or credentials. OAuth tokens, signed JWTs, and private keys are
+deliberately omitted.

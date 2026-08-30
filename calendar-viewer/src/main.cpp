@@ -68,6 +68,7 @@ using namespace theme;
 constexpr const char* kFrameValidKey = "frame_valid";
 constexpr const char* kFrameHashKey = "frame_hash";
 constexpr const char* kFrameKindKey = "frame_kind";
+constexpr const char* kFrameComponentsKey = "frame_parts";
 // Increment when rendering changes without changing the underlying data.
 constexpr uint32_t kCalendarFrameRevision = 11;
 
@@ -212,13 +213,34 @@ bool loadFrameState(uint64_t& hash, FrameKind& kind) {
   return valid;
 }
 
-bool saveFrameState(uint64_t hash, FrameKind kind) {
+bool loadFrameComponents(calendar_logic::FrameComponents& components) {
+  Preferences prefs;
+  if (!prefs.begin(calendar_config::kNamespace, true)) return false;
+  const size_t storedSize = prefs.getBytesLength(kFrameComponentsKey);
+  const size_t read =
+      storedSize == sizeof(components)
+          ? prefs.getBytes(kFrameComponentsKey, &components, sizeof(components))
+          : 0;
+  prefs.end();
+  return read == sizeof(components) &&
+         calendar_logic::frameComponentsCompatible(components);
+}
+
+bool saveFrameState(
+    uint64_t hash, FrameKind kind,
+    const calendar_logic::FrameComponents* components = nullptr) {
   Preferences prefs;
   if (!prefs.begin(calendar_config::kNamespace, false)) return false;
   prefs.putBool(kFrameValidKey, false);
   bool written =
       prefs.putULong64(kFrameHashKey, hash) > 0 &&
       prefs.putUChar(kFrameKindKey, static_cast<uint8_t>(kind)) > 0;
+  if (written && kind == FrameKind::Calendar) {
+    written =
+        components != nullptr &&
+        prefs.putBytes(kFrameComponentsKey, components, sizeof(*components)) ==
+            sizeof(*components);
+  }
   if (written) written = prefs.putBool(kFrameValidKey, true) > 0;
   prefs.end();
   return written;
@@ -231,7 +253,7 @@ void invalidateFrameState() {
   prefs.end();
 }
 
-void addRoundedSensors(calendar_logic::Fingerprint& hash,
+void addRoundedClimate(calendar_logic::Fingerprint& hash,
                        const sensors::Readings& readings) {
   hash.addValue(readings.climateValid);
   if (readings.climateValid) {
@@ -241,6 +263,10 @@ void addRoundedSensors(calendar_logic::Fingerprint& hash,
     hash.addValue(temperature);
     hash.addValue(humidity);
   }
+}
+
+void addRoundedPower(calendar_logic::Fingerprint& hash,
+                     const sensors::Readings& readings) {
   hash.addValue(readings.batteryValid);
   if (readings.batteryValid) {
     hash.addValue(readings.batteryPct);
@@ -272,13 +298,66 @@ void addRoundedWeather(calendar_logic::Fingerprint& hash,
   hash.add(std::string(weather.alertTitle.c_str()));
 }
 
-uint64_t frameFingerprint(const calendar::Data& data,
-                          const calendar::Window& window,
-                          const WeatherData& weather,
-                          const String& footer, time_t now) {
+struct CalendarFrameFingerprints {
+  uint64_t combined = 0;
+  calendar_logic::FrameComponents components;
+};
+
+CalendarFrameFingerprints frameFingerprints(
+    const calendar::Data& data, const calendar::Window& window,
+    const WeatherData& weather, const String& footer, time_t now) {
+  CalendarFrameFingerprints result;
+  const uint64_t calendarHash = calendar_logic::dataFingerprint(data, window);
+
+  calendar_logic::Fingerprint rendererHash;
+  rendererHash.addValue(kCalendarFrameRevision);
+  rendererHash.add(std::string(board::FIRMWARE_VERSION));
+  result.components.renderer = rendererHash.value();
+
+  calendar_logic::Fingerprint calendarHashDetails;
+  calendarHashDetails.addValue(calendarHash);
+  calendarHashDetails.addValue(data.truncated);
+  result.components.calendar = calendarHashDetails.value();
+
+  calendar_logic::Fingerprint presentationHash;
+  presentationHash.addValue(calendar_config::runtime::weekStart());
+  presentationHash.addValue(calendar_config::runtime::timeFormat());
+  presentationHash.addValue(
+      calendar_config::runtime::showSingleCalendarBackground());
+  presentationHash.add(std::string(calendar_config::runtime::timezone()));
+  presentationHash.add(std::string(calendar_config::runtime::locationName()));
+  presentationHash.addValue(calendar_config::runtime::temperatureUnit());
+  presentationHash.addValue(calendar_config::runtime::windSpeedUnit());
+  result.components.presentation = presentationHash.value();
+
+  calendar_logic::Fingerprint climateHash;
+  addRoundedClimate(climateHash, sensorReadings);
+  result.components.indoorClimate = climateHash.value();
+
+  calendar_logic::Fingerprint powerHash;
+  addRoundedPower(powerHash, sensorReadings);
+  result.components.power = powerHash.value();
+
+  calendar_logic::Fingerprint weatherHash;
+  addRoundedWeather(weatherHash, weather);
+  result.components.weather = weatherHash.value();
+
+  calendar_logic::Fingerprint footerHash;
+  footerHash.add(std::string(footer.c_str()));
+  result.components.footer = footerHash.value();
+
+  struct tm localDate = {};
+  const bool haveLocalDate = localtime_r(&now, &localDate) != nullptr;
+  calendar_logic::Fingerprint dateHash;
+  if (haveLocalDate) {
+    dateHash.addValue(localDate.tm_year);
+    dateHash.addValue(localDate.tm_yday);
+  }
+  result.components.date = dateHash.value();
+
+  // Preserve the established combined fingerprint as the refresh authority.
   calendar_logic::Fingerprint hash;
   hash.addValue(kCalendarFrameRevision);
-  const uint64_t calendarHash = calendar_logic::dataFingerprint(data, window);
   hash.addValue(calendarHash);
   hash.addValue(data.truncated);
   hash.addValue(calendar_config::runtime::weekStart());
@@ -289,16 +368,156 @@ uint64_t frameFingerprint(const calendar::Data& data,
   hash.add(std::string(calendar_config::runtime::locationName()));
   hash.addValue(calendar_config::runtime::temperatureUnit());
   hash.addValue(calendar_config::runtime::windSpeedUnit());
-  addRoundedSensors(hash, sensorReadings);
+  addRoundedClimate(hash, sensorReadings);
+  addRoundedPower(hash, sensorReadings);
   addRoundedWeather(hash, weather);
   hash.add(std::string(footer.c_str()));
   hash.add(std::string(board::FIRMWARE_VERSION));
-  struct tm localDate = {};
-  if (localtime_r(&now, &localDate) != nullptr) {
+  if (haveLocalDate) {
     hash.addValue(localDate.tm_year);
     hash.addValue(localDate.tm_yday);
   }
-  return hash.value();
+  result.combined = hash.value();
+  return result;
+}
+
+String roundedMeasurement(float value, const char* suffix) {
+  if (!isfinite(value)) return "unavailable";
+  return String(static_cast<int>(lroundf(value))) + suffix;
+}
+
+void logCalendarFrameChanges(
+    bool havePreviousFrame, FrameKind previousKind,
+    bool havePreviousComponents,
+    const calendar_logic::FrameComponents& previousComponents,
+    const calendar_logic::FrameComponents& nextComponents,
+    const calendar::Data& data, const WeatherData& weather,
+    const String& footer, time_t now) {
+  if (!havePreviousFrame) {
+    LOG.println("[display] refresh changes: full render; no previous frame");
+    return;
+  }
+  if (previousKind != FrameKind::Calendar) {
+    LOG.println(
+        "[display] refresh changes: full render; previous frame was a status "
+        "screen");
+    return;
+  }
+  if (!havePreviousComponents) {
+    LOG.println(
+        "[display] refresh changes: full render; component history is "
+        "unavailable or incompatible");
+    return;
+  }
+
+  const uint16_t changes = calendar_logic::changedFrameComponents(
+      previousComponents, nextComponents);
+  using calendar_logic::FrameComponentChange;
+
+  if (calendar_logic::frameComponentChanged(
+          changes, FrameComponentChange::Renderer)) {
+    LOG.printf("[display] changed: renderer/firmware (revision=%lu, fw=%s)\n",
+               static_cast<unsigned long>(kCalendarFrameRevision),
+               board::FIRMWARE_VERSION);
+  }
+  if (calendar_logic::frameComponentChanged(
+          changes, FrameComponentChange::Calendar)) {
+    LOG.printf(
+        "[display] changed: calendar events/sources (events=%u, sources=%u, "
+        "limited=%s)\n",
+        static_cast<unsigned>(data.events.size()),
+        static_cast<unsigned>(data.sources.size()),
+        data.truncated ? "yes" : "no");
+  }
+  if (calendar_logic::frameComponentChanged(
+          changes, FrameComponentChange::Presentation)) {
+    LOG.printf(
+        "[display] changed: presentation settings (week=%s, clock=%s, "
+        "single-calendar-background=%s, timezone=%s, location=%s, units=%s/%s)"
+        "\n",
+        calendar_config::runtime::weekStart() == config::WeekStart::Sunday
+            ? "Sunday"
+            : "Monday",
+        calendar_config::runtime::timeFormat() ==
+                config::TimeFormat::TwelveHour
+            ? "12-hour"
+            : "24-hour",
+        calendar_config::runtime::showSingleCalendarBackground() ? "on"
+                                                                  : "off",
+        calendar_config::runtime::timezone(),
+        calendar_config::runtime::locationName(),
+        calendar_config::runtime::temperatureUnit() ==
+                config::TemperatureUnit::Celsius
+            ? "C"
+            : "F",
+        calendar_config::runtime::windSpeedUnit() ==
+                config::WindSpeedUnit::KilometresPerHour
+            ? "km/h"
+            : "mph");
+  }
+  if (calendar_logic::frameComponentChanged(changes,
+                                             FrameComponentChange::Date)) {
+    char date[16] = "unavailable";
+    struct tm localDate = {};
+    if (localtime_r(&now, &localDate) != nullptr) {
+      strftime(date, sizeof(date), "%Y-%m-%d", &localDate);
+    }
+    LOG.printf("[display] changed: local date (%s)\n", date);
+  }
+  if (calendar_logic::frameComponentChanged(
+          changes, FrameComponentChange::IndoorClimate)) {
+    if (sensorReadings.climateValid) {
+      LOG.printf(
+          "[display] changed: indoor climate (temperature=%dC, humidity=%d%%)"
+          "\n",
+          static_cast<int>(lroundf(sensorReadings.temperatureC)),
+          static_cast<int>(lroundf(sensorReadings.humidityPct)));
+    } else {
+      LOG.println("[display] changed: indoor climate (unavailable)");
+    }
+  }
+  if (calendar_logic::frameComponentChanged(changes,
+                                             FrameComponentChange::Power)) {
+    const String battery =
+        sensorReadings.batteryValid
+            ? String(sensorReadings.batteryPct) + "%"
+            : "unavailable";
+    const char* externalPower =
+        !sensorReadings.externalPowerValid
+            ? "unknown"
+            : (sensorReadings.externalPower ? "yes" : "no");
+    LOG.printf(
+        "[display] changed: battery/external power (battery=%s, external=%s)"
+        "\n",
+        battery.c_str(), externalPower);
+  }
+  if (calendar_logic::frameComponentChanged(changes,
+                                             FrameComponentChange::Weather)) {
+    if (weather.valid) {
+      const String temperature = roundedMeasurement(weather.temperatureC, "C");
+      const String low = roundedMeasurement(weather.days[0].minimumC, "C");
+      const String high = roundedMeasurement(weather.days[0].maximumC, "C");
+      const String wind = roundedMeasurement(weather.windKmh, "km/h");
+      LOG.printf(
+          "[display] changed: weather (code=%d, day=%s, temperature=%s, "
+          "low=%s, high=%s, wind=%s, alert=%s)\n",
+          weather.weatherCode, weather.isDay ? "yes" : "no",
+          temperature.c_str(), low.c_str(), high.c_str(), wind.c_str(),
+          weather.alertTitle.isEmpty() ? "none" : weather.alertTitle.c_str());
+    } else {
+      LOG.println("[display] changed: weather (unavailable)");
+    }
+  }
+  if (calendar_logic::frameComponentChanged(changes,
+                                             FrameComponentChange::Footer)) {
+    LOG.printf("[display] changed: status/footer (%s)\n",
+               footer.isEmpty() ? "hidden" : footer.c_str());
+  }
+  if (changes == 0) {
+    LOG.println(
+        "[display] changed: combined render fingerprint; component hashes "
+        "matched");
+  }
 }
 
 uint64_t statusFingerprint(const String& title, const String& detail,
@@ -775,16 +994,26 @@ void setup() {
              " checked " + checked;
     if (weather.fromCache) footer += " / cached weather";
   }
-  const uint64_t nextHash =
-      frameFingerprint(calendarData, window, weather, footer, now);
+  const CalendarFrameFingerprints nextFrame =
+      frameFingerprints(calendarData, window, weather, footer, now);
   uint64_t previousHash = 0;
   FrameKind previousKind = FrameKind::None;
   const bool havePreviousFrame =
       loadFrameState(previousHash, previousKind);
+  calendar_logic::FrameComponents previousComponents;
+  const bool havePreviousComponents =
+      havePreviousFrame && previousKind == FrameKind::Calendar &&
+      loadFrameComponents(previousComponents);
   const bool changed = !havePreviousFrame ||
                        previousKind != FrameKind::Calendar ||
-                       previousHash != nextHash;
+                       previousHash != nextFrame.combined;
   if (changed || screenshotRequested) {
+    if (changed) {
+      logCalendarFrameChanges(
+          havePreviousFrame, previousKind, havePreviousComponents,
+          previousComponents, nextFrame.components, calendarData, weather,
+          footer, now);
+    }
     beginPanel();
     initializePanelColorMode();
     calendar_render::calendar(
@@ -794,17 +1023,30 @@ void setup() {
     const bool screenshotSaved = saveRequestedScreenshot();
     if (changed) {
       refreshPanel();
-      if (!saveFrameState(nextHash, FrameKind::Calendar)) {
+      if (!saveFrameState(nextFrame.combined, FrameKind::Calendar,
+                          &nextFrame.components)) {
         LOG.println("[display] warning: frame fingerprint was not saved");
       }
-      LOG.println("[display] refreshed because rendered content changed");
+      LOG.println("[display] refresh complete");
     } else {
+      if (!havePreviousComponents &&
+          !saveFrameState(nextFrame.combined, FrameKind::Calendar,
+                          &nextFrame.components)) {
+        LOG.println(
+            "[display] warning: component fingerprints were not initialized");
+      }
       LOG.println(screenshotSaved
                       ? "[display] exported screenshot without refreshing "
                         "unchanged panel"
                       : "[display] screenshot export failed; panel unchanged");
     }
   } else {
+    if (!havePreviousComponents &&
+        !saveFrameState(nextFrame.combined, FrameKind::Calendar,
+                        &nextFrame.components)) {
+      LOG.println(
+          "[display] warning: component fingerprints were not initialized");
+    }
     LOG.println("[display] calendar, weather, and rounded sensors unchanged; "
                 "skipping panel refresh");
   }

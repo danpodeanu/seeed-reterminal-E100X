@@ -29,6 +29,90 @@ enum class PrimaryButtonAction {
   Screenshot,
 };
 
+inline constexpr uint32_t kFrameComponentsVersion = 1;
+
+struct FrameComponents {
+  uint32_t version = kFrameComponentsVersion;
+  uint32_t reserved = 0;
+  uint64_t renderer = 0;
+  uint64_t calendar = 0;
+  uint64_t presentation = 0;
+  uint64_t date = 0;
+  uint64_t indoorClimate = 0;
+  uint64_t power = 0;
+  uint64_t weather = 0;
+  uint64_t footer = 0;
+};
+
+enum class FrameComponentChange : uint16_t {
+  Renderer = 1U << 0,
+  Calendar = 1U << 1,
+  Presentation = 1U << 2,
+  Date = 1U << 3,
+  IndoorClimate = 1U << 4,
+  Power = 1U << 5,
+  Weather = 1U << 6,
+  Footer = 1U << 7,
+};
+
+inline constexpr uint16_t frameComponentBit(FrameComponentChange component) {
+  return static_cast<uint16_t>(component);
+}
+
+inline constexpr uint16_t kAllFrameComponentChanges =
+    frameComponentBit(FrameComponentChange::Renderer) |
+    frameComponentBit(FrameComponentChange::Calendar) |
+    frameComponentBit(FrameComponentChange::Presentation) |
+    frameComponentBit(FrameComponentChange::Date) |
+    frameComponentBit(FrameComponentChange::IndoorClimate) |
+    frameComponentBit(FrameComponentChange::Power) |
+    frameComponentBit(FrameComponentChange::Weather) |
+    frameComponentBit(FrameComponentChange::Footer);
+
+inline bool frameComponentsCompatible(const FrameComponents& components) {
+  return components.version == kFrameComponentsVersion;
+}
+
+inline uint16_t changedFrameComponents(const FrameComponents& previous,
+                                       const FrameComponents& current) {
+  if (!frameComponentsCompatible(previous) ||
+      !frameComponentsCompatible(current)) {
+    return kAllFrameComponentChanges;
+  }
+
+  uint16_t changes = 0;
+  if (previous.renderer != current.renderer) {
+    changes |= frameComponentBit(FrameComponentChange::Renderer);
+  }
+  if (previous.calendar != current.calendar) {
+    changes |= frameComponentBit(FrameComponentChange::Calendar);
+  }
+  if (previous.presentation != current.presentation) {
+    changes |= frameComponentBit(FrameComponentChange::Presentation);
+  }
+  if (previous.date != current.date) {
+    changes |= frameComponentBit(FrameComponentChange::Date);
+  }
+  if (previous.indoorClimate != current.indoorClimate) {
+    changes |= frameComponentBit(FrameComponentChange::IndoorClimate);
+  }
+  if (previous.power != current.power) {
+    changes |= frameComponentBit(FrameComponentChange::Power);
+  }
+  if (previous.weather != current.weather) {
+    changes |= frameComponentBit(FrameComponentChange::Weather);
+  }
+  if (previous.footer != current.footer) {
+    changes |= frameComponentBit(FrameComponentChange::Footer);
+  }
+  return changes;
+}
+
+inline bool frameComponentChanged(uint16_t changes,
+                                  FrameComponentChange component) {
+  return (changes & frameComponentBit(component)) != 0;
+}
+
 inline constexpr uint32_t kConfigPortalHoldMs = 2000;
 inline constexpr uint32_t kScreenshotHoldMs = 5000;
 
