@@ -32,7 +32,7 @@ enum class FontSize {
 #if RETERMINAL_MODEL == 1003
 constexpr int kAgendaMargin = 24;
 constexpr int kAgendaHeaderHeight = 68;
-constexpr int kAgendaRowHeight = 96;
+constexpr int kAgendaRowHeight = 88;
 #elif RETERMINAL_MODEL == 1004
 constexpr int kAgendaMargin = 18;
 constexpr int kAgendaHeaderHeight = 54;
@@ -490,7 +490,7 @@ BodyGeometry bodyGeometry() {
 #else
   value = {12, 76, 596, 390,
            620, 76, 168,
-           620, 316, 168, 150};
+           620, 328, 168, 138};
 #endif
   return value;
 }
@@ -555,7 +555,7 @@ void drawWeatherCard(EPaper& epaper, ColorDitherer& ditherer,
 #elif RETERMINAL_MODEL == 1004
       48;
 #else
-      30;
+      26;
 #endif
   const int iconSize =
 #if RETERMINAL_MODEL == 1003
@@ -563,7 +563,7 @@ void drawWeatherCard(EPaper& epaper, ColorDitherer& ditherer,
 #elif RETERMINAL_MODEL == 1004
       78;
 #else
-      42;
+      38;
 #endif
   const int alertHeight =
 #if RETERMINAL_MODEL == 1003
@@ -579,7 +579,7 @@ void drawWeatherCard(EPaper& epaper, ColorDitherer& ditherer,
 #elif RETERMINAL_MODEL == 1004
       44;
 #else
-      28;
+      24;
 #endif
   const int detailStep =
 #if RETERMINAL_MODEL == 1003
@@ -813,10 +813,8 @@ void drawAgendaCard(EPaper& epaper, ColorDitherer& ditherer,
   const int capacity =
       rowHeight > 0 ? std::max(1, contentHeight / rowHeight) : 0;
   if (capacity == 0) return;
-  epaper.setFreeFont(nullptr);
-  epaper.setTextFont(2);
-  epaper.setTextSize(1);
-  const int moreLineHeight = 16 + config::ui(2);
+  selectFont(epaper, FontSize::Tiny, false);
+  const int moreLineHeight = epaper.fontHeight(1) + config::ui(4);
   const int shown = calendar_logic::agendaVisibleRows(
       static_cast<int>(events.size()), contentHeight, rowHeight,
       moreLineHeight);
@@ -870,9 +868,7 @@ void drawAgendaCard(EPaper& epaper, ColorDitherer& ditherer,
   const bool showMore = shown < static_cast<int>(events.size()) &&
                         contentHeight - shown * rowHeight >= moreLineHeight;
   if (showMore) {
-    epaper.setFreeFont(nullptr);
-    epaper.setTextFont(2);
-    epaper.setTextSize(1);
+    selectFont(epaper, FontSize::Tiny);
     epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, true);
     epaper.setTextDatum(ML_DATUM);
     epaper.drawString("+" + String(events.size() - shown) + " more",
@@ -885,7 +881,8 @@ void drawAgendaCards(EPaper& epaper, ColorDitherer& ditherer,
                      const ::calendar::Data& data, const BodyGeometry& body,
                      time_t dayStart, int weekBottom, int monthTop) {
   const int todayHeight = weekBottom - body.dayTop;
-  const int upcomingBottom = body.weatherTop;
+  const int upcomingBottom =
+      body.weatherTop - (monthTop - weekBottom);
   const AgendaCard today{
       body.dayLeft, body.dayTop, body.dayWidth, todayHeight};
   const AgendaCard upcoming{
