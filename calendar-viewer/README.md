@@ -25,8 +25,8 @@ panel only when visible calendar, weather, sensor, or date content has changed.
   current day in green on six-color panels.
 - A wall-planner layout uses open column gutters, weekday/date labels inside
   the week cells, a light-blue weekday header above date-only month cells,
-  horizontal week separators, rounded event bands, and clean white agenda and
-  weather areas.
+  horizontal week separators, a heavier outline around today, rounded event
+  bands, and clean white agenda and weather areas.
 - Sunday is the default first day of the week; the Presentation settings can
   switch week and month grids to Monday-first.
 - A Presentation toggle controls the single-Google-calendar background and
@@ -191,12 +191,12 @@ settings. Indoor climate refreshes only after temperature moves at least 1 C or
 humidity moves at least 5 percentage points from the last rendered values. If
 none of those inputs changed, panel initialization and refresh are skipped.
 Before a changed frame is refreshed, the serial log identifies each changed
-component and reports useful current values. The diagnostic `Google checked`
-footer is updated whenever another component causes a refresh, but its timestamp
-never triggers a refresh by itself. iCalendar download failures preserve an
-existing calendar frame and retry after five minutes. Google failures display
-the API error and retry on the normal configured schedule; an unchanged error
-does not cause another panel refresh.
+component and reports useful current values. The plain-white diagnostic
+`Google checked` footer is updated whenever another component causes a refresh,
+but its timestamp never triggers a refresh by itself. iCalendar download
+failures preserve an existing calendar frame and retry after five minutes.
+Google failures display the API error and retry on the normal configured
+schedule; an unchanged error does not cause another panel refresh.
 
 The five-second screenshot gesture is enabled by default for development. A
 production build can disable only that gesture with

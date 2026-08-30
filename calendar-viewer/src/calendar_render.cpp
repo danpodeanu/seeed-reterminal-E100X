@@ -76,11 +76,18 @@ void selectFont(EPaper& epaper, FontSize size, bool bold = true) {
 #endif
 }
 
-void fillTodayRect(EPaper& epaper, int x, int y, int width, int height) {
+void drawTodayCell(EPaper& epaper, int x, int y, int width, int height) {
   text_render::fillDitheredRect(
       epaper, x, y, width, height, config::PANEL_WIDTH, config::PANEL_HEIGHT,
       PANEL_TODAY_BASE, PANEL_TODAY_DITHER != PANEL_TODAY_BASE,
       PANEL_TODAY_DITHER, 5);
+  const int borderWidth = std::max(2, config::ui(1));
+  for (int inset = 0; inset < borderWidth; ++inset) {
+    const int insetWidth = width - inset * 2;
+    const int insetHeight = height - inset * 2;
+    if (insetWidth <= 0 || insetHeight <= 0) break;
+    epaper.drawRect(x + inset, y + inset, insetWidth, insetHeight, PANEL_BLACK);
+  }
 }
 
 void drawCalendarIcon(EPaper& epaper, int x, int y, int size,
@@ -445,14 +452,19 @@ void drawHeader(EPaper& epaper, time_t now,
   const String heading = formatDate(now, "%A, %e %B");
   const int calendarIconSize = config::ui(26);
   const int calendarIconGap = config::ui(8);
-  const int headingLeft =
-      config::PANEL_WIDTH / 2 - epaper.textWidth(heading) / 2;
+  const int headingWidth = epaper.textWidth(heading);
+  const int headingGroupWidth =
+      calendarIconSize + calendarIconGap + headingWidth;
+  const int headingGroupLeft =
+      (config::PANEL_WIDTH - headingGroupWidth) / 2;
   drawCalendarIcon(epaper,
-                   headingLeft - calendarIconGap - calendarIconSize,
+                   headingGroupLeft,
                    height / 2 - calendarIconSize * 7 / 16,
                    calendarIconSize, PANEL_ACCENT);
-  epaper.setTextDatum(MC_DATUM);
-  epaper.drawString(heading, config::PANEL_WIDTH / 2, height / 2);
+  epaper.setTextDatum(ML_DATUM);
+  epaper.drawString(
+      heading, headingGroupLeft + calendarIconSize + calendarIconGap,
+      height / 2);
 
   selectFont(epaper, FontSize::Small);
   const int batteryWidth = config::ui(22);
@@ -826,10 +838,14 @@ void drawAgendaCard(EPaper& epaper, ColorDitherer& ditherer,
   int y = card.top + headerHeight;
   for (int index = 0; index < shown; ++index) {
     const ::calendar::Event& event = *events[index];
-    const int barInset = config::ui(3);
+    const int barInset =
+        upcoming ? std::max(1, config::ui(3) - 1)
+                 : std::max(1, config::ui(2));
     const int rowCompression = kAgendaRowHeight - rowHeight;
-    const int verticalGap =
-        std::max(1, config::ui(3) - std::max(0, rowCompression) / 2);
+    const int baseVerticalGap =
+        upcoming ? config::ui(2) : std::max(1, config::ui(2) - 1);
+    const int verticalGap = std::max(
+        1, baseVerticalGap - std::max(0, rowCompression) / 2);
     const int barLeft = card.left + barInset;
     const int barTop = y + verticalGap;
     const int barWidth = card.width - barInset * 2;
@@ -986,7 +1002,7 @@ void drawGrid(EPaper& epaper, ColorDitherer& ditherer,
           monthView && (dayTm.tm_year != anchorTm.tm_year ||
                         dayTm.tm_mon != anchorTm.tm_mon);
       if (today) {
-        fillTodayRect(epaper, x + cellInset, y + 1,
+        drawTodayCell(epaper, x + cellInset, y + 1,
                       cellWidth - cellInset * 2,
                       cellHeight - 1);
       }
@@ -1010,8 +1026,9 @@ void drawGrid(EPaper& epaper, ColorDitherer& ditherer,
         dayLabel += " ";
         dayLabel += String(dayTm.tm_mday);
       }
+      const int weekLabelOffset = monthView ? 0 : config::ui(2);
       epaper.drawString(dayLabel, x + cellInset + config::ui(3),
-                        y + config::ui(3));
+                        y + config::ui(3) + weekLabelOffset);
 
       const auto dayEvents = eventsForDay(data, day);
       int eventY = y +
@@ -1113,8 +1130,7 @@ void drawGrid(EPaper& epaper, ColorDitherer& ditherer,
   epaper.setTextDatum(TL_DATUM);
 }
 
-void drawFooter(EPaper& epaper, ColorDitherer& ditherer,
-                const String& footer,
+void drawFooter(EPaper& epaper, const String& footer,
                 const ::calendar::Data& data) {
   if (footer.isEmpty() &&
       !calendar_config::runtime::debugShowStatusBadges()) {
@@ -1144,8 +1160,7 @@ void drawFooter(EPaper& epaper, ColorDitherer& ditherer,
       std::min(config::PANEL_WIDTH,
                epaper.textWidth(label) + horizontalPadding * 2);
   const int badgeTop = config::PANEL_HEIGHT - badgeHeight;
-  ditherer.fillRect(epaper, 0, badgeTop, badgeWidth, badgeHeight,
-                    STATUS_BACKGROUND_RGB);
+  epaper.fillRect(0, badgeTop, badgeWidth, badgeHeight, PANEL_WHITE);
   epaper.setTextColor(PANEL_BLACK);
   epaper.setTextDatum(ML_DATUM);
   epaper.drawString(label, horizontalPadding,
@@ -1243,7 +1258,7 @@ void calendar(EPaper& epaper, const ::calendar::Data& data,
            false);
   drawGrid(epaper, ditherer, data, month, window.start, 6, weekStart, now,
            true);
-  drawFooter(epaper, ditherer, footer, data);
+  drawFooter(epaper, footer, data);
 }
 
 }  // namespace calendar_render
