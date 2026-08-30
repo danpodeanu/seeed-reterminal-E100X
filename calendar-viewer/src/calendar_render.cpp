@@ -8,6 +8,7 @@
 
 #include "app_logger.h"
 #include "calendar_config_runtime.h"
+#include "calendar_latin_font.h"
 #include "calendar_logic.h"
 #include "calendar_render_geometry.h"
 #include "config.h"
@@ -367,10 +368,6 @@ class ColorDitherer {
   size_t capacity_ = 0;
   bool warned_ = false;
 };
-
-String ellipsize(EPaper& epaper, const std::string& value, int width) {
-  return text_render::ellipsize(epaper, String(value.c_str()), width);
-}
 
 String formatTime(time_t value) {
   return String(calendar_logic::formatClockTime(
@@ -870,13 +867,11 @@ void drawAgendaCard(EPaper& epaper, ColorDitherer& ditherer,
       epaper.drawString(text_render::ellipsize(epaper, timeLabel, textWidth),
                       textLeft, metadataY);
     }
-#if RETERMINAL_MODEL == 1001 || RETERMINAL_MODEL == 1002
-    selectFont(epaper, FontSize::Medium, true);
-#else
-    selectFont(epaper, FontSize::Small, true);
-#endif
-    epaper.drawString(ellipsize(epaper, event.title, textWidth),
-                      textLeft, titleY);
+    const String title = calendar_latin_font::ellipsize(
+        event.title, textWidth, calendar_latin_font::Size::Agenda);
+    calendar_latin_font::drawLeftMiddle(
+        epaper, title, textLeft, titleY, calendar_latin_font::Size::Agenda,
+        eventTextInk(event.colorRgb));
     y += rowHeight;
   }
   if (layout.showMore) {
@@ -1088,13 +1083,13 @@ void drawGrid(EPaper& epaper, ColorDitherer& ditherer,
         const int textX = barLeft + textPadding;
         ditherer.fillRoundedRect(epaper, barLeft, barTop, barWidth,
                                  barHeight, radius, event->colorRgb);
-        selectFont(epaper, FontSize::Tiny, true);
-        epaper.setTextColor(eventTextInk(event->colorRgb));
-        epaper.setTextDatum(ML_DATUM);
-        epaper.drawString(
-            ellipsize(epaper, event->title,
-                      barWidth - 2 * textPadding),
-            textX, barTop + barHeight / 2);
+        const String title = calendar_latin_font::ellipsize(
+            event->title, barWidth - 2 * textPadding,
+            calendar_latin_font::Size::Grid);
+        calendar_latin_font::drawLeftMiddle(
+            epaper, title, textX, barTop + barHeight / 2,
+            calendar_latin_font::Size::Grid,
+            eventTextInk(event->colorRgb));
         eventY += lineHeight;
         ++shown;
       }

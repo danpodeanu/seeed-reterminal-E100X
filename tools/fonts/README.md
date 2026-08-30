@@ -4,6 +4,26 @@
 TFT_eSPI and Seeed_GFX. The prebuilt SD-card fonts use the bundled DejaVu Sans
 Bold source.
 
+Calendar Viewer embeds one-bit 18px and 24px subsets of **Noto Sans
+SemiCondensed Bold** for Latin-script event titles. To regenerate them,
+download this pinned source:
+
+```text
+https://raw.githubusercontent.com/notofonts/noto-fonts/ffebf8c1ee449e544955a7e813c54f9b73848eac/hinted/ttf/NotoSans/NotoSans-SemiCondensedBold.ttf
+```
+
+Its SHA-256 is
+`f7dc6bbca7a6b134600a49ca05352cb51cb519305b554bd93311bcd2c925d1bc`.
+Save it as `tools/fonts/NotoSans-SemiCondensedBold.ttf`, then run:
+
+```bash
+python calendar-viewer/tools/generate_latin_font.py
+```
+
+The source TTF is intentionally not checked in. The generated header contains
+Latin, Latin Extended, phonetic and combining forms, punctuation, and currency
+glyphs. Greek, Cyrillic, Thai, CJK, and other scripts are not embedded.
+
 The Sticky Arcade interface embeds a small multilingual glyph subset generated from
 **Noto Sans CJK SC Bold**. To regenerate it, download this pinned source:
 

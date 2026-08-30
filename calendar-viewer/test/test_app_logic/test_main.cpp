@@ -3,6 +3,7 @@
 #include <cstdlib>
 #include <string>
 
+#include "calendar_latin_text.h"
 #include "calendar_logic.h"
 #include "calendar_render_geometry.h"
 #include "ical_parser.h"
@@ -211,6 +212,25 @@ void test_ical_parser_reads_timed_all_day_folded_text_and_colors() {
   TEST_ASSERT_FALSE(data.events[0].allDay);
   TEST_ASSERT_TRUE(data.events[1].allDay);
   TEST_ASSERT_EQUAL_INT64(86400, data.events[1].end - data.events[1].start);
+}
+
+void test_ical_parser_preserves_latin_utf8_event_titles() {
+  const char* payload =
+      "BEGIN:VCALENDAR\r\n"
+      "BEGIN:VEVENT\r\n"
+      "UID:utf8-title\r\n"
+      "DTSTART:20260830T090000Z\r\n"
+      "DTEND:20260830T100000Z\r\n"
+      "SUMMARY:Caf\xC3\xA9 \xC2\xB7 \xC5\x81\xC3\xB3""d\xC5\xBA "
+      "\xC2\xB7 S\xC3\xA3o Paulo \xC2\xB7 Vi\xE1\xBB\x87t Nam\r\n"
+      "END:VEVENT\r\n"
+      "END:VCALENDAR\r\n";
+  const calendar::Data data = parseCalendar(payload);
+  TEST_ASSERT_EQUAL_UINT(1, data.events.size());
+  TEST_ASSERT_EQUAL_STRING(
+      "Caf\xC3\xA9 \xC2\xB7 \xC5\x81\xC3\xB3""d\xC5\xBA "
+      "\xC2\xB7 S\xC3\xA3o Paulo \xC2\xB7 Vi\xE1\xBB\x87t Nam",
+      data.events[0].title.c_str());
 }
 
 void test_ical_parser_expands_recurrence_and_applies_exdates() {
@@ -901,6 +921,36 @@ void test_grid_today_fill_and_week_label_geometry() {
       137, calendar_render_geometry::gridDayLabelTop(132, 5, 3, true));
 }
 
+void test_calendar_latin_font_decodes_supported_utf8() {
+  const std::string text =
+      "\xC3\xA9\xC5\x81\xE1\xBB\xB9\xE2\x80\x93\xE2\x82\xAC";
+  const uint32_t expected[] = {0x00E9, 0x0141, 0x1EF9, 0x2013, 0x20AC};
+  size_t offset = 0;
+  for (uint32_t codepoint : expected) {
+    TEST_ASSERT_EQUAL_HEX32(
+        codepoint,
+        calendar_latin_text::nextCodepoint(text.data(), text.size(), offset));
+    TEST_ASSERT_TRUE(calendar_latin_text::isEmbeddedLatinCodepoint(codepoint));
+  }
+  TEST_ASSERT_EQUAL_UINT(text.size(), offset);
+}
+
+void test_calendar_latin_font_excludes_other_scripts() {
+  TEST_ASSERT_FALSE(calendar_latin_text::isEmbeddedLatinCodepoint(0x03B1));
+  TEST_ASSERT_FALSE(calendar_latin_text::isEmbeddedLatinCodepoint(0x0416));
+  TEST_ASSERT_FALSE(calendar_latin_text::isEmbeddedLatinCodepoint(0x0E44));
+  TEST_ASSERT_FALSE(calendar_latin_text::isEmbeddedLatinCodepoint(0x5317));
+  TEST_ASSERT_FALSE(calendar_latin_text::isEmbeddedLatinCodepoint(0x1F4C5));
+
+  const std::string emoji = "\xF0\x9F\x93\x85";
+  size_t offset = 0;
+  TEST_ASSERT_EQUAL_HEX32(
+      0x1F4C5,
+      calendar_latin_text::nextCodepoint(emoji.data(), emoji.size(), offset));
+  TEST_ASSERT_EQUAL_UINT(emoji.size(), offset);
+  TEST_ASSERT_TRUE(calendar_latin_text::isIgnorableCodepoint(0xFE0F));
+}
+
 void test_agenda_band_geometry_keeps_today_larger_than_upcoming() {
   const calendar_render_geometry::Rect compactToday =
       calendar_render_geometry::agendaBand(
@@ -1075,6 +1125,7 @@ int main(int, char**) {
   RUN_TEST(test_primary_button_hold_classification);
   RUN_TEST(test_display_windows_respect_week_start_and_month_grid);
   RUN_TEST(test_ical_parser_reads_timed_all_day_folded_text_and_colors);
+  RUN_TEST(test_ical_parser_preserves_latin_utf8_event_titles);
   RUN_TEST(test_ical_parser_expands_recurrence_and_applies_exdates);
   RUN_TEST(test_ical_parser_applies_overrides_and_cancellations);
   RUN_TEST(test_utc_recurrence_does_not_shift_with_device_dst);
@@ -1107,6 +1158,8 @@ int main(int, char**) {
   RUN_TEST(test_calendar_frame_refresh_decision_covers_each_trigger);
   RUN_TEST(test_header_icon_and_title_are_centered_as_one_group);
   RUN_TEST(test_grid_today_fill_and_week_label_geometry);
+  RUN_TEST(test_calendar_latin_font_decodes_supported_utf8);
+  RUN_TEST(test_calendar_latin_font_excludes_other_scripts);
   RUN_TEST(test_agenda_band_geometry_keeps_today_larger_than_upcoming);
   RUN_TEST(test_plain_footer_issues_expected_fill_call);
   RUN_TEST(test_color_parsing_accepts_hex_and_rejects_invalid_values);
