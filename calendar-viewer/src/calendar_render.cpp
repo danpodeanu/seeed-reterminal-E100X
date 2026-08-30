@@ -2,12 +2,15 @@
 
 #include <TFT_eSPI.h>
 #include <math.h>
+#include <stdlib.h>
 
 #include <algorithm>
 
+#include "app_logger.h"
 #include "calendar_config_runtime.h"
 #include "calendar_logic.h"
 #include "config.h"
+#include "dither.h"
 #include "driver.h"
 #include "text_render.h"
 #include "theme.h"
@@ -153,14 +156,14 @@ uint32_t nearestCalendarInk(uint32_t rgb) {
     uint32_t ink;
   };
   static const Candidate kCandidates[] = {
-      {196, 40, 38, TFT_RED},    {245, 180, 0, TFT_YELLOW},
-      {35, 95, 190, TFT_BLUE},   {35, 135, 65, TFT_GREEN},
-      {30, 30, 30, TFT_BLACK},
+      {255, 255, 255, TFT_WHITE}, {29, 185, 84, TFT_GREEN},
+      {229, 57, 53, TFT_RED},     {255, 216, 0, TFT_YELLOW},
+      {0, 76, 255, TFT_BLUE},     {0, 0, 0, TFT_BLACK},
   };
   const int r = calendar_logic::red(rgb);
   const int g = calendar_logic::green(rgb);
   const int b = calendar_logic::blue(rgb);
-  uint32_t bestInk = TFT_BLACK;
+  uint32_t bestInk = kCandidates[0].ink;
   uint32_t bestDistance = UINT32_MAX;
   for (const Candidate& candidate : kCandidates) {
     const int dr = r - candidate.r;
@@ -176,25 +179,171 @@ uint32_t nearestCalendarInk(uint32_t rgb) {
   return bestInk;
 #elif RETERMINAL_MODEL == 1003
   const uint8_t level =
-      static_cast<uint8_t>(std::min(11, calendar_logic::luminance(rgb) / 17));
+      static_cast<uint8_t>(std::min(15, (calendar_logic::luminance(rgb) + 8) /
+                                             17));
   return TFT_GRAY_0 + level;
 #else
   const uint8_t level =
-      static_cast<uint8_t>(std::min(2, calendar_logic::luminance(rgb) / 64));
+      static_cast<uint8_t>(std::min(3, (calendar_logic::luminance(rgb) + 42) /
+                                            85));
   return TFT_GRAY_0 + level;
 #endif
 }
 
-uint32_t eventTextInk(uint32_t background) {
-#if RETERMINAL_MODEL == 1002 || RETERMINAL_MODEL == 1004
-  return background == TFT_WHITE || background == TFT_YELLOW ? TFT_BLACK
-                                                              : TFT_WHITE;
+uint32_t eventTextInk(uint32_t rgb) {
+  return calendar_logic::luminance(rgb) >= 145 ? PANEL_BLACK : PANEL_WHITE;
+}
+
+constexpr DitherPalette eventDitherPalette() {
+#if RETERMINAL_MODEL == 1001
+  return PAL_GRAY4;
 #elif RETERMINAL_MODEL == 1003
-  return background >= TFT_GRAY_8 ? TFT_GRAY_0 : TFT_GRAY_15;
+  return PAL_GRAY16;
 #else
-  return background >= TFT_GRAY_2 ? TFT_GRAY_0 : TFT_GRAY_3;
+  return PAL_E6;
 #endif
 }
+
+uint8_t* allocateDitherBytes(size_t size) {
+  uint8_t* bytes = static_cast<uint8_t*>(ps_malloc(size));
+  if (!bytes) bytes = static_cast<uint8_t*>(malloc(size));
+  return bytes;
+}
+
+uint32_t panelInkForDitherCode(uint8_t code) {
+#if RETERMINAL_MODEL == 1002 || RETERMINAL_MODEL == 1004
+  switch (code) {
+    case 0x0:
+      return TFT_WHITE;
+    case 0x2:
+      return TFT_GREEN;
+    case 0x6:
+      return TFT_RED;
+    case 0xB:
+      return TFT_YELLOW;
+    case 0xD:
+      return TFT_BLUE;
+    case 0xF:
+    default:
+      return TFT_BLACK;
+  }
+#elif RETERMINAL_MODEL == 1003
+  return TFT_GRAY_0 + std::min<uint8_t>(15, code);
+#else
+  return TFT_GRAY_0 + std::min<uint8_t>(3, code);
+#endif
+}
+
+class EventColorDitherer {
+ public:
+  ~EventColorDitherer() {
+    free(rgb_);
+    free(indices_);
+  }
+
+  void fillRect(EPaper& epaper, int left, int top, int width, int height,
+                uint32_t rgb) {
+    if (!render(rgb, width, height)) {
+      warnOnce();
+      epaper.fillRect(left, top, width, height, nearestCalendarInk(rgb));
+      return;
+    }
+
+    const size_t rowBytes = static_cast<size_t>(width + 1) / 2;
+    for (int y = 0; y < height; ++y) {
+      const size_t source = static_cast<size_t>(y) * width;
+      const size_t destination = static_cast<size_t>(y) * rowBytes;
+      for (int x = 0; x < width; x += 2) {
+        const uint8_t leftCode = indices_[source + x] & 0x0F;
+        const uint8_t rightCode =
+            x + 1 < width ? indices_[source + x + 1] & 0x0F : 0;
+        indices_[destination + x / 2] =
+            static_cast<uint8_t>((leftCode << 4) | rightCode);
+      }
+    }
+
+    if ((width & 1) == 0) {
+      epaper.pushImage(left, top, width, height,
+                       reinterpret_cast<uint16_t*>(indices_));
+      return;
+    }
+    for (int y = 0; y < height; ++y) {
+      epaper.pushImage(left, top + y, width, 1,
+                       reinterpret_cast<uint16_t*>(indices_ + y * rowBytes));
+    }
+  }
+
+  void fillCircle(EPaper& epaper, int centerX, int centerY, int radius,
+                  uint32_t rgb) {
+    const int diameter = radius * 2 + 1;
+    if (!render(rgb, diameter, diameter)) {
+      warnOnce();
+      epaper.fillCircle(centerX, centerY, radius, nearestCalendarInk(rgb));
+      return;
+    }
+    const int radiusSquared = radius * radius;
+    for (int y = 0; y < diameter; ++y) {
+      const int dy = y - radius;
+      for (int x = 0; x < diameter; ++x) {
+        const int dx = x - radius;
+        if (dx * dx + dy * dy > radiusSquared) continue;
+        epaper.drawPixel(centerX + dx, centerY + dy,
+                         panelInkForDitherCode(indices_[y * diameter + x]));
+      }
+    }
+  }
+
+ private:
+  bool reserve(size_t pixelCount) {
+    if (pixelCount <= capacity_) return true;
+    if (pixelCount > SIZE_MAX / 3) return false;
+
+    uint8_t* rgb = allocateDitherBytes(pixelCount * 3);
+    if (!rgb) return false;
+    uint8_t* indices = allocateDitherBytes(pixelCount);
+    if (!indices) {
+      free(rgb);
+      return false;
+    }
+
+    free(rgb_);
+    free(indices_);
+    rgb_ = rgb;
+    indices_ = indices;
+    capacity_ = pixelCount;
+    return true;
+  }
+
+  bool render(uint32_t rgb, int width, int height) {
+    if (width <= 0 || height <= 0) return false;
+    const size_t pixelCount =
+        static_cast<size_t>(width) * static_cast<size_t>(height);
+    if (!reserve(pixelCount)) return false;
+
+    const uint8_t red = calendar_logic::red(rgb);
+    const uint8_t green = calendar_logic::green(rgb);
+    const uint8_t blue = calendar_logic::blue(rgb);
+    for (size_t pixel = 0; pixel < pixelCount; ++pixel) {
+      rgb_[pixel * 3] = red;
+      rgb_[pixel * 3 + 1] = green;
+      rgb_[pixel * 3 + 2] = blue;
+    }
+    return dither_image(rgb_, width, height, eventDitherPalette(), DITHER_FS,
+                        1.0f, false, indices_);
+  }
+
+  void warnOnce() {
+    if (warned_) return;
+    warned_ = true;
+    LOG.println(
+        "[render] event-color dithering unavailable; using nearest panel ink");
+  }
+
+  uint8_t* rgb_ = nullptr;
+  uint8_t* indices_ = nullptr;
+  size_t capacity_ = 0;
+  bool warned_ = false;
+};
 
 String ellipsize(EPaper& epaper, const std::string& value, int width) {
   return text_render::ellipsize(epaper, String(value.c_str()), width);
@@ -553,8 +702,9 @@ std::vector<const ::calendar::Event*> eventsForDay(
   return result;
 }
 
-void drawDayCard(EPaper& epaper, const ::calendar::Data& data,
-                 const BodyGeometry& body, time_t dayStart) {
+void drawDayCard(EPaper& epaper, EventColorDitherer& ditherer,
+                 const ::calendar::Data& data, const BodyGeometry& body,
+                 time_t dayStart) {
   epaper.fillRect(body.dayLeft, body.dayTop, body.dayWidth, body.dayHeight,
                   PANEL_WHITE);
   epaper.drawRect(body.dayLeft, body.dayTop, body.dayWidth, body.dayHeight,
@@ -638,7 +788,6 @@ void drawDayCard(EPaper& epaper, const ::calendar::Data& data,
   int y = body.dayTop + headerHeight;
   for (int index = 0; index < shown; ++index) {
     const ::calendar::Event& event = *events[index];
-    const uint32_t ink = nearestCalendarInk(event.colorRgb);
     const int barLeft = body.dayLeft + 1;
     const int barTop = y + 2;
     const int barWidth = body.dayWidth - 2;
@@ -646,13 +795,14 @@ void drawDayCard(EPaper& epaper, const ::calendar::Data& data,
     const int textPadding = config::ui(5);
     const int textLeft = barLeft + textPadding;
     const int textWidth = barWidth - 2 * textPadding;
-    epaper.fillRect(barLeft, barTop, barWidth, barHeight, ink);
+    ditherer.fillRect(epaper, barLeft, barTop, barWidth, barHeight,
+                      event.colorRgb);
     selectFont(epaper, FontSize::Tiny, true);
     const String timeLabel =
         event.allDay ? "All day"
                      : event.start < dayStart ? "Ongoing"
                                               : formatTime(event.start);
-    epaper.setTextColor(eventTextInk(ink), ink, true);
+    epaper.setTextColor(eventTextInk(event.colorRgb));
     epaper.drawString(timeLabel, textLeft, y + 2);
     epaper.drawString(ellipsize(epaper, event.title, textWidth),
                       textLeft, y + titleOffset);
@@ -675,9 +825,10 @@ const char* weekdayLabel(int index, config::WeekStart weekStart) {
                                                  : kMonday[index];
 }
 
-void drawGrid(EPaper& epaper, const ::calendar::Data& data,
-              const BodyGeometry& body, time_t gridStart, int rows,
-              config::WeekStart weekStart, time_t now, bool monthView) {
+void drawGrid(EPaper& epaper, EventColorDitherer& ditherer,
+              const ::calendar::Data& data, const BodyGeometry& body,
+              time_t gridStart, int rows, config::WeekStart weekStart,
+              time_t now, bool monthView) {
   const int headerHeight =
 #if RETERMINAL_MODEL == 1003
       72;
@@ -769,11 +920,11 @@ void drawGrid(EPaper& epaper, const ::calendar::Data& data,
             std::min(static_cast<int>(dayEvents.size()), maxDots);
         const int dotY = y + cellHeight - dotSize - 3;
         for (int index = 0; index < visible; ++index) {
-          const uint32_t ink =
-              nearestCalendarInk(dayEvents[index]->colorRgb);
-          epaper.fillCircle(
+          ditherer.fillCircle(
+              epaper,
               x + 4 + dotSize / 2 + index * (dotSize + dotGap),
-              dotY + dotSize / 2, std::max(1, dotSize / 2), ink);
+              dotY + dotSize / 2, std::max(1, dotSize / 2),
+              dayEvents[index]->colorRgb);
         }
         continue;
       }
@@ -784,16 +935,16 @@ void drawGrid(EPaper& epaper, const ::calendar::Data& data,
       }
       for (const ::calendar::Event* event : dayEvents) {
         if (shown >= eventCapacity) break;
-        const uint32_t ink = nearestCalendarInk(event->colorRgb);
         const int barLeft = x + 1;
         const int barTop = eventY + 1;
         const int barWidth = cellWidth - 1;
         const int barHeight = lineHeight - 2;
         const int textPadding = config::ui(4);
         const int textX = barLeft + textPadding;
-        epaper.fillRect(barLeft, barTop, barWidth, barHeight, ink);
+        ditherer.fillRect(epaper, barLeft, barTop, barWidth, barHeight,
+                          event->colorRgb);
         selectFont(epaper, FontSize::Tiny, true);
-        epaper.setTextColor(eventTextInk(ink), ink, true);
+        epaper.setTextColor(eventTextInk(event->colorRgb));
         epaper.setTextDatum(ML_DATUM);
         epaper.drawString(
             ellipsize(epaper, event->title,
@@ -880,7 +1031,9 @@ void calendar(EPaper& epaper, const ::calendar::Data& data,
   epaper.fillSprite(PANEL_WHITE);
   drawHeader(epaper, now, indoor);
   const BodyGeometry body = bodyGeometry();
-  drawDayCard(epaper, data, body, calendar_logic::localMidnight(now));
+  EventColorDitherer ditherer;
+  drawDayCard(epaper, ditherer, data, body,
+              calendar_logic::localMidnight(now));
   drawWeatherCard(epaper, body, weather, indoor);
 
   BodyGeometry week = body;
@@ -899,10 +1052,11 @@ void calendar(EPaper& epaper, const ::calendar::Data& data,
   month.top = week.top + week.height + sectionGap;
   month.height = body.top + body.height - month.top;
 
-  drawGrid(epaper, data, week,
+  drawGrid(epaper, ditherer, data, week,
            calendar_logic::startOfWeek(now, weekStart), 1, weekStart, now,
            false);
-  drawGrid(epaper, data, month, window.start, 6, weekStart, now, true);
+  drawGrid(epaper, ditherer, data, month, window.start, 6, weekStart, now,
+           true);
   drawFooter(epaper, footer, data);
 }
 
