@@ -12,6 +12,7 @@ struct Source {
   std::string id;
   std::string name;
   uint32_t colorRgb = 0x4A6FA5;
+  bool googleColorAvailable = false;
 };
 
 struct Event {

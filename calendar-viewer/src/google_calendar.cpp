@@ -30,6 +30,7 @@ struct GoogleCalendar {
   String id;
   String name;
   uint32_t color = 0x4A6FA5;
+  bool colorAvailable = false;
 };
 
 constexpr const char* kCalendarReadOnlyScope =
@@ -494,8 +495,13 @@ void parseCalendarList(const String& body,
     calendar.id = id;
     calendar.name = String(item["summaryOverride"] |
                            (item["summary"] | id.c_str()));
-    calendar.color =
-        calendar_logic::parseRgb(item["backgroundColor"] | "", 0x4A6FA5);
+    constexpr uint32_t kInvalidColor = 0x1000000;
+    const uint32_t color = calendar_logic::parseRgb(
+        item["backgroundColor"] | "", kInvalidColor);
+    if (color != kInvalidColor) {
+      calendar.color = color;
+      calendar.colorAvailable = true;
+    }
     calendars.push_back(calendar);
     if (calendars.size() >= config::MAX_GOOGLE_CALENDARS) break;
   }
@@ -543,6 +549,7 @@ bool parseCalendarListEntry(const String& body, GoogleCalendar& calendar,
   calendar.name = String(
       document["summaryOverride"] | (document["summary"] | returnedId.c_str()));
   calendar.color = color;
+  calendar.colorAvailable = true;
   const String accessRole = String(document["accessRole"] | "unknown");
   LOG.printf("[google] calendar metadata: %s, access=%s, color=%s\n",
              calendar.name.c_str(), accessRole.c_str(),
@@ -812,6 +819,7 @@ bool fetchGoogle(const calendar::Window& window, calendar::Data& out,
     source.id = std::string(calendars[index].id.c_str());
     source.name = std::string(calendars[index].name.c_str());
     source.colorRgb = calendars[index].color;
+    source.googleColorAvailable = calendars[index].colorAvailable;
     out.sources.push_back(source);
 
     String pageToken;

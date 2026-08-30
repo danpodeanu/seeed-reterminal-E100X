@@ -8,7 +8,7 @@ using config_portal::FieldType;
 using config_portal::Section;
 
 const char* const kCalendarProviderValues[] = {"Ical", "Google", nullptr};
-const char* const kWeekStartValues[] = {"Monday", "Sunday", nullptr};
+const char* const kWeekStartValues[] = {"Sunday", "Monday", nullptr};
 const char* const kTimeFormatValues[] = {
     "12-hour (AM/PM)", "24-hour", nullptr};
 const char* const kWeatherProviderValues[] = {"OpenMeteo", "QWeather", nullptr};
@@ -34,7 +34,7 @@ const Field kCalendarFields[] = {
 const Field kPresentationFields[] = {
     {kKeyWeekStart, "First day of week",
      "Used by the weekly and monthly calendar grids.",
-     FieldType::Enum, "Monday", kWeekStartValues, 0, 0, nullptr},
+     FieldType::Enum, "Sunday", kWeekStartValues, 0, 0, nullptr},
     {kKeyTimeFormat, "Time format",
      "Display timed events using a 12-hour AM/PM or 24-hour clock.",
      FieldType::Enum, "12-hour (AM/PM)", kTimeFormatValues, 0, 0, nullptr},

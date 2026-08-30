@@ -107,6 +107,16 @@ inline bool sameLocalDate(time_t left, time_t right) {
          a.tm_year == b.tm_year && a.tm_yday == b.tm_yday;
 }
 
+inline bool singleGoogleCalendarColor(const calendar::Data& data,
+                                     uint32_t& color) {
+  if (data.sources.size() != 1 ||
+      !data.sources.front().googleColorAvailable) {
+    return false;
+  }
+  color = data.sources.front().colorRgb;
+  return true;
+}
+
 inline std::string formatClockTime(time_t value, config::TimeFormat format,
                                   bool includeMeridiem = true) {
   struct tm local = {};
@@ -120,8 +130,8 @@ inline std::string formatClockTime(time_t value, config::TimeFormat format,
 
   const int hour = local.tm_hour % 12 == 0 ? 12 : local.tm_hour % 12;
   if (includeMeridiem) {
-    snprintf(buffer, sizeof(buffer), "%d:%02d %s", hour, local.tm_min,
-            local.tm_hour < 12 ? "AM" : "PM");
+    snprintf(buffer, sizeof(buffer), "%d:%02d%s", hour, local.tm_min,
+            local.tm_hour < 12 ? "am" : "pm");
   } else {
     snprintf(buffer, sizeof(buffer), "%d:%02d", hour, local.tm_min);
   }
@@ -135,32 +145,26 @@ inline std::string formatClockRange(time_t start, time_t end,
     const std::string endText = formatClockTime(end, format);
     return startText == "--:--" || endText == "--:--"
                ? std::string("--:--")
-               : startText + "-" + endText;
+               : startText + " - " + endText;
   }
 
-  struct tm startLocal = {};
   struct tm endLocal = {};
-  if (localtime_r(&start, &startLocal) == nullptr ||
+  const std::string startText = formatClockTime(start, format);
+  if (startText == "--:--" ||
       localtime_r(&end, &endLocal) == nullptr) {
     return "--:--";
   }
-  const bool sameDate = startLocal.tm_year == endLocal.tm_year &&
-                       startLocal.tm_yday == endLocal.tm_yday;
-  const bool sameMeridiem = (startLocal.tm_hour < 12) == (endLocal.tm_hour < 12);
-  if (sameDate && sameMeridiem) {
-    return formatClockTime(start, format, false) + "-" +
-           formatClockTime(end, format);
+  char endBuffer[16] = {};
+  const int endHour =
+      endLocal.tm_hour % 12 == 0 ? 12 : endLocal.tm_hour % 12;
+  if (endLocal.tm_min == 0) {
+    snprintf(endBuffer, sizeof(endBuffer), "%d%s", endHour,
+             endLocal.tm_hour < 12 ? "am" : "pm");
+  } else {
+    snprintf(endBuffer, sizeof(endBuffer), "%d:%02d%s", endHour,
+             endLocal.tm_min, endLocal.tm_hour < 12 ? "am" : "pm");
   }
-
-  std::string startText = formatClockTime(start, format);
-  std::string endText = formatClockTime(end, format);
-  if (startText.size() >= 3 && startText[startText.size() - 3] == ' ') {
-    startText.erase(startText.size() - 3, 1);
-  }
-  if (endText.size() >= 3 && endText[endText.size() - 3] == ' ') {
-    endText.erase(endText.size() - 3, 1);
-  }
-  return startText + "-" + endText;
+  return startText + " - " + endBuffer;
 }
 
 inline uint32_t parseRgb(const char* value, uint32_t fallback = 0x4A6FA5) {
@@ -224,6 +228,7 @@ inline uint64_t dataFingerprint(const calendar::Data& data,
     hash.add(source.id);
     hash.add(source.name);
     hash.addValue(source.colorRgb);
+    hash.addValue(source.googleColorAvailable);
   }
   for (const auto& event : data.events) {
     if (!overlaps(event.start, event.end, window.start, window.end)) continue;

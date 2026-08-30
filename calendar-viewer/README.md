@@ -22,6 +22,8 @@ panel only when visible calendar, weather, sensor, or date content has changed.
   sidebar. Upcoming entries from the next six weeks include their date and
   start/end times. Week and month grids mark the current day in green on
   six-color panels.
+- Sunday is the default first day of the week; the Presentation settings can
+  switch week and month grids to Monday-first.
 - Shared Meteocons weather artwork plus native calendar, climate, location, and
   alert icons, with dithered light-blue calendar and light-yellow weather
   headers on six-color models.
@@ -130,7 +132,9 @@ For configured IDs, Calendar Viewer requests
 it reads each CalendarList entry and adds a missing subscription to the service
 account's list. This allows events without their own `colorId` to inherit the
 calendar entry's `backgroundColor`; explicitly colored events use Google's
-event-color palette. Adding the subscription does not modify calendar events.
+event-color palette. When exactly one Google calendar is loaded and that
+background color is available, the week and month cells use its dithered color.
+Adding the subscription does not modify calendar events.
 
 If color-enabled authentication or CalendarList access is unavailable, the
 firmware continues with
@@ -146,8 +150,9 @@ key is never placed on SD, returned by the status endpoint, or logged. The
 portal can remove the stored credential. Standard ESP32 NVS is not encrypted
 unless flash encryption is separately provisioned on the device.
 
-Under **Settings -> Presentation**, choose Monday or Sunday as the first day of
-the week and select either the default 12-hour AM/PM clock or a 24-hour clock.
+Under **Settings -> Presentation**, choose Sunday (the default) or Monday as the
+first day of the week and select either the default 12-hour am/pm clock or a
+24-hour clock.
 Timed entries in the Today agenda show both their start and end times.
 
 ### 4. Configure weather

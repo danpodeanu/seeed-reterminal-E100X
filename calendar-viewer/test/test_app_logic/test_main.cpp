@@ -617,6 +617,14 @@ void test_data_fingerprint_changes_with_visible_event_content_only() {
   data.events[0].title = "Outside changed";
   TEST_ASSERT_EQUAL_UINT64(
       outside, calendar_logic::dataFingerprint(data, window));
+
+  calendar::Source source;
+  data.sources.push_back(source);
+  const uint64_t fallbackColor =
+      calendar_logic::dataFingerprint(data, window);
+  data.sources[0].googleColorAvailable = true;
+  TEST_ASSERT_NOT_EQUAL(
+      fallbackColor, calendar_logic::dataFingerprint(data, window));
 }
 
 void test_color_parsing_accepts_hex_and_rejects_invalid_values() {
@@ -626,19 +634,37 @@ void test_color_parsing_accepts_hex_and_rejects_invalid_values() {
                           calendar_logic::parseRgb("#bad", 0x123456));
 }
 
+void test_single_google_calendar_color_controls_grid_background() {
+  calendar::Data data;
+  uint32_t color = 0;
+  calendar::Source source;
+  source.colorRgb = 0xCCA6AC;
+  data.sources.push_back(source);
+  TEST_ASSERT_FALSE(calendar_logic::singleGoogleCalendarColor(data, color));
+
+  data.sources[0].googleColorAvailable = true;
+  TEST_ASSERT_TRUE(calendar_logic::singleGoogleCalendarColor(data, color));
+  TEST_ASSERT_EQUAL_HEX32(0xCCA6AC, color);
+
+  data.sources.push_back(source);
+  TEST_ASSERT_FALSE(calendar_logic::singleGoogleCalendarColor(data, color));
+}
+
 void test_clock_time_format_supports_twelve_and_twenty_four_hour_clocks() {
   const time_t midnight = utc(2026, 8, 30, 0, 5);
   const time_t morning = utc(2026, 8, 30, 10, 15);
+  const time_t eleven = utc(2026, 8, 30, 11);
   const time_t noon = utc(2026, 8, 30, 12, 30);
+  const time_t one = utc(2026, 8, 30, 13);
   const time_t afternoon = utc(2026, 8, 30, 13, 45);
 
   TEST_ASSERT_EQUAL_STRING(
-      "12:05 AM",
+      "12:05am",
       calendar_logic::formatClockTime(midnight,
                                       config::TimeFormat::TwelveHour)
           .c_str());
   TEST_ASSERT_EQUAL_STRING(
-      "12:30 PM",
+      "12:30pm",
       calendar_logic::formatClockTime(noon, config::TimeFormat::TwelveHour)
           .c_str());
   TEST_ASSERT_EQUAL_STRING(
@@ -647,17 +673,22 @@ void test_clock_time_format_supports_twelve_and_twenty_four_hour_clocks() {
           afternoon, config::TimeFormat::TwentyFourHour)
           .c_str());
   TEST_ASSERT_EQUAL_STRING(
-      "10:15AM-12:30PM",
+      "10:15am - 12:30pm",
       calendar_logic::formatClockRange(morning, noon,
                                        config::TimeFormat::TwelveHour)
           .c_str());
   TEST_ASSERT_EQUAL_STRING(
-      "12:30-1:45 PM",
+      "12:30pm - 1:45pm",
       calendar_logic::formatClockRange(noon, afternoon,
                                        config::TimeFormat::TwelveHour)
           .c_str());
   TEST_ASSERT_EQUAL_STRING(
-      "12:30-13:45",
+      "11:00am - 1pm",
+      calendar_logic::formatClockRange(eleven, one,
+                                       config::TimeFormat::TwelveHour)
+          .c_str());
+  TEST_ASSERT_EQUAL_STRING(
+      "12:30 - 13:45",
       calendar_logic::formatClockRange(noon, afternoon,
                                        config::TimeFormat::TwentyFourHour)
           .c_str());
@@ -694,6 +725,7 @@ int main(int, char**) {
   RUN_TEST(test_ical_parser_caps_event_count_and_marks_truncation);
   RUN_TEST(test_data_fingerprint_changes_with_visible_event_content_only);
   RUN_TEST(test_color_parsing_accepts_hex_and_rejects_invalid_values);
+  RUN_TEST(test_single_google_calendar_color_controls_grid_background);
   RUN_TEST(
       test_clock_time_format_supports_twelve_and_twenty_four_hour_clocks);
   return UNITY_END();

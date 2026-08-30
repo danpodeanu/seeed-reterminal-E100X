@@ -474,7 +474,6 @@ struct BodyGeometry {
   int dayLeft;
   int dayTop;
   int dayWidth;
-  int dayHeight;
   int weatherLeft;
   int weatherTop;
   int weatherWidth;
@@ -485,15 +484,15 @@ BodyGeometry bodyGeometry() {
   BodyGeometry value{};
 #if RETERMINAL_MODEL == 1003
   value = {32, 156, 1340, 1192,
-           1404, 156, 436, 800,
+           1404, 156, 436,
            1404, 988, 436, 360};
 #elif RETERMINAL_MODEL == 1004
   value = {24, 132, 1168, 1044,
-           1216, 132, 360, 720,
+           1216, 132, 360,
            1216, 876, 360, 300};
 #else
   value = {12, 76, 596, 390,
-           620, 76, 168, 228,
+           620, 76, 168,
            620, 316, 168, 150};
 #endif
   return value;
@@ -745,34 +744,12 @@ String eventStartDate(time_t value, bool compact = false) {
   return label;
 }
 
-String upcomingEventTime(const ::calendar::Event& event,
-                        bool compact = false) {
+String upcomingEventTime(const ::calendar::Event& event) {
   if (event.allDay) return "All day";
   if (event.end <= event.start) return formatTime(event.start);
-  const config::TimeFormat timeFormat =
-      calendar_config::runtime::timeFormat();
-  if (compact && timeFormat == config::TimeFormat::TwelveHour) {
-    struct tm startLocal = {};
-    struct tm endLocal = {};
-    if (localtime_r(&event.start, &startLocal) != nullptr &&
-        localtime_r(&event.end, &endLocal) != nullptr) {
-      const String start =
-          String(calendar_logic::formatClockTime(
-                    event.start, timeFormat, false)
-                    .c_str());
-      const String end =
-          String(calendar_logic::formatClockTime(event.end, timeFormat, false)
-                    .c_str());
-      const char startMeridiem = startLocal.tm_hour < 12 ? 'a' : 'p';
-      const char endMeridiem = endLocal.tm_hour < 12 ? 'a' : 'p';
-      if (startMeridiem == endMeridiem) {
-        return start + "-" + end + endMeridiem;
-      }
-      return start + startMeridiem + "-" + end + endMeridiem;
-    }
-  }
   return String(calendar_logic::formatClockRange(
-                   event.start, event.end, timeFormat)
+                   event.start, event.end,
+                   calendar_config::runtime::timeFormat())
                    .c_str());
 }
 
@@ -788,14 +765,17 @@ void drawAgendaCard(EPaper& epaper, ColorDitherer& ditherer,
                    const String& headerDetail,
                    const std::vector<const ::calendar::Event*>& events,
                    time_t dayStart, bool upcoming) {
+  int headerHeight = kAgendaHeaderHeight;
+#if RETERMINAL_MODEL == 1001 || RETERMINAL_MODEL == 1002
+  if (upcoming) headerHeight = 28;
+#endif
   epaper.fillRect(card.left, card.top, card.width, card.height, PANEL_WHITE);
   epaper.drawRect(card.left, card.top, card.width, card.height, PANEL_BLACK);
   const int headerIconSize = std::max(10, config::ui(14));
 
   const int contentLeft = card.left + kAgendaMargin;
   ditherer.fillRect(epaper, card.left + 1, card.top + 1, card.width - 2,
-                   kAgendaHeaderHeight - 1,
-                   CALENDAR_HEADER_RGB);
+                   headerHeight - 1, CALENDAR_HEADER_RGB);
   const uint32_t headerTextInk = eventTextInk(CALENDAR_HEADER_RGB);
   epaper.setTextColor(headerTextInk);
 #if RETERMINAL_MODEL == 1003 || RETERMINAL_MODEL == 1004
@@ -805,18 +785,18 @@ void drawAgendaCard(EPaper& epaper, ColorDitherer& ditherer,
 #endif
   drawCalendarIcon(epaper, contentLeft,
                    card.top +
-                      (kAgendaHeaderHeight - headerIconSize * 7 / 8) / 2,
+                       (headerHeight - headerIconSize * 7 / 8) / 2,
                    headerIconSize, headerTextInk);
   epaper.setTextDatum(ML_DATUM);
   epaper.drawString(heading,
                     contentLeft + headerIconSize + config::ui(6),
-                    card.top + kAgendaHeaderHeight / 2);
+                    card.top + headerHeight / 2);
   if (!headerDetail.isEmpty()) {
     epaper.setTextDatum(MR_DATUM);
     epaper.drawString(headerDetail, card.left + card.width - kAgendaMargin,
-                      card.top + kAgendaHeaderHeight / 2);
+                      card.top + headerHeight / 2);
   }
-  epaper.drawFastHLine(card.left, card.top + kAgendaHeaderHeight, card.width,
+  epaper.drawFastHLine(card.left, card.top + headerHeight, card.width,
                       PANEL_BLACK);
 
   if (events.empty()) {
@@ -827,30 +807,32 @@ void drawAgendaCard(EPaper& epaper, ColorDitherer& ditherer,
     epaper.drawString(
         text_render::ellipsize(epaper, emptyLabel,
                               card.width - kAgendaMargin * 2),
-        contentLeft, card.top + kAgendaHeaderHeight + kAgendaMargin);
+        contentLeft, card.top + headerHeight + kAgendaMargin);
     return;
   }
 
-  const int capacity = std::max(
-      1, (card.height - kAgendaHeaderHeight - kAgendaMargin) /
-             kAgendaRowHeight);
+  const int contentHeight = card.height - headerHeight;
+  const int rowHeight = std::min(kAgendaRowHeight, contentHeight);
+  const int capacity =
+      rowHeight > 0 ? std::max(1, contentHeight / rowHeight) : 0;
+  if (capacity == 0) return;
   int shown = std::min(static_cast<int>(events.size()), capacity);
   if (static_cast<int>(events.size()) > capacity && capacity > 1) {
     --shown;
   }
-  int y = card.top + kAgendaHeaderHeight;
+  int y = card.top + headerHeight;
   for (int index = 0; index < shown; ++index) {
     const ::calendar::Event& event = *events[index];
     const int barLeft = card.left + 1;
     const int barTop = y + 2;
     const int barWidth = card.width - 2;
-    const int barHeight = kAgendaRowHeight - 4;
+    const int barHeight = rowHeight - 4;
     const int textPadding = config::ui(5);
     const int textLeft = barLeft + textPadding;
     const int textWidth = barWidth - 2 * textPadding;
     ditherer.fillRect(epaper, barLeft, barTop, barWidth, barHeight,
                       event.colorRgb);
-    selectFont(epaper, FontSize::Tiny, true);
+    selectFont(epaper, FontSize::Tiny, false);
     epaper.setTextColor(eventTextInk(event.colorRgb));
     const int metadataY = barTop + barHeight / 4;
     const int titleY = barTop + barHeight * 3 / 4;
@@ -863,11 +845,6 @@ void drawAgendaCard(EPaper& epaper, ColorDitherer& ditherer,
           textWidth) {
         dateLabel = eventStartDate(event.start, true);
       }
-      if (epaper.textWidth(dateLabel) + config::ui(4) +
-              epaper.textWidth(timeLabel) >
-          textWidth) {
-        timeLabel = upcomingEventTime(event, true);
-      }
       epaper.drawString(dateLabel, textLeft, metadataY);
       epaper.setTextDatum(MR_DATUM);
       epaper.drawString(timeLabel, barLeft + barWidth - textPadding, metadataY);
@@ -877,11 +854,12 @@ void drawAgendaCard(EPaper& epaper, ColorDitherer& ditherer,
       epaper.drawString(text_render::ellipsize(epaper, timeLabel, textWidth),
                       textLeft, metadataY);
     }
+    selectFont(epaper, FontSize::Tiny, true);
     epaper.drawString(ellipsize(epaper, event.title, textWidth),
                       textLeft, titleY);
-    y += kAgendaRowHeight;
+    y += rowHeight;
   }
-  if (shown < static_cast<int>(events.size())) {
+  if (capacity > 1 && shown < static_cast<int>(events.size())) {
     selectFont(epaper, FontSize::Tiny);
     epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, true);
     epaper.setTextDatum(TL_DATUM);
@@ -892,16 +870,20 @@ void drawAgendaCard(EPaper& epaper, ColorDitherer& ditherer,
 
 void drawAgendaCards(EPaper& epaper, ColorDitherer& ditherer,
                      const ::calendar::Data& data, const BodyGeometry& body,
-                     time_t dayStart) {
-  const int cardsHeight = body.dayHeight - kAgendaCardGap;
-  const int todayHeight = cardsHeight / 2;
+                     time_t dayStart, int weekBottom, int monthTop) {
+  const int todayHeight = weekBottom - body.dayTop;
+#if RETERMINAL_MODEL == 1001 || RETERMINAL_MODEL == 1002
+  const int upcomingBottom = body.weatherTop;
+#else
+  const int upcomingBottom = body.weatherTop - kAgendaCardGap;
+#endif
   const AgendaCard today{
       body.dayLeft, body.dayTop, body.dayWidth, todayHeight};
   const AgendaCard upcoming{
       body.dayLeft,
-      body.dayTop + todayHeight + kAgendaCardGap,
+      monthTop,
       body.dayWidth,
-      cardsHeight - todayHeight,
+      upcomingBottom - monthTop,
   };
 
   drawAgendaCard(epaper, ditherer, today, "TODAY",
@@ -937,7 +919,7 @@ void drawGrid(EPaper& epaper, ColorDitherer& ditherer,
 #else
       34;
 #endif
-  const int cellHeight = (body.height - headerHeight) / rows;
+  const int gridHeight = body.height - headerHeight;
   ditherer.fillRect(epaper, body.left, body.top, body.width, headerHeight,
                     CALENDAR_HEADER_RGB);
   epaper.setTextDatum(MC_DATUM);
@@ -954,6 +936,11 @@ void drawGrid(EPaper& epaper, ColorDitherer& ditherer,
                       PANEL_BLACK);
 
   const time_t monthAnchor = calendar_logic::startOfMonth(now);
+  uint32_t calendarBackgroundRgb = 0;
+  const bool haveCalendarBackground =
+      calendar_logic::singleGoogleCalendarColor(data, calendarBackgroundRgb);
+  const uint32_t calendarBackgroundText =
+      eventTextInk(calendarBackgroundRgb);
   struct tm anchorTm = {};
   localtime_r(&monthAnchor, &anchorTm);
   for (int row = 0; row < rows; ++row) {
@@ -963,7 +950,15 @@ void drawGrid(EPaper& epaper, ColorDitherer& ditherer,
       const int x = body.left + body.width * column / 7;
       const int nextX = body.left + body.width * (column + 1) / 7;
       const int cellWidth = nextX - x;
-      const int y = body.top + headerHeight + row * cellHeight;
+      const int y =
+          body.top + headerHeight + gridHeight * row / rows;
+      const int nextY =
+          body.top + headerHeight + gridHeight * (row + 1) / rows;
+      const int cellHeight = nextY - y;
+      if (haveCalendarBackground) {
+        ditherer.fillRect(epaper, x + 1, y + 1, cellWidth - 1,
+                          cellHeight - 1, calendarBackgroundRgb);
+      }
       if (column > 0) epaper.drawFastVLine(x, y, cellHeight, PANEL_MUTED);
       if (row > 0) epaper.drawFastHLine(x, y, cellWidth, PANEL_MUTED);
 
@@ -978,8 +973,13 @@ void drawGrid(EPaper& epaper, ColorDitherer& ditherer,
                       cellHeight - 1);
       }
       epaper.setTextDatum(TL_DATUM);
-      const uint32_t dateInk = outsideMonth ? PANEL_MUTED : PANEL_BLACK;
+      const uint32_t dateInk =
+          today ? PANEL_BLACK
+          : haveCalendarBackground ? calendarBackgroundText
+                                   : outsideMonth ? PANEL_MUTED : PANEL_BLACK;
       if (today) {
+        epaper.setTextColor(dateInk);
+      } else if (haveCalendarBackground) {
         epaper.setTextColor(dateInk);
       } else {
         epaper.setTextColor(dateInk, PANEL_WHITE, true);
@@ -1057,6 +1057,8 @@ void drawGrid(EPaper& epaper, ColorDitherer& ditherer,
         selectFont(epaper, FontSize::Tiny);
         if (today) {
           epaper.setTextColor(PANEL_BLACK);
+        } else if (haveCalendarBackground) {
+          epaper.setTextColor(calendarBackgroundText);
         } else {
           epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, true);
         }
@@ -1154,10 +1156,6 @@ void calendar(EPaper& epaper, const ::calendar::Data& data,
   drawHeader(epaper, now, indoor);
   const BodyGeometry body = bodyGeometry();
   ColorDitherer ditherer;
-  drawAgendaCards(epaper, ditherer, data, body,
-                  calendar_logic::localMidnight(now));
-  drawWeatherCard(epaper, ditherer, body, weather, indoor);
-
   BodyGeometry week = body;
   BodyGeometry month = body;
 #if RETERMINAL_MODEL == 1003
@@ -1174,6 +1172,10 @@ void calendar(EPaper& epaper, const ::calendar::Data& data,
   month.top = week.top + week.height + sectionGap;
   month.height = body.top + body.height - month.top;
 
+  drawAgendaCards(epaper, ditherer, data, body,
+                  calendar_logic::localMidnight(now),
+                  week.top + week.height, month.top);
+  drawWeatherCard(epaper, ditherer, body, weather, indoor);
   drawGrid(epaper, ditherer, data, week,
            calendar_logic::startOfWeek(now, weekStart), 1, weekStart, now,
            false);
