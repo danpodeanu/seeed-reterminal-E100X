@@ -8,6 +8,8 @@ namespace theme {
 
 inline constexpr uint32_t CALENDAR_HEADER_RGB = 0xA4BDFC;
 inline constexpr uint32_t WEATHER_HEADER_RGB = 0xFBD75B;
+inline constexpr uint32_t WEEKEND_BACKGROUND_RGB = 0xE2E2E2;
+inline constexpr uint32_t STATUS_BACKGROUND_RGB = 0xEEEEEE;
 
 // E1004's physical front-button order is RIGHT / LEFT / GREEN; the older
 // models use GREEN / RIGHT / LEFT on the same three GPIOs.

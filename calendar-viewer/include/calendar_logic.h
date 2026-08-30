@@ -5,6 +5,7 @@
 #include <string.h>
 #include <time.h>
 
+#include <algorithm>
 #include <string>
 
 #include "calendar_data.h"
@@ -115,6 +116,17 @@ inline bool singleGoogleCalendarColor(const calendar::Data& data,
   }
   color = data.sources.front().colorRgb;
   return true;
+}
+
+inline int agendaVisibleRows(int eventCount, int contentHeight, int rowHeight,
+                             int moreLineHeight) {
+  if (eventCount <= 0 || contentHeight <= 0 || rowHeight <= 0) return 0;
+  int shown = std::min(eventCount, contentHeight / rowHeight);
+  if (eventCount > shown &&
+      contentHeight - shown * rowHeight < moreLineHeight && shown > 1) {
+    --shown;
+  }
+  return shown;
 }
 
 inline std::string formatClockTime(time_t value, config::TimeFormat format,

@@ -65,7 +65,7 @@ constexpr const char* kFrameValidKey = "frame_valid";
 constexpr const char* kFrameHashKey = "frame_hash";
 constexpr const char* kFrameKindKey = "frame_kind";
 // Increment when rendering changes without changing the underlying data.
-constexpr uint32_t kCalendarFrameRevision = 5;
+constexpr uint32_t kCalendarFrameRevision = 6;
 
 enum class FrameKind : uint8_t {
   None = 0,
@@ -253,6 +253,8 @@ uint64_t frameFingerprint(const calendar::Data& data,
   hash.addValue(data.truncated);
   hash.addValue(calendar_config::runtime::weekStart());
   hash.addValue(calendar_config::runtime::timeFormat());
+  hash.addValue(
+      calendar_config::runtime::showSingleCalendarBackground());
   hash.add(std::string(calendar_config::runtime::timezone()));
   hash.add(std::string(calendar_config::runtime::locationName()));
   hash.addValue(calendar_config::runtime::temperatureUnit());
@@ -650,8 +652,14 @@ void setup() {
 
   String footer;
   if (calendar_config::runtime::debugShowStatusBadges()) {
-    char checked[16] = {};
-    strftime(checked, sizeof(checked), "%H:%M", &localNow);
+    char checkedDate[16] = {};
+    strftime(checkedDate, sizeof(checkedDate), "%e %b %Y", &localNow);
+    String checked = checkedDate;
+    checked.trim();
+    checked += " ";
+    checked += calendar_logic::formatClockTime(
+                  now, calendar_config::runtime::timeFormat())
+                  .c_str();
     footer = String(calendar_config::runtime::calendarProviderName()) +
              " checked " + checked;
     if (weather.fromCache) footer += " / cached weather";

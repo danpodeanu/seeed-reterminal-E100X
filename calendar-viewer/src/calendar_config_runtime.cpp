@@ -15,6 +15,8 @@ struct Cache {
   String googleDelegatedUser = config::GOOGLE_DELEGATED_USER;
   config::WeekStart weekStart = config::WEEK_START;
   config::TimeFormat timeFormat = config::TIME_FORMAT;
+  bool showSingleCalendarBackground =
+      config::SHOW_SINGLE_CALENDAR_BACKGROUND;
 
   uint64_t sleepSeconds = config::SLEEP_SECONDS;
   String timezone = config::TIMEZONE;
@@ -112,6 +114,8 @@ void load() {
       config_portal::storage::getString(prefs, kSchema, kKeyWeekStart));
   g_cache.timeFormat = parseTimeFormat(
       config_portal::storage::getString(prefs, kSchema, kKeyTimeFormat));
+  g_cache.showSingleCalendarBackground = config_portal::storage::getBool(
+      prefs, kSchema, kKeyShowSingleCalendarBackground);
 
   g_cache.sleepSeconds = static_cast<uint64_t>(
       config_portal::storage::getInt(prefs, kSchema, kKeySleepSeconds));
@@ -173,6 +177,9 @@ const char* googleDelegatedUser() {
 }
 config::WeekStart weekStart() { return g_cache.weekStart; }
 config::TimeFormat timeFormat() { return g_cache.timeFormat; }
+bool showSingleCalendarBackground() {
+  return g_cache.showSingleCalendarBackground;
+}
 
 uint64_t sleepSeconds() { return g_cache.sleepSeconds; }
 const char* timezone() { return g_cache.timezone.c_str(); }

@@ -38,6 +38,9 @@ const Field kPresentationFields[] = {
     {kKeyTimeFormat, "Time format",
      "Display timed events using a 12-hour AM/PM or 24-hour clock.",
      FieldType::Enum, "12-hour (AM/PM)", kTimeFormatValues, 0, 0, nullptr},
+    {kKeyShowSingleCalendarBackground, "Show calendar background",
+     "Use the Google calendar color behind week and month cells when exactly one calendar is loaded.",
+     FieldType::Bool, "true", nullptr, 0, 0, nullptr},
 };
 
 const Field kRefreshFields[] = {

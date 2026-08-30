@@ -816,10 +816,11 @@ void drawAgendaCard(EPaper& epaper, ColorDitherer& ditherer,
   const int capacity =
       rowHeight > 0 ? std::max(1, contentHeight / rowHeight) : 0;
   if (capacity == 0) return;
-  int shown = std::min(static_cast<int>(events.size()), capacity);
-  if (static_cast<int>(events.size()) > capacity && capacity > 1) {
-    --shown;
-  }
+  selectFont(epaper, FontSize::Tiny, false);
+  const int moreLineHeight = epaper.fontHeight(1) + config::ui(4);
+  const int shown = calendar_logic::agendaVisibleRows(
+      static_cast<int>(events.size()), contentHeight, rowHeight,
+      moreLineHeight);
   int y = card.top + headerHeight;
   for (int index = 0; index < shown; ++index) {
     const ::calendar::Event& event = *events[index];
@@ -859,12 +860,15 @@ void drawAgendaCard(EPaper& epaper, ColorDitherer& ditherer,
                       textLeft, titleY);
     y += rowHeight;
   }
-  if (capacity > 1 && shown < static_cast<int>(events.size())) {
+  const bool showMore = shown < static_cast<int>(events.size()) &&
+                        contentHeight - shown * rowHeight >= moreLineHeight;
+  if (showMore) {
     selectFont(epaper, FontSize::Tiny);
     epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, true);
-    epaper.setTextDatum(TL_DATUM);
+    epaper.setTextDatum(ML_DATUM);
     epaper.drawString("+" + String(events.size() - shown) + " more",
-                      contentLeft, y + config::ui(5));
+                      contentLeft,
+                      y + (card.top + card.height - y) / 2);
   }
 }
 
@@ -889,11 +893,7 @@ void drawAgendaCards(EPaper& epaper, ColorDitherer& ditherer,
   drawAgendaCard(epaper, ditherer, today, "TODAY",
                  eventStartDate(dayStart), eventsForDay(data, dayStart),
                  dayStart, false);
-#if RETERMINAL_MODEL == 1003 || RETERMINAL_MODEL == 1004
-  constexpr const char* kUpcomingHeading = "UPCOMING EVENTS";
-#else
   constexpr const char* kUpcomingHeading = "UPCOMING";
-#endif
   drawAgendaCard(epaper, ditherer, upcoming, kUpcomingHeading, "",
                  upcomingEvents(data, dayStart), dayStart, true);
 }
@@ -938,6 +938,7 @@ void drawGrid(EPaper& epaper, ColorDitherer& ditherer,
   const time_t monthAnchor = calendar_logic::startOfMonth(now);
   uint32_t calendarBackgroundRgb = 0;
   const bool haveCalendarBackground =
+      calendar_config::runtime::showSingleCalendarBackground() &&
       calendar_logic::singleGoogleCalendarColor(data, calendarBackgroundRgb);
   const uint32_t calendarBackgroundText =
       eventTextInk(calendarBackgroundRgb);
@@ -955,16 +956,20 @@ void drawGrid(EPaper& epaper, ColorDitherer& ditherer,
       const int nextY =
           body.top + headerHeight + gridHeight * (row + 1) / rows;
       const int cellHeight = nextY - y;
+      struct tm dayTm = {};
+      localtime_r(&day, &dayTm);
+      const bool today = calendar_logic::sameLocalDate(day, now);
+      const bool weekend = dayTm.tm_wday == 0 || dayTm.tm_wday == 6;
       if (haveCalendarBackground) {
         ditherer.fillRect(epaper, x + 1, y + 1, cellWidth - 1,
                           cellHeight - 1, calendarBackgroundRgb);
+      } else if (weekend && !today) {
+        ditherer.fillRect(epaper, x + 1, y + 1, cellWidth - 1,
+                          cellHeight - 1, WEEKEND_BACKGROUND_RGB);
       }
       if (column > 0) epaper.drawFastVLine(x, y, cellHeight, PANEL_MUTED);
       if (row > 0) epaper.drawFastHLine(x, y, cellWidth, PANEL_MUTED);
 
-      struct tm dayTm = {};
-      localtime_r(&day, &dayTm);
-      const bool today = calendar_logic::sameLocalDate(day, now);
       const bool outsideMonth =
           monthView && (dayTm.tm_year != anchorTm.tm_year ||
                         dayTm.tm_mon != anchorTm.tm_mon);
@@ -981,10 +986,16 @@ void drawGrid(EPaper& epaper, ColorDitherer& ditherer,
         epaper.setTextColor(dateInk);
       } else if (haveCalendarBackground) {
         epaper.setTextColor(dateInk);
+      } else if (weekend) {
+        epaper.setTextColor(dateInk);
       } else {
         epaper.setTextColor(dateInk, PANEL_WHITE, true);
       }
-      selectFont(epaper, FontSize::Tiny, today);
+#if RETERMINAL_MODEL == 1003 || RETERMINAL_MODEL == 1004
+      selectFont(epaper, FontSize::Small, today);
+#else
+      selectFont(epaper, FontSize::Medium, today);
+#endif
       epaper.drawString(String(dayTm.tm_mday), x + 5, y + 3);
 
       const auto dayEvents = eventsForDay(data, day);
@@ -1014,15 +1025,23 @@ void drawGrid(EPaper& epaper, ColorDitherer& ditherer,
             5;
 #endif
         const int dotGap = std::max(2, dotSize / 2);
+#if RETERMINAL_MODEL == 1001 || RETERMINAL_MODEL == 1002
+        const int dotAreaWidth = std::max(1, cellWidth - 36);
+#else
+        const int dotAreaWidth = cellWidth - 8;
+#endif
         const int maxDots =
-            std::max(1, (cellWidth - 8 + dotGap) / (dotSize + dotGap));
+            std::max(1, (dotAreaWidth + dotGap) / (dotSize + dotGap));
         const int visible =
             std::min(static_cast<int>(dayEvents.size()), maxDots);
         const int dotY = y + cellHeight - dotSize - 3;
+        const int dotStart =
+            x + cellWidth - 4 - dotSize / 2 -
+            (visible - 1) * (dotSize + dotGap);
         for (int index = 0; index < visible; ++index) {
           ditherer.fillCircle(
               epaper,
-              x + 4 + dotSize / 2 + index * (dotSize + dotGap),
+              dotStart + index * (dotSize + dotGap),
               dotY + dotSize / 2, std::max(1, dotSize / 2),
               dayEvents[index]->colorRgb);
         }
@@ -1059,6 +1078,8 @@ void drawGrid(EPaper& epaper, ColorDitherer& ditherer,
           epaper.setTextColor(PANEL_BLACK);
         } else if (haveCalendarBackground) {
           epaper.setTextColor(calendarBackgroundText);
+        } else if (weekend) {
+          epaper.setTextColor(PANEL_BLACK);
         } else {
           epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, true);
         }
@@ -1072,22 +1093,43 @@ void drawGrid(EPaper& epaper, ColorDitherer& ditherer,
   epaper.setTextDatum(TL_DATUM);
 }
 
-void drawFooter(EPaper& epaper, const String& footer,
+void drawFooter(EPaper& epaper, ColorDitherer& ditherer,
+                const String& footer,
                 const ::calendar::Data& data) {
   if (footer.isEmpty() &&
       !calendar_config::runtime::debugShowStatusBadges()) {
     return;
   }
-  selectFont(epaper, FontSize::Tiny, false);
-  epaper.setTextColor(PANEL_MUTED, PANEL_WHITE, true);
-  epaper.setTextDatum(BL_DATUM);
+#if RETERMINAL_MODEL == 1001 || RETERMINAL_MODEL == 1002
+  epaper.setFreeFont(nullptr);
+  epaper.setTextFont(1);
+  epaper.setTextSize(1);
+  constexpr int footerTextHeight = 8;
+#else
+  epaper.setFreeFont(nullptr);
+  epaper.setTextFont(2);
+  epaper.setTextSize(1);
+  constexpr int footerTextHeight = 16;
+#endif
   String label = footer;
   if (calendar_config::runtime::debugShowStatusBadges()) {
     if (!label.isEmpty()) label += "  ";
     label += String(data.events.size()) + " events";
     if (data.truncated) label += " (limited)";
   }
-  epaper.drawString(label, 8, config::PANEL_HEIGHT - 3);
+  const int horizontalPadding = config::ui(5);
+  const int verticalPadding = std::max(1, config::ui(2));
+  const int badgeHeight = footerTextHeight + verticalPadding * 2;
+  const int badgeWidth =
+      std::min(config::PANEL_WIDTH,
+               epaper.textWidth(label) + horizontalPadding * 2);
+  const int badgeTop = config::PANEL_HEIGHT - badgeHeight;
+  ditherer.fillRect(epaper, 0, badgeTop, badgeWidth, badgeHeight,
+                    STATUS_BACKGROUND_RGB);
+  epaper.setTextColor(PANEL_BLACK);
+  epaper.setTextDatum(ML_DATUM);
+  epaper.drawString(label, horizontalPadding,
+                    badgeTop + badgeHeight / 2);
   epaper.setTextDatum(TL_DATUM);
 }
 
@@ -1181,7 +1223,7 @@ void calendar(EPaper& epaper, const ::calendar::Data& data,
            false);
   drawGrid(epaper, ditherer, data, month, window.start, 6, weekStart, now,
            true);
-  drawFooter(epaper, footer, data);
+  drawFooter(epaper, ditherer, footer, data);
 }
 
 }  // namespace calendar_render

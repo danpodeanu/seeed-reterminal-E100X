@@ -24,6 +24,8 @@ panel only when visible calendar, weather, sensor, or date content has changed.
   six-color panels.
 - Sunday is the default first day of the week; the Presentation settings can
   switch week and month grids to Monday-first.
+- A Presentation toggle controls the single-Google-calendar background and
+  defaults on. Plain grids shade non-current Saturdays and Sundays light gray.
 - Shared Meteocons weather artwork plus native calendar, climate, location, and
   alert icons, with dithered light-blue calendar and light-yellow weather
   headers on six-color models.
@@ -152,7 +154,8 @@ unless flash encryption is separately provisioned on the device.
 
 Under **Settings -> Presentation**, choose Sunday (the default) or Monday as the
 first day of the week and select either the default 12-hour am/pm clock or a
-24-hour clock.
+24-hour clock. The single-calendar background toggle defaults on; turn it off
+to use white weekday cells and light-gray weekend cells.
 Timed entries in the Today agenda show both their start and end times.
 
 ### 4. Configure weather

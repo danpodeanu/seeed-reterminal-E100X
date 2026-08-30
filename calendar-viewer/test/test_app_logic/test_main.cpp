@@ -650,6 +650,15 @@ void test_single_google_calendar_color_controls_grid_background() {
   TEST_ASSERT_FALSE(calendar_logic::singleGoogleCalendarColor(data, color));
 }
 
+void test_agenda_uses_partial_row_space_for_more_count() {
+  TEST_ASSERT_EQUAL_INT(
+      4, calendar_logic::agendaVisibleRows(8, 298, 64, 30));
+  TEST_ASSERT_EQUAL_INT(
+      3, calendar_logic::agendaVisibleRows(8, 256, 64, 30));
+  TEST_ASSERT_EQUAL_INT(
+      1, calendar_logic::agendaVisibleRows(8, 42, 42, 20));
+}
+
 void test_clock_time_format_supports_twelve_and_twenty_four_hour_clocks() {
   const time_t midnight = utc(2026, 8, 30, 0, 5);
   const time_t morning = utc(2026, 8, 30, 10, 15);
@@ -726,6 +735,7 @@ int main(int, char**) {
   RUN_TEST(test_data_fingerprint_changes_with_visible_event_content_only);
   RUN_TEST(test_color_parsing_accepts_hex_and_rejects_invalid_values);
   RUN_TEST(test_single_google_calendar_color_controls_grid_background);
+  RUN_TEST(test_agenda_uses_partial_row_space_for_more_count);
   RUN_TEST(
       test_clock_time_format_supports_twelve_and_twenty_four_hour_clocks);
   return UNITY_END();

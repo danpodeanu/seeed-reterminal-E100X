@@ -24,6 +24,7 @@ enum class WindSpeedUnit {
 constexpr CalendarProvider CALENDAR_PROVIDER = CalendarProvider::Ical;
 constexpr WeekStart WEEK_START = WeekStart::Sunday;
 constexpr TimeFormat TIME_FORMAT = TimeFormat::TwelveHour;
+constexpr bool SHOW_SINGLE_CALENDAR_BACKGROUND = true;
 constexpr char ICAL_URL[] = "";
 constexpr char GOOGLE_CALENDAR_IDS[] = "";
 constexpr char GOOGLE_DELEGATED_USER[] = "";
