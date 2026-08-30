@@ -8,8 +8,6 @@ namespace theme {
 
 inline constexpr uint32_t CALENDAR_HEADER_RGB = 0xA4BDFC;
 inline constexpr uint32_t WEATHER_HEADER_RGB = 0xFBD75B;
-inline constexpr uint32_t AGENDA_CARD_BACKGROUND_RGB = 0xF1F5FD;
-inline constexpr uint32_t WEATHER_CARD_BACKGROUND_RGB = 0xFFF8E6;
 inline constexpr uint32_t WEEKEND_BACKGROUND_RGB = 0xE2E2E2;
 inline constexpr uint32_t GRID_RULE_RGB = 0xD6D6D6;
 inline constexpr uint32_t STATUS_BACKGROUND_RGB = 0xEEEEEE;

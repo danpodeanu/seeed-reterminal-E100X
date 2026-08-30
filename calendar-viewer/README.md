@@ -24,8 +24,8 @@ panel only when visible calendar, weather, sensor, or date content has changed.
   six-color panels.
 - A wall-planner layout uses open column gutters, weekday/date labels inside
   the week cells, a light-blue weekday header above date-only month cells,
-  horizontal week separators, rounded event bands, and softly tinted
-  borderless agenda and weather cards.
+  horizontal week separators, rounded event bands, and clean white agenda and
+  weather areas.
 - Sunday is the default first day of the week; the Presentation settings can
   switch week and month grids to Monday-first.
 - A Presentation toggle controls the single-Google-calendar background and
@@ -38,6 +38,8 @@ panel only when visible calendar, weather, sensor, or date content has changed.
 - Open-Meteo or QWeather summary, with optional severe-weather alerts.
 - Captive-portal configuration for Wi-Fi, calendar, timezone, 12/24-hour time
   format, NTP, quiet hours, weather, refresh cadence, and diagnostics.
+- An SD tab in the configuration portal can browse, upload, download, create,
+  and delete files on the inserted microSD card.
 - DHCP networking, NTP synchronization, PCF8563 clock restoration, quiet
   hours, low-battery handling, and deep sleep.
 - iCalendar URLs, Google IAM credentials, weather credentials, and settings
@@ -83,8 +85,9 @@ and settings QR codes. Scan both codes, then save the Wi-Fi, calendar, and
 weather settings.
 
 To reopen the portal later, wake the sleeping device while holding the green
-button for at least two seconds. Press it again to leave the portal after
-saving.
+button for at least two seconds, then release it before five seconds. Press it
+again to leave the portal after saving. The **SD** tab exposes the inserted
+microSD card through the same web UI.
 
 ### 3. Configure a calendar source
 
@@ -174,7 +177,8 @@ for temporary provider failures; no SD card is required.
 | Action from deep sleep | Result |
 | --- | --- |
 | Tap any front button | Refresh calendar and weather |
-| Hold green for at least 2 seconds | Open the configuration portal |
+| Hold green for 2–5 seconds, then release | Open the configuration portal |
+| Keep holding green for 5 seconds | Save the rendered dashboard to `/screenshot.png` on microSD |
 | Wait for the timer | Check for calendar and weather updates |
 
 Button wakes bypass HTTP caches. Scheduled wakes are suppressed during
@@ -188,12 +192,21 @@ failures preserve an existing calendar frame and retry after five minutes.
 Google failures display the API error and retry on the normal configured
 schedule; an unchanged error does not cause another panel refresh.
 
+The five-second screenshot gesture is enabled by default for development. A
+production build can disable only that gesture with
+`-D CALENDAR_GREEN_SCREENSHOT_ENABLED=0`; the SD web UI remains enabled.
+
 ## Configuration storage
 
 All runtime settings live in NVS and survive normal reflashing. The tracked
 `include/secrets.h` contains placeholders only; compile-time Wi-Fi and
 QWeather values are optional fallbacks for local builds. Never commit real
 credentials.
+
+Google credentials, iCalendar URLs, and calendar data are never written to the
+SD card. A requested screenshot is the only Calendar Viewer file created
+automatically; the SD web UI otherwise changes files only in response to the
+operator.
 
 The current NVS partition is 20 KiB. Typical Google service-account keys fit
 alongside the app settings, but very large or unusually formatted IAM files

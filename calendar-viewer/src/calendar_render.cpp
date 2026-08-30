@@ -552,9 +552,6 @@ void drawIndoorClimate(EPaper& epaper, const BodyGeometry& body,
 void drawWeatherCard(EPaper& epaper, ColorDitherer& ditherer,
                      const BodyGeometry& body, const WeatherData& weather,
                      const sensors::Readings& indoor) {
-  ditherer.fillRect(epaper, body.weatherLeft, body.weatherTop,
-                    body.weatherWidth, body.weatherHeight,
-                    WEATHER_CARD_BACKGROUND_RGB);
   const int margin =
 #if RETERMINAL_MODEL == 1003
       24;
@@ -778,8 +775,6 @@ void drawAgendaCard(EPaper& epaper, ColorDitherer& ditherer,
 #if RETERMINAL_MODEL == 1001 || RETERMINAL_MODEL == 1002
   if (upcoming) headerHeight = 24;
 #endif
-  ditherer.fillRect(epaper, card.left, card.top, card.width, card.height,
-                    AGENDA_CARD_BACKGROUND_RGB);
   const int headerIconSize = std::max(10, config::ui(14));
 
   const int contentLeft = card.left + kAgendaMargin;
@@ -882,9 +877,9 @@ void drawAgendaCard(EPaper& epaper, ColorDitherer& ditherer,
   if (showMore) {
     selectFont(epaper, FontSize::Tiny);
     epaper.setTextColor(PANEL_BLACK);
-    epaper.setTextDatum(ML_DATUM);
+    epaper.setTextDatum(MR_DATUM);
     epaper.drawString("+" + String(events.size() - shown) + " more",
-                      contentLeft,
+                      card.left + card.width - kAgendaMargin,
                       y + (card.top + card.height - y) / 2);
   }
 }

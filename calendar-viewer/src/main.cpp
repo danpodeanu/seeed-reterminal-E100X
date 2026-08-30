@@ -1,5 +1,6 @@
 #include <Arduino.h>
 #include <Preferences.h>
+#include <SD.h>
 #include <TFT_eSPI.h>
 #include <WiFi.h>
 #include <Wire.h>
@@ -38,6 +39,9 @@
 #include "repo_qr.h"
 #include "rtc_sync.h"
 #include "sensors.h"
+#include "screenshot_png.h"
+#include "sd_card.h"
+#include "sd_web_portal.h"
 #include "theme.h"
 #include "timestamped_logger.h"
 #include "usb_screen_capture.h"
@@ -65,7 +69,7 @@ constexpr const char* kFrameValidKey = "frame_valid";
 constexpr const char* kFrameHashKey = "frame_hash";
 constexpr const char* kFrameKindKey = "frame_kind";
 // Increment when rendering changes without changing the underlying data.
-constexpr uint32_t kCalendarFrameRevision = 10;
+constexpr uint32_t kCalendarFrameRevision = 11;
 
 enum class FrameKind : uint8_t {
   None = 0,
@@ -80,6 +84,8 @@ sensors::Readings sensorReadings;
 RTC_DATA_ATTR time_t lastNtpSyncEpoch = 0;
 bool panelStarted = false;
 bool framebufferReady = false;
+bool sdReady = false;
+bool screenshotRequested = false;
 
 #if RETERMINAL_MODEL == 1003
 float panelWaveformTemperatureC() {
@@ -119,8 +125,32 @@ void refreshPanel() {
   framebufferReady = true;
 }
 
+bool saveRequestedScreenshot() {
+  if (!screenshotRequested) return false;
+  bool saved = false;
+#if CALENDAR_GREEN_SCREENSHOT_ENABLED
+  if (!sdReady) {
+    sdReady = sd_card::mount(epaper.getSPIinstance(), config::SD_ROOT);
+  }
+  if (sdReady) {
+    saved = screenshot::saveScreenshotPng(
+        epaper, config::PANEL_WIDTH, config::PANEL_HEIGHT);
+  } else {
+    LOG.println("[screenshot] request ignored: SD card is unavailable");
+  }
+#else
+  LOG.println("[screenshot] green-button capture is disabled in this build");
+#endif
+  screenshotRequested = false;
+  return saved;
+}
+
 void powerDownAndSleep(uint64_t sleepSeconds, bool timerWakeEnabled = true) {
   wifi_sta::disable();
+  if (sdReady) {
+    SD.end();
+    sdReady = false;
+  }
   if (panelStarted) epaper_setup::shutdownPanelPower();
   peripheral_power::disable();
   if (PIN_BATTERY_ENABLE >= 0) {
@@ -330,6 +360,7 @@ void renderPortal() {
   portal.useAutoApPassword = true;
   static const config_portal::NavTab kTabs[] = {
       {"Google IAM", "/google-credentials", "google"},
+      {"SD", "/browse?path=%2F", "sd"},
   };
   portal.extraTabs = kTabs;
   portal.extraTabCount = sizeof(kTabs) / sizeof(kTabs[0]);
@@ -339,6 +370,12 @@ void renderPortal() {
     return "";
   };
   portal.onWifiPasswordSaved = calendar_wifi::recordPasswordOverride;
+  portal.sdFormat = [](String& error) -> bool {
+    sdReady =
+        sd_card::formatCard(epaper.getSPIinstance(), config::SD_ROOT, error);
+    return sdReady;
+  };
+  portal.sdFormatWarning = "screenshots and all other files";
 
   if (!config_portal::begin(portal)) {
     calendar_render::status(epaper, "Configuration unavailable",
@@ -349,6 +386,11 @@ void renderPortal() {
   }
   if (WebServer* server = config_portal::webServer()) {
     google_credentials_portal::attachRoutes(*server, portal);
+    sd_web_portal::Config sdPortal;
+    static String sdHeaderHtml;
+    sdHeaderHtml = config_portal::renderHeaderHtml(portal, "sd");
+    sdPortal.headerHtml = sdHeaderHtml.c_str();
+    sd_web_portal::attachRoutes(*server, sdPortal);
   }
 
   config_portal::ui::RenderInfo info;
@@ -374,11 +416,16 @@ void renderPortal() {
       epaper, config::PANEL_WIDTH, config::PANEL_HEIGHT, PANEL_BLACK,
       PANEL_WHITE, info);
   refreshPanel();
+  sdReady = sd_card::mount(epaper.getSPIinstance(), config::SD_ROOT);
+  if (!sdReady) {
+    LOG.println("[portal] SD mount failed; browser tab will be empty");
+  }
   panel_watchdog::disarmCurrentTask();
 
   bool exitButtonArmed = digitalRead(PIN_BUTTON_GREEN);
   uint32_t buttonLowSince = 0;
-  while (!config_portal::rebootRequested()) {
+  while (!config_portal::rebootRequested() &&
+         !sd_web_portal::exitRequested()) {
     config_portal::loop();
     usbScreenCapture.poll(epaper, config::PANEL_WIDTH, config::PANEL_HEIGHT);
     const uint32_t now = millis();
@@ -394,36 +441,83 @@ void renderPortal() {
     }
     delay(5);
   }
+  if (sd_web_portal::exitRequested()) {
+    const uint32_t drainStart = millis();
+    while (millis() - drainStart < 400) {
+      config_portal::loop();
+      delay(10);
+    }
+  }
+  sd_web_portal::end();
   config_portal::end();
+  if (sdReady) {
+    SD.end();
+    sdReady = false;
+  }
   delay(200);
   ESP.restart();
 }
 
-enum class PrimaryGesture {
-  None,
-  Refresh,
-  Portal,
-};
-
-PrimaryGesture primaryGesture(bool pressedAtBoot) {
-  if (!pressedAtBoot) return PrimaryGesture::None;
+calendar_logic::PrimaryButtonAction primaryGesture(bool pressedAtBoot) {
+  using calendar_logic::PrimaryButtonAction;
+  if (!pressedAtBoot) return PrimaryButtonAction::None;
   hardware::beep();
-  constexpr uint32_t kHoldMs = 2000;
   const uint32_t started = millis();
-  while (digitalRead(PIN_BUTTON_GREEN) == LOW &&
-         millis() - started < kHoldMs) {
+  const uint32_t decisionMs =
+      config::GREEN_SCREENSHOT_ENABLED
+          ? calendar_logic::kScreenshotHoldMs
+          : calendar_logic::kConfigPortalHoldMs;
+  bool released = false;
+  uint32_t heldMs = decisionMs;
+  while (millis() - started < decisionMs) {
+    if (digitalRead(PIN_BUTTON_GREEN) != LOW) {
+      heldMs = millis() - started;
+      released = true;
+      break;
+    }
     delay(10);
   }
-  if (digitalRead(PIN_BUTTON_GREEN) == LOW) {
-    hardware::beep();
-    LOG.println("[gesture] green held for 2s; entering configuration portal");
-    return PrimaryGesture::Portal;
+
+  const PrimaryButtonAction action =
+      calendar_logic::classifyPrimaryButtonHold(
+          heldMs, config::GREEN_SCREENSHOT_ENABLED);
+  if (action == PrimaryButtonAction::Refresh) {
+    LOG.printf("[gesture] green released after %u ms; refreshing\n",
+               static_cast<unsigned>(heldMs));
+    return action;
   }
-  LOG.println("[gesture] green released before 2s; refreshing");
-  return PrimaryGesture::Refresh;
+
+  hardware::beep();
+  if (action == PrimaryButtonAction::Portal) {
+    LOG.printf("[gesture] green held for %u ms; entering configuration portal\n",
+               static_cast<unsigned>(heldMs));
+    return action;
+  }
+
+  LOG.printf("[gesture] green held for %u ms; capturing screenshot\n",
+             static_cast<unsigned>(heldMs));
+  if (!released) {
+    const uint32_t releaseWaitStarted = millis();
+    uint32_t releaseStableSince = 0;
+    while (millis() - releaseWaitStarted < 3000) {
+      if (digitalRead(PIN_BUTTON_GREEN) == LOW) {
+        releaseStableSince = 0;
+      } else if (releaseStableSince == 0) {
+        releaseStableSince = millis();
+      } else if (millis() - releaseStableSince >=
+                 config::BUTTON_RELEASE_DEBOUNCE_MS) {
+        break;
+      }
+      delay(5);
+    }
+  }
+  return action;
 }
 
 String portalHint() {
+  if (config::GREEN_SCREENSHOT_ENABLED) {
+    return "Press green to retry; hold 2s to configure or 5s for screenshot";
+  }
   return "Press green to retry or hold green for 2s to configure";
 }
 
@@ -447,14 +541,20 @@ void showStatusAndSleep(const String& title, const String& detail,
   const uint64_t nextHash = statusFingerprint(title, detail, footer);
   uint64_t previousHash = 0;
   FrameKind previousKind = FrameKind::None;
-  if (!loadFrameState(previousHash, previousKind) ||
-      previousKind != FrameKind::Status || previousHash != nextHash) {
+  const bool changed =
+      !loadFrameState(previousHash, previousKind) ||
+      previousKind != FrameKind::Status || previousHash != nextHash;
+  if (changed || screenshotRequested) {
     beginPanel();
     initializePanelColorMode();
     calendar_render::status(epaper, title, detail, footer);
-    refreshPanel();
-    if (!saveFrameState(nextHash, FrameKind::Status)) {
-      LOG.println("[display] warning: status fingerprint was not saved");
+    framebufferReady = true;
+    saveRequestedScreenshot();
+    if (changed) {
+      refreshPanel();
+      if (!saveFrameState(nextHash, FrameKind::Status)) {
+        LOG.println("[display] warning: status fingerprint was not saved");
+      }
     }
   }
   powerDownAndSleep(sleepSeconds);
@@ -487,9 +587,10 @@ void setup() {
       (wakePins & (1ULL << PIN_BUTTON_GREEN)) != 0 ||
       (buttonWake && !digitalRead(PIN_BUTTON_GREEN));
 
-  PrimaryGesture gesture = PrimaryGesture::None;
-  gesture = primaryGesture(
+  calendar_logic::PrimaryButtonAction gesture = primaryGesture(
       greenWake || (coldBoot && !digitalRead(PIN_BUTTON_GREEN)));
+  screenshotRequested =
+      gesture == calendar_logic::PrimaryButtonAction::Screenshot;
   const bool noWifi = !calendar_wifi::haveCredentials();
   const config::CalendarProvider provider =
       calendar_config::runtime::calendarProvider();
@@ -500,15 +601,19 @@ void setup() {
       !calendar_logic::hasConfiguredCalendarProvider(
           provider, calendar_config::runtime::icalUrl(),
           googleCredentialsConfigured);
-  if (gesture == PrimaryGesture::Portal ||
+  if (gesture == calendar_logic::PrimaryButtonAction::Portal ||
       (coldBoot && (noWifi || noCalendarProvider))) {
+    screenshotRequested = false;
     renderPortal();
     return;
   }
 
   if (app_logic::startupBeepRequired(coldBoot, buttonWake) &&
-      gesture == PrimaryGesture::None) {
+      gesture == calendar_logic::PrimaryButtonAction::None) {
     hardware::beep();
+  }
+  if (screenshotRequested) {
+    LOG.println("[screenshot] green-button hold requested PNG export");
   }
   LOG.printf("[boot] Calendar Viewer %s / %s / fw %s\n",
              MODEL_NAME, COLOR_MODE_NAME, board::FIRMWARE_VERSION);
@@ -679,17 +784,26 @@ void setup() {
   const bool changed = !havePreviousFrame ||
                        previousKind != FrameKind::Calendar ||
                        previousHash != nextHash;
-  if (changed) {
+  if (changed || screenshotRequested) {
     beginPanel();
     initializePanelColorMode();
     calendar_render::calendar(
         epaper, calendarData, window, calendar_config::runtime::weekStart(),
         now, sensorReadings, weather, footer);
-    refreshPanel();
-    if (!saveFrameState(nextHash, FrameKind::Calendar)) {
-      LOG.println("[display] warning: frame fingerprint was not saved");
+    framebufferReady = true;
+    const bool screenshotSaved = saveRequestedScreenshot();
+    if (changed) {
+      refreshPanel();
+      if (!saveFrameState(nextHash, FrameKind::Calendar)) {
+        LOG.println("[display] warning: frame fingerprint was not saved");
+      }
+      LOG.println("[display] refreshed because rendered content changed");
+    } else {
+      LOG.println(screenshotSaved
+                      ? "[display] exported screenshot without refreshing "
+                        "unchanged panel"
+                      : "[display] screenshot export failed; panel unchanged");
     }
-    LOG.println("[display] refreshed because rendered content changed");
   } else {
     LOG.println("[display] calendar, weather, and rounded sensors unchanged; "
                 "skipping panel refresh");

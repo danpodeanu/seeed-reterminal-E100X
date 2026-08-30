@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <string>
+#include <string_view>
 
 #include "calendar_data.h"
 #include "calendar_options.h"
@@ -20,6 +21,28 @@ enum class GoogleAuthFailure {
   ScopeOrAuthorization,
   Other,
 };
+
+enum class PrimaryButtonAction {
+  None,
+  Refresh,
+  Portal,
+  Screenshot,
+};
+
+inline constexpr uint32_t kConfigPortalHoldMs = 2000;
+inline constexpr uint32_t kScreenshotHoldMs = 5000;
+
+inline PrimaryButtonAction classifyPrimaryButtonHold(
+    uint32_t heldMilliseconds, bool screenshotEnabled) {
+  if (screenshotEnabled &&
+      heldMilliseconds >= kScreenshotHoldMs) {
+    return PrimaryButtonAction::Screenshot;
+  }
+  if (heldMilliseconds >= kConfigPortalHoldMs) {
+    return PrimaryButtonAction::Portal;
+  }
+  return PrimaryButtonAction::Refresh;
+}
 
 inline bool isGoogleTransportFailure(int httpStatus) {
   return httpStatus <= 0;

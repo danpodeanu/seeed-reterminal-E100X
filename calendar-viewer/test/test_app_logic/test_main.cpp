@@ -110,6 +110,31 @@ void test_google_api_fallback_statuses() {
   TEST_ASSERT_FALSE(calendar_logic::shouldUseGoogleEventOnlyFallback(500));
 }
 
+void test_primary_button_hold_classification() {
+  using calendar_logic::PrimaryButtonAction;
+
+  TEST_ASSERT_EQUAL(
+      static_cast<int>(PrimaryButtonAction::Refresh),
+      static_cast<int>(
+          calendar_logic::classifyPrimaryButtonHold(1999, true)));
+  TEST_ASSERT_EQUAL(
+      static_cast<int>(PrimaryButtonAction::Portal),
+      static_cast<int>(
+          calendar_logic::classifyPrimaryButtonHold(2000, true)));
+  TEST_ASSERT_EQUAL(
+      static_cast<int>(PrimaryButtonAction::Portal),
+      static_cast<int>(
+          calendar_logic::classifyPrimaryButtonHold(4999, true)));
+  TEST_ASSERT_EQUAL(
+      static_cast<int>(PrimaryButtonAction::Screenshot),
+      static_cast<int>(
+          calendar_logic::classifyPrimaryButtonHold(5000, true)));
+  TEST_ASSERT_EQUAL(
+      static_cast<int>(PrimaryButtonAction::Portal),
+      static_cast<int>(
+          calendar_logic::classifyPrimaryButtonHold(5000, false)));
+}
+
 void test_display_windows_respect_week_start_and_month_grid() {
   const time_t saturday = utc(2026, 8, 29, 12);
   const calendar::Window mondayWeek = calendar_logic::displayWindow(
@@ -759,6 +784,7 @@ int main(int, char**) {
   RUN_TEST(test_google_transport_failure_classification);
   RUN_TEST(test_google_oauth_failure_classification);
   RUN_TEST(test_google_api_fallback_statuses);
+  RUN_TEST(test_primary_button_hold_classification);
   RUN_TEST(test_display_windows_respect_week_start_and_month_grid);
   RUN_TEST(test_ical_parser_reads_timed_all_day_folded_text_and_colors);
   RUN_TEST(test_ical_parser_expands_recurrence_and_applies_exdates);
