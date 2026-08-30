@@ -813,20 +813,23 @@ void drawAgendaCard(EPaper& epaper, ColorDitherer& ditherer,
   }
 
   const int contentHeight = card.height - headerHeight;
-  const int rowHeight = std::min(kAgendaRowHeight, contentHeight);
-  const int capacity =
-      rowHeight > 0 ? std::max(1, contentHeight / rowHeight) : 0;
-  if (capacity == 0) return;
   selectFont(epaper, FontSize::Tiny, false);
-  const int moreLineHeight = epaper.fontHeight(1) + config::ui(4);
-  const int shown = calendar_logic::agendaVisibleRows(
-      static_cast<int>(events.size()), contentHeight, rowHeight,
-      moreLineHeight);
+  const int moreLineHeight = epaper.fontHeight(1) + config::ui(2);
+  const int minimumRowHeight =
+      upcoming ? kAgendaRowHeight - config::ui(4) : kAgendaRowHeight;
+  const calendar_logic::AgendaLayout layout = calendar_logic::agendaLayout(
+      static_cast<int>(events.size()), contentHeight, kAgendaRowHeight,
+      minimumRowHeight, moreLineHeight);
+  if (layout.visibleRows == 0) return;
+  const int rowHeight = layout.rowHeight;
+  const int shown = layout.visibleRows;
   int y = card.top + headerHeight;
   for (int index = 0; index < shown; ++index) {
     const ::calendar::Event& event = *events[index];
     const int barInset = config::ui(3);
-    const int verticalGap = config::ui(3);
+    const int rowCompression = kAgendaRowHeight - rowHeight;
+    const int verticalGap =
+        std::max(1, config::ui(3) - std::max(0, rowCompression) / 2);
     const int barLeft = card.left + barInset;
     const int barTop = y + verticalGap;
     const int barWidth = card.width - barInset * 2;
@@ -872,9 +875,7 @@ void drawAgendaCard(EPaper& epaper, ColorDitherer& ditherer,
                       textLeft, titleY);
     y += rowHeight;
   }
-  const bool showMore = shown < static_cast<int>(events.size()) &&
-                        contentHeight - shown * rowHeight >= moreLineHeight;
-  if (showMore) {
+  if (layout.showMore) {
     selectFont(epaper, FontSize::Tiny);
     epaper.setTextColor(PANEL_BLACK);
     epaper.setTextDatum(MR_DATUM);

@@ -253,15 +253,39 @@ inline bool singleGoogleCalendarColor(const calendar::Data& data,
   return true;
 }
 
-inline int agendaVisibleRows(int eventCount, int contentHeight, int rowHeight,
-                             int moreLineHeight) {
-  if (eventCount <= 0 || contentHeight <= 0 || rowHeight <= 0) return 0;
-  int shown = std::min(eventCount, contentHeight / rowHeight);
-  if (eventCount > shown &&
-      contentHeight - shown * rowHeight < moreLineHeight && shown > 1) {
-    --shown;
+struct AgendaLayout {
+  int visibleRows = 0;
+  int rowHeight = 0;
+  bool showMore = false;
+};
+
+inline AgendaLayout agendaLayout(int eventCount, int contentHeight,
+                                 int preferredRowHeight,
+                                 int minimumRowHeight,
+                                 int moreLineHeight) {
+  AgendaLayout result;
+  if (eventCount <= 0 || contentHeight <= 0 || preferredRowHeight <= 0) {
+    return result;
   }
-  return shown;
+
+  result.rowHeight = std::min(preferredRowHeight, contentHeight);
+  result.visibleRows =
+      std::min(eventCount, contentHeight / result.rowHeight);
+  if (result.visibleRows >= eventCount || moreLineHeight <= 0) return result;
+
+  const int availableForRows = contentHeight - moreLineHeight;
+  const int compactRowHeight =
+      std::min(result.rowHeight, std::max(1, minimumRowHeight));
+  const int compactCapacity =
+      availableForRows > 0 ? availableForRows / compactRowHeight : 0;
+  const int compactRows = std::min(eventCount - 1, compactCapacity);
+  if (compactRows <= 0) return result;
+
+  result.visibleRows = compactRows;
+  result.rowHeight =
+      std::min(result.rowHeight, availableForRows / compactRows);
+  result.showMore = true;
+  return result;
 }
 
 inline std::string formatClockTime(time_t value, config::TimeFormat format,

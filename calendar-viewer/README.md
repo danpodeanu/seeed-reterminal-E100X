@@ -20,8 +20,9 @@ panel only when visible calendar, weather, sensor, or date content has changed.
 - A fixed dashboard with the current week above a six-week month grid and
   separate Today and Upcoming agendas above a compact weather card in the
   sidebar. Upcoming entries from the next six weeks include their date and
-  start/end times. Week and month grids mark the current day in green on
-  six-color panels.
+  start/end times, fill the available event space, and use a compact
+  right-aligned `+N more` line only when needed. Week and month grids mark the
+  current day in green on six-color panels.
 - A wall-planner layout uses open column gutters, weekday/date labels inside
   the week cells, a light-blue weekday header above date-only month cells,
   horizontal week separators, rounded event bands, and clean white agenda and

@@ -778,13 +778,38 @@ void test_single_google_calendar_color_controls_grid_background() {
   TEST_ASSERT_FALSE(calendar_logic::singleGoogleCalendarColor(data, color));
 }
 
-void test_agenda_uses_partial_row_space_for_more_count() {
-  TEST_ASSERT_EQUAL_INT(
-      4, calendar_logic::agendaVisibleRows(8, 298, 64, 30));
-  TEST_ASSERT_EQUAL_INT(
-      3, calendar_logic::agendaVisibleRows(8, 256, 64, 30));
-  TEST_ASSERT_EQUAL_INT(
-      1, calendar_logic::agendaVisibleRows(8, 42, 42, 20));
+void test_agenda_compacts_upcoming_rows_for_more_count() {
+  const calendar_logic::AgendaLayout e1004 =
+      calendar_logic::agendaLayout(8, 290, 70, 64, 25);
+  TEST_ASSERT_EQUAL_INT(4, e1004.visibleRows);
+  TEST_ASSERT_EQUAL_INT(66, e1004.rowHeight);
+  TEST_ASSERT_TRUE(e1004.showMore);
+  TEST_ASSERT_GREATER_OR_EQUAL_INT(
+      25, 290 - e1004.visibleRows * e1004.rowHeight);
+
+  const calendar_logic::AgendaLayout e1003 =
+      calendar_logic::agendaLayout(8, 296, 88, 79, 27);
+  TEST_ASSERT_EQUAL_INT(3, e1003.visibleRows);
+  TEST_ASSERT_EQUAL_INT(88, e1003.rowHeight);
+  TEST_ASSERT_TRUE(e1003.showMore);
+
+  const calendar_logic::AgendaLayout today =
+      calendar_logic::agendaLayout(8, 290, 70, 70, 25);
+  TEST_ASSERT_EQUAL_INT(3, today.visibleRows);
+  TEST_ASSERT_EQUAL_INT(70, today.rowHeight);
+  TEST_ASSERT_TRUE(today.showMore);
+
+  const calendar_logic::AgendaLayout compact =
+      calendar_logic::agendaLayout(8, 46, 48, 44, 24);
+  TEST_ASSERT_EQUAL_INT(1, compact.visibleRows);
+  TEST_ASSERT_EQUAL_INT(46, compact.rowHeight);
+  TEST_ASSERT_FALSE(compact.showMore);
+
+  const calendar_logic::AgendaLayout noOverflow =
+      calendar_logic::agendaLayout(4, 290, 70, 64, 25);
+  TEST_ASSERT_EQUAL_INT(4, noOverflow.visibleRows);
+  TEST_ASSERT_EQUAL_INT(70, noOverflow.rowHeight);
+  TEST_ASSERT_FALSE(noOverflow.showMore);
 }
 
 void test_clock_time_format_supports_twelve_and_twenty_four_hour_clocks() {
@@ -869,7 +894,7 @@ int main(int, char**) {
   RUN_TEST(test_frame_component_changes_reject_incompatible_history);
   RUN_TEST(test_color_parsing_accepts_hex_and_rejects_invalid_values);
   RUN_TEST(test_single_google_calendar_color_controls_grid_background);
-  RUN_TEST(test_agenda_uses_partial_row_space_for_more_count);
+  RUN_TEST(test_agenda_compacts_upcoming_rows_for_more_count);
   RUN_TEST(
       test_clock_time_format_supports_twelve_and_twenty_four_hour_clocks);
   return UNITY_END();
