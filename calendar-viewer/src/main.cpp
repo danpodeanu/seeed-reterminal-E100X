@@ -70,7 +70,7 @@ constexpr const char* kFrameHashKey = "frame_hash";
 constexpr const char* kFrameKindKey = "frame_kind";
 constexpr const char* kFrameComponentsKey = "frame_parts";
 // Increment when rendering changes without changing the underlying data.
-constexpr uint32_t kCalendarFrameRevision = 12;
+constexpr uint32_t kCalendarFrameRevision = 13;
 
 enum class FrameKind : uint8_t {
   None = 0,
@@ -253,18 +253,6 @@ void invalidateFrameState() {
   prefs.end();
 }
 
-void addRoundedClimate(calendar_logic::Fingerprint& hash,
-                       const sensors::Readings& readings) {
-  hash.addValue(readings.climateValid);
-  if (readings.climateValid) {
-    const int temperature =
-        static_cast<int>(lroundf(readings.temperatureC));
-    const int humidity = static_cast<int>(lroundf(readings.humidityPct));
-    hash.addValue(temperature);
-    hash.addValue(humidity);
-  }
-}
-
 void addRoundedPower(calendar_logic::Fingerprint& hash,
                      const sensors::Readings& readings) {
   hash.addValue(readings.batteryValid);
@@ -305,7 +293,7 @@ struct CalendarFrameFingerprints {
 
 CalendarFrameFingerprints frameFingerprints(
     const calendar::Data& data, const calendar::Window& window,
-    const WeatherData& weather, const String& footer, time_t now) {
+    const WeatherData& weather, time_t now) {
   CalendarFrameFingerprints result;
   const uint64_t calendarHash = calendar_logic::dataFingerprint(data, window);
 
@@ -330,9 +318,15 @@ CalendarFrameFingerprints frameFingerprints(
   presentationHash.addValue(calendar_config::runtime::windSpeedUnit());
   result.components.presentation = presentationHash.value();
 
-  calendar_logic::Fingerprint climateHash;
-  addRoundedClimate(climateHash, sensorReadings);
-  result.components.indoorClimate = climateHash.value();
+  const bool climateValid =
+      sensorReadings.climateValid &&
+      isfinite(sensorReadings.temperatureC) &&
+      isfinite(sensorReadings.humidityPct);
+  result.components.indoorClimateValid = climateValid ? 1U : 0U;
+  if (climateValid) {
+    result.components.indoorTemperatureC = sensorReadings.temperatureC;
+    result.components.indoorHumidityPct = sensorReadings.humidityPct;
+  }
 
   calendar_logic::Fingerprint powerHash;
   addRoundedPower(powerHash, sensorReadings);
@@ -341,10 +335,6 @@ CalendarFrameFingerprints frameFingerprints(
   calendar_logic::Fingerprint weatherHash;
   addRoundedWeather(weatherHash, weather);
   result.components.weather = weatherHash.value();
-
-  calendar_logic::Fingerprint footerHash;
-  footerHash.add(std::string(footer.c_str()));
-  result.components.footer = footerHash.value();
 
   struct tm localDate = {};
   const bool haveLocalDate = localtime_r(&now, &localDate) != nullptr;
@@ -355,7 +345,7 @@ CalendarFrameFingerprints frameFingerprints(
   }
   result.components.date = dateHash.value();
 
-  // Preserve the established combined fingerprint as the refresh authority.
+  // Climate uses thresholds below; the diagnostic footer never triggers refresh.
   calendar_logic::Fingerprint hash;
   hash.addValue(kCalendarFrameRevision);
   hash.addValue(calendarHash);
@@ -368,10 +358,8 @@ CalendarFrameFingerprints frameFingerprints(
   hash.add(std::string(calendar_config::runtime::locationName()));
   hash.addValue(calendar_config::runtime::temperatureUnit());
   hash.addValue(calendar_config::runtime::windSpeedUnit());
-  addRoundedClimate(hash, sensorReadings);
   addRoundedPower(hash, sensorReadings);
   addRoundedWeather(hash, weather);
-  hash.add(std::string(footer.c_str()));
   hash.add(std::string(board::FIRMWARE_VERSION));
   if (haveLocalDate) {
     hash.addValue(localDate.tm_year);
@@ -390,9 +378,9 @@ void logCalendarFrameChanges(
     bool havePreviousFrame, FrameKind previousKind,
     bool havePreviousComponents,
     const calendar_logic::FrameComponents& previousComponents,
-    const calendar_logic::FrameComponents& nextComponents,
+    uint16_t changes,
     const calendar::Data& data, const WeatherData& weather,
-    const String& footer, time_t now) {
+    time_t now) {
   if (!havePreviousFrame) {
     LOG.println("[display] refresh changes: full render; no previous frame");
     return;
@@ -410,8 +398,6 @@ void logCalendarFrameChanges(
     return;
   }
 
-  const uint16_t changes = calendar_logic::changedFrameComponents(
-      previousComponents, nextComponents);
   using calendar_logic::FrameComponentChange;
 
   if (calendar_logic::frameComponentChanged(
@@ -466,12 +452,30 @@ void logCalendarFrameChanges(
   }
   if (calendar_logic::frameComponentChanged(
           changes, FrameComponentChange::IndoorClimate)) {
-    if (sensorReadings.climateValid) {
-      LOG.printf(
-          "[display] changed: indoor climate (temperature=%dC, humidity=%d%%)"
-          "\n",
-          static_cast<int>(lroundf(sensorReadings.temperatureC)),
-          static_cast<int>(lroundf(sensorReadings.humidityPct)));
+    const bool currentClimateValid =
+        sensorReadings.climateValid &&
+        isfinite(sensorReadings.temperatureC) &&
+        isfinite(sensorReadings.humidityPct);
+    if (currentClimateValid) {
+      if (calendar_logic::hasValidIndoorClimate(previousComponents)) {
+        LOG.printf(
+            "[display] changed: indoor climate (temperature=%.1fC, "
+            "previous=%.1fC, delta=%+.1fC; humidity=%.1f%%, previous=%.1f%%, "
+            "delta=%+.1f%%)\n",
+            sensorReadings.temperatureC,
+            previousComponents.indoorTemperatureC,
+            sensorReadings.temperatureC -
+                previousComponents.indoorTemperatureC,
+            sensorReadings.humidityPct,
+            previousComponents.indoorHumidityPct,
+            sensorReadings.humidityPct -
+                previousComponents.indoorHumidityPct);
+      } else {
+        LOG.printf(
+            "[display] changed: indoor climate (now available: %.1fC, %.1f%%)"
+            "\n",
+            sensorReadings.temperatureC, sensorReadings.humidityPct);
+      }
     } else {
       LOG.println("[display] changed: indoor climate (unavailable)");
     }
@@ -507,11 +511,6 @@ void logCalendarFrameChanges(
     } else {
       LOG.println("[display] changed: weather (unavailable)");
     }
-  }
-  if (calendar_logic::frameComponentChanged(changes,
-                                             FrameComponentChange::Footer)) {
-    LOG.printf("[display] changed: status/footer (%s)\n",
-               footer.isEmpty() ? "hidden" : footer.c_str());
   }
   if (changes == 0) {
     LOG.println(
@@ -995,7 +994,7 @@ void setup() {
     if (weather.fromCache) footer += " / cached weather";
   }
   const CalendarFrameFingerprints nextFrame =
-      frameFingerprints(calendarData, window, weather, footer, now);
+      frameFingerprints(calendarData, window, weather, now);
   uint64_t previousHash = 0;
   FrameKind previousKind = FrameKind::None;
   const bool havePreviousFrame =
@@ -1004,15 +1003,20 @@ void setup() {
   const bool havePreviousComponents =
       havePreviousFrame && previousKind == FrameKind::Calendar &&
       loadFrameComponents(previousComponents);
+  const uint16_t componentChanges =
+      havePreviousComponents
+          ? calendar_logic::changedFrameComponents(previousComponents,
+                                                  nextFrame.components)
+          : 0;
   const bool changed = !havePreviousFrame ||
                        previousKind != FrameKind::Calendar ||
-                       previousHash != nextFrame.combined;
+                       previousHash != nextFrame.combined ||
+                       componentChanges != 0;
   if (changed || screenshotRequested) {
     if (changed) {
       logCalendarFrameChanges(
           havePreviousFrame, previousKind, havePreviousComponents,
-          previousComponents, nextFrame.components, calendarData, weather,
-          footer, now);
+          previousComponents, componentChanges, calendarData, weather, now);
     }
     beginPanel();
     initializePanelColorMode();
@@ -1047,8 +1051,9 @@ void setup() {
       LOG.println(
           "[display] warning: component fingerprints were not initialized");
     }
-    LOG.println("[display] calendar, weather, and rounded sensors unchanged; "
-                "skipping panel refresh");
+    LOG.println(
+        "[display] calendar, weather, power, and thresholded indoor climate "
+        "unchanged; skipping panel refresh");
   }
 
   powerDownAndSleep(scheduledSleepSeconds(localNow));

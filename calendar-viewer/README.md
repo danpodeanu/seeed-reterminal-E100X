@@ -186,15 +186,17 @@ Button wakes bypass HTTP caches. Scheduled wakes are suppressed during
 configured quiet hours.
 
 After a successful fetch, Calendar Viewer fingerprints the visible date
-window, event data and colors, rounded indoor readings, weather summary, and
-render-affecting settings. If that fingerprint matches the last successful
-frame, panel initialization and refresh are skipped. Before a changed frame is
-refreshed, the serial log identifies each changed component and reports useful
-current values for calendar data, local date, weather, indoor climate, power,
-presentation settings, footer, and renderer/firmware. iCalendar download
-failures preserve an existing calendar frame and retry after five minutes.
-Google failures display the API error and retry on the normal configured
-schedule; an unchanged error does not cause another panel refresh.
+window, event data and colors, weather summary, power, and render-affecting
+settings. Indoor climate refreshes only after temperature moves at least 1 C or
+humidity moves at least 5 percentage points from the last rendered values. If
+none of those inputs changed, panel initialization and refresh are skipped.
+Before a changed frame is refreshed, the serial log identifies each changed
+component and reports useful current values. The diagnostic `Google checked`
+footer is updated whenever another component causes a refresh, but its timestamp
+never triggers a refresh by itself. iCalendar download failures preserve an
+existing calendar frame and retry after five minutes. Google failures display
+the API error and retry on the normal configured schedule; an unchanged error
+does not cause another panel refresh.
 
 The five-second screenshot gesture is enabled by default for development. A
 production build can disable only that gesture with

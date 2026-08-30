@@ -709,10 +709,11 @@ void test_frame_component_changes_identify_each_changed_input() {
   previous.calendar = 2;
   previous.presentation = 3;
   previous.date = 4;
-  previous.indoorClimate = 5;
   previous.power = 6;
   previous.weather = 7;
-  previous.footer = 8;
+  previous.indoorClimateValid = 1;
+  previous.indoorTemperatureC = 20.0f;
+  previous.indoorHumidityPct = 40.0f;
 
   calendar_logic::FrameComponents current = previous;
   TEST_ASSERT_EQUAL_HEX16(
@@ -736,12 +737,45 @@ void test_frame_component_changes_identify_each_changed_input() {
       changes, FrameComponentChange::Weather));
 
   current.presentation++;
-  current.indoorClimate++;
+  current.indoorTemperatureC +=
+      calendar_logic::kIndoorTemperatureRefreshThresholdC;
   current.weather++;
-  current.footer++;
   TEST_ASSERT_EQUAL_HEX16(
       calendar_logic::kAllFrameComponentChanges,
       calendar_logic::changedFrameComponents(previous, current));
+}
+
+void test_indoor_climate_change_thresholds_use_last_rendered_values() {
+  using calendar_logic::FrameComponentChange;
+  calendar_logic::FrameComponents previous;
+  previous.indoorClimateValid = 1;
+  previous.indoorTemperatureC = 20.0f;
+  previous.indoorHumidityPct = 40.0f;
+
+  calendar_logic::FrameComponents current = previous;
+  current.indoorTemperatureC = 20.9f;
+  current.indoorHumidityPct = 44.9f;
+  TEST_ASSERT_FALSE(calendar_logic::indoorClimateChanged(previous, current));
+  TEST_ASSERT_FALSE(calendar_logic::frameComponentChanged(
+      calendar_logic::changedFrameComponents(previous, current),
+      FrameComponentChange::IndoorClimate));
+
+  current.indoorTemperatureC = 21.0f;
+  TEST_ASSERT_TRUE(calendar_logic::indoorClimateChanged(previous, current));
+  current.indoorTemperatureC = 19.0f;
+  TEST_ASSERT_TRUE(calendar_logic::indoorClimateChanged(previous, current));
+
+  current = previous;
+  current.indoorHumidityPct = 45.0f;
+  TEST_ASSERT_TRUE(calendar_logic::indoorClimateChanged(previous, current));
+  current.indoorHumidityPct = 35.0f;
+  TEST_ASSERT_TRUE(calendar_logic::indoorClimateChanged(previous, current));
+
+  current = previous;
+  current.indoorClimateValid = 0;
+  TEST_ASSERT_TRUE(calendar_logic::indoorClimateChanged(previous, current));
+  previous.indoorClimateValid = 0;
+  TEST_ASSERT_FALSE(calendar_logic::indoorClimateChanged(previous, current));
 }
 
 void test_frame_component_changes_reject_incompatible_history() {
@@ -891,6 +925,7 @@ int main(int, char**) {
   RUN_TEST(test_ical_parser_caps_event_count_and_marks_truncation);
   RUN_TEST(test_data_fingerprint_changes_with_visible_event_content_only);
   RUN_TEST(test_frame_component_changes_identify_each_changed_input);
+  RUN_TEST(test_indoor_climate_change_thresholds_use_last_rendered_values);
   RUN_TEST(test_frame_component_changes_reject_incompatible_history);
   RUN_TEST(test_color_parsing_accepts_hex_and_rejects_invalid_values);
   RUN_TEST(test_single_google_calendar_color_controls_grid_background);

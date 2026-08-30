@@ -6,6 +6,7 @@
 #include <time.h>
 
 #include <algorithm>
+#include <cmath>
 #include <string>
 #include <string_view>
 
@@ -29,7 +30,10 @@ enum class PrimaryButtonAction {
   Screenshot,
 };
 
-inline constexpr uint32_t kFrameComponentsVersion = 1;
+// FrameComponents is persisted as an NVS blob; bump this for layout changes.
+inline constexpr uint32_t kFrameComponentsVersion = 2;
+inline constexpr float kIndoorTemperatureRefreshThresholdC = 1.0f;
+inline constexpr float kIndoorHumidityRefreshThresholdPct = 5.0f;
 
 struct FrameComponents {
   uint32_t version = kFrameComponentsVersion;
@@ -38,11 +42,15 @@ struct FrameComponents {
   uint64_t calendar = 0;
   uint64_t presentation = 0;
   uint64_t date = 0;
-  uint64_t indoorClimate = 0;
   uint64_t power = 0;
   uint64_t weather = 0;
-  uint64_t footer = 0;
+  float indoorTemperatureC = 0.0f;
+  float indoorHumidityPct = 0.0f;
+  uint32_t indoorClimateValid = 0;
+  uint32_t reservedClimate = 0;
 };
+static_assert(sizeof(FrameComponents) == 72,
+              "FrameComponents NVS layout changed without a version bump");
 
 enum class FrameComponentChange : uint16_t {
   Renderer = 1U << 0,
@@ -52,7 +60,6 @@ enum class FrameComponentChange : uint16_t {
   IndoorClimate = 1U << 4,
   Power = 1U << 5,
   Weather = 1U << 6,
-  Footer = 1U << 7,
 };
 
 inline constexpr uint16_t frameComponentBit(FrameComponentChange component) {
@@ -66,11 +73,31 @@ inline constexpr uint16_t kAllFrameComponentChanges =
     frameComponentBit(FrameComponentChange::Date) |
     frameComponentBit(FrameComponentChange::IndoorClimate) |
     frameComponentBit(FrameComponentChange::Power) |
-    frameComponentBit(FrameComponentChange::Weather) |
-    frameComponentBit(FrameComponentChange::Footer);
+    frameComponentBit(FrameComponentChange::Weather);
 
 inline bool frameComponentsCompatible(const FrameComponents& components) {
   return components.version == kFrameComponentsVersion;
+}
+
+inline bool hasValidIndoorClimate(const FrameComponents& components) {
+  return components.indoorClimateValid != 0 &&
+         std::isfinite(components.indoorTemperatureC) &&
+         std::isfinite(components.indoorHumidityPct);
+}
+
+inline bool indoorClimateChanged(const FrameComponents& previous,
+                                 const FrameComponents& current) {
+  const bool previousValid = hasValidIndoorClimate(previous);
+  const bool currentValid = hasValidIndoorClimate(current);
+  if (previousValid != currentValid) return true;
+  if (!currentValid) return false;
+
+  return std::fabs(current.indoorTemperatureC -
+                   previous.indoorTemperatureC) >=
+             kIndoorTemperatureRefreshThresholdC ||
+         std::fabs(current.indoorHumidityPct -
+                   previous.indoorHumidityPct) >=
+             kIndoorHumidityRefreshThresholdPct;
 }
 
 inline uint16_t changedFrameComponents(const FrameComponents& previous,
@@ -93,7 +120,7 @@ inline uint16_t changedFrameComponents(const FrameComponents& previous,
   if (previous.date != current.date) {
     changes |= frameComponentBit(FrameComponentChange::Date);
   }
-  if (previous.indoorClimate != current.indoorClimate) {
+  if (indoorClimateChanged(previous, current)) {
     changes |= frameComponentBit(FrameComponentChange::IndoorClimate);
   }
   if (previous.power != current.power) {
@@ -101,9 +128,6 @@ inline uint16_t changedFrameComponents(const FrameComponents& previous,
   }
   if (previous.weather != current.weather) {
     changes |= frameComponentBit(FrameComponentChange::Weather);
-  }
-  if (previous.footer != current.footer) {
-    changes |= frameComponentBit(FrameComponentChange::Footer);
   }
   return changes;
 }
