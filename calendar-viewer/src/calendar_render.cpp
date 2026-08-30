@@ -32,18 +32,15 @@ enum class FontSize {
 #if RETERMINAL_MODEL == 1003
 constexpr int kAgendaMargin = 24;
 constexpr int kAgendaHeaderHeight = 68;
-constexpr int kAgendaRowHeight = 82;
-constexpr int kAgendaCardGap = 16;
+constexpr int kAgendaRowHeight = 96;
 #elif RETERMINAL_MODEL == 1004
 constexpr int kAgendaMargin = 18;
 constexpr int kAgendaHeaderHeight = 54;
-constexpr int kAgendaRowHeight = 64;
-constexpr int kAgendaCardGap = 12;
+constexpr int kAgendaRowHeight = 70;
 #else
 constexpr int kAgendaMargin = 10;
 constexpr int kAgendaHeaderHeight = 36;
-constexpr int kAgendaRowHeight = 44;
-constexpr int kAgendaCardGap = 8;
+constexpr int kAgendaRowHeight = 48;
 #endif
 
 void selectFont(EPaper& epaper, FontSize size, bool bold = true) {
@@ -767,7 +764,7 @@ void drawAgendaCard(EPaper& epaper, ColorDitherer& ditherer,
                    time_t dayStart, bool upcoming) {
   int headerHeight = kAgendaHeaderHeight;
 #if RETERMINAL_MODEL == 1001 || RETERMINAL_MODEL == 1002
-  if (upcoming) headerHeight = 28;
+  if (upcoming) headerHeight = 24;
 #endif
   epaper.fillRect(card.left, card.top, card.width, card.height, PANEL_WHITE);
   epaper.drawRect(card.left, card.top, card.width, card.height, PANEL_BLACK);
@@ -816,8 +813,10 @@ void drawAgendaCard(EPaper& epaper, ColorDitherer& ditherer,
   const int capacity =
       rowHeight > 0 ? std::max(1, contentHeight / rowHeight) : 0;
   if (capacity == 0) return;
-  selectFont(epaper, FontSize::Tiny, false);
-  const int moreLineHeight = epaper.fontHeight(1) + config::ui(4);
+  epaper.setFreeFont(nullptr);
+  epaper.setTextFont(2);
+  epaper.setTextSize(1);
+  const int moreLineHeight = 16 + config::ui(2);
   const int shown = calendar_logic::agendaVisibleRows(
       static_cast<int>(events.size()), contentHeight, rowHeight,
       moreLineHeight);
@@ -833,7 +832,11 @@ void drawAgendaCard(EPaper& epaper, ColorDitherer& ditherer,
     const int textWidth = barWidth - 2 * textPadding;
     ditherer.fillRect(epaper, barLeft, barTop, barWidth, barHeight,
                       event.colorRgb);
+#if RETERMINAL_MODEL == 1001 || RETERMINAL_MODEL == 1002
     selectFont(epaper, FontSize::Tiny, false);
+#else
+    selectFont(epaper, FontSize::Small, false);
+#endif
     epaper.setTextColor(eventTextInk(event.colorRgb));
     const int metadataY = barTop + barHeight / 4;
     const int titleY = barTop + barHeight * 3 / 4;
@@ -855,7 +858,11 @@ void drawAgendaCard(EPaper& epaper, ColorDitherer& ditherer,
       epaper.drawString(text_render::ellipsize(epaper, timeLabel, textWidth),
                       textLeft, metadataY);
     }
-    selectFont(epaper, FontSize::Tiny, true);
+#if RETERMINAL_MODEL == 1001 || RETERMINAL_MODEL == 1002
+    selectFont(epaper, FontSize::Medium, true);
+#else
+    selectFont(epaper, FontSize::Small, true);
+#endif
     epaper.drawString(ellipsize(epaper, event.title, textWidth),
                       textLeft, titleY);
     y += rowHeight;
@@ -863,7 +870,9 @@ void drawAgendaCard(EPaper& epaper, ColorDitherer& ditherer,
   const bool showMore = shown < static_cast<int>(events.size()) &&
                         contentHeight - shown * rowHeight >= moreLineHeight;
   if (showMore) {
-    selectFont(epaper, FontSize::Tiny);
+    epaper.setFreeFont(nullptr);
+    epaper.setTextFont(2);
+    epaper.setTextSize(1);
     epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, true);
     epaper.setTextDatum(ML_DATUM);
     epaper.drawString("+" + String(events.size() - shown) + " more",
@@ -876,11 +885,7 @@ void drawAgendaCards(EPaper& epaper, ColorDitherer& ditherer,
                      const ::calendar::Data& data, const BodyGeometry& body,
                      time_t dayStart, int weekBottom, int monthTop) {
   const int todayHeight = weekBottom - body.dayTop;
-#if RETERMINAL_MODEL == 1001 || RETERMINAL_MODEL == 1002
   const int upcomingBottom = body.weatherTop;
-#else
-  const int upcomingBottom = body.weatherTop - kAgendaCardGap;
-#endif
   const AgendaCard today{
       body.dayLeft, body.dayTop, body.dayWidth, todayHeight};
   const AgendaCard upcoming{
