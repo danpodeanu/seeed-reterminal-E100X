@@ -22,6 +22,9 @@ panel only when visible calendar, weather, sensor, or date content has changed.
   sidebar. Upcoming entries from the next six weeks include their date and
   start/end times. Week and month grids mark the current day in green on
   six-color panels.
+- A wall-planner layout uses open column gutters, weekday/date labels inside
+  each day, horizontal week separators, rounded event bands, and softly tinted
+  borderless agenda and weather cards.
 - Sunday is the default first day of the week; the Presentation settings can
   switch week and month grids to Monday-first.
 - A Presentation toggle controls the single-Google-calendar background and
