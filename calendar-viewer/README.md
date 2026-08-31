@@ -279,11 +279,14 @@ for temporary provider failures; no SD card is required.
 Button wakes bypass HTTP caches. Scheduled wakes are suppressed during
 configured quiet hours.
 
-After a successful fetch, Calendar Viewer fingerprints the visible date
-window, event data and colors, weather summary, power, and render-affecting
+After a successful fetch, Calendar Viewer compares the visible date window,
+event data and colors, weather summary, power, and render-affecting
 settings. Indoor climate refreshes only after temperature moves at least 1 C or
-humidity moves at least 5 percentage points from the last rendered values. If
-none of those inputs changed, panel initialization and refresh are skipped.
+humidity moves at least 5 percentage points from the last rendered values.
+Battery changes of up to 5 percentage points from the last rendered value are
+ignored, while plugging in or returning to battery power still refreshes
+immediately. If none of those inputs changed, panel initialization and refresh
+are skipped.
 Before a changed frame is refreshed, the serial log identifies each changed
 component and reports useful current values. The plain-white diagnostic
 `Google checked` footer is updated whenever another component causes a refresh,

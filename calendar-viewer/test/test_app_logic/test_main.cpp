@@ -768,11 +768,14 @@ void test_frame_component_changes_identify_each_changed_input() {
   previous.calendar = 2;
   previous.presentation = 3;
   previous.date = 4;
-  previous.power = 6;
   previous.weather = 7;
   previous.indoorClimateValid = 1;
   previous.indoorTemperatureC = 20.0f;
   previous.indoorHumidityPct = 40.0f;
+  previous.batteryValid = 1;
+  previous.batteryPct = 75;
+  previous.externalPowerValid = 1;
+  previous.externalPower = 0;
 
   calendar_logic::FrameComponents current = previous;
   TEST_ASSERT_EQUAL_HEX16(
@@ -781,7 +784,7 @@ void test_frame_component_changes_identify_each_changed_input() {
   current.renderer++;
   current.calendar++;
   current.date++;
-  current.power++;
+  current.externalPower = 1;
   const uint16_t expected =
       calendar_logic::frameComponentBit(FrameComponentChange::Renderer) |
       calendar_logic::frameComponentBit(FrameComponentChange::Calendar) |
@@ -837,6 +840,64 @@ void test_indoor_climate_change_thresholds_use_last_rendered_values() {
   TEST_ASSERT_FALSE(calendar_logic::indoorClimateChanged(previous, current));
 }
 
+void test_battery_percentage_threshold_uses_last_rendered_value() {
+  using calendar_logic::FrameComponentChange;
+  calendar_logic::FrameComponents previous;
+  previous.batteryValid = 1;
+  previous.batteryPct = 50;
+
+  calendar_logic::FrameComponents current = previous;
+  current.batteryPct = 55;
+  TEST_ASSERT_FALSE(
+      calendar_logic::batteryPercentageChanged(previous, current));
+  TEST_ASSERT_FALSE(calendar_logic::frameComponentChanged(
+      calendar_logic::changedFrameComponents(previous, current),
+      FrameComponentChange::Power));
+
+  current.batteryPct = 45;
+  TEST_ASSERT_FALSE(
+      calendar_logic::batteryPercentageChanged(previous, current));
+  current.batteryPct = 56;
+  TEST_ASSERT_TRUE(
+      calendar_logic::batteryPercentageChanged(previous, current));
+  current.batteryPct = 44;
+  TEST_ASSERT_TRUE(
+      calendar_logic::batteryPercentageChanged(previous, current));
+
+  current = previous;
+  current.batteryValid = 0;
+  current.batteryPct = -1;
+  TEST_ASSERT_TRUE(
+      calendar_logic::batteryPercentageChanged(previous, current));
+  previous = current;
+  TEST_ASSERT_FALSE(
+      calendar_logic::batteryPercentageChanged(previous, current));
+}
+
+void test_external_power_state_remains_a_refresh_reason() {
+  using calendar_logic::FrameComponentChange;
+  calendar_logic::FrameComponents previous;
+  previous.batteryValid = 1;
+  previous.batteryPct = 50;
+  previous.externalPowerValid = 1;
+  previous.externalPower = 0;
+
+  calendar_logic::FrameComponents current = previous;
+  current.externalPower = 1;
+  TEST_ASSERT_TRUE(calendar_logic::externalPowerChanged(previous, current));
+  TEST_ASSERT_TRUE(calendar_logic::frameComponentChanged(
+      calendar_logic::changedFrameComponents(previous, current),
+      FrameComponentChange::Power));
+
+  current = previous;
+  current.externalPowerValid = 0;
+  TEST_ASSERT_TRUE(calendar_logic::externalPowerChanged(previous, current));
+
+  previous = current;
+  current.externalPower = 1;
+  TEST_ASSERT_FALSE(calendar_logic::externalPowerChanged(previous, current));
+}
+
 void test_frame_component_changes_reject_incompatible_history() {
   calendar_logic::FrameComponents previous;
   calendar_logic::FrameComponents current;
@@ -848,17 +909,20 @@ void test_frame_component_changes_reject_incompatible_history() {
       calendar_logic::changedFrameComponents(previous, current));
 }
 
-void test_refresh_fingerprint_excludes_diagnostic_footer_and_climate() {
+void test_refresh_fingerprint_excludes_thresholded_sensor_values() {
   calendar_logic::FrameComponents components;
   components.renderer = 1;
   components.calendar = 2;
   components.presentation = 3;
   components.date = 4;
-  components.power = 5;
   components.weather = 6;
   components.indoorClimateValid = 1;
   components.indoorTemperatureC = 20.0f;
   components.indoorHumidityPct = 40.0f;
+  components.batteryValid = 1;
+  components.batteryPct = 50;
+  components.externalPowerValid = 1;
+  components.externalPower = 0;
 
   const uint64_t original = calendar_logic::frameRefreshFingerprint(
       components, "Google checked 30 Aug 2026 8:42pm");
@@ -868,6 +932,12 @@ void test_refresh_fingerprint_excludes_diagnostic_footer_and_climate() {
 
   components.indoorTemperatureC = 22.0f;
   components.indoorHumidityPct = 50.0f;
+  TEST_ASSERT_EQUAL_UINT64(
+      original,
+      calendar_logic::frameRefreshFingerprint(components, "different footer"));
+
+  components.batteryPct = 60;
+  components.externalPower = 1;
   TEST_ASSERT_EQUAL_UINT64(
       original,
       calendar_logic::frameRefreshFingerprint(components, "different footer"));
@@ -894,11 +964,6 @@ void test_refresh_fingerprint_excludes_diagnostic_footer_and_climate() {
       calendar_logic::frameRefreshFingerprint(components, "same footer"));
   components.presentation--;
   components.date++;
-  TEST_ASSERT_NOT_EQUAL(
-      original,
-      calendar_logic::frameRefreshFingerprint(components, "same footer"));
-  components.date--;
-  components.power++;
   TEST_ASSERT_NOT_EQUAL(
       original,
       calendar_logic::frameRefreshFingerprint(components, "same footer"));
@@ -1197,8 +1262,10 @@ int main(int, char**) {
   RUN_TEST(test_data_fingerprint_changes_with_visible_event_content_only);
   RUN_TEST(test_frame_component_changes_identify_each_changed_input);
   RUN_TEST(test_indoor_climate_change_thresholds_use_last_rendered_values);
+  RUN_TEST(test_battery_percentage_threshold_uses_last_rendered_value);
+  RUN_TEST(test_external_power_state_remains_a_refresh_reason);
   RUN_TEST(test_frame_component_changes_reject_incompatible_history);
-  RUN_TEST(test_refresh_fingerprint_excludes_diagnostic_footer_and_climate);
+  RUN_TEST(test_refresh_fingerprint_excludes_thresholded_sensor_values);
   RUN_TEST(test_calendar_frame_refresh_decision_covers_each_trigger);
   RUN_TEST(test_header_icon_and_title_are_centered_as_one_group);
   RUN_TEST(test_grid_today_fill_and_week_label_geometry);

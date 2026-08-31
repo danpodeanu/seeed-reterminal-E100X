@@ -256,16 +256,6 @@ void invalidateFrameState() {
   prefs.end();
 }
 
-void addRoundedPower(calendar_logic::Fingerprint& hash,
-                     const sensors::Readings& readings) {
-  hash.addValue(readings.batteryValid);
-  if (readings.batteryValid) {
-    hash.addValue(readings.batteryPct);
-  }
-  hash.addValue(readings.externalPowerValid);
-  if (readings.externalPowerValid) hash.addValue(readings.externalPower);
-}
-
 void addRoundedWeather(calendar_logic::Fingerprint& hash,
                        const WeatherData& weather) {
   hash.addValue(weather.valid);
@@ -331,9 +321,17 @@ CalendarFrameFingerprints frameFingerprints(
     result.components.indoorHumidityPct = sensorReadings.humidityPct;
   }
 
-  calendar_logic::Fingerprint powerHash;
-  addRoundedPower(powerHash, sensorReadings);
-  result.components.power = powerHash.value();
+  const bool batteryValid =
+      sensorReadings.batteryValid && sensorReadings.batteryPct >= 0 &&
+      sensorReadings.batteryPct <= 100;
+  result.components.batteryValid = batteryValid ? 1U : 0U;
+  result.components.batteryPct =
+      batteryValid ? sensorReadings.batteryPct : -1;
+  result.components.externalPowerValid =
+      sensorReadings.externalPowerValid ? 1U : 0U;
+  result.components.externalPower =
+      sensorReadings.externalPowerValid && sensorReadings.externalPower ? 1U
+                                                                        : 0U;
 
   calendar_logic::Fingerprint weatherHash;
   addRoundedWeather(weatherHash, weather);
@@ -362,6 +360,7 @@ void logCalendarFrameChanges(
     bool havePreviousFrame, FrameKind previousKind,
     bool havePreviousComponents,
     const calendar_logic::FrameComponents& previousComponents,
+    const calendar_logic::FrameComponents& currentComponents,
     uint16_t changes,
     const calendar::Data& data, const WeatherData& weather,
     time_t now) {
@@ -466,18 +465,44 @@ void logCalendarFrameChanges(
   }
   if (calendar_logic::frameComponentChanged(changes,
                                              FrameComponentChange::Power)) {
-    const String battery =
-        sensorReadings.batteryValid
-            ? String(sensorReadings.batteryPct) + "%"
-            : "unavailable";
-    const char* externalPower =
-        !sensorReadings.externalPowerValid
-            ? "unknown"
-            : (sensorReadings.externalPower ? "yes" : "no");
-    LOG.printf(
-        "[display] changed: battery/external power (battery=%s, external=%s)"
-        "\n",
-        battery.c_str(), externalPower);
+    const bool batteryChanged = calendar_logic::batteryPercentageChanged(
+        previousComponents, currentComponents);
+    const bool sourceChanged = calendar_logic::externalPowerChanged(
+        previousComponents, currentComponents);
+    if (sourceChanged) {
+      const char* previousSource =
+          !previousComponents.externalPowerValid
+              ? "unknown"
+              : (previousComponents.externalPower ? "plugged in"
+                                                  : "on battery");
+      const char* currentSource =
+          !currentComponents.externalPowerValid
+              ? "unknown"
+              : (currentComponents.externalPower ? "plugged in"
+                                                 : "on battery");
+      LOG.printf("[display] changed: power source (%s -> %s)\n",
+                 previousSource, currentSource);
+    }
+    if (batteryChanged) {
+      const String previousBattery =
+          calendar_logic::hasValidBattery(previousComponents)
+              ? String(previousComponents.batteryPct) + "%"
+              : "unavailable";
+      const String currentBattery =
+          calendar_logic::hasValidBattery(currentComponents)
+              ? String(currentComponents.batteryPct) + "%"
+              : "unavailable";
+      if (calendar_logic::hasValidBattery(previousComponents) &&
+          calendar_logic::hasValidBattery(currentComponents)) {
+        LOG.printf(
+            "[display] changed: battery percentage (%s -> %s, delta=%+d%%)\n",
+            previousBattery.c_str(), currentBattery.c_str(),
+            currentComponents.batteryPct - previousComponents.batteryPct);
+      } else {
+        LOG.printf("[display] changed: battery percentage (%s -> %s)\n",
+                   previousBattery.c_str(), currentBattery.c_str());
+      }
+    }
   }
   if (calendar_logic::frameComponentChanged(changes,
                                              FrameComponentChange::Weather)) {
@@ -1025,7 +1050,8 @@ void setup() {
     if (changed) {
       logCalendarFrameChanges(
           havePreviousFrame, previousKind, havePreviousComponents,
-          previousComponents, componentChanges, calendarData, weather, now);
+          previousComponents, nextFrame.components, componentChanges,
+          calendarData, weather, now);
     }
     beginPanel();
     initializePanelColorMode();

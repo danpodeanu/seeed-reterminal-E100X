@@ -30,24 +30,27 @@ enum class PrimaryButtonAction {
   Screenshot,
 };
 
-// FrameComponents is persisted as an NVS blob; bump this for layout changes.
-inline constexpr uint32_t kFrameComponentsVersion = 2;
+// FrameComponents is persisted as an NVS blob; bump this when its layout or
+// comparison semantics change.
+inline constexpr uint32_t kFrameComponentsVersion = 3;
 inline constexpr float kIndoorTemperatureRefreshThresholdC = 1.0f;
 inline constexpr float kIndoorHumidityRefreshThresholdPct = 5.0f;
+inline constexpr int kBatteryRefreshDeadbandPct = 5;
 
 struct FrameComponents {
   uint32_t version = kFrameComponentsVersion;
-  uint32_t reserved = 0;
+  int32_t batteryPct = -1;
   uint64_t renderer = 0;
   uint64_t calendar = 0;
   uint64_t presentation = 0;
   uint64_t date = 0;
-  uint64_t power = 0;
   uint64_t weather = 0;
   float indoorTemperatureC = 0.0f;
   float indoorHumidityPct = 0.0f;
   uint32_t indoorClimateValid = 0;
-  uint32_t reservedClimate = 0;
+  uint32_t batteryValid = 0;
+  uint32_t externalPowerValid = 0;
+  uint32_t externalPower = 0;
 };
 static_assert(sizeof(FrameComponents) == 72,
               "FrameComponents NVS layout changed without a version bump");
@@ -100,6 +103,38 @@ inline bool indoorClimateChanged(const FrameComponents& previous,
              kIndoorHumidityRefreshThresholdPct;
 }
 
+inline constexpr bool hasValidBattery(const FrameComponents& components) {
+  return components.batteryValid != 0 && components.batteryPct >= 0 &&
+         components.batteryPct <= 100;
+}
+
+inline constexpr bool batteryPercentageChanged(
+    const FrameComponents& previous, const FrameComponents& current) {
+  const bool previousValid = hasValidBattery(previous);
+  const bool currentValid = hasValidBattery(current);
+  if (previousValid != currentValid) return true;
+  if (!currentValid) return false;
+
+  const int delta = current.batteryPct - previous.batteryPct;
+  return delta < -kBatteryRefreshDeadbandPct ||
+         delta > kBatteryRefreshDeadbandPct;
+}
+
+inline constexpr bool externalPowerChanged(
+    const FrameComponents& previous, const FrameComponents& current) {
+  const bool previousValid = previous.externalPowerValid != 0;
+  const bool currentValid = current.externalPowerValid != 0;
+  if (previousValid != currentValid) return true;
+  if (!currentValid) return false;
+  return (previous.externalPower != 0) != (current.externalPower != 0);
+}
+
+inline constexpr bool powerChanged(const FrameComponents& previous,
+                                   const FrameComponents& current) {
+  return batteryPercentageChanged(previous, current) ||
+         externalPowerChanged(previous, current);
+}
+
 inline uint16_t changedFrameComponents(const FrameComponents& previous,
                                        const FrameComponents& current) {
   if (!frameComponentsCompatible(previous) ||
@@ -123,7 +158,7 @@ inline uint16_t changedFrameComponents(const FrameComponents& previous,
   if (indoorClimateChanged(previous, current)) {
     changes |= frameComponentBit(FrameComponentChange::IndoorClimate);
   }
-  if (previous.power != current.power) {
+  if (powerChanged(previous, current)) {
     changes |= frameComponentBit(FrameComponentChange::Power);
   }
   if (previous.weather != current.weather) {
@@ -427,7 +462,9 @@ class Fingerprint {
 inline uint64_t frameRefreshFingerprint(
     const FrameComponents& components,
     std::string_view diagnosticFooter) {
-  // The footer is diagnostic-only and intentionally excluded from refreshes.
+  // Diagnostic text and thresholded sensor values are intentionally excluded.
+  // Their component comparators decide whether the visible change is large
+  // enough to refresh.
   static_cast<void>(diagnosticFooter);
   Fingerprint hash;
   hash.addValue(components.version);
@@ -435,7 +472,6 @@ inline uint64_t frameRefreshFingerprint(
   hash.addValue(components.calendar);
   hash.addValue(components.presentation);
   hash.addValue(components.date);
-  hash.addValue(components.power);
   hash.addValue(components.weather);
   return hash.value();
 }
