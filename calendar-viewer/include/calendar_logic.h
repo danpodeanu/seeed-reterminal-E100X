@@ -326,6 +326,29 @@ inline calendar::Window dashboardWindow(time_t now,
   return result;
 }
 
+inline time_t selectedDayForWake(config::CalendarView view,
+                                 time_t retainedDay, time_t now,
+                                 const calendar::Window& fetchedWindow,
+                                 bool resetToToday) {
+  const time_t today = localMidnight(now);
+  if (view != config::CalendarView::Today || resetToToday) return today;
+
+  const time_t retainedMidnight = localMidnight(retainedDay);
+  if (retainedMidnight >= fetchedWindow.start &&
+      retainedMidnight < fetchedWindow.end) {
+    return retainedMidnight;
+  }
+  return today;
+}
+
+inline time_t touchSelectionWindowEnd(
+    const calendar::Window& monthWindow) {
+  constexpr int kLastMonthCellIndex = 41;
+  constexpr int kUpcomingDayCount = 43;
+  return addLocalDays(
+      monthWindow.start, kLastMonthCellIndex + kUpcomingDayCount);
+}
+
 inline bool overlaps(time_t start, time_t end,
                      time_t windowStart, time_t windowEnd) {
   return start < windowEnd && end > windowStart;

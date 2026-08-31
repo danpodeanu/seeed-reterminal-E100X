@@ -183,6 +183,34 @@ void test_e1005_buttons_select_and_retain_calendar_views() {
       "Month", calendar_logic::calendarViewName(CalendarView::Month));
 }
 
+void test_e1005_selected_day_is_retained_only_while_fetchable() {
+  using config::CalendarView;
+  const time_t now = utc(2026, 8, 29, 12);
+  const calendar::Window window = {
+      utc(2026, 7, 27), utc(2026, 10, 12)};
+
+  TEST_ASSERT_EQUAL_INT64(
+      utc(2026, 9, 12),
+      calendar_logic::selectedDayForWake(
+          CalendarView::Today, utc(2026, 9, 12, 18), now, window, false));
+  TEST_ASSERT_EQUAL_INT64(
+      utc(2026, 8, 29),
+      calendar_logic::selectedDayForWake(
+          CalendarView::Today, utc(2027, 1, 1), now, window, false));
+  TEST_ASSERT_EQUAL_INT64(
+      utc(2026, 8, 29),
+      calendar_logic::selectedDayForWake(
+          CalendarView::Today, utc(2026, 9, 12), now, window, true));
+  TEST_ASSERT_EQUAL_INT64(
+      utc(2026, 8, 29),
+      calendar_logic::selectedDayForWake(
+          CalendarView::Week, utc(2026, 9, 12), now, window, false));
+  TEST_ASSERT_EQUAL_INT64(
+      utc(2026, 10, 19),
+      calendar_logic::touchSelectionWindowEnd(
+          {utc(2026, 7, 27), utc(2026, 9, 7)}));
+}
+
 void test_initial_connection_status_is_limited_to_configured_cold_boots() {
   TEST_ASSERT_TRUE(
       calendar_logic::shouldShowInitialConnectionStatus(true, false));
@@ -1062,13 +1090,34 @@ void test_e1005_portrait_layout_and_screenshot_cover_the_panel() {
   using namespace calendar_portrait_layout;
 
   TEST_ASSERT_TRUE(fitsPanel(PANEL_WIDTH, PANEL_HEIGHT));
-  TEST_ASSERT_EQUAL_INT(76, WEATHER.top);
-  TEST_ASSERT_EQUAL_INT(744, UPCOMING.top + UPCOMING.height);
+  TEST_ASSERT_EQUAL_INT(76, TODAY.top);
+  TEST_ASSERT_EQUAL_INT(576, WEATHER.top);
+  TEST_ASSERT_EQUAL_INT(744, WEATHER.top + WEATHER.height);
   TEST_ASSERT_EQUAL_INT(76, weekRow(0).top);
   TEST_ASSERT_EQUAL_INT(744, weekRow(6).top + weekRow(6).height);
   TEST_ASSERT_EQUAL_INT(
       744, monthCell(5, 6).top + monthCell(5, 6).height);
   TEST_ASSERT_EQUAL_INT(800, NAVIGATION_TOP + NAVIGATION_HEIGHT);
+
+  TEST_ASSERT_EQUAL_INT(0, navigationIndexAt(0, NAVIGATION_TOP));
+  TEST_ASSERT_EQUAL_INT(1, navigationIndexAt(160, NAVIGATION_TOP + 10));
+  TEST_ASSERT_EQUAL_INT(2, navigationIndexAt(479, PANEL_HEIGHT - 1));
+  TEST_ASSERT_EQUAL_INT(-1, navigationIndexAt(240, NAVIGATION_TOP - 1));
+  for (int index = 0; index < 7; ++index) {
+    const Rect row = weekRow(index);
+    TEST_ASSERT_EQUAL_INT(
+        index, weekDayIndexAt(row.left + 1, row.top + row.height / 2));
+  }
+  TEST_ASSERT_EQUAL_INT(-1, weekDayIndexAt(0, CALENDAR.top));
+  TEST_ASSERT_EQUAL_INT(-1, monthDayIndexAt(
+                                CALENDAR.left, CALENDAR.top +
+                                                   MONTH_HEADER_HEIGHT - 1));
+  for (int index = 0; index < 42; ++index) {
+    const Rect cell = monthCell(index / 7, index % 7);
+    TEST_ASSERT_EQUAL_INT(
+        index, monthDayIndexAt(cell.left + cell.width / 2,
+                               cell.top + cell.height / 2));
+  }
 
   screenshot::PixelCoordinate pixel =
       screenshot::nativePixelCoordinate(1, 480, 800, 0, 0);
@@ -1282,6 +1331,7 @@ int main(int, char**) {
   RUN_TEST(test_google_api_fallback_statuses);
   RUN_TEST(test_primary_button_hold_classification);
   RUN_TEST(test_e1005_buttons_select_and_retain_calendar_views);
+  RUN_TEST(test_e1005_selected_day_is_retained_only_while_fetchable);
   RUN_TEST(
       test_initial_connection_status_is_limited_to_configured_cold_boots);
   RUN_TEST(

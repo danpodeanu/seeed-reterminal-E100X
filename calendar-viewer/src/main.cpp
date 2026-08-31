@@ -18,6 +18,7 @@
 #include "calendar_config_schema.h"
 #include "calendar_latin_font.h"
 #include "calendar_logic.h"
+#include "calendar_portrait_layout.h"
 #include "calendar_provider.h"
 #include "calendar_render.h"
 #include "calendar_wifi_credentials.h"
@@ -54,6 +55,10 @@
 #include "weather_summary.h"
 #include "wifi_schema.h"
 #include "wifi_sta.h"
+#if RETERMINAL_MODEL == 1005
+#include "e1005_fast_refresh.h"
+#include "gt911_touch.h"
+#endif
 
 SET_LOOP_TASK_STACK_SIZE(16U * 1024U);
 
@@ -73,12 +78,13 @@ constexpr const char* kFrameHashKey = "frame_hash";
 constexpr const char* kFrameKindKey = "frame_kind";
 constexpr const char* kFrameComponentsKey = "frame_parts";
 // Increment when rendering changes without changing the underlying data.
-constexpr uint32_t kCalendarFrameRevision = 21;
+constexpr uint32_t kCalendarFrameRevision = 22;
 
 enum class FrameKind : uint8_t {
   None = 0,
   Calendar = 1,
   Status = 2,
+  SleepingCalendar = 3,
 };
 
 EPaper epaper;
@@ -89,6 +95,10 @@ RTC_DATA_ATTR time_t lastNtpSyncEpoch = 0;
 #if RETERMINAL_MODEL == 1005
 RTC_DATA_ATTR uint8_t retainedCalendarView =
     static_cast<uint8_t>(config::CalendarView::Today);
+RTC_DATA_ATTR time_t retainedSelectedDay = 0;
+TwoWire touchWire(1);
+Gt911Touch touch;
+E1005FastRefresh fastRefresh(epaper);
 #endif
 bool panelStarted = false;
 bool framebufferReady = false;
@@ -244,6 +254,11 @@ bool loadFrameState(uint64_t& hash, FrameKind& kind) {
   return valid;
 }
 
+constexpr bool isPreservableCalendarFrame(FrameKind kind) {
+  return kind == FrameKind::Calendar ||
+         kind == FrameKind::SleepingCalendar;
+}
+
 bool loadFrameComponents(calendar_logic::FrameComponents& components) {
   Preferences prefs;
   if (!prefs.begin(calendar_config::kNamespace, true)) return false;
@@ -315,13 +330,15 @@ struct CalendarFrameFingerprints {
 CalendarFrameFingerprints frameFingerprints(
     const calendar::Data& data, const calendar::Window& window,
     config::CalendarView view, const WeatherData& weather,
-    const String& diagnosticFooter, time_t now) {
+    const String& diagnosticFooter, time_t now, time_t displayDay) {
   CalendarFrameFingerprints result;
   calendar::Window visibleWindow = window;
 #if RETERMINAL_MODEL == 1005
   if (view == config::CalendarView::Today) {
-    visibleWindow.start = calendar_logic::localMidnight(now);
+    visibleWindow.start = calendar_logic::localMidnight(displayDay);
     visibleWindow.end = calendar_logic::addLocalDays(visibleWindow.start, 43);
+    if (visibleWindow.start < window.start) visibleWindow.start = window.start;
+    if (visibleWindow.end > window.end) visibleWindow.end = window.end;
   } else {
     visibleWindow = calendar_logic::displayWindow(
         view, now, calendar_config::runtime::weekStart());
@@ -351,8 +368,12 @@ CalendarFrameFingerprints frameFingerprints(
   presentationHash.addValue(calendar_config::runtime::windSpeedUnit());
 #if RETERMINAL_MODEL == 1005
   presentationHash.addValue(view);
+  if (view == config::CalendarView::Today) {
+    presentationHash.addValue(calendar_logic::localMidnight(displayDay));
+  }
 #else
   static_cast<void>(view);
+  static_cast<void>(displayDay);
 #endif
   result.components.presentation = presentationHash.value();
 
@@ -594,6 +615,202 @@ uint64_t statusFingerprint(const String& title, const String& detail,
   return hash.value();
 }
 
+#if RETERMINAL_MODEL == 1005
+config::CalendarView viewForNavigationIndex(int index) {
+  switch (index) {
+    case 1:
+      return config::CalendarView::Week;
+    case 2:
+      return config::CalendarView::Month;
+    default:
+      return config::CalendarView::Today;
+  }
+}
+
+bool fastRefreshRegion(const E1005FastRefresh::Region& region,
+                       const char* reason) {
+  if (!fastRefresh.ready()) return false;
+
+  E1005FastRefresh::Timing timing;
+  const E1005FastRefresh::Result result =
+      fastRefresh.refresh(region, timing);
+  if (result == E1005FastRefresh::Result::Ok) {
+    LOG.printf(
+        "[touch] %s refresh=%lu ms "
+        "(prepare=%lu transfer=%lu panel=%lu reseed=%lu ms)\n",
+        reason, static_cast<unsigned long>(timing.totalUs / 1000U),
+        static_cast<unsigned long>(timing.prepareUs / 1000U),
+        static_cast<unsigned long>(timing.transferUs / 1000U),
+        static_cast<unsigned long>(timing.panelUs / 1000U),
+        static_cast<unsigned long>(timing.reseedUs / 1000U));
+    return true;
+  }
+
+  LOG.printf("[touch] %s fast refresh failed: %s\n", reason,
+             E1005FastRefresh::resultMessage(result));
+  return false;
+}
+
+void recoverInteractiveRefresh() {
+  fastRefresh.end();
+  epaper.sleep();
+  refreshPanel();
+  const E1005FastRefresh::Result result = fastRefresh.begin();
+  if (result != E1005FastRefresh::Result::Ok) {
+    LOG.printf("[touch] fast refresh unavailable after full refresh: %s\n",
+               E1005FastRefresh::resultMessage(result));
+  }
+}
+
+void renderInteractiveCalendar(
+    const calendar::Data& data, const calendar::Window& window,
+    config::CalendarView view, time_t now, time_t displayDay,
+    const WeatherData& weather, const String& footer) {
+  calendar_render::calendar(
+      epaper, data, window, view, calendar_config::runtime::weekStart(), now,
+      displayDay, sensorReadings, weather, footer);
+  framebufferReady = true;
+
+  const E1005FastRefresh::Region fullPanel = {
+      0, 0, config::PANEL_WIDTH, config::PANEL_HEIGHT};
+  if (!fastRefreshRegion(fullPanel, "page")) {
+    recoverInteractiveRefresh();
+  }
+
+  const CalendarFrameFingerprints frame =
+      frameFingerprints(data, window, view, weather, footer, now, displayDay);
+  if (!saveFrameState(frame.combined, FrameKind::Calendar,
+                      &frame.components)) {
+    LOG.println("[touch] warning: selected page state was not saved");
+  }
+  retainedCalendarView = static_cast<uint8_t>(view);
+  retainedSelectedDay = displayDay;
+}
+
+void renderTouchSleepMessage() {
+  calendar_render::sleepStatus(epaper);
+  const E1005FastRefresh::Region navigation = {
+      0, calendar_portrait_layout::NAVIGATION_TOP, config::PANEL_WIDTH,
+      calendar_portrait_layout::NAVIGATION_HEIGHT};
+  if (!fastRefreshRegion(navigation, "sleep message")) {
+    fastRefresh.end();
+    epaper.sleep();
+    refreshPanel();
+  }
+  if (!saveFrameState(
+          statusFingerprint(
+              "Sleeping",
+              "Press OK, UP, or DOWN to wake",
+              ""),
+          FrameKind::SleepingCalendar)) {
+    LOG.println("[touch] warning: sleep-message state was not saved");
+  }
+}
+
+void runTouchSession(
+    const calendar::Data& data, const calendar::Window& window,
+    config::CalendarView& view, time_t now, time_t& displayDay,
+    const WeatherData& weather, const String& footer,
+    bool framebufferMatchesPanel) {
+  if (!framebufferReady) {
+    beginPanel();
+    initializePanelColorMode();
+    calendar_render::calendar(
+        epaper, data, window, view, calendar_config::runtime::weekStart(), now,
+        displayDay, sensorReadings, weather, footer);
+    framebufferReady = true;
+  }
+  if (!framebufferMatchesPanel) {
+    LOG.println(
+        "[touch] refreshing current page to establish the fast-refresh "
+        "baseline");
+    refreshPanel();
+    const CalendarFrameFingerprints frame = frameFingerprints(
+        data, window, view, weather, footer, now, displayDay);
+    if (!saveFrameState(frame.combined, FrameKind::Calendar,
+                        &frame.components)) {
+      LOG.println("[touch] warning: refreshed baseline state was not saved");
+    }
+  }
+
+  const E1005FastRefresh::Result refreshResult = fastRefresh.begin();
+  if (refreshResult != E1005FastRefresh::Result::Ok) {
+    LOG.printf("[touch] fast refresh unavailable: %s; using full refreshes\n",
+               E1005FastRefresh::resultMessage(refreshResult));
+  }
+  if (!touch.begin(touchWire)) {
+    LOG.println("[touch] initialization failed; sleeping without touch input");
+    renderTouchSleepMessage();
+    fastRefresh.end();
+    return;
+  }
+
+  LOG.printf("[touch] ready; sleeping after %lu seconds without input\n",
+             static_cast<unsigned long>(
+                 config::TOUCH_INACTIVITY_SLEEP_MS / 1000U));
+  uint32_t lastActivityAt = millis();
+  bool touchActive = false;
+  while (static_cast<uint32_t>(millis() - lastActivityAt) <
+         config::TOUCH_INACTIVITY_SLEEP_MS) {
+    usbScreenCapture.poll(epaper, config::PANEL_WIDTH, config::PANEL_HEIGHT);
+
+    Gt911Touch::Point point = {};
+    const Gt911Touch::PollResult result = touch.poll(point);
+    if (result == Gt911Touch::PollResult::Release) {
+      touchActive = false;
+      lastActivityAt = millis();
+    } else if (result == Gt911Touch::PollResult::Touch) {
+      lastActivityAt = millis();
+      if (!touchActive) {
+        touchActive = true;
+        config::CalendarView nextView = view;
+        time_t nextDisplayDay = displayDay;
+
+        const int navigationIndex =
+            calendar_portrait_layout::navigationIndexAt(point.x, point.y);
+        if (navigationIndex >= 0) {
+          nextView = viewForNavigationIndex(navigationIndex);
+          nextDisplayDay = calendar_logic::localMidnight(now);
+        } else if (view == config::CalendarView::Week) {
+          const int dayIndex =
+              calendar_portrait_layout::weekDayIndexAt(point.x, point.y);
+          if (dayIndex >= 0) {
+            nextView = config::CalendarView::Today;
+            nextDisplayDay = calendar_logic::addLocalDays(
+                calendar_logic::startOfWeek(
+                    now, calendar_config::runtime::weekStart()),
+                dayIndex);
+          }
+        } else if (view == config::CalendarView::Month) {
+          const int dayIndex =
+              calendar_portrait_layout::monthDayIndexAt(point.x, point.y);
+          if (dayIndex >= 0) {
+            nextView = config::CalendarView::Today;
+            nextDisplayDay =
+                calendar_logic::addLocalDays(window.start, dayIndex);
+          }
+        }
+
+        if (nextView != view || nextDisplayDay != displayDay) {
+          LOG.printf("[touch] x=%u y=%u -> %s\n", point.x, point.y,
+                     calendar_logic::calendarViewName(nextView));
+          view = nextView;
+          displayDay = nextDisplayDay;
+          renderInteractiveCalendar(
+              data, window, view, now, displayDay, weather, footer);
+        }
+      }
+    }
+    delay(20);
+  }
+
+  LOG.println("[touch] inactivity timeout; entering deep sleep");
+  renderTouchSleepMessage();
+  touch.end();
+  fastRefresh.end();
+}
+#endif
+
 void applyRuntimeTimeSettings() {
   local_time::configureTimezone(calendar_config::runtime::timezone());
   quiet_hours::configure({
@@ -626,6 +843,11 @@ void renderPortal() {
   const GFXfont* subtitleFont = calendar_latin_font::uiFont(36);
   const GFXfont* captionFont = calendar_latin_font::uiFont(24);
   const GFXfont* detailFont = calendar_latin_font::uiFont(24);
+#elif RETERMINAL_MODEL == 1005
+  const GFXfont* titleFont = calendar_latin_font::uiFont(36);
+  const GFXfont* subtitleFont = calendar_latin_font::uiFont(18);
+  const GFXfont* captionFont = calendar_latin_font::uiFont(16);
+  const GFXfont* detailFont = calendar_latin_font::uiFont(16);
 #else
   const GFXfont* titleFont = calendar_latin_font::uiFont(36);
   const GFXfont* subtitleFont = calendar_latin_font::uiFont(24);
@@ -680,7 +902,11 @@ void renderPortal() {
   config_portal::ui::RenderInfo info;
   info.modelLabel = MODEL_NAME;
   info.title = "Configure calendar";
+#if RETERMINAL_MODEL == 1005
+  info.tagline = "Join AP for Wi-Fi, calendar, weather";
+#else
   info.tagline = "Join the AP to set Wi-Fi, calendar, and weather";
+#endif
   info.ssid = config_portal::currentSsid();
   info.wifiPassword = config_portal::currentApPassword();
   info.url = String("http://") + config_portal::currentIp().toString();
@@ -868,6 +1094,7 @@ void setup() {
 #if RETERMINAL_MODEL == 1005
     retainedCalendarView =
         static_cast<uint8_t>(config::CalendarView::Today);
+    retainedSelectedDay = 0;
 #endif
   }
   const uint64_t wakePins =
@@ -972,8 +1199,12 @@ void setup() {
   if (showInitialConnectionStatus) {
     const String stationMac = wifi_sta::stationMacAddress();
     const String deviceInfo =
+#if RETERMINAL_MODEL == 1005
+        String("MAC ") + stationMac + "  FW " + board::FIRMWARE_VERSION;
+#else
         String("MAC: ") + stationMac +
         "  Firmware: " + board::FIRMWARE_VERSION;
+#endif
     const String connectionDetail =
         ntpDue ? "Synchronizing clock, calendar, and weather"
                : "Refreshing calendar and weather";
@@ -997,7 +1228,7 @@ void setup() {
     uint64_t previousHash = 0;
     FrameKind previousKind = FrameKind::None;
     if (loadFrameState(previousHash, previousKind) &&
-        previousKind == FrameKind::Calendar) {
+        isPreservableCalendarFrame(previousKind)) {
       LOG.printf("[wifi] %s; preserving existing panel\n",
                  networkFailure.c_str());
       powerDownAndSleep(config::FAILURE_RETRY_SECONDS);
@@ -1028,7 +1259,7 @@ void setup() {
     uint64_t previousHash = 0;
     FrameKind previousKind = FrameKind::None;
     if (loadFrameState(previousHash, previousKind) &&
-        previousKind == FrameKind::Calendar) {
+        isPreservableCalendarFrame(previousKind)) {
       LOG.println("[time] clock unavailable; preserving existing panel");
       powerDownAndSleep(config::FAILURE_RETRY_SECONDS);
     } else {
@@ -1049,8 +1280,24 @@ void setup() {
   }
 
   const time_t now = time(nullptr);
-  const calendar::Window window = calendar_logic::dashboardWindow(
+  calendar::Window window = calendar_logic::dashboardWindow(
       now, calendar_config::runtime::weekStart());
+  time_t displayDay = calendar_logic::localMidnight(now);
+#if RETERMINAL_MODEL == 1005
+  displayDay = calendar_logic::selectedDayForWake(
+      activeCalendarView, retainedSelectedDay, now, window, todaySelected);
+  if (activeCalendarView == config::CalendarView::Today) {
+    retainedSelectedDay = displayDay;
+    const time_t selectedUpcomingEnd =
+        calendar_logic::addLocalDays(displayDay, 43);
+    if (window.end < selectedUpcomingEnd) window.end = selectedUpcomingEnd;
+  }
+  if (coldBoot || buttonWake) {
+    const time_t touchSelectionEnd =
+        calendar_logic::touchSelectionWindowEnd(window);
+    if (window.end < touchSelectionEnd) window.end = touchSelectionEnd;
+  }
+#endif
   calendar::Data calendarData;
   String calendarFailure;
   const bool calendarUpdated =
@@ -1096,7 +1343,7 @@ void setup() {
     uint64_t previousHash = 0;
     FrameKind previousKind = FrameKind::None;
     if (loadFrameState(previousHash, previousKind) &&
-        previousKind == FrameKind::Calendar) {
+        isPreservableCalendarFrame(previousKind)) {
       LOG.printf("[calendar] %s; preserving existing panel\n",
                  calendarFailure.c_str());
       powerDownAndSleep(config::FAILURE_RETRY_SECONDS);
@@ -1123,7 +1370,7 @@ void setup() {
   }
   const CalendarFrameFingerprints nextFrame =
       frameFingerprints(calendarData, window, activeCalendarView, weather,
-                        footer, now);
+                        footer, now, displayDay);
   uint64_t previousHash = 0;
   FrameKind previousKind = FrameKind::None;
   const bool havePreviousFrame =
@@ -1151,8 +1398,8 @@ void setup() {
     initializePanelColorMode();
     calendar_render::calendar(
         epaper, calendarData, window, activeCalendarView,
-        calendar_config::runtime::weekStart(), now, sensorReadings, weather,
-        footer);
+        calendar_config::runtime::weekStart(), now, displayDay, sensorReadings,
+        weather, footer);
     framebufferReady = true;
     const bool screenshotSaved = saveRequestedScreenshot();
     if (changed) {
@@ -1186,6 +1433,12 @@ void setup() {
         "unchanged; skipping panel refresh");
   }
 
+#if RETERMINAL_MODEL == 1005
+  if (coldBoot || buttonWake) {
+    runTouchSession(calendarData, window, activeCalendarView, now, displayDay,
+                    weather, footer, changed);
+  }
+#endif
   powerDownAndSleep(scheduledSleepSeconds(localNow));
 }
 

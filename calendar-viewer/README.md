@@ -33,7 +33,9 @@ feature.*
   current day in green on six-color panels.
 - A dedicated E1005 portrait interface uses separate Today, Week, and Month
   pages. The front OK, UP, and DOWN buttons select them directly from deep
-  sleep, and the selected page remains active for scheduled refreshes.
+  sleep. While awake, the bottom tabs switch pages and tapping a Week row or
+  Month cell opens Today for that date. The selected page and date remain active
+  for scheduled refreshes while that date is still in the fetched window.
 - A wall-planner layout uses open column gutters, weekday/date labels inside
   the week cells, a light-blue weekday header above date-only month cells,
   horizontal week separators, rounded event bands, and clean white agenda and
@@ -274,17 +276,22 @@ for temporary provider failures; no SD card is required.
 
 ## Controls and refresh behavior
 
-| Action from deep sleep | Result |
+| Action | Result |
 | --- | --- |
 | Tap any front button on E1001-E1004 | Refresh calendar and weather |
 | Tap OK on E1005 | Refresh and show Today plus Upcoming |
 | Tap UP on E1005 | Refresh and show the seven-day Week view |
 | Tap DOWN on E1005 | Refresh and show the six-week Month view |
+| Tap an E1005 bottom tab while awake | Switch directly to Today, Week, or Month |
+| Tap an E1005 Week row or Month date while awake | Open Today for the selected date |
 | Hold green, or OK on E1005, for at least 2 seconds | Open the configuration portal |
 | Wait for the timer | Check for calendar and weather updates |
 
 Button wakes bypass HTTP caches. Scheduled wakes are suppressed during
-configured quiet hours.
+configured quiet hours. After an E1005 cold boot or button wake, touch remains
+active until five minutes have elapsed without input. The bottom bar then
+confirms that the device is sleeping and names the buttons that wake it; timer
+wakes do not hold the device awake for touch input.
 
 After a successful fetch, Calendar Viewer compares the visible date window,
 event data and colors, weather summary, power, and render-affecting

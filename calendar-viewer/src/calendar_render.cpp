@@ -472,6 +472,7 @@ String wind(float kmh) {
 }
 
 void drawHeader(EPaper& epaper, config::CalendarView view, time_t now,
+                time_t displayDay,
                 const sensors::Readings& indoor) {
 #if RETERMINAL_MODEL == 1003
   constexpr int height = 132;
@@ -503,7 +504,7 @@ void drawHeader(EPaper& epaper, config::CalendarView view, time_t now,
     weekDate.trim();
     heading = "Week of " + weekDate;
   } else {
-    heading = formatDate(now, "%a, %e %b");
+    heading = formatDate(displayDay, "%a, %e %b");
   }
   constexpr int headingSurfaceWidth = config::PANEL_WIDTH - 96;
   constexpr int calendarIconSize = 22;
@@ -544,8 +545,11 @@ void drawHeader(EPaper& epaper, config::CalendarView view, time_t now,
   const int outline = std::max(1, config::ui(1));
   const int terminalHeight = std::max(3, config::ui(5));
   const int batteryPct = indoor.batteryValid ? indoor.batteryPct : -1;
-  const String percent =
+  String percent =
       indoor.batteryValid ? String(indoor.batteryPct) + "%" : "--%";
+#if RETERMINAL_MODEL == 1005
+  if (indoor.externalPowerValid && indoor.externalPower) percent += "+";
+#endif
 
   epaper.setTextColor(PANEL_BLACK);
   epaper.setTextDatum(MR_DATUM);
@@ -555,7 +559,11 @@ void drawHeader(EPaper& epaper, config::CalendarView view, time_t now,
       epaper, batteryX, batteryY, batteryWidth, batteryHeight, batteryPct,
       outline, terminalWidth, terminalHeight, PANEL_BLACK,
       PANEL_WHITE,
+#if RETERMINAL_MODEL == 1005
+      false);
+#else
       indoor.externalPowerValid && indoor.externalPower);
+#endif
   epaper.setTextDatum(TL_DATUM);
 }
 
@@ -653,6 +661,8 @@ void drawWeatherCard(EPaper& epaper, ColorDitherer& ditherer,
       96;
 #elif RETERMINAL_MODEL == 1004
       78;
+#elif RETERMINAL_MODEL == 1005
+      64;
 #else
       38;
 #endif
@@ -815,8 +825,11 @@ std::vector<const ::calendar::Event*> upcomingEvents(
     const ::calendar::Data& data, time_t dayStart) {
   std::vector<const ::calendar::Event*> result;
   const time_t tomorrow = calendar_logic::addLocalDays(dayStart, 1);
+  const time_t upcomingEnd = calendar_logic::addLocalDays(dayStart, 43);
   for (const auto& event : data.events) {
-    if (event.start >= tomorrow) result.push_back(&event);
+    if (event.start >= tomorrow && event.start < upcomingEnd) {
+      result.push_back(&event);
+    }
   }
   return result;
 }
@@ -1234,7 +1247,7 @@ void drawPortraitEventBand(
 }
 
 void drawPortraitToday(EPaper& epaper, ColorDitherer& ditherer,
-                       const ::calendar::Data& data, time_t now,
+                       const ::calendar::Data& data, time_t displayDay,
                        const sensors::Readings& indoor,
                        const WeatherData& weather) {
   BodyGeometry weatherBody{};
@@ -1244,7 +1257,7 @@ void drawPortraitToday(EPaper& epaper, ColorDitherer& ditherer,
   weatherBody.weatherHeight = calendar_portrait_layout::WEATHER.height;
   drawWeatherCard(epaper, ditherer, weatherBody, weather, indoor);
 
-  const time_t dayStart = calendar_logic::localMidnight(now);
+  const time_t dayStart = calendar_logic::localMidnight(displayDay);
   const auto& today = calendar_portrait_layout::TODAY;
   const auto& upcoming = calendar_portrait_layout::UPCOMING;
   drawAgendaCard(
@@ -1407,9 +1420,8 @@ void drawPortraitMonth(EPaper& epaper, ColorDitherer& ditherer,
           dateCenterX - (visible - 1) * dotStep / 2;
       const int dotY = cell.top + cell.height - 14;
       for (int eventIndex = 0; eventIndex < visible; ++eventIndex) {
-        ditherer.fillCircle(
-            epaper, dotStartX + eventIndex * dotStep, dotY, dotRadius,
-            dayEvents[eventIndex]->colorRgb);
+        epaper.fillCircle(
+            dotStartX + eventIndex * dotStep, dotY, dotRadius, PANEL_BLACK);
       }
       if (static_cast<int>(dayEvents.size()) > visible) {
         selectFont(epaper, FontSize::Tiny);
@@ -1554,18 +1566,32 @@ void connectionStatus(EPaper& epaper, const String& title,
 
   selectFont(epaper, FontSize::Tiny);
   if (!deviceInfo.isEmpty()) {
+#if RETERMINAL_MODEL == 1005
+    epaper.setTextDatum(ML_DATUM);
+    epaper.drawString(
+        text_render::ellipsize(epaper, deviceInfo, config::PANEL_WIDTH - 112),
+        16, config::PANEL_HEIGHT - 46);
+#else
     epaper.drawString(
         text_render::ellipsize(
             epaper, deviceInfo, config::PANEL_WIDTH - config::ui(60)),
         config::PANEL_WIDTH / 2,
         config::PANEL_HEIGHT - config::ui(46));
+#endif
   }
   if (!footer.isEmpty()) {
+#if RETERMINAL_MODEL == 1005
+    epaper.setTextDatum(ML_DATUM);
+    epaper.drawString(
+        text_render::ellipsize(epaper, footer, config::PANEL_WIDTH - 112),
+        16, config::PANEL_HEIGHT - 24);
+#else
     epaper.drawString(
         text_render::ellipsize(
             epaper, footer, config::PANEL_WIDTH - config::ui(60)),
         config::PANEL_WIDTH / 2,
         config::PANEL_HEIGHT - config::ui(24));
+#endif
   }
 
   repo_qr::drawBottomRight(
@@ -1631,10 +1657,11 @@ void status(EPaper& epaper, const String& title, const String& detail,
 void calendar(EPaper& epaper, const ::calendar::Data& data,
               const ::calendar::Window& window, config::CalendarView view,
               config::WeekStart weekStart, time_t now,
+              time_t displayDay,
               const sensors::Readings& indoor, const WeatherData& weather,
               const String& footer) {
   epaper.fillSprite(PANEL_WHITE);
-  drawHeader(epaper, view, now, indoor);
+  drawHeader(epaper, view, now, displayDay, indoor);
   ColorDitherer ditherer;
 #if RETERMINAL_MODEL == 1005
   static_assert(
@@ -1646,7 +1673,7 @@ void calendar(EPaper& epaper, const ::calendar::Data& data,
   } else if (view == config::CalendarView::Week) {
     drawPortraitWeek(epaper, ditherer, data, weekStart, now);
   } else {
-    drawPortraitToday(epaper, ditherer, data, now, indoor, weather);
+    drawPortraitToday(epaper, ditherer, data, displayDay, indoor, weather);
   }
   drawPortraitFooter(epaper, view, footer, data);
 #else
@@ -1678,6 +1705,29 @@ void calendar(EPaper& epaper, const ::calendar::Data& data,
   drawGrid(epaper, ditherer, data, month, window.start, 6, weekStart, now,
            true);
   drawFooter(epaper, footer, data);
+#endif
+}
+
+void sleepStatus(EPaper& epaper) {
+#if RETERMINAL_MODEL == 1005
+  epaper.fillRect(
+      0, calendar_portrait_layout::NAVIGATION_TOP, config::PANEL_WIDTH,
+      calendar_portrait_layout::NAVIGATION_HEIGHT, PANEL_WHITE);
+  epaper.drawFastHLine(
+      0, calendar_portrait_layout::NAVIGATION_TOP, config::PANEL_WIDTH,
+      PANEL_BLACK);
+  epaper.setTextSize(1);
+  epaper.setFreeFont(calendar_latin_font::uiFont(16));
+  epaper.setTextColor(PANEL_BLACK);
+  epaper.setTextDatum(MC_DATUM);
+  epaper.drawString(
+      "Sleeping - press OK, UP, or DOWN to wake",
+      config::PANEL_WIDTH / 2,
+      calendar_portrait_layout::NAVIGATION_TOP +
+          calendar_portrait_layout::NAVIGATION_HEIGHT / 2);
+  epaper.setTextDatum(TL_DATUM);
+#else
+  static_cast<void>(epaper);
 #endif
 }
 
