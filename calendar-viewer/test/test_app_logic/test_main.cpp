@@ -847,20 +847,24 @@ void test_battery_percentage_threshold_uses_last_rendered_value() {
   previous.batteryPct = 50;
 
   calendar_logic::FrameComponents current = previous;
-  current.batteryPct = 55;
+  current.batteryPct = 54;
   TEST_ASSERT_FALSE(
       calendar_logic::batteryPercentageChanged(previous, current));
   TEST_ASSERT_FALSE(calendar_logic::frameComponentChanged(
       calendar_logic::changedFrameComponents(previous, current),
       FrameComponentChange::Power));
 
-  current.batteryPct = 45;
+  current.batteryPct = 46;
   TEST_ASSERT_FALSE(
       calendar_logic::batteryPercentageChanged(previous, current));
-  current.batteryPct = 56;
+
+  current.batteryPct = 55;
   TEST_ASSERT_TRUE(
       calendar_logic::batteryPercentageChanged(previous, current));
-  current.batteryPct = 44;
+  TEST_ASSERT_TRUE(calendar_logic::frameComponentChanged(
+      calendar_logic::changedFrameComponents(previous, current),
+      FrameComponentChange::Power));
+  current.batteryPct = 45;
   TEST_ASSERT_TRUE(
       calendar_logic::batteryPercentageChanged(previous, current));
 

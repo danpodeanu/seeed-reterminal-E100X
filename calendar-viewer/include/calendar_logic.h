@@ -32,10 +32,10 @@ enum class PrimaryButtonAction {
 
 // FrameComponents is persisted as an NVS blob; bump this when its layout or
 // comparison semantics change.
-inline constexpr uint32_t kFrameComponentsVersion = 3;
+inline constexpr uint32_t kFrameComponentsVersion = 4;
 inline constexpr float kIndoorTemperatureRefreshThresholdC = 1.0f;
 inline constexpr float kIndoorHumidityRefreshThresholdPct = 5.0f;
-inline constexpr int kBatteryRefreshDeadbandPct = 5;
+inline constexpr int kBatteryRefreshThresholdPct = 5;
 
 struct FrameComponents {
   uint32_t version = kFrameComponentsVersion;
@@ -116,8 +116,8 @@ inline constexpr bool batteryPercentageChanged(
   if (!currentValid) return false;
 
   const int delta = current.batteryPct - previous.batteryPct;
-  return delta < -kBatteryRefreshDeadbandPct ||
-         delta > kBatteryRefreshDeadbandPct;
+  return delta <= -kBatteryRefreshThresholdPct ||
+         delta >= kBatteryRefreshThresholdPct;
 }
 
 inline constexpr bool externalPowerChanged(
