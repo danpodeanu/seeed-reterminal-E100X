@@ -163,13 +163,14 @@ inline bool write(EPaper& epaper, uint32_t width, uint32_t height, Sink& sink) {
        writeBytes(idatChunk, zlibHeader, sizeof(zlibHeader));
   uint32_t adler = 1;
   const uint8_t filter = 0;
-#if RETERMINAL_MODEL == 1005
+#if RETERMINAL_MODEL == 1004 || RETERMINAL_MODEL == 1005
+  // Bypass Seeed_GFX's incomplete/incorrect rotated framebuffer reads.
   const uint8_t captureRotation = epaper.getRotation();
   epaper.setRotation(0);
 #endif
   for (uint32_t y = 0; ok && y < height; ++y) {
     for (uint32_t x = 0; x < width; ++x) {
-#if RETERMINAL_MODEL == 1005
+#if RETERMINAL_MODEL == 1004 || RETERMINAL_MODEL == 1005
       const screenshot::PixelCoordinate native =
           screenshot::nativePixelCoordinate(
               captureRotation, static_cast<int32_t>(width),
@@ -198,7 +199,7 @@ inline bool write(EPaper& epaper, uint32_t width, uint32_t height, Sink& sink) {
     adler = updateAdler32(adler, row, width);
     if ((y & 31U) == 0) delay(1);
   }
-#if RETERMINAL_MODEL == 1005
+#if RETERMINAL_MODEL == 1004 || RETERMINAL_MODEL == 1005
   epaper.setRotation(captureRotation);
 #endif
 

@@ -8,6 +8,7 @@
 #include "calendar_render_geometry.h"
 #include "ical_parser.h"
 #include "local_time.h"
+#include "screenshot_rotation.h"
 
 namespace {
 
@@ -921,6 +922,25 @@ void test_grid_today_fill_and_week_label_geometry() {
       137, calendar_render_geometry::gridDayLabelTop(132, 5, 3, true));
 }
 
+void test_e1004_screenshot_rotation_maps_the_full_landscape_frame() {
+  screenshot::PixelCoordinate pixel =
+      screenshot::nativePixelCoordinate(1, 1600, 1200, 0, 0);
+  TEST_ASSERT_EQUAL_INT(1199, pixel.x);
+  TEST_ASSERT_EQUAL_INT(0, pixel.y);
+
+  pixel = screenshot::nativePixelCoordinate(1, 1600, 1200, 1599, 0);
+  TEST_ASSERT_EQUAL_INT(1199, pixel.x);
+  TEST_ASSERT_EQUAL_INT(1599, pixel.y);
+
+  pixel = screenshot::nativePixelCoordinate(1, 1600, 1200, 0, 1199);
+  TEST_ASSERT_EQUAL_INT(0, pixel.x);
+  TEST_ASSERT_EQUAL_INT(0, pixel.y);
+
+  pixel = screenshot::nativePixelCoordinate(1, 1600, 1200, 1599, 1199);
+  TEST_ASSERT_EQUAL_INT(0, pixel.x);
+  TEST_ASSERT_EQUAL_INT(1599, pixel.y);
+}
+
 void test_calendar_latin_font_decodes_supported_utf8() {
   const std::string text =
       "\xC3\xA9\xC5\x81\xE1\xBB\xB9\xE2\x80\x93\xE2\x82\xAC";
@@ -1158,6 +1178,7 @@ int main(int, char**) {
   RUN_TEST(test_calendar_frame_refresh_decision_covers_each_trigger);
   RUN_TEST(test_header_icon_and_title_are_centered_as_one_group);
   RUN_TEST(test_grid_today_fill_and_week_label_geometry);
+  RUN_TEST(test_e1004_screenshot_rotation_maps_the_full_landscape_frame);
   RUN_TEST(test_calendar_latin_font_decodes_supported_utf8);
   RUN_TEST(test_calendar_latin_font_excludes_other_scripts);
   RUN_TEST(test_agenda_band_geometry_keeps_today_larger_than_upcoming);
