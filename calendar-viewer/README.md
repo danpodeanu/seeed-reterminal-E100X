@@ -13,9 +13,9 @@ panel only when visible calendar, weather, sensor, or date content has changed.
 - Public HTTP(S) `.ics` feeds, including folded text, all-day and timed events,
   exclusions, recurrence overrides, cancellation, and common daily, weekly,
   monthly, and yearly recurrence rules.
-- Event titles use embedded Noto Sans SemiCondensed Bold fonts for ASCII,
-  Latin-1, Latin Extended, combining marks, punctuation, and currency symbols;
-  no SD-card font files are required.
+- All on-panel text uses embedded Noto Sans SemiCondensed Bold. Event titles
+  include ASCII, Latin-1, Latin Extended, combining marks, punctuation, and
+  currency symbols; no SD-card font files are required.
 - Google Calendar through a Google Cloud service account, with optional
   Workspace domain-wide delegation.
 - Calendar and event colors Floyd-Steinberg-dithered into each panel's native

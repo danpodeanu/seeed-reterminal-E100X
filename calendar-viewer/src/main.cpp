@@ -16,6 +16,7 @@
 #include "board_pins.h"
 #include "calendar_config_runtime.h"
 #include "calendar_config_schema.h"
+#include "calendar_latin_font.h"
 #include "calendar_logic.h"
 #include "calendar_provider.h"
 #include "calendar_render.h"
@@ -70,7 +71,7 @@ constexpr const char* kFrameHashKey = "frame_hash";
 constexpr const char* kFrameKindKey = "frame_kind";
 constexpr const char* kFrameComponentsKey = "frame_parts";
 // Increment when rendering changes without changing the underlying data.
-constexpr uint32_t kCalendarFrameRevision = 17;
+constexpr uint32_t kCalendarFrameRevision = 18;
 
 enum class FrameKind : uint8_t {
   None = 0,
@@ -529,25 +530,25 @@ void renderPortal() {
   initializePanelColorMode();
 
 #if RETERMINAL_MODEL == 1001
-  const GFXfont* titleFont = &FreeSansBold18pt7b;
-  const GFXfont* subtitleFont = &FreeSans12pt7b;
-  const GFXfont* captionFont = &FreeSansBold9pt7b;
-  const GFXfont* detailFont = &FreeSans9pt7b;
+  const GFXfont* titleFont = calendar_latin_font::uiFont(36);
+  const GFXfont* subtitleFont = calendar_latin_font::uiFont(24);
+  const GFXfont* captionFont = calendar_latin_font::uiFont(18);
+  const GFXfont* detailFont = calendar_latin_font::uiFont(18);
 #elif RETERMINAL_MODEL == 1003
-  const GFXfont* titleFont = &FreeSansBold24pt7b;
-  const GFXfont* subtitleFont = &FreeSans18pt7b;
-  const GFXfont* captionFont = &FreeSansBold12pt7b;
-  const GFXfont* detailFont = &FreeSans12pt7b;
+  const GFXfont* titleFont = calendar_latin_font::uiFont(48);
+  const GFXfont* subtitleFont = calendar_latin_font::uiFont(36);
+  const GFXfont* captionFont = calendar_latin_font::uiFont(24);
+  const GFXfont* detailFont = calendar_latin_font::uiFont(24);
 #elif RETERMINAL_MODEL == 1004
-  const GFXfont* titleFont = &FreeSansBold24pt7b;
-  const GFXfont* subtitleFont = &FreeSans18pt7b;
-  const GFXfont* captionFont = &FreeSansBold12pt7b;
-  const GFXfont* detailFont = &FreeSans12pt7b;
+  const GFXfont* titleFont = calendar_latin_font::uiFont(48);
+  const GFXfont* subtitleFont = calendar_latin_font::uiFont(36);
+  const GFXfont* captionFont = calendar_latin_font::uiFont(24);
+  const GFXfont* detailFont = calendar_latin_font::uiFont(24);
 #else
-  const GFXfont* titleFont = &FreeSansBold18pt7b;
-  const GFXfont* subtitleFont = &FreeSans12pt7b;
-  const GFXfont* captionFont = &FreeSansBold9pt7b;
-  const GFXfont* detailFont = &FreeSans9pt7b;
+  const GFXfont* titleFont = calendar_latin_font::uiFont(36);
+  const GFXfont* subtitleFont = calendar_latin_font::uiFont(24);
+  const GFXfont* captionFont = calendar_latin_font::uiFont(18);
+  const GFXfont* detailFont = calendar_latin_font::uiFont(18);
 #endif
 
   config_portal::Config portal;

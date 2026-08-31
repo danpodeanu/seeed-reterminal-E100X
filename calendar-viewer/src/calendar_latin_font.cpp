@@ -169,4 +169,21 @@ void drawLeftMiddle(EPaper& epaper, const String& text, int left, int middleY,
   }
 }
 
+const GFXfont* uiFont(int pixelSize) {
+  switch (pixelSize) {
+    case 10:
+      return &data::kUiFont10;
+    case 16:
+      return &data::kUiFont16;
+    case 24:
+      return &data::kUiFont24;
+    case 36:
+      return &data::kUiFont36;
+    case 48:
+      return &data::kUiFont48;
+    default:
+      return &data::kUiFont18;
+  }
+}
+
 }  // namespace calendar_latin_font

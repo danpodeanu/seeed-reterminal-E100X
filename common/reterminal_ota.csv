@@ -3,8 +3,8 @@
 #
 # app0/app1 give us OTA - the SD-driven flash path writes into whichever
 # is NOT the currently-booted slot, then flips otadata and reboots.
-# 3.0 MiB per slot fits today's largest firmware image (~2.86 MiB,
-# calendar-viewer on E1003) with roughly 140 KiB of remaining headroom.
+# 3.0 MiB per slot fits today's largest firmware image (~2.84 MiB,
+# calendar-viewer on E1003) with roughly 165 KiB of remaining headroom.
 #
 # NVS at the standard 0x9000/0x5000 offsets so Wi-Fi credentials survive
 # re-flashes with the Arduino ESP32 stock bootloader.

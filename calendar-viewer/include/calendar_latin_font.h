@@ -1,10 +1,8 @@
 #pragma once
 
-#include <Arduino.h>
+#include <TFT_eSPI.h>
 
 #include <string>
-
-class EPaper;
 
 namespace calendar_latin_font {
 
@@ -17,5 +15,6 @@ int textWidth(const String& text, Size size);
 String ellipsize(const std::string& text, int maximumWidth, Size size);
 void drawLeftMiddle(EPaper& epaper, const String& text, int left, int middleY,
                     Size size, uint32_t color);
+const GFXfont* uiFont(int pixelSize);
 
 }  // namespace calendar_latin_font

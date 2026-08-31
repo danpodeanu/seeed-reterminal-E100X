@@ -45,37 +45,25 @@ constexpr int kAgendaHeaderHeight = 36;
 constexpr int kAgendaRowHeight = 48;
 #endif
 
-void selectFont(EPaper& epaper, FontSize size, bool bold = true) {
+void selectFont(EPaper& epaper, FontSize size) {
   epaper.setTextSize(1);
-#if RETERMINAL_MODEL == 1003
+  int pixelSize = 18;
+#if RETERMINAL_MODEL == 1003 || RETERMINAL_MODEL == 1004
   if (size == FontSize::Large) {
-    epaper.setFreeFont(bold ? &FreeSansBold24pt7b : &FreeSans24pt7b);
+    pixelSize = 48;
   } else if (size == FontSize::Medium) {
-    epaper.setFreeFont(bold ? &FreeSansBold18pt7b : &FreeSans18pt7b);
+    pixelSize = 36;
   } else if (size == FontSize::Small) {
-    epaper.setFreeFont(bold ? &FreeSansBold12pt7b : &FreeSans12pt7b);
-  } else {
-    epaper.setFreeFont(bold ? &FreeSansBold9pt7b : &FreeSans9pt7b);
-  }
-#elif RETERMINAL_MODEL == 1004
-  if (size == FontSize::Large) {
-    epaper.setFreeFont(bold ? &FreeSansBold24pt7b : &FreeSans24pt7b);
-  } else if (size == FontSize::Medium) {
-    epaper.setFreeFont(bold ? &FreeSansBold18pt7b : &FreeSans18pt7b);
-  } else if (size == FontSize::Small) {
-    epaper.setFreeFont(bold ? &FreeSansBold12pt7b : &FreeSans12pt7b);
-  } else {
-    epaper.setFreeFont(bold ? &FreeSansBold9pt7b : &FreeSans9pt7b);
+    pixelSize = 24;
   }
 #else
   if (size == FontSize::Large) {
-    epaper.setFreeFont(bold ? &FreeSansBold18pt7b : &FreeSans18pt7b);
+    pixelSize = 36;
   } else if (size == FontSize::Medium) {
-    epaper.setFreeFont(bold ? &FreeSansBold12pt7b : &FreeSans12pt7b);
-  } else {
-    epaper.setFreeFont(bold ? &FreeSansBold9pt7b : &FreeSans9pt7b);
+    pixelSize = 24;
   }
 #endif
+  epaper.setFreeFont(calendar_latin_font::uiFont(pixelSize));
 }
 
 void fillTodayCell(EPaper& epaper,
@@ -652,7 +640,7 @@ void drawWeatherCard(EPaper& epaper, ColorDitherer& ditherer,
   }
 
   if (!weather.valid) {
-    selectFont(epaper, FontSize::Small, false);
+    selectFont(epaper, FontSize::Small);
     epaper.setTextColor(PANEL_BLACK);
     epaper.setTextDatum(MC_DATUM);
     const int messageY = (contentTop + contentBottom) / 2;
@@ -684,9 +672,9 @@ void drawWeatherCard(EPaper& epaper, ColorDitherer& ditherer,
       temperatureX, iconCenterY);
 
 #if RETERMINAL_MODEL == 1001 || RETERMINAL_MODEL == 1002
-  selectFont(epaper, FontSize::Tiny, false);
+  selectFont(epaper, FontSize::Tiny);
 #else
-  selectFont(epaper, FontSize::Small, false);
+  selectFont(epaper, FontSize::Small);
 #endif
   epaper.setTextDatum(TL_DATUM);
   int y = contentTop + margin + iconSize +
@@ -802,7 +790,7 @@ void drawAgendaCard(EPaper& epaper, ColorDitherer& ditherer,
                       card.top + headerHeight / 2);
   }
   if (events.empty()) {
-    selectFont(epaper, FontSize::Tiny, false);
+    selectFont(epaper, FontSize::Tiny);
     epaper.setTextColor(PANEL_MUTED);
     epaper.setTextDatum(TL_DATUM);
     const String emptyLabel = upcoming ? "No upcoming events" : "No events";
@@ -814,7 +802,7 @@ void drawAgendaCard(EPaper& epaper, ColorDitherer& ditherer,
   }
 
   const int contentHeight = card.height - headerHeight;
-  selectFont(epaper, FontSize::Tiny, false);
+  selectFont(epaper, FontSize::Tiny);
   const int moreLineHeight = epaper.fontHeight(1) + config::ui(2);
   const int minimumRowHeight =
       upcoming ? kAgendaRowHeight - config::ui(4) : kAgendaRowHeight;
@@ -842,9 +830,9 @@ void drawAgendaCard(EPaper& epaper, ColorDitherer& ditherer,
     ditherer.fillRoundedRect(epaper, barLeft, barTop, barWidth, barHeight,
                              radius, event.colorRgb);
 #if RETERMINAL_MODEL == 1001 || RETERMINAL_MODEL == 1002
-    selectFont(epaper, FontSize::Tiny, false);
+    selectFont(epaper, FontSize::Tiny);
 #else
-    selectFont(epaper, FontSize::Small, false);
+    selectFont(epaper, FontSize::Small);
 #endif
     epaper.setTextColor(eventTextInk(event.colorRgb));
     const int metadataY = barTop + barHeight / 4;
@@ -997,9 +985,9 @@ void drawGrid(EPaper& epaper, ColorDitherer& ditherer,
                                    : outsideMonth ? PANEL_MUTED : PANEL_BLACK;
       epaper.setTextColor(dateInk);
 #if RETERMINAL_MODEL == 1003 || RETERMINAL_MODEL == 1004
-      selectFont(epaper, FontSize::Small, true);
+      selectFont(epaper, FontSize::Small);
 #else
-      selectFont(epaper, FontSize::Medium, true);
+      selectFont(epaper, FontSize::Medium);
 #endif
       String dayLabel;
       if (monthView) {
@@ -1121,16 +1109,13 @@ void drawFooter(EPaper& epaper, const String& footer,
     return;
   }
 #if RETERMINAL_MODEL == 1001 || RETERMINAL_MODEL == 1002
-  epaper.setFreeFont(nullptr);
-  epaper.setTextFont(1);
-  epaper.setTextSize(1);
-  constexpr int footerTextHeight = 8;
+  constexpr int footerPixelSize = 10;
 #else
-  epaper.setFreeFont(nullptr);
-  epaper.setTextFont(2);
-  epaper.setTextSize(1);
-  constexpr int footerTextHeight = 16;
+  constexpr int footerPixelSize = 16;
 #endif
+  epaper.setTextSize(1);
+  epaper.setFreeFont(calendar_latin_font::uiFont(footerPixelSize));
+  const int footerTextHeight = epaper.fontHeight(1);
   String label = footer;
   if (calendar_config::runtime::debugShowStatusBadges()) {
     if (!label.isEmpty()) label += "  ";
@@ -1175,7 +1160,7 @@ void status(EPaper& epaper, const String& title, const String& detail,
                         30
 #endif
   );
-  selectFont(epaper, FontSize::Small, false);
+  selectFont(epaper, FontSize::Small);
   constexpr int kMaximumDetailLines = 4;
   String detailLines[kMaximumDetailLines];
   int detailLineCount = 0;
@@ -1202,7 +1187,7 @@ void status(EPaper& epaper, const String& title, const String& detail,
                       detailTop + line * detailLineHeight);
   }
   if (!footer.isEmpty()) {
-    selectFont(epaper, FontSize::Tiny, false);
+    selectFont(epaper, FontSize::Tiny);
     epaper.setTextDatum(BC_DATUM);
     epaper.drawString(
         text_render::ellipsize(epaper, footer, config::PANEL_WIDTH - 30),
