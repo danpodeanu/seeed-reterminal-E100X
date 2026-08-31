@@ -155,6 +155,26 @@ void test_primary_button_hold_classification() {
           calendar_logic::classifyPrimaryButtonHold(5000, false)));
 }
 
+void test_initial_connection_status_is_limited_to_configured_cold_boots() {
+  TEST_ASSERT_TRUE(
+      calendar_logic::shouldShowInitialConnectionStatus(true, false));
+  TEST_ASSERT_FALSE(
+      calendar_logic::shouldShowInitialConnectionStatus(true, true));
+  TEST_ASSERT_FALSE(
+      calendar_logic::shouldShowInitialConnectionStatus(false, false));
+}
+
+void test_post_sync_quiet_hours_do_not_leave_cold_boot_status_visible() {
+  TEST_ASSERT_FALSE(
+      calendar_logic::suppressPostSyncForQuietHours(true, false, true));
+  TEST_ASSERT_FALSE(
+      calendar_logic::suppressPostSyncForQuietHours(false, true, true));
+  TEST_ASSERT_FALSE(
+      calendar_logic::suppressPostSyncForQuietHours(false, false, false));
+  TEST_ASSERT_TRUE(
+      calendar_logic::suppressPostSyncForQuietHours(false, false, true));
+}
+
 void test_display_windows_respect_week_start_and_month_grid() {
   const time_t saturday = utc(2026, 8, 29, 12);
   const calendar::Window mondayWeek = calendar_logic::displayWindow(
@@ -1143,6 +1163,10 @@ int main(int, char**) {
   RUN_TEST(test_google_oauth_failure_classification);
   RUN_TEST(test_google_api_fallback_statuses);
   RUN_TEST(test_primary_button_hold_classification);
+  RUN_TEST(
+      test_initial_connection_status_is_limited_to_configured_cold_boots);
+  RUN_TEST(
+      test_post_sync_quiet_hours_do_not_leave_cold_boot_status_visible);
   RUN_TEST(test_display_windows_respect_week_start_and_month_grid);
   RUN_TEST(test_ical_parser_reads_timed_all_day_folded_text_and_colors);
   RUN_TEST(test_ical_parser_preserves_latin_utf8_event_titles);

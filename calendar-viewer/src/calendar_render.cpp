@@ -14,6 +14,7 @@
 #include "config.h"
 #include "dither.h"
 #include "driver.h"
+#include "repo_qr.h"
 #include "text_render.h"
 #include "theme.h"
 #include "weather_app_logic.h"
@@ -1141,6 +1142,51 @@ void drawFooter(EPaper& epaper, const String& footer,
 }
 
 }  // namespace
+
+void connectionStatus(EPaper& epaper, const String& title,
+                      const String& detail, const String& deviceInfo,
+                      const String& footer) {
+  epaper.fillSprite(PANEL_WHITE);
+  epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, true);
+  epaper.setTextDatum(MC_DATUM);
+
+  selectFont(epaper, FontSize::Large);
+  epaper.drawString(
+      text_render::ellipsize(
+          epaper, title, config::PANEL_WIDTH - config::ui(60)),
+      config::PANEL_WIDTH / 2,
+      config::PANEL_HEIGHT / 2 - config::ui(15));
+
+  if (!detail.isEmpty()) {
+    selectFont(epaper, FontSize::Small);
+    epaper.drawString(
+        text_render::ellipsize(
+            epaper, detail, config::PANEL_WIDTH - config::ui(60)),
+        config::PANEL_WIDTH / 2,
+        config::PANEL_HEIGHT / 2 + config::ui(25));
+  }
+
+  selectFont(epaper, FontSize::Tiny);
+  if (!deviceInfo.isEmpty()) {
+    epaper.drawString(
+        text_render::ellipsize(
+            epaper, deviceInfo, config::PANEL_WIDTH - config::ui(60)),
+        config::PANEL_WIDTH / 2,
+        config::PANEL_HEIGHT - config::ui(46));
+  }
+  if (!footer.isEmpty()) {
+    epaper.drawString(
+        text_render::ellipsize(
+            epaper, footer, config::PANEL_WIDTH - config::ui(60)),
+        config::PANEL_WIDTH / 2,
+        config::PANEL_HEIGHT - config::ui(24));
+  }
+
+  repo_qr::drawBottomRight(
+      epaper, config::PANEL_WIDTH, config::PANEL_HEIGHT,
+      std::max(2, config::ui(2)), config::ui(12), PANEL_BLACK, PANEL_WHITE);
+  epaper.setTextDatum(TL_DATUM);
+}
 
 void status(EPaper& epaper, const String& title, const String& detail,
             const String& footer) {

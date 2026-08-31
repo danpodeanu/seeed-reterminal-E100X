@@ -93,6 +93,12 @@ On first boot, the device opens its own Wi-Fi access point and displays join
 and settings QR codes. Scan both codes, then save the Wi-Fi, calendar, and
 weather settings.
 
+After the configured device restarts, it displays **Connecting to
+&lt;Wi-Fi name&gt;** while it connects and synchronizes the clock, calendar,
+and weather. Later cold boots show the same progress screen; ordinary
+deep-sleep wakes leave the existing calendar visible until refreshed data is
+ready.
+
 To reopen the portal later, wake the sleeping device while holding the green
 button for at least two seconds, then release it before five seconds. Press it
 again to leave the portal after saving. The **SD** tab exposes the inserted

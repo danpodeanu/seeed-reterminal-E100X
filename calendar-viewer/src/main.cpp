@@ -805,8 +805,13 @@ void setup() {
       !calendar_logic::hasConfiguredCalendarProvider(
           provider, calendar_config::runtime::icalUrl(),
           googleCredentialsConfigured);
-  if (gesture == calendar_logic::PrimaryButtonAction::Portal ||
-      (coldBoot && (noWifi || noCalendarProvider))) {
+  const bool portalRequested =
+      gesture == calendar_logic::PrimaryButtonAction::Portal ||
+      (coldBoot && (noWifi || noCalendarProvider));
+  const bool showInitialConnectionStatus =
+      calendar_logic::shouldShowInitialConnectionStatus(
+          coldBoot, portalRequested);
+  if (portalRequested) {
     screenshotRequested = false;
     renderPortal();
     return;
@@ -845,6 +850,24 @@ void setup() {
                        "Plug in USB-C, then press a button to retry.",
                        calendar_config::runtime::sleepSeconds());
     return;
+  }
+
+  if (showInitialConnectionStatus) {
+    const String stationMac = wifi_sta::stationMacAddress();
+    const String deviceInfo =
+        String("MAC: ") + stationMac +
+        "  Firmware: " + board::FIRMWARE_VERSION;
+    const String connectionDetail =
+        ntpDue ? "Synchronizing clock, calendar, and weather"
+               : "Refreshing calendar and weather";
+    LOG.printf("[wifi] station MAC=%s\n", stationMac.c_str());
+    LOG.println("[display] showing Wi-Fi connection status");
+    beginPanel();
+    calendar_render::connectionStatus(
+        epaper, "Connecting to " + String(calendar_wifi::ssid()),
+        connectionDetail, deviceInfo,
+        "From sleep, hold green for 2 seconds to configure");
+    refreshPanel();
   }
 
   String networkFailure;
@@ -900,7 +923,8 @@ void setup() {
   }
 
   local_time::localClock(localNow);
-  if (!buttonWake && quiet_hours::active(localNow)) {
+  if (calendar_logic::suppressPostSyncForQuietHours(
+          coldBoot, buttonWake, quiet_hours::active(localNow))) {
     wifi_sta::disable();
     powerDownAndSleep(quiet_hours::secondsUntilEnd(localNow));
     return;

@@ -152,6 +152,16 @@ inline PrimaryButtonAction classifyPrimaryButtonHold(
   return PrimaryButtonAction::Refresh;
 }
 
+inline constexpr bool shouldShowInitialConnectionStatus(
+    bool coldBoot, bool portalRequested) {
+  return coldBoot && !portalRequested;
+}
+
+inline constexpr bool suppressPostSyncForQuietHours(
+    bool coldBoot, bool buttonWake, bool quietHoursActive) {
+  return !coldBoot && !buttonWake && quietHoursActive;
+}
+
 inline bool isGoogleTransportFailure(int httpStatus) {
   return httpStatus <= 0;
 }

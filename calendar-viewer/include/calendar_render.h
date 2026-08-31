@@ -11,6 +11,10 @@ class EPaper;
 
 namespace calendar_render {
 
+void connectionStatus(EPaper& epaper, const String& title,
+                      const String& detail, const String& deviceInfo,
+                      const String& footer);
+
 void status(EPaper& epaper, const String& title, const String& detail,
             const String& footer = "");
 
