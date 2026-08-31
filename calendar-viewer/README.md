@@ -97,16 +97,37 @@ microSD card through the same web UI.
 
 Choose one source under **Settings -> Calendar source**.
 
-#### Public iCalendar feed
+#### Google Calendar secret iCal URL
 
-1. Select **Ical**.
-2. Paste the complete `.ics` subscription URL into **iCalendar URL**.
-3. Save and reboot.
+This is the simplest read-only setup for one Google/Gmail calendar. The link is
+created in Google Calendar, not in the Gmail mailbox:
 
-The URL is treated as a secret: it is stored in NVS and the portal returns only
-a "saved" placeholder after configuration. Prefer HTTPS, especially when a
-provider embeds an access token in the URL. HTTPS certificates are verified
-against the Mozilla root bundle supplied by the ESP32 framework.
+1. On a computer, open [Google Calendar](https://calendar.google.com/) and sign
+   in with the Google account that owns the calendar.
+2. In the left sidebar, expand **My calendars**.
+3. Point to the calendar to display, select its three-dot **More** menu, then
+   select **Settings and sharing**.
+4. In that calendar's settings, select or scroll to **Integrate calendar**.
+5. Under **Secret address in iCal format**, select the copy button. Copy the
+   complete HTTPS URL, which ends in `.ics`.
+6. Open Calendar Viewer's configuration portal and go to **Settings ->
+   Calendar source**.
+7. Select **Ical**, paste the URL into **iCalendar URL**, then save.
+8. Select **Reboot to viewer**.
+
+Do not make the calendar public and do not use **Public address in iCal
+format**. The secret address is a bearer credential: anyone who has it can read
+the calendar. Give it only to trusted applications and devices, not to other
+people. If it is disclosed, return to **Integrate calendar**, select **Reset**
+beside the secret address to invalidate it, and save the new URL on the device.
+Google Workspace administrators can disable secret addresses; if the field is
+missing, ask the administrator or use the service-account method below.
+
+For another calendar provider, use its complete HTTPS `.ics` subscription URL
+and follow steps 6-8. Calendar Viewer stores the URL in NVS, never on the SD
+card, and the portal returns only a "saved" placeholder after configuration.
+HTTPS certificates are verified against the Mozilla root bundle supplied by
+the ESP32 framework.
 
 Common IANA `TZID` values covered by the portal's timezone presets are
 converted with their own UTC offsets and daylight-saving rules. Unknown
@@ -116,28 +137,88 @@ daily/weekly/monthly/yearly `RRULE` forms are supported, including `WKST`,
 monthly `BYDAY`, and `BYMONTHDAY`. Unsupported recurrence selectors are
 reported as a feed error instead of silently producing a different schedule.
 
-#### Google Calendar
+#### Google Calendar API with a service account
 
-1. In a Google Cloud project, open **APIs & Services -> Library** and enable
-   **Google Calendar API**.
-2. Open **IAM & Admin -> Service Accounts**, create a service account, then
-   select **Keys -> Add key -> Create new key -> JSON**. Keep the downloaded
-   file private.
-3. In Google Calendar, open the target calendar's **Settings and sharing**.
-   Under **Share with specific people or groups**, add the service account's
-   `client_email` from the JSON file. Grant **Make changes to events** (or the
-   equivalent **Make changes and see all event details** permission).
-4. In the same calendar settings, open **Integrate calendar** and copy
-   **Calendar ID**. It often resembles
-   `c_abc123@group.calendar.google.com`. Do not use the service-account email as
-   the Calendar ID.
-5. Open the device configuration portal, select **Google** under Calendar
-   source, and paste one or more comma-separated Calendar IDs into **Google
-   calendar IDs**. Up to 12 calendars and 128 visible events are loaded per
-   refresh. Leave this field blank only to discover calendars already present
-   in the service account's CalendarList.
-6. Open the portal's **Google IAM** tab, upload the downloaded JSON key, then
-   select **Reboot to viewer**.
+Use this method for Google calendar and event colors, multiple calendars, or a
+dedicated shared calendar. Direct sharing does not require an OAuth consent
+screen or Workspace domain-wide delegation.
+
+##### Create the Google Cloud service account
+
+1. Open the [Google Cloud console](https://console.cloud.google.com/), open the
+   project selector in the top bar, and select **New project**.
+2. Enter a project name such as `calendar-viewer`, select **Create**, then
+   select the new project when creation finishes. An existing project is also
+   suitable.
+3. Open **APIs & Services -> Library**, search for **Google Calendar API**,
+   open it, and select **Enable**.
+4. Open **IAM & Admin -> Service Accounts** and select **Create service
+   account**.
+5. Enter a service account name such as `calendar-viewer`. Select **Create and
+   continue**, leave the optional project-role field empty, then select
+   **Continue** and **Done**. Calendar access is granted later in Google
+   Calendar, so the service account needs no Google Cloud project role.
+6. Select the new service account, open its **Keys** tab, then select **Add
+   key -> Create new key -> JSON -> Create**.
+7. Store the downloaded JSON file securely. Copy the service account address
+   shown in the Cloud console or the value of `client_email` in that file. It
+   resembles `calendar-viewer@PROJECT_ID.iam.gserviceaccount.com`.
+
+Some organizations prohibit downloadable service-account keys. If **Create new
+key** is unavailable or reports that key creation is disabled, an organization
+administrator must permit it for the project before this firmware can use the
+service account.
+
+##### Share a calendar with the service account
+
+1. On a computer, open [Google Calendar](https://calendar.google.com/) as the
+   calendar owner.
+2. To make a dedicated shared calendar, select the **+** beside **Other
+   calendars**, select **Create new calendar**, enter its name and time zone,
+   then select **Create calendar**. Skip this step to use an existing calendar.
+3. Under **My calendars**, point to the target calendar, select its three-dot
+   **More** menu, then select **Settings and sharing**.
+4. Open **Shared with** (called **Share with specific people or groups** in
+   some versions of the UI), then select **Add people and groups**.
+5. Paste the service account's `client_email`, choose **See event details** or
+   **See all event details**, then select **Send**. Edit permission is not
+   required. The calendar owner, or someone with permission to manage sharing,
+   must perform this step.
+6. In the same calendar settings, open **Integrate calendar** and copy
+   **Calendar ID**. A primary calendar ID is often the owner's Gmail address;
+   a secondary calendar commonly resembles
+   `c_abc123@group.calendar.google.com`. This is not the secret iCal URL and is
+   not the service account's email address.
+7. Repeat steps 3-6 for every calendar the device should display. Each calendar
+   must be shared directly with the service account.
+
+The service account has no inbox and does not click an invitation link.
+Calendar Viewer uses each configured Calendar ID to add the shared calendar to
+the service account's CalendarList on its first refresh.
+
+##### Configure Calendar Viewer
+
+1. Open the device configuration portal and go to **Settings -> Calendar
+   source**.
+2. Select **Google** and paste the Calendar IDs into **Google calendar IDs**,
+   separated by commas. Leave **Google delegated user** empty for this
+   directly-shared setup.
+3. Save the settings, open the **Google IAM** tab, and upload the complete JSON
+   key downloaded from Google Cloud.
+4. Select **Reboot to viewer**. A newly created service account can take a
+   minute to become usable; retry after a short wait if the first refresh
+   reports that it cannot access the calendar.
+
+Up to 12 calendars and 128 visible events are loaded per refresh. Leave
+**Google calendar IDs** blank only to discover calendars already present in the
+service account's CalendarList.
+
+Google's corresponding instructions are [use a secret iCal
+address](https://support.google.com/calendar/answer/37648),
+[share a calendar](https://support.google.com/calendar/answer/37082),
+[enable a Workspace API](https://developers.google.com/workspace/guides/enable-apis),
+[create a service account](https://cloud.google.com/iam/docs/service-accounts-create),
+and [create a JSON key](https://cloud.google.com/iam/docs/keys-create-delete).
 
 For configured IDs, Calendar Viewer requests
 `https://www.googleapis.com/auth/calendar.readonly` and
