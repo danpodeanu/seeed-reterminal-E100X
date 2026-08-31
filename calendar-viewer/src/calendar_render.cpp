@@ -923,7 +923,8 @@ void drawGrid(EPaper& epaper, ColorDitherer& ditherer,
                      CALENDAR_HEADER_RGB);
     epaper.setTextDatum(MC_DATUM);
     epaper.setTextColor(eventTextInk(CALENDAR_HEADER_RGB));
-    selectFont(epaper, FontSize::Tiny);
+    epaper.setTextSize(1);
+    epaper.setFreeFont(calendar_latin_font::uiFont(24));
     for (int column = 0; column < 7; ++column) {
       const int columnLeft = body.left + body.width * column / 7;
       const int columnRight = body.left + body.width * (column + 1) / 7;
