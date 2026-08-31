@@ -51,6 +51,13 @@ This frame was captured directly from a reTerminal E1003 running the
 This frame was captured directly from a reTerminal E1001 running the
 [Weather Viewer](weather-viewer/).
 
+## Calendar Viewer example
+
+![Calendar Viewer showing week and month calendars, agendas, and weather on a reTerminal E1004](calendar-viewer/assets/e1004-calendar-screenshot.png)
+
+This frame was captured directly from a reTerminal E1004 running the
+[Calendar Viewer](calendar-viewer/).
+
 ## Sticky Arcade examples
 
 | First selector page | Mini Minesweeper |

@@ -8,6 +8,11 @@ temperature and humidity plus a weather summary, and then returns to deep sleep.
 The device reconnects at the configured interval, but refreshes the e-paper
 panel only when visible calendar, weather, sensor, or date content has changed.
 
+![Calendar Viewer showing week and month calendars, agendas, and weather on a reTerminal E1004](assets/e1004-calendar-screenshot.png)
+
+*Frame captured directly from a reTerminal E1004 using the built-in screenshot
+feature.*
+
 ## Features
 
 - Public HTTP(S) `.ics` feeds, including folded text, all-day and timed events,
