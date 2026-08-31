@@ -2,6 +2,7 @@
 #include "config_portal.h"
 
 #include "timezone_list.h"
+#include "wifi_sta.h"
 
 namespace config_portal {
 namespace {
@@ -203,7 +204,11 @@ String renderWifiPage(const Config& cfg, const Schema& wifi, const Schema* appSc
   String html;
   html.reserve(7000);
   appendChrome(html, cfg, "Wi-Fi configuration", appSchema != nullptr, "wifi");
-  html += F("<section class=\"card\"><h2>Wi-Fi</h2><form id=\"wifiForm\">");
+  html += F(
+      "<section class=\"card\"><h2>Wi-Fi</h2>"
+      "<p><strong>Device Wi-Fi MAC address:</strong> <code>");
+  html += htmlEscape(wifi_sta::stationMacAddress());
+  html += F("</code></p><form id=\"wifiForm\">");
   for (size_t si = 0; si < wifi.sectionCount; ++si) {
     for (size_t fi = 0; fi < wifi.sections[si].fieldCount; ++fi) {
       const Field& f = wifi.sections[si].fields[fi];

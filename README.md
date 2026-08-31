@@ -208,9 +208,9 @@ At the next wake, the running firmware:
 - renames `/update.bin` to `update.bin.applied-<epoch>` on success, or `update.bin.failed-<reason>-<epoch>` on any failure (so the same bad file can't boot-loop the device).
 
 The running firmware version is printed as `[boot] fw <version>` on the
-serial log and shown on the Wi-Fi / config portal screen, next to the
-device MAC, so you can confirm the upgrade landed without opening the
-serial console.
+serial log and shown on the Wi-Fi / config portal screen. The device's Wi-Fi
+station MAC address appears on both that screen and the web Wi-Fi page, so you
+can identify the unit without opening the serial console.
 
 **Two asset flavours per app + board.** Every release ships both:
 
