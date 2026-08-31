@@ -495,11 +495,11 @@ void drawHeader(EPaper& epaper, config::CalendarView view, time_t now,
 #if RETERMINAL_MODEL == 1005
   String heading;
   if (view == config::CalendarView::Month) {
-    heading = formatDate(now, "%B %Y");
+    heading = formatDate(displayDay, "%B %Y");
   } else if (view == config::CalendarView::Week) {
     String weekDate = formatDate(
         calendar_logic::startOfWeek(
-            now, calendar_config::runtime::weekStart()),
+            displayDay, calendar_config::runtime::weekStart()),
         "%e %b");
     weekDate.trim();
     heading = "Week of " + weekDate;
@@ -538,23 +538,22 @@ void drawHeader(EPaper& epaper, config::CalendarView view, time_t now,
   const int batteryX =
       config::PANEL_WIDTH - margin - terminalWidth - batteryWidth;
 #if RETERMINAL_MODEL == 1005
-  const int batteryY = (height - batteryHeight) / 2;
+  const int batteryY = height / 2 + 2 - batteryHeight / 2;
+  const int percentY = height / 2;
 #else
   const int batteryY = std::max(3, margin / 2);
+  const int percentY = batteryY + batteryHeight / 2;
 #endif
   const int outline = std::max(1, config::ui(1));
   const int terminalHeight = std::max(3, config::ui(5));
   const int batteryPct = indoor.batteryValid ? indoor.batteryPct : -1;
-  String percent =
+  const String percent =
       indoor.batteryValid ? String(indoor.batteryPct) + "%" : "--%";
-#if RETERMINAL_MODEL == 1005
-  if (indoor.externalPowerValid && indoor.externalPower) percent += "+";
-#endif
 
   epaper.setTextColor(PANEL_BLACK);
   epaper.setTextDatum(MR_DATUM);
   const int percentRight = batteryX - config::ui(9);
-  epaper.drawString(percent, percentRight, batteryY + batteryHeight / 2);
+  epaper.drawString(percent, percentRight, percentY);
   text_render::drawBatteryGauge(
       epaper, batteryX, batteryY, batteryWidth, batteryHeight, batteryPct,
       outline, terminalWidth, terminalHeight, PANEL_BLACK,
@@ -1272,10 +1271,12 @@ void drawPortraitToday(EPaper& epaper, ColorDitherer& ditherer,
 
 void drawPortraitWeek(EPaper& epaper, ColorDitherer& ditherer,
                       const ::calendar::Data& data,
-                      config::WeekStart weekStart, time_t now) {
+                      config::WeekStart weekStart, time_t displayDay,
+                      time_t now) {
   constexpr int dateColumnWidth = 68;
   constexpr int bandGap = 4;
-  const time_t weekStartTime = calendar_logic::startOfWeek(now, weekStart);
+  const time_t weekStartTime =
+      calendar_logic::startOfWeek(displayDay, weekStart);
 
   for (int index = 0; index < 7; ++index) {
     const calendar_portrait_layout::Rect row =
@@ -1343,8 +1344,8 @@ void drawPortraitWeek(EPaper& epaper, ColorDitherer& ditherer,
 
 void drawPortraitMonth(EPaper& epaper, ColorDitherer& ditherer,
                        const ::calendar::Data& data,
-                       const ::calendar::Window& window,
-                       config::WeekStart weekStart, time_t now) {
+                       config::WeekStart weekStart, time_t displayDay,
+                       time_t now) {
   const auto& calendar = calendar_portrait_layout::CALENDAR;
   ditherer.fillRect(epaper, calendar.left, calendar.top, calendar.width,
                     calendar_portrait_layout::MONTH_HEADER_HEIGHT,
@@ -1365,7 +1366,9 @@ void drawPortraitMonth(EPaper& epaper, ColorDitherer& ditherer,
       calendar_logic::singleGoogleCalendarColor(data, calendarBackgroundRgb);
   const uint32_t calendarBackgroundText =
       eventTextInk(calendarBackgroundRgb);
-  const time_t monthAnchor = calendar_logic::startOfMonth(now);
+  const time_t monthAnchor = calendar_logic::startOfMonth(displayDay);
+  const time_t gridStart =
+      calendar_logic::startOfWeek(monthAnchor, weekStart);
   struct tm anchorTm = {};
   localtime_r(&monthAnchor, &anchorTm);
 
@@ -1375,7 +1378,7 @@ void drawPortraitMonth(EPaper& epaper, ColorDitherer& ditherer,
           calendar_portrait_layout::monthCell(rowIndex, column);
       const int cellIndex = rowIndex * 7 + column;
       const time_t day =
-          calendar_logic::addLocalDays(window.start, cellIndex);
+          calendar_logic::addLocalDays(gridStart, cellIndex);
       struct tm dayTm = {};
       localtime_r(&day, &dayTm);
       const bool today = calendar_logic::sameLocalDate(day, now);
@@ -1446,6 +1449,9 @@ void drawPortraitFooter(EPaper& epaper, config::CalendarView view,
     diagnostics += String(data.events.size()) + " events";
     if (data.truncated) diagnostics += " (limited)";
   }
+  if (diagnostics.isEmpty()) {
+    diagnostics = "UP previous  |  OK today  |  DOWN next";
+  }
 
   epaper.fillRect(
       0, calendar_portrait_layout::DIAGNOSTIC_TOP, config::PANEL_WIDTH,
@@ -1470,9 +1476,9 @@ void drawPortraitFooter(EPaper& epaper, config::CalendarView view,
     const char* label;
   };
   static constexpr NavigationItem kItems[] = {
-      {config::CalendarView::Today, "OK Today"},
-      {config::CalendarView::Week, "UP Week"},
-      {config::CalendarView::Month, "DOWN Month"},
+      {config::CalendarView::Today, "Today"},
+      {config::CalendarView::Week, "Week"},
+      {config::CalendarView::Month, "Month"},
   };
   epaper.drawFastHLine(0, calendar_portrait_layout::NAVIGATION_TOP,
                        config::PANEL_WIDTH, PANEL_BLACK);
@@ -1669,9 +1675,11 @@ void calendar(EPaper& epaper, const ::calendar::Data& data,
           config::PANEL_WIDTH, config::PANEL_HEIGHT),
       "E1005 Calendar layout must fit the portrait panel");
   if (view == config::CalendarView::Month) {
-    drawPortraitMonth(epaper, ditherer, data, window, weekStart, now);
+    drawPortraitMonth(
+        epaper, ditherer, data, weekStart, displayDay, now);
   } else if (view == config::CalendarView::Week) {
-    drawPortraitWeek(epaper, ditherer, data, weekStart, now);
+    drawPortraitWeek(
+        epaper, ditherer, data, weekStart, displayDay, now);
   } else {
     drawPortraitToday(epaper, ditherer, data, displayDay, indoor, weather);
   }

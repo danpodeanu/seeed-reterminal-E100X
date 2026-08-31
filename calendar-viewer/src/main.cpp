@@ -10,6 +10,7 @@
 #include <climits>
 #include <math.h>
 #include <time.h>
+#include <utility>
 
 #include "app_logger.h"
 #include "app_logic.h"
@@ -78,7 +79,7 @@ constexpr const char* kFrameHashKey = "frame_hash";
 constexpr const char* kFrameKindKey = "frame_kind";
 constexpr const char* kFrameComponentsKey = "frame_parts";
 // Increment when rendering changes without changing the underlying data.
-constexpr uint32_t kCalendarFrameRevision = 22;
+constexpr uint32_t kCalendarFrameRevision = 23;
 
 enum class FrameKind : uint8_t {
   None = 0,
@@ -99,6 +100,22 @@ RTC_DATA_ATTR time_t retainedSelectedDay = 0;
 TwoWire touchWire(1);
 Gt911Touch touch;
 E1005FastRefresh fastRefresh(epaper);
+
+struct AwakeButtonState {
+  int pin;
+  const char* name;
+  calendar_logic::CalendarNavigation navigation;
+  int stableLevel = HIGH;
+  int sampledLevel = HIGH;
+  uint32_t changedAtMs = 0;
+  bool armed = true;
+};
+
+AwakeButtonState awakeButtons[] = {
+    {PIN_BUTTON_GREEN, "OK", calendar_logic::CalendarNavigation::Today},
+    {PIN_BUTTON_RIGHT, "UP", calendar_logic::CalendarNavigation::Previous},
+    {PIN_BUTTON_LEFT, "DOWN", calendar_logic::CalendarNavigation::Next},
+};
 #endif
 bool panelStarted = false;
 bool framebufferReady = false;
@@ -341,7 +358,7 @@ CalendarFrameFingerprints frameFingerprints(
     if (visibleWindow.end > window.end) visibleWindow.end = window.end;
   } else {
     visibleWindow = calendar_logic::displayWindow(
-        view, now, calendar_config::runtime::weekStart());
+        view, displayDay, calendar_config::runtime::weekStart());
   }
 #endif
   const uint64_t calendarHash =
@@ -368,9 +385,7 @@ CalendarFrameFingerprints frameFingerprints(
   presentationHash.addValue(calendar_config::runtime::windSpeedUnit());
 #if RETERMINAL_MODEL == 1005
   presentationHash.addValue(view);
-  if (view == config::CalendarView::Today) {
-    presentationHash.addValue(calendar_logic::localMidnight(displayDay));
-  }
+  presentationHash.addValue(calendar_logic::localMidnight(displayDay));
 #else
   static_cast<void>(view);
   static_cast<void>(displayDay);
@@ -615,6 +630,17 @@ uint64_t statusFingerprint(const String& title, const String& detail,
   return hash.value();
 }
 
+bool fetchConfiguredCalendar(
+    const calendar::Window& window, calendar::Data& data,
+    String& failure, bool bypassHttpCache) {
+  return calendar_config::runtime::calendarProvider() ==
+                 config::CalendarProvider::Google
+             ? calendar_provider::fetchGoogle(
+                   window, data, failure, bypassHttpCache)
+             : calendar_provider::fetchIcal(
+                   window, data, failure, bypassHttpCache);
+}
+
 #if RETERMINAL_MODEL == 1005
 config::CalendarView viewForNavigationIndex(int index) {
   switch (index) {
@@ -625,6 +651,115 @@ config::CalendarView viewForNavigationIndex(int index) {
     default:
       return config::CalendarView::Today;
   }
+}
+
+void initializeAwakeButtons() {
+  const uint32_t now = millis();
+  for (AwakeButtonState& button : awakeButtons) {
+    pinMode(button.pin, INPUT_PULLUP);
+    button.stableLevel = digitalRead(button.pin);
+    button.sampledLevel = button.stableLevel;
+    button.changedAtMs = now;
+    button.armed = button.stableLevel == HIGH;
+  }
+}
+
+bool pollAwakeButton(calendar_logic::CalendarNavigation& navigation,
+                     const char*& name) {
+  const uint32_t now = millis();
+  for (AwakeButtonState& button : awakeButtons) {
+    const int level = digitalRead(button.pin);
+    if (level != button.sampledLevel) {
+      button.sampledLevel = level;
+      button.changedAtMs = now;
+    }
+    if (level == button.stableLevel ||
+        now - button.changedAtMs < config::BUTTON_RELEASE_DEBOUNCE_MS) {
+      continue;
+    }
+
+    button.stableLevel = level;
+    if (level == HIGH) {
+      button.armed = true;
+      continue;
+    }
+    if (!button.armed) continue;
+
+    button.armed = false;
+    navigation = button.navigation;
+    name = button.name;
+    return true;
+  }
+  return false;
+}
+
+bool fetchInteractiveCalendarData(
+    config::CalendarView view, time_t displayDay,
+    calendar::Data& data, calendar::Window& availableWindow) {
+  const calendar::Window required = calendar_logic::visibleDataWindow(
+      view, displayDay, calendar_config::runtime::weekStart());
+  const bool bufferedRangeContainsVisible =
+      calendar_logic::containsWindow(availableWindow, required);
+  if (bufferedRangeContainsVisible && !data.truncated) return true;
+
+  calendar::Window requested =
+      bufferedRangeContainsVisible
+          ? required
+          : calendar_logic::interactiveDataWindow(
+                view, displayDay, calendar_config::runtime::weekStart());
+  LOG.printf("[buttons] loading calendar data for %s navigation\n",
+             calendar_logic::calendarViewName(view));
+
+  String networkFailure;
+  const bool connected =
+      wifi_sta::connectStation(
+          calendar_wifi::ssid(), calendar_wifi::password(),
+          config::WIFI_TIMEOUT_MS, &networkFailure)
+          .connected;
+  if (!connected) {
+    wifi_sta::disable();
+    LOG.printf("[buttons] navigation unavailable: %s\n",
+               networkFailure.c_str());
+    hardware::beep();
+    return false;
+  }
+  if (!WiFi.setSleep(false)) {
+    LOG.println(
+        "[buttons] warning: could not disable modem sleep for navigation");
+  }
+
+  calendar::Data updated;
+  String calendarFailure;
+  const bool fetched = fetchConfiguredCalendar(
+      requested, updated, calendarFailure, true);
+  if (fetched && updated.truncated &&
+      (requested.start != required.start ||
+       requested.end != required.end)) {
+    LOG.println(
+        "[buttons] buffered calendar was limited; retrying the visible period");
+    calendar::Data visibleData;
+    String visibleFailure;
+    if (fetchConfiguredCalendar(
+            required, visibleData, visibleFailure, true)) {
+      updated = std::move(visibleData);
+      requested = required;
+    } else {
+      LOG.printf(
+          "[buttons] visible-period retry failed; using limited buffer: %s\n",
+          visibleFailure.c_str());
+    }
+  }
+  wifi_sta::disable();
+  if (!fetched) {
+    LOG.printf("[buttons] navigation calendar fetch failed: %s\n",
+               calendarFailure.c_str());
+    hardware::beep();
+    return false;
+  }
+
+  data = std::move(updated);
+  availableWindow = requested;
+  return true;
 }
 
 bool fastRefreshRegion(const E1005FastRefresh::Region& region,
@@ -687,6 +822,27 @@ void renderInteractiveCalendar(
   retainedSelectedDay = displayDay;
 }
 
+bool applyInteractiveSelection(
+    calendar::Data& data, calendar::Window& window,
+    config::CalendarView& view, time_t now, time_t& displayDay,
+    const WeatherData& weather, const String& footer,
+    const calendar_logic::CalendarSelection& selection,
+    const char* inputName) {
+  if (selection.view == view && selection.day == displayDay) return true;
+  if (!fetchInteractiveCalendarData(
+          selection.view, selection.day, data, window)) {
+    return false;
+  }
+
+  LOG.printf("[input] %s -> %s\n", inputName,
+             calendar_logic::calendarViewName(selection.view));
+  view = selection.view;
+  displayDay = selection.day;
+  renderInteractiveCalendar(
+      data, window, view, now, displayDay, weather, footer);
+  return true;
+}
+
 void renderTouchSleepMessage() {
   calendar_render::sleepStatus(epaper);
   const E1005FastRefresh::Region navigation = {
@@ -708,7 +864,7 @@ void renderTouchSleepMessage() {
 }
 
 void runTouchSession(
-    const calendar::Data& data, const calendar::Window& window,
+    calendar::Data& data, calendar::Window& window,
     config::CalendarView& view, time_t now, time_t& displayDay,
     const WeatherData& weather, const String& footer,
     bool framebufferMatchesPanel) {
@@ -738,14 +894,15 @@ void runTouchSession(
     LOG.printf("[touch] fast refresh unavailable: %s; using full refreshes\n",
                E1005FastRefresh::resultMessage(refreshResult));
   }
-  if (!touch.begin(touchWire)) {
-    LOG.println("[touch] initialization failed; sleeping without touch input");
-    renderTouchSleepMessage();
-    fastRefresh.end();
-    return;
+  const bool touchReady = touch.begin(touchWire);
+  if (!touchReady) {
+    LOG.println(
+        "[touch] initialization failed; front buttons remain available");
   }
+  initializeAwakeButtons();
 
-  LOG.printf("[touch] ready; sleeping after %lu seconds without input\n",
+  LOG.printf("[input] %s; sleeping after %lu seconds without input\n",
+             touchReady ? "touch and buttons ready" : "buttons ready",
              static_cast<unsigned long>(
                  config::TOUCH_INACTIVITY_SLEEP_MS / 1000U));
   uint32_t lastActivityAt = millis();
@@ -754,52 +911,67 @@ void runTouchSession(
          config::TOUCH_INACTIVITY_SLEEP_MS) {
     usbScreenCapture.poll(epaper, config::PANEL_WIDTH, config::PANEL_HEIGHT);
 
-    Gt911Touch::Point point = {};
-    const Gt911Touch::PollResult result = touch.poll(point);
-    if (result == Gt911Touch::PollResult::Release) {
-      touchActive = false;
-      lastActivityAt = millis();
-    } else if (result == Gt911Touch::PollResult::Touch) {
-      lastActivityAt = millis();
-      if (!touchActive) {
-        touchActive = true;
-        config::CalendarView nextView = view;
-        time_t nextDisplayDay = displayDay;
+    if (touchReady) {
+      Gt911Touch::Point point = {};
+      const Gt911Touch::PollResult touchResult = touch.poll(point);
+      if (touchResult == Gt911Touch::PollResult::Release) {
+        touchActive = false;
+        lastActivityAt = millis();
+      } else if (touchResult == Gt911Touch::PollResult::Touch) {
+        lastActivityAt = millis();
+        if (!touchActive) {
+          touchActive = true;
+          const time_t inputNow = time(nullptr);
+          calendar_logic::CalendarSelection selection{
+              view, displayDay};
 
-        const int navigationIndex =
-            calendar_portrait_layout::navigationIndexAt(point.x, point.y);
-        if (navigationIndex >= 0) {
-          nextView = viewForNavigationIndex(navigationIndex);
-          nextDisplayDay = calendar_logic::localMidnight(now);
-        } else if (view == config::CalendarView::Week) {
-          const int dayIndex =
-              calendar_portrait_layout::weekDayIndexAt(point.x, point.y);
-          if (dayIndex >= 0) {
-            nextView = config::CalendarView::Today;
-            nextDisplayDay = calendar_logic::addLocalDays(
-                calendar_logic::startOfWeek(
-                    now, calendar_config::runtime::weekStart()),
-                dayIndex);
+          const int navigationIndex =
+              calendar_portrait_layout::navigationIndexAt(point.x, point.y);
+          if (navigationIndex >= 0) {
+            selection.view = viewForNavigationIndex(navigationIndex);
+            selection.day = calendar_logic::localMidnight(inputNow);
+          } else if (view == config::CalendarView::Week) {
+            const int dayIndex =
+                calendar_portrait_layout::weekDayIndexAt(point.x, point.y);
+            if (dayIndex >= 0) {
+              selection.view = config::CalendarView::Today;
+              selection.day = calendar_logic::addLocalDays(
+                  calendar_logic::startOfWeek(
+                      displayDay, calendar_config::runtime::weekStart()),
+                  dayIndex);
+            }
+          } else if (view == config::CalendarView::Month) {
+            const int dayIndex =
+                calendar_portrait_layout::monthDayIndexAt(point.x, point.y);
+            if (dayIndex >= 0) {
+              selection.view = config::CalendarView::Today;
+              selection.day = calendar_logic::addLocalDays(
+                  calendar_logic::displayWindow(
+                      config::CalendarView::Month, displayDay,
+                      calendar_config::runtime::weekStart())
+                      .start,
+                  dayIndex);
+            }
           }
-        } else if (view == config::CalendarView::Month) {
-          const int dayIndex =
-              calendar_portrait_layout::monthDayIndexAt(point.x, point.y);
-          if (dayIndex >= 0) {
-            nextView = config::CalendarView::Today;
-            nextDisplayDay =
-                calendar_logic::addLocalDays(window.start, dayIndex);
-          }
-        }
 
-        if (nextView != view || nextDisplayDay != displayDay) {
-          LOG.printf("[touch] x=%u y=%u -> %s\n", point.x, point.y,
-                     calendar_logic::calendarViewName(nextView));
-          view = nextView;
-          displayDay = nextDisplayDay;
-          renderInteractiveCalendar(
-              data, window, view, now, displayDay, weather, footer);
+          applyInteractiveSelection(
+              data, window, view, inputNow, displayDay, weather, footer,
+              selection, "touch");
         }
       }
+    }
+
+    calendar_logic::CalendarNavigation buttonNavigation;
+    const char* buttonName = nullptr;
+    if (pollAwakeButton(buttonNavigation, buttonName)) {
+      lastActivityAt = millis();
+      const time_t inputNow = time(nullptr);
+      const calendar_logic::CalendarSelection selection =
+          calendar_logic::navigateCalendar(
+              view, displayDay, inputNow, buttonNavigation);
+      applyInteractiveSelection(
+          data, window, view, inputNow, displayDay, weather, footer,
+          selection, buttonName);
     }
     delay(20);
   }
@@ -1144,17 +1316,10 @@ void setup() {
     return;
   }
 
-  config::CalendarView activeCalendarView = config::CalendarView::Today;
 #if RETERMINAL_MODEL == 1005
   const bool todaySelected =
       greenPressed &&
       gesture == calendar_logic::PrimaryButtonAction::Refresh;
-  activeCalendarView = calendar_logic::calendarViewForButtons(
-      todaySelected, rightPressed, leftPressed,
-      static_cast<config::CalendarView>(retainedCalendarView));
-  retainedCalendarView = static_cast<uint8_t>(activeCalendarView);
-  LOG.printf("[view] selected %s (OK=Today, UP=Week, DOWN=Month)\n",
-             calendar_logic::calendarViewName(activeCalendarView));
 #else
   static_cast<void>(rightPressed);
   static_cast<void>(leftPressed);
@@ -1280,33 +1445,69 @@ void setup() {
   }
 
   const time_t now = time(nullptr);
-  calendar::Window window = calendar_logic::dashboardWindow(
-      now, calendar_config::runtime::weekStart());
+  config::CalendarView activeCalendarView = config::CalendarView::Today;
   time_t displayDay = calendar_logic::localMidnight(now);
+  calendar::Window window;
 #if RETERMINAL_MODEL == 1005
-  displayDay = calendar_logic::selectedDayForWake(
-      activeCalendarView, retainedSelectedDay, now, window, todaySelected);
-  if (activeCalendarView == config::CalendarView::Today) {
-    retainedSelectedDay = displayDay;
-    const time_t selectedUpcomingEnd =
-        calendar_logic::addLocalDays(displayDay, 43);
-    if (window.end < selectedUpcomingEnd) window.end = selectedUpcomingEnd;
+  calendar_logic::CalendarNavigation wakeNavigation =
+      calendar_logic::CalendarNavigation::None;
+  if (todaySelected) {
+    wakeNavigation = calendar_logic::CalendarNavigation::Today;
+  } else if (rightPressed) {
+    wakeNavigation = calendar_logic::CalendarNavigation::Previous;
+  } else if (leftPressed) {
+    wakeNavigation = calendar_logic::CalendarNavigation::Next;
   }
-  if (coldBoot || buttonWake) {
-    const time_t touchSelectionEnd =
-        calendar_logic::touchSelectionWindowEnd(window);
-    if (window.end < touchSelectionEnd) window.end = touchSelectionEnd;
-  }
+  const calendar_logic::CalendarSelection wakeSelection =
+      calendar_logic::navigateCalendar(
+          static_cast<config::CalendarView>(retainedCalendarView),
+          retainedSelectedDay, now, wakeNavigation);
+  activeCalendarView = wakeSelection.view;
+  displayDay = wakeSelection.day;
+  retainedCalendarView = static_cast<uint8_t>(activeCalendarView);
+  retainedSelectedDay = displayDay;
+  window = coldBoot || buttonWake
+               ? calendar_logic::interactiveDataWindow(
+                     activeCalendarView, displayDay,
+                     calendar_config::runtime::weekStart())
+               : calendar_logic::visibleDataWindow(
+                     activeCalendarView, displayDay,
+                     calendar_config::runtime::weekStart());
+  LOG.printf(
+      "[view] %s (OK=today, UP=previous, DOWN=next)\n",
+      calendar_logic::calendarViewName(activeCalendarView));
+#else
+  window = calendar_logic::dashboardWindow(
+      now, calendar_config::runtime::weekStart());
 #endif
   calendar::Data calendarData;
   String calendarFailure;
-  const bool calendarUpdated =
-      calendar_config::runtime::calendarProvider() ==
-              config::CalendarProvider::Google
-          ? calendar_provider::fetchGoogle(window, calendarData,
-                                           calendarFailure, buttonWake)
-          : calendar_provider::fetchIcal(window, calendarData,
-                                         calendarFailure, buttonWake);
+  const bool calendarUpdated = fetchConfiguredCalendar(
+      window, calendarData, calendarFailure, buttonWake);
+#if RETERMINAL_MODEL == 1005
+  if (calendarUpdated && calendarData.truncated) {
+    const calendar::Window visibleWindow =
+        calendar_logic::visibleDataWindow(
+            activeCalendarView, displayDay,
+            calendar_config::runtime::weekStart());
+    if (window.start != visibleWindow.start ||
+        window.end != visibleWindow.end) {
+      LOG.println(
+          "[calendar] buffered range was limited; retrying the visible period");
+      calendar::Data visibleData;
+      String visibleFailure;
+      if (fetchConfiguredCalendar(
+              visibleWindow, visibleData, visibleFailure, buttonWake)) {
+        calendarData = std::move(visibleData);
+        window = visibleWindow;
+      } else {
+        LOG.printf(
+            "[calendar] visible-period retry failed; using limited buffer: %s\n",
+            visibleFailure.c_str());
+      }
+    }
+  }
+#endif
 
   WeatherData weather;
   String weatherFailure;

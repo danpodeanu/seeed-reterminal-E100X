@@ -32,10 +32,10 @@ feature.*
   right-aligned `+N more` line only when needed. Week and month grids mark the
   current day in green on six-color panels.
 - A dedicated E1005 portrait interface uses separate Today, Week, and Month
-  pages. The front OK, UP, and DOWN buttons select them directly from deep
-  sleep. While awake, the bottom tabs switch pages and tapping a Week row or
-  Month cell opens Today for that date. The selected page and date remain active
-  for scheduled refreshes while that date is still in the fetched window.
+  pages. OK returns to the actual current day, while UP and DOWN move the active
+  page backward or forward by one day, week, or month. While awake, the bottom
+  tabs switch pages and tapping a Week row or Month cell opens Today for that
+  date. The selected page and date remain active for scheduled refreshes.
 - A wall-planner layout uses open column gutters, weekday/date labels inside
   the week cells, a light-blue weekday header above date-only month cells,
   horizontal week separators, rounded event bands, and clean white agenda and
@@ -279,9 +279,9 @@ for temporary provider failures; no SD card is required.
 | Action | Result |
 | --- | --- |
 | Tap any front button on E1001-E1004 | Refresh calendar and weather |
-| Tap OK on E1005 | Refresh and show Today plus Upcoming |
-| Tap UP on E1005 | Refresh and show the seven-day Week view |
-| Tap DOWN on E1005 | Refresh and show the six-week Month view |
+| Tap OK on E1005 | Return to the actual current day in Today |
+| Tap UP on E1005 | Move back one day, week, or month in the active view |
+| Tap DOWN on E1005 | Move forward one day, week, or month in the active view |
 | Tap an E1005 bottom tab while awake | Switch directly to Today, Week, or Month |
 | Tap an E1005 Week row or Month date while awake | Open Today for the selected date |
 | Hold green, or OK on E1005, for at least 2 seconds | Open the configuration portal |
@@ -292,6 +292,10 @@ configured quiet hours. After an E1005 cold boot or button wake, touch remains
 active until five minutes have elapsed without input. The bottom bar then
 confirms that the device is sleeping and names the buttons that wake it; timer
 wakes do not hold the device awake for touch input.
+
+Calendar data for nearby periods is prefetched while E1005 interaction is
+active. Browsing beyond that in-memory window reconnects only long enough to
+load the requested period, then turns Wi-Fi back off.
 
 After a successful fetch, Calendar Viewer compares the visible date window,
 event data and colors, weather summary, power, and render-affecting

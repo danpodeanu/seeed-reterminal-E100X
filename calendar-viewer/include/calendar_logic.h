@@ -30,6 +30,18 @@ enum class PrimaryButtonAction {
   Screenshot,
 };
 
+enum class CalendarNavigation {
+  None,
+  Today,
+  Previous,
+  Next,
+};
+
+struct CalendarSelection {
+  config::CalendarView view = config::CalendarView::Today;
+  time_t day = 0;
+};
+
 // FrameComponents is persisted as an NVS blob; bump this when its layout or
 // comparison semantics change.
 inline constexpr uint32_t kFrameComponentsVersion = 4;
@@ -181,15 +193,6 @@ inline constexpr bool validCalendarView(config::CalendarView view) {
          view == config::CalendarView::Month;
 }
 
-inline constexpr config::CalendarView calendarViewForButtons(
-    bool todayPressed, bool weekPressed, bool monthPressed,
-    config::CalendarView retained) {
-  if (todayPressed) return config::CalendarView::Today;
-  if (weekPressed) return config::CalendarView::Week;
-  if (monthPressed) return config::CalendarView::Month;
-  return validCalendarView(retained) ? retained : config::CalendarView::Today;
-}
-
 inline constexpr const char* calendarViewName(config::CalendarView view) {
   switch (view) {
     case config::CalendarView::Week:
@@ -300,6 +303,36 @@ inline time_t addLocalMonths(time_t value, int months) {
   return mktime(&local);
 }
 
+inline CalendarSelection navigateCalendar(
+    config::CalendarView retainedView, time_t retainedDay, time_t now,
+    CalendarNavigation navigation) {
+  CalendarSelection result;
+  result.view = validCalendarView(retainedView)
+                    ? retainedView
+                    : config::CalendarView::Today;
+  const time_t today = localMidnight(now);
+  result.day = retainedDay > 0 ? localMidnight(retainedDay) : today;
+
+  if (navigation == CalendarNavigation::Today) {
+    result.view = config::CalendarView::Today;
+    result.day = today;
+    return result;
+  }
+  if (navigation == CalendarNavigation::None) return result;
+
+  const int direction =
+      navigation == CalendarNavigation::Previous ? -1 : 1;
+  if (result.view == config::CalendarView::Today) {
+    result.day = addLocalDays(result.day, direction);
+  } else if (result.view == config::CalendarView::Week) {
+    result.day = addLocalDays(result.day, direction * 7);
+  } else {
+    result.day =
+        addLocalMonths(startOfMonth(result.day), direction);
+  }
+  return result;
+}
+
 inline calendar::Window displayWindow(config::CalendarView view, time_t now,
                                       config::WeekStart firstDay) {
   calendar::Window result;
@@ -326,27 +359,49 @@ inline calendar::Window dashboardWindow(time_t now,
   return result;
 }
 
-inline time_t selectedDayForWake(config::CalendarView view,
-                                 time_t retainedDay, time_t now,
-                                 const calendar::Window& fetchedWindow,
-                                 bool resetToToday) {
-  const time_t today = localMidnight(now);
-  if (view != config::CalendarView::Today || resetToToday) return today;
-
-  const time_t retainedMidnight = localMidnight(retainedDay);
-  if (retainedMidnight >= fetchedWindow.start &&
-      retainedMidnight < fetchedWindow.end) {
-    return retainedMidnight;
+inline calendar::Window visibleDataWindow(
+    config::CalendarView view, time_t displayDay,
+    config::WeekStart firstDay) {
+  calendar::Window result = displayWindow(view, displayDay, firstDay);
+  if (view == config::CalendarView::Today) {
+    result.end = addLocalDays(result.start, 43);
   }
-  return today;
+  return result;
 }
 
-inline time_t touchSelectionWindowEnd(
-    const calendar::Window& monthWindow) {
-  constexpr int kLastMonthCellIndex = 41;
-  constexpr int kUpcomingDayCount = 43;
-  return addLocalDays(
-      monthWindow.start, kLastMonthCellIndex + kUpcomingDayCount);
+inline calendar::Window interactiveDataWindow(
+    config::CalendarView view, time_t displayDay,
+    config::WeekStart firstDay) {
+  const calendar::Window visible =
+      visibleDataWindow(view, displayDay, firstDay);
+  if (view == config::CalendarView::Today) {
+    return {
+        addLocalDays(visible.start, -7),
+        addLocalDays(visible.start, 50),
+    };
+  }
+  if (view == config::CalendarView::Week) {
+    return {
+        addLocalDays(visible.start, -14),
+        addLocalDays(visible.start, 63),
+    };
+  }
+
+  const time_t month = startOfMonth(displayDay);
+  return {
+      displayWindow(
+          config::CalendarView::Month, addLocalMonths(month, -1), firstDay)
+          .start,
+      displayWindow(
+          config::CalendarView::Month, addLocalMonths(month, 1), firstDay)
+          .end,
+  };
+}
+
+inline constexpr bool containsWindow(const calendar::Window& available,
+                                     const calendar::Window& required) {
+  return available.start <= required.start &&
+         available.end >= required.end;
 }
 
 inline bool overlaps(time_t start, time_t end,

@@ -156,59 +156,82 @@ void test_primary_button_hold_classification() {
           calendar_logic::classifyPrimaryButtonHold(5000, false)));
 }
 
-void test_e1005_buttons_select_and_retain_calendar_views() {
+void test_e1005_buttons_navigate_the_active_calendar_period() {
   using config::CalendarView;
+  using calendar_logic::CalendarNavigation;
+  const time_t now = utc(2026, 8, 29, 12);
 
-  TEST_ASSERT_EQUAL(
-      static_cast<int>(CalendarView::Today),
-      static_cast<int>(calendar_logic::calendarViewForButtons(
-          true, false, false, CalendarView::Month)));
-  TEST_ASSERT_EQUAL(
-      static_cast<int>(CalendarView::Week),
-      static_cast<int>(calendar_logic::calendarViewForButtons(
-          false, true, false, CalendarView::Today)));
-  TEST_ASSERT_EQUAL(
-      static_cast<int>(CalendarView::Month),
-      static_cast<int>(calendar_logic::calendarViewForButtons(
-          false, false, true, CalendarView::Today)));
-  TEST_ASSERT_EQUAL(
-      static_cast<int>(CalendarView::Week),
-      static_cast<int>(calendar_logic::calendarViewForButtons(
-          false, false, false, CalendarView::Week)));
-  TEST_ASSERT_EQUAL(
-      static_cast<int>(CalendarView::Today),
-      static_cast<int>(calendar_logic::calendarViewForButtons(
-          false, false, false, static_cast<CalendarView>(99))));
+  calendar_logic::CalendarSelection selection =
+      calendar_logic::navigateCalendar(
+          CalendarView::Today, now, now, CalendarNavigation::Previous);
+  TEST_ASSERT_EQUAL_INT64(utc(2026, 8, 28), selection.day);
+
+  selection = calendar_logic::navigateCalendar(
+      CalendarView::Week, now, now, CalendarNavigation::Next);
+  TEST_ASSERT_EQUAL(static_cast<int>(CalendarView::Week),
+                    static_cast<int>(selection.view));
+  TEST_ASSERT_EQUAL_INT64(utc(2026, 9, 5), selection.day);
+
+  selection = calendar_logic::navigateCalendar(
+      CalendarView::Month, now, now, CalendarNavigation::Previous);
+  TEST_ASSERT_EQUAL(static_cast<int>(CalendarView::Month),
+                    static_cast<int>(selection.view));
+  TEST_ASSERT_EQUAL_INT64(utc(2026, 7, 1), selection.day);
+
+  selection = calendar_logic::navigateCalendar(
+      CalendarView::Month, utc(2026, 9, 12), now,
+      CalendarNavigation::Today);
+  TEST_ASSERT_EQUAL(static_cast<int>(CalendarView::Today),
+                    static_cast<int>(selection.view));
+  TEST_ASSERT_EQUAL_INT64(utc(2026, 8, 29), selection.day);
+
+  selection = calendar_logic::navigateCalendar(
+      static_cast<CalendarView>(99), 0, now, CalendarNavigation::None);
+  TEST_ASSERT_EQUAL(static_cast<int>(CalendarView::Today),
+                    static_cast<int>(selection.view));
+  TEST_ASSERT_EQUAL_INT64(utc(2026, 8, 29), selection.day);
   TEST_ASSERT_EQUAL_STRING(
       "Month", calendar_logic::calendarViewName(CalendarView::Month));
 }
 
-void test_e1005_selected_day_is_retained_only_while_fetchable() {
+void test_e1005_navigation_windows_buffer_adjacent_periods() {
   using config::CalendarView;
   const time_t now = utc(2026, 8, 29, 12);
-  const calendar::Window window = {
-      utc(2026, 7, 27), utc(2026, 10, 12)};
+  const calendar::Window todayVisible = calendar_logic::visibleDataWindow(
+      CalendarView::Today, now, config::WeekStart::Monday);
+  const calendar::Window todayInteractive =
+      calendar_logic::interactiveDataWindow(
+          CalendarView::Today, now, config::WeekStart::Monday);
+  TEST_ASSERT_TRUE(
+      calendar_logic::containsWindow(todayInteractive, todayVisible));
+  TEST_ASSERT_TRUE(calendar_logic::containsWindow(
+      todayInteractive,
+      calendar_logic::visibleDataWindow(
+          CalendarView::Today, utc(2026, 9, 5),
+          config::WeekStart::Monday)));
 
-  TEST_ASSERT_EQUAL_INT64(
-      utc(2026, 9, 12),
-      calendar_logic::selectedDayForWake(
-          CalendarView::Today, utc(2026, 9, 12, 18), now, window, false));
-  TEST_ASSERT_EQUAL_INT64(
-      utc(2026, 8, 29),
-      calendar_logic::selectedDayForWake(
-          CalendarView::Today, utc(2027, 1, 1), now, window, false));
-  TEST_ASSERT_EQUAL_INT64(
-      utc(2026, 8, 29),
-      calendar_logic::selectedDayForWake(
-          CalendarView::Today, utc(2026, 9, 12), now, window, true));
-  TEST_ASSERT_EQUAL_INT64(
-      utc(2026, 8, 29),
-      calendar_logic::selectedDayForWake(
-          CalendarView::Week, utc(2026, 9, 12), now, window, false));
-  TEST_ASSERT_EQUAL_INT64(
-      utc(2026, 10, 19),
-      calendar_logic::touchSelectionWindowEnd(
-          {utc(2026, 7, 27), utc(2026, 9, 7)}));
+  const calendar::Window weekInteractive =
+      calendar_logic::interactiveDataWindow(
+          CalendarView::Week, now, config::WeekStart::Monday);
+  TEST_ASSERT_TRUE(calendar_logic::containsWindow(
+      weekInteractive,
+      calendar_logic::visibleDataWindow(
+          CalendarView::Week, utc(2026, 9, 12),
+          config::WeekStart::Monday)));
+
+  const calendar::Window monthInteractive =
+      calendar_logic::interactiveDataWindow(
+          CalendarView::Month, now, config::WeekStart::Monday);
+  TEST_ASSERT_TRUE(calendar_logic::containsWindow(
+      monthInteractive,
+      calendar_logic::visibleDataWindow(
+          CalendarView::Month, utc(2026, 7, 15),
+          config::WeekStart::Monday)));
+  TEST_ASSERT_TRUE(calendar_logic::containsWindow(
+      monthInteractive,
+      calendar_logic::visibleDataWindow(
+          CalendarView::Month, utc(2026, 9, 15),
+          config::WeekStart::Monday)));
 }
 
 void test_initial_connection_status_is_limited_to_configured_cold_boots() {
@@ -1330,8 +1353,8 @@ int main(int, char**) {
   RUN_TEST(test_google_oauth_failure_classification);
   RUN_TEST(test_google_api_fallback_statuses);
   RUN_TEST(test_primary_button_hold_classification);
-  RUN_TEST(test_e1005_buttons_select_and_retain_calendar_views);
-  RUN_TEST(test_e1005_selected_day_is_retained_only_while_fetchable);
+  RUN_TEST(test_e1005_buttons_navigate_the_active_calendar_period);
+  RUN_TEST(test_e1005_navigation_windows_buffer_adjacent_periods);
   RUN_TEST(
       test_initial_connection_status_is_limited_to_configured_cold_boots);
   RUN_TEST(
