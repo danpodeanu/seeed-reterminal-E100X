@@ -995,7 +995,6 @@ void drawGrid(EPaper& epaper, ColorDitherer& ditherer,
         dayLabel = String(dayTm.tm_mday);
       } else {
         dayLabel = weekdayLabel(column, weekStart);
-        dayLabel.toUpperCase();
         dayLabel += " ";
         dayLabel += String(dayTm.tm_mday);
       }
