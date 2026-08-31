@@ -1,7 +1,7 @@
-# Calendar Viewer for reTerminal E1001-E1004
+# Calendar Viewer for reTerminal E1001-E1005
 
 A low-power calendar dashboard for the Seeed Studio reTerminal E1001, E1002,
-E1003, and E1004. It loads a public iCalendar feed or Google calendars,
+E1003, E1004, and E1005. It loads a public iCalendar feed or Google calendars,
 renders today's agenda together with week and month calendars, shows indoor
 temperature and humidity plus a weather summary, and then returns to deep sleep.
 
@@ -31,6 +31,9 @@ feature.*
   start/end times, fill the available event space, and use a compact
   right-aligned `+N more` line only when needed. Week and month grids mark the
   current day in green on six-color panels.
+- A dedicated E1005 portrait interface uses separate Today, Week, and Month
+  pages. The front OK, UP, and DOWN buttons select them directly from deep
+  sleep, and the selected page remains active for scheduled refreshes.
 - A wall-planner layout uses open column gutters, weekday/date labels inside
   the week cells, a light-blue weekday header above date-only month cells,
   horizontal week separators, rounded event bands, and clean white agenda and
@@ -63,6 +66,7 @@ feature.*
 | `reterminal_e1002` | 800x480 landscape ED2208 | six-color |
 | `reterminal_e1003` | 1872x1404 landscape ED103TC2 | 16-level gray |
 | `reterminal_e1004` | 1600x1200 landscape T133A01 | six-color |
+| `reterminal_e1005` | 480x800 portrait SSD1677 | monochrome dithering |
 
 Use the environment matching the physical device; panel drivers and
 dimensions differ between models.
@@ -84,8 +88,8 @@ and run:
 pio run -e reterminal_e1001
 ```
 
-Replace the environment with `reterminal_e1002`, `reterminal_e1003`, or
-`reterminal_e1004` as needed.
+Replace the environment with `reterminal_e1002`, `reterminal_e1003`,
+`reterminal_e1004`, or `reterminal_e1005` as needed.
 
 ### 2. Open the configuration portal
 
@@ -100,9 +104,9 @@ deep-sleep wakes leave the existing calendar visible until refreshed data is
 ready.
 
 To reopen the portal later, wake the sleeping device while holding the green
-button for at least two seconds, then release it before five seconds. Press it
-again to leave the portal after saving. The **SD** tab exposes the inserted
-microSD card through the same web UI.
+button (OK on E1005) for at least two seconds, then release it before five
+seconds. Press it again to leave the portal after saving. The **SD** tab exposes
+the inserted microSD card through the same web UI.
 
 ### 3. Configure a calendar source
 
@@ -272,8 +276,11 @@ for temporary provider failures; no SD card is required.
 
 | Action from deep sleep | Result |
 | --- | --- |
-| Tap any front button | Refresh calendar and weather |
-| Hold green for at least 2 seconds | Open the configuration portal |
+| Tap any front button on E1001-E1004 | Refresh calendar and weather |
+| Tap OK on E1005 | Refresh and show Today plus Upcoming |
+| Tap UP on E1005 | Refresh and show the seven-day Week view |
+| Tap DOWN on E1005 | Refresh and show the six-week Month view |
+| Hold green, or OK on E1005, for at least 2 seconds | Open the configuration portal |
 | Wait for the timer | Check for calendar and weather updates |
 
 Button wakes bypass HTTP caches. Scheduled wakes are suppressed during
@@ -297,8 +304,9 @@ schedule; an unchanged error does not cause another panel refresh.
 
 The five-second screenshot gesture is compiled out by default. A development
 build can enable it with `-D CALENDAR_GREEN_SCREENSHOT_ENABLED=1`; holding green
-for five seconds then saves the rendered dashboard to `/screenshot.png`. The
-two-second configuration gesture and SD web UI remain enabled either way.
+(OK on E1005) for five seconds then saves the rendered page to
+`/screenshot.png`. The two-second configuration gesture and SD web UI remain
+enabled either way.
 
 The **SD** page can browse, upload, download, delete, and create files and
 folders. Its **Erase SD card** section reformats the card as FAT32 after
@@ -336,6 +344,7 @@ pio run -e reterminal_e1001
 pio run -e reterminal_e1002
 pio run -e reterminal_e1003
 pio run -e reterminal_e1004
+pio run -e reterminal_e1005
 ```
 
 Serial logging uses UART1 on GPIO43/GPIO44 at 115200 baud. Google request

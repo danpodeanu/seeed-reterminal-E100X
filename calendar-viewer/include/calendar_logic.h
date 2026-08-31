@@ -175,6 +175,33 @@ inline bool frameComponentChanged(uint16_t changes,
 inline constexpr uint32_t kConfigPortalHoldMs = 2000;
 inline constexpr uint32_t kScreenshotHoldMs = 5000;
 
+inline constexpr bool validCalendarView(config::CalendarView view) {
+  return view == config::CalendarView::Today ||
+         view == config::CalendarView::Week ||
+         view == config::CalendarView::Month;
+}
+
+inline constexpr config::CalendarView calendarViewForButtons(
+    bool todayPressed, bool weekPressed, bool monthPressed,
+    config::CalendarView retained) {
+  if (todayPressed) return config::CalendarView::Today;
+  if (weekPressed) return config::CalendarView::Week;
+  if (monthPressed) return config::CalendarView::Month;
+  return validCalendarView(retained) ? retained : config::CalendarView::Today;
+}
+
+inline constexpr const char* calendarViewName(config::CalendarView view) {
+  switch (view) {
+    case config::CalendarView::Week:
+      return "Week";
+    case config::CalendarView::Month:
+      return "Month";
+    case config::CalendarView::Today:
+    default:
+      return "Today";
+  }
+}
+
 inline PrimaryButtonAction classifyPrimaryButtonHold(
     uint32_t heldMilliseconds, bool screenshotEnabled) {
   if (screenshotEnabled &&

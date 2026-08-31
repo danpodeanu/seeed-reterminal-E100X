@@ -12,8 +12,8 @@
 #define CALENDAR_GREEN_SCREENSHOT_ENABLED 0
 #endif
 
-#if RETERMINAL_MODEL < 1001 || RETERMINAL_MODEL > 1004
-#error "calendar-viewer supports reTerminal E1001, E1002, E1003, and E1004"
+#if RETERMINAL_MODEL < 1001 || RETERMINAL_MODEL > 1005
+#error "calendar-viewer supports reTerminal E1001, E1002, E1003, E1004, and E1005"
 #endif
 
 #include "panel_traits.h"
@@ -28,8 +28,9 @@ constexpr int PANEL_WIDTH =
     ROTATE_PANEL_TO_LANDSCAPE ? panel_traits::HEIGHT : panel_traits::WIDTH;
 constexpr int PANEL_HEIGHT =
     ROTATE_PANEL_TO_LANDSCAPE ? panel_traits::WIDTH : panel_traits::HEIGHT;
-static_assert(PANEL_WIDTH > PANEL_HEIGHT,
-              "Calendar Viewer requires landscape panel geometry");
+static_assert(MODEL == 1005 ? PANEL_HEIGHT > PANEL_WIDTH
+                            : PANEL_WIDTH > PANEL_HEIGHT,
+              "Calendar Viewer panel geometry does not match the model");
 
 constexpr int ui(int e1001Pixels) {
   return panel_traits::scaleUi(e1001Pixels);

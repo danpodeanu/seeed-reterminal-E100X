@@ -20,7 +20,6 @@ const E1005_BOARD = "reterminal_e1005";
 const boardSel = document.getElementById("board");
 const appSel = document.getElementById("app");
 const e1005OnlyApps = new Set(["sticky-arcade", "sticky-fiddle"]);
-const e1001ToE1004OnlyApps = new Set(["calendar-viewer"]);
 const appOptions = Array.from(appSel.options);
 const installer = document.getElementById("installer");
 const status = document.getElementById("status");
@@ -47,7 +46,6 @@ function otaFirmwareCandidates(app, board) {
 
 function appSupportedOnBoard(app, board) {
   if (e1005OnlyApps.has(app)) return board === E1005_BOARD;
-  if (e1001ToE1004OnlyApps.has(app)) return board !== E1005_BOARD;
   return true;
 }
 

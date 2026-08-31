@@ -15,8 +15,8 @@ Hosted at:
 - Presents two dropdowns: board (E1001 / E1002 / E1003 / E1004 /
   E1005 "Seeed Sticky") and
   application (XKCD Viewer / Weather Viewer / Calendar Viewer / Photo Viewer /
-  Sticky Arcade / Sticky Fiddle). Calendar Viewer supports E1001-E1004; Sticky
-  Arcade and Sticky Fiddle are enabled only when E1005 is selected.
+  Sticky Arcade / Sticky Fiddle). The four viewer apps support E1001-E1005;
+  Sticky Arcade and Sticky Fiddle are enabled only when E1005 is selected.
 - Looks up the repository's latest GitHub Release through the public API
   so the version tag can be displayed in the status line.
 - Builds an ESP Web Tools manifest from the E1001-E1004 shared boot-chain

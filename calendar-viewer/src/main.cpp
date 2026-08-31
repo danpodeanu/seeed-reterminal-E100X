@@ -73,7 +73,7 @@ constexpr const char* kFrameHashKey = "frame_hash";
 constexpr const char* kFrameKindKey = "frame_kind";
 constexpr const char* kFrameComponentsKey = "frame_parts";
 // Increment when rendering changes without changing the underlying data.
-constexpr uint32_t kCalendarFrameRevision = 20;
+constexpr uint32_t kCalendarFrameRevision = 21;
 
 enum class FrameKind : uint8_t {
   None = 0,
@@ -86,6 +86,10 @@ usb_screen_capture::Server usbScreenCapture;
 Adafruit_SHT4x sht4;
 sensors::Readings sensorReadings;
 RTC_DATA_ATTR time_t lastNtpSyncEpoch = 0;
+#if RETERMINAL_MODEL == 1005
+RTC_DATA_ATTR uint8_t retainedCalendarView =
+    static_cast<uint8_t>(config::CalendarView::Today);
+#endif
 bool panelStarted = false;
 bool framebufferReady = false;
 bool sdReady = false;
@@ -108,10 +112,26 @@ void beginPanel() {
         config::SENSOR_READ_ATTEMPTS, config::SENSOR_RETRY_DELAY_MS);
   }
 #endif
+#if RETERMINAL_MODEL == 1005
+  if (sdReady) {
+    SD.end();
+    sdReady = false;
+  }
+  // Sticky shares panel SPI signals with the separately powered SD slot.
+  pinMode(PIN_SD_CS, OUTPUT);
+  digitalWrite(PIN_SD_CS, HIGH);
+  peripheral_power::enableSd();
+  delay(board::SD_POWER_SETTLE_MS);
+#endif
   epaper_setup::begin(epaper);
   epaper.setRotation(config::PANEL_ROTATION);
 #if RETERMINAL_MODEL == 1003
   epaper.setTemp(panelWaveformTemperatureC);
+#endif
+#if RETERMINAL_MODEL == 1005
+  LOG.printf("[panel] orientation=portrait rotation=%d geometry=%dx%d\n",
+             config::PANEL_ROTATION, config::PANEL_WIDTH,
+             config::PANEL_HEIGHT);
 #endif
   panelStarted = true;
 }
@@ -155,6 +175,14 @@ void powerDownAndSleep(uint64_t sleepSeconds, bool timerWakeEnabled = true) {
     SD.end();
     sdReady = false;
   }
+#if RETERMINAL_MODEL == 1005
+  if (panelStarted) epaper.getSPIinstance().end();
+  pinMode(PIN_SD_CS, INPUT);
+  pinMode(PIN_SD_SCK, INPUT);
+  pinMode(PIN_SD_MOSI, INPUT);
+  pinMode(PIN_SD_MISO, INPUT);
+  peripheral_power::disableSd();
+#endif
   if (panelStarted) epaper_setup::shutdownPanelPower();
   peripheral_power::disable();
   if (PIN_BATTERY_ENABLE >= 0) {
@@ -286,9 +314,21 @@ struct CalendarFrameFingerprints {
 
 CalendarFrameFingerprints frameFingerprints(
     const calendar::Data& data, const calendar::Window& window,
-    const WeatherData& weather, const String& diagnosticFooter, time_t now) {
+    config::CalendarView view, const WeatherData& weather,
+    const String& diagnosticFooter, time_t now) {
   CalendarFrameFingerprints result;
-  const uint64_t calendarHash = calendar_logic::dataFingerprint(data, window);
+  calendar::Window visibleWindow = window;
+#if RETERMINAL_MODEL == 1005
+  if (view == config::CalendarView::Today) {
+    visibleWindow.start = calendar_logic::localMidnight(now);
+    visibleWindow.end = calendar_logic::addLocalDays(visibleWindow.start, 43);
+  } else {
+    visibleWindow = calendar_logic::displayWindow(
+        view, now, calendar_config::runtime::weekStart());
+  }
+#endif
+  const uint64_t calendarHash =
+      calendar_logic::dataFingerprint(data, visibleWindow);
 
   calendar_logic::Fingerprint rendererHash;
   rendererHash.addValue(kCalendarFrameRevision);
@@ -309,10 +349,21 @@ CalendarFrameFingerprints frameFingerprints(
   presentationHash.add(std::string(calendar_config::runtime::locationName()));
   presentationHash.addValue(calendar_config::runtime::temperatureUnit());
   presentationHash.addValue(calendar_config::runtime::windSpeedUnit());
+#if RETERMINAL_MODEL == 1005
+  presentationHash.addValue(view);
+#else
+  static_cast<void>(view);
+#endif
   result.components.presentation = presentationHash.value();
 
+  const bool environmentVisible =
+#if RETERMINAL_MODEL == 1005
+      view == config::CalendarView::Today;
+#else
+      true;
+#endif
   const bool climateValid =
-      sensorReadings.climateValid &&
+      environmentVisible && sensorReadings.climateValid &&
       isfinite(sensorReadings.temperatureC) &&
       isfinite(sensorReadings.humidityPct);
   result.components.indoorClimateValid = climateValid ? 1U : 0U;
@@ -334,7 +385,7 @@ CalendarFrameFingerprints frameFingerprints(
                                                                         : 0U;
 
   calendar_logic::Fingerprint weatherHash;
-  addRoundedWeather(weatherHash, weather);
+  if (environmentVisible) addRoundedWeather(weatherHash, weather);
   result.components.weather = weatherHash.value();
 
   struct tm localDate = {};
@@ -361,7 +412,7 @@ void logCalendarFrameChanges(
     bool havePreviousComponents,
     const calendar_logic::FrameComponents& previousComponents,
     const calendar_logic::FrameComponents& currentComponents,
-    uint16_t changes,
+    config::CalendarView view, uint16_t changes,
     const calendar::Data& data, const WeatherData& weather,
     time_t now) {
   if (!havePreviousFrame) {
@@ -400,6 +451,10 @@ void logCalendarFrameChanges(
   }
   if (calendar_logic::frameComponentChanged(
           changes, FrameComponentChange::Presentation)) {
+#if RETERMINAL_MODEL == 1005
+    LOG.printf("[display] changed: selected view (%s)\n",
+               calendar_logic::calendarViewName(view));
+#endif
     LOG.printf(
         "[display] changed: presentation settings (week=%s, clock=%s, "
         "single-calendar-background=%s, timezone=%s, location=%s, units=%s/%s)"
@@ -711,20 +766,21 @@ calendar_logic::PrimaryButtonAction primaryGesture(bool pressedAtBoot) {
       calendar_logic::classifyPrimaryButtonHold(
           heldMs, config::GREEN_SCREENSHOT_ENABLED);
   if (action == PrimaryButtonAction::Refresh) {
-    LOG.printf("[gesture] green released after %u ms; refreshing\n",
-               static_cast<unsigned>(heldMs));
+    LOG.printf("[gesture] %s released after %u ms; refreshing\n",
+               PRIMARY_BUTTON_LABEL, static_cast<unsigned>(heldMs));
     return action;
   }
 
   hardware::beep();
   if (action == PrimaryButtonAction::Portal) {
-    LOG.printf("[gesture] green held for %u ms; entering configuration portal\n",
-               static_cast<unsigned>(heldMs));
+    LOG.printf(
+        "[gesture] %s held for %u ms; entering configuration portal\n",
+        PRIMARY_BUTTON_LABEL, static_cast<unsigned>(heldMs));
     return action;
   }
 
-  LOG.printf("[gesture] green held for %u ms; capturing screenshot\n",
-             static_cast<unsigned>(heldMs));
+  LOG.printf("[gesture] %s held for %u ms; capturing screenshot\n",
+             PRIMARY_BUTTON_LABEL, static_cast<unsigned>(heldMs));
   if (!released) {
     const uint32_t releaseWaitStarted = millis();
     uint32_t releaseStableSince = 0;
@@ -745,9 +801,11 @@ calendar_logic::PrimaryButtonAction primaryGesture(bool pressedAtBoot) {
 
 String portalHint() {
   if (config::GREEN_SCREENSHOT_ENABLED) {
-    return "Press green to retry; hold 2s to configure or 5s for screenshot";
+    return String("Press ") + PRIMARY_BUTTON_LABEL +
+           " to retry; hold 2s to configure or 5s for screenshot";
   }
-  return "Press green to retry or hold green for 2s to configure";
+  return String("Press ") + PRIMARY_BUTTON_LABEL + " to retry or hold " +
+         PRIMARY_BUTTON_LABEL + " for 2s to configure";
 }
 
 String googleFailureForDisplay(String failure) {
@@ -805,7 +863,13 @@ void setup() {
       esp_sleep_get_wakeup_cause();
   const bool coldBoot = wakeCause == ESP_SLEEP_WAKEUP_UNDEFINED;
   const bool buttonWake = wakeCause == ESP_SLEEP_WAKEUP_EXT1;
-  if (coldBoot) invalidateFrameState();
+  if (coldBoot) {
+    invalidateFrameState();
+#if RETERMINAL_MODEL == 1005
+    retainedCalendarView =
+        static_cast<uint8_t>(config::CalendarView::Today);
+#endif
+  }
   const uint64_t wakePins =
       buttonWake ? esp_sleep_get_ext1_wakeup_status() : 0;
 
@@ -815,9 +879,20 @@ void setup() {
   const bool greenWake =
       (wakePins & (1ULL << PIN_BUTTON_GREEN)) != 0 ||
       (buttonWake && !digitalRead(PIN_BUTTON_GREEN));
+  const bool rightWake =
+      (wakePins & (1ULL << PIN_BUTTON_RIGHT)) != 0 ||
+      (buttonWake && !digitalRead(PIN_BUTTON_RIGHT));
+  const bool leftWake =
+      (wakePins & (1ULL << PIN_BUTTON_LEFT)) != 0 ||
+      (buttonWake && !digitalRead(PIN_BUTTON_LEFT));
+  const bool greenPressed =
+      greenWake || (coldBoot && !digitalRead(PIN_BUTTON_GREEN));
+  const bool rightPressed =
+      rightWake || (coldBoot && !digitalRead(PIN_BUTTON_RIGHT));
+  const bool leftPressed =
+      leftWake || (coldBoot && !digitalRead(PIN_BUTTON_LEFT));
 
-  calendar_logic::PrimaryButtonAction gesture = primaryGesture(
-      greenWake || (coldBoot && !digitalRead(PIN_BUTTON_GREEN)));
+  calendar_logic::PrimaryButtonAction gesture = primaryGesture(greenPressed);
   screenshotRequested =
       gesture == calendar_logic::PrimaryButtonAction::Screenshot;
   const bool noWifi = !calendar_wifi::haveCredentials();
@@ -842,12 +917,29 @@ void setup() {
     return;
   }
 
+  config::CalendarView activeCalendarView = config::CalendarView::Today;
+#if RETERMINAL_MODEL == 1005
+  const bool todaySelected =
+      greenPressed &&
+      gesture == calendar_logic::PrimaryButtonAction::Refresh;
+  activeCalendarView = calendar_logic::calendarViewForButtons(
+      todaySelected, rightPressed, leftPressed,
+      static_cast<config::CalendarView>(retainedCalendarView));
+  retainedCalendarView = static_cast<uint8_t>(activeCalendarView);
+  LOG.printf("[view] selected %s (OK=Today, UP=Week, DOWN=Month)\n",
+             calendar_logic::calendarViewName(activeCalendarView));
+#else
+  static_cast<void>(rightPressed);
+  static_cast<void>(leftPressed);
+#endif
+
   if (app_logic::startupBeepRequired(coldBoot, buttonWake) &&
       gesture == calendar_logic::PrimaryButtonAction::None) {
     hardware::beep();
   }
   if (screenshotRequested) {
-    LOG.println("[screenshot] green-button hold requested PNG export");
+    LOG.printf("[screenshot] %s-button hold requested PNG export\n",
+               PRIMARY_BUTTON_LABEL);
   }
   LOG.printf("[boot] Calendar Viewer %s / %s / fw %s\n",
              MODEL_NAME, COLOR_MODE_NAME, board::FIRMWARE_VERSION);
@@ -891,7 +983,8 @@ void setup() {
     calendar_render::connectionStatus(
         epaper, "Connecting to " + String(calendar_wifi::ssid()),
         connectionDetail, deviceInfo,
-        "From sleep, hold green for 2 seconds to configure");
+        String("From sleep, hold ") + PRIMARY_BUTTON_LABEL +
+            " for 2 seconds to configure");
     refreshPanel();
   }
 
@@ -1029,7 +1122,8 @@ void setup() {
     if (weather.fromCache) footer += " / cached weather";
   }
   const CalendarFrameFingerprints nextFrame =
-      frameFingerprints(calendarData, window, weather, footer, now);
+      frameFingerprints(calendarData, window, activeCalendarView, weather,
+                        footer, now);
   uint64_t previousHash = 0;
   FrameKind previousKind = FrameKind::None;
   const bool havePreviousFrame =
@@ -1050,14 +1144,15 @@ void setup() {
     if (changed) {
       logCalendarFrameChanges(
           havePreviousFrame, previousKind, havePreviousComponents,
-          previousComponents, nextFrame.components, componentChanges,
-          calendarData, weather, now);
+          previousComponents, nextFrame.components, activeCalendarView,
+          componentChanges, calendarData, weather, now);
     }
     beginPanel();
     initializePanelColorMode();
     calendar_render::calendar(
-        epaper, calendarData, window, calendar_config::runtime::weekStart(),
-        now, sensorReadings, weather, footer);
+        epaper, calendarData, window, activeCalendarView,
+        calendar_config::runtime::weekStart(), now, sensorReadings, weather,
+        footer);
     framebufferReady = true;
     const bool screenshotSaved = saveRequestedScreenshot();
     if (changed) {

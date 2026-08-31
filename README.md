@@ -31,7 +31,7 @@ details.
 | --- | --- | --- |
 | [XKCD Viewer](xkcd-viewer/) | A battery-powered random XKCD display with model-aware scaling, optional SD caching, Unicode titles, environmental readings, and deep sleep. | Available |
 | [Weather Viewer](weather-viewer/) | A low-power current-conditions and three-day forecast display using QWeather or Open-Meteo, with local environmental readings, severe-weather alerts, Unicode location names, and deep sleep. | Available |
-| [Calendar Viewer](calendar-viewer/) | Today, week, and month calendars from iCalendar or Google Calendar, with provider colors, indoor climate, weather, and change-only e-paper refreshes. | Available on E1001-E1004 |
+| [Calendar Viewer](calendar-viewer/) | Today, week, and month calendars from iCalendar or Google Calendar, with provider colors, indoor climate, weather, and change-only e-paper refreshes. | Available |
 | [Photo Viewer](photo-viewer/) | A private, SD-card photo frame with panel-native preprocessing, full model-specific color, quiet hours, daily time sync, and deep sleep. | Available |
 | [Sticky Arcade](sticky-arcade/) | Eighteen E1005 activities with fast refresh and resumable state: seventeen touch games plus a read-only SD browser and EPUB reader. | Available on E1005 |
 | [Sticky Fiddle](sticky-fiddle/) | Nine no-pressure E1005 touch activities for idle hands, including Bubble Wrap, Zen Rake, Kaleidoscope, Inkblot, Pebble Stack, and Worry Stone. | Available on E1005 |
@@ -141,11 +141,12 @@ family. Panel resolution, color capabilities, peripherals, and pin mappings
 differ between models, so consult each application's README before building or
 uploading firmware.
 
-XKCD Viewer, Weather Viewer, and Photo Viewer support E1001-E1005, including
-the monochrome Seeed reTerminal E1005 ("Seeed Sticky") in portrait and both
-landscape directions. Calendar Viewer supports E1001-E1004. Sticky Arcade and
-Sticky Fiddle are intentionally E1005-only because they depend on the
-integrated touch screen. E1005 hardware tools live under `tools/`.
+XKCD Viewer, Weather Viewer, Photo Viewer, and Calendar Viewer support
+E1001-E1005, including the monochrome Seeed reTerminal E1005 ("Seeed Sticky").
+The first three support E1005 portrait and both landscape directions; Calendar
+uses a dedicated portrait interface. Sticky Arcade and Sticky Fiddle are
+intentionally E1005-only because they depend on the integrated touch screen.
+E1005 hardware tools live under `tools/`.
 Model-specific firmware for supported combinations is included in releases.
 
 ## Getting started
@@ -233,7 +234,7 @@ Use the same command inside `weather-viewer`, `calendar-viewer`, or
 `photo-viewer`. Their GitHub Actions workflows run these tests on every
 relevant push and pull request.
 
-Release qualification builds all 21 supported application/board combinations.
+Release qualification builds all 22 supported application/board combinations.
 
 ## Contributing
 

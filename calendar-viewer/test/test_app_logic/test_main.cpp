@@ -5,6 +5,7 @@
 
 #include "calendar_latin_text.h"
 #include "calendar_logic.h"
+#include "calendar_portrait_layout.h"
 #include "calendar_render_geometry.h"
 #include "ical_parser.h"
 #include "local_time.h"
@@ -153,6 +154,33 @@ void test_primary_button_hold_classification() {
       static_cast<int>(PrimaryButtonAction::Portal),
       static_cast<int>(
           calendar_logic::classifyPrimaryButtonHold(5000, false)));
+}
+
+void test_e1005_buttons_select_and_retain_calendar_views() {
+  using config::CalendarView;
+
+  TEST_ASSERT_EQUAL(
+      static_cast<int>(CalendarView::Today),
+      static_cast<int>(calendar_logic::calendarViewForButtons(
+          true, false, false, CalendarView::Month)));
+  TEST_ASSERT_EQUAL(
+      static_cast<int>(CalendarView::Week),
+      static_cast<int>(calendar_logic::calendarViewForButtons(
+          false, true, false, CalendarView::Today)));
+  TEST_ASSERT_EQUAL(
+      static_cast<int>(CalendarView::Month),
+      static_cast<int>(calendar_logic::calendarViewForButtons(
+          false, false, true, CalendarView::Today)));
+  TEST_ASSERT_EQUAL(
+      static_cast<int>(CalendarView::Week),
+      static_cast<int>(calendar_logic::calendarViewForButtons(
+          false, false, false, CalendarView::Week)));
+  TEST_ASSERT_EQUAL(
+      static_cast<int>(CalendarView::Today),
+      static_cast<int>(calendar_logic::calendarViewForButtons(
+          false, false, false, static_cast<CalendarView>(99))));
+  TEST_ASSERT_EQUAL_STRING(
+      "Month", calendar_logic::calendarViewName(CalendarView::Month));
 }
 
 void test_initial_connection_status_is_limited_to_configured_cold_boots() {
@@ -1030,6 +1058,27 @@ void test_e1004_screenshot_rotation_maps_the_full_landscape_frame() {
   TEST_ASSERT_EQUAL_INT(1599, pixel.y);
 }
 
+void test_e1005_portrait_layout_and_screenshot_cover_the_panel() {
+  using namespace calendar_portrait_layout;
+
+  TEST_ASSERT_TRUE(fitsPanel(PANEL_WIDTH, PANEL_HEIGHT));
+  TEST_ASSERT_EQUAL_INT(76, WEATHER.top);
+  TEST_ASSERT_EQUAL_INT(744, UPCOMING.top + UPCOMING.height);
+  TEST_ASSERT_EQUAL_INT(76, weekRow(0).top);
+  TEST_ASSERT_EQUAL_INT(744, weekRow(6).top + weekRow(6).height);
+  TEST_ASSERT_EQUAL_INT(
+      744, monthCell(5, 6).top + monthCell(5, 6).height);
+  TEST_ASSERT_EQUAL_INT(800, NAVIGATION_TOP + NAVIGATION_HEIGHT);
+
+  screenshot::PixelCoordinate pixel =
+      screenshot::nativePixelCoordinate(1, 480, 800, 0, 0);
+  TEST_ASSERT_EQUAL_INT(799, pixel.x);
+  TEST_ASSERT_EQUAL_INT(0, pixel.y);
+  pixel = screenshot::nativePixelCoordinate(1, 480, 800, 479, 799);
+  TEST_ASSERT_EQUAL_INT(0, pixel.x);
+  TEST_ASSERT_EQUAL_INT(479, pixel.y);
+}
+
 void test_calendar_latin_font_decodes_supported_utf8() {
   const std::string text =
       "\xC3\xA9\xC5\x81\xE1\xBB\xB9\xE2\x80\x93\xE2\x82\xAC";
@@ -1232,6 +1281,7 @@ int main(int, char**) {
   RUN_TEST(test_google_oauth_failure_classification);
   RUN_TEST(test_google_api_fallback_statuses);
   RUN_TEST(test_primary_button_hold_classification);
+  RUN_TEST(test_e1005_buttons_select_and_retain_calendar_views);
   RUN_TEST(
       test_initial_connection_status_is_limited_to_configured_cold_boots);
   RUN_TEST(
@@ -1274,6 +1324,7 @@ int main(int, char**) {
   RUN_TEST(test_header_icon_and_title_are_centered_as_one_group);
   RUN_TEST(test_grid_today_fill_and_week_label_geometry);
   RUN_TEST(test_e1004_screenshot_rotation_maps_the_full_landscape_frame);
+  RUN_TEST(test_e1005_portrait_layout_and_screenshot_cover_the_panel);
   RUN_TEST(test_calendar_latin_font_decodes_supported_utf8);
   RUN_TEST(test_calendar_latin_font_excludes_other_scripts);
   RUN_TEST(test_agenda_band_geometry_keeps_today_larger_than_upcoming);

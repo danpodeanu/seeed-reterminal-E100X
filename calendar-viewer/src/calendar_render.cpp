@@ -10,6 +10,7 @@
 #include "calendar_config_runtime.h"
 #include "calendar_latin_font.h"
 #include "calendar_logic.h"
+#include "calendar_portrait_layout.h"
 #include "calendar_render_geometry.h"
 #include "config.h"
 #include "dither.h"
@@ -56,6 +57,14 @@ void selectFont(EPaper& epaper, FontSize size) {
     pixelSize = 36;
   } else if (size == FontSize::Small) {
     pixelSize = 24;
+  }
+#elif RETERMINAL_MODEL == 1005
+  if (size == FontSize::Large) {
+    pixelSize = 36;
+  } else if (size == FontSize::Medium) {
+    pixelSize = 24;
+  } else if (size == FontSize::Tiny) {
+    pixelSize = 16;
   }
 #else
   if (size == FontSize::Large) {
@@ -180,6 +189,8 @@ uint32_t nearestCalendarInk(uint32_t rgb) {
       static_cast<uint8_t>(std::min(15, (calendar_logic::luminance(rgb) + 8) /
                                              17));
   return TFT_GRAY_0 + level;
+#elif RETERMINAL_MODEL == 1005
+  return calendar_logic::luminance(rgb) >= 128 ? TFT_WHITE : TFT_BLACK;
 #else
   const uint8_t level =
       static_cast<uint8_t>(std::min(3, (calendar_logic::luminance(rgb) + 42) /
@@ -197,6 +208,8 @@ constexpr DitherPalette eventDitherPalette() {
   return PAL_GRAY4;
 #elif RETERMINAL_MODEL == 1003
   return PAL_GRAY16;
+#elif RETERMINAL_MODEL == 1005
+  return PAL_BW;
 #else
   return PAL_E6;
 #endif
@@ -227,10 +240,32 @@ uint32_t panelInkForDitherCode(uint8_t code) {
   }
 #elif RETERMINAL_MODEL == 1003
   return TFT_GRAY_0 + std::min<uint8_t>(15, code);
+#elif RETERMINAL_MODEL == 1005
+  return code == 0 ? TFT_BLACK : TFT_WHITE;
 #else
   return TFT_GRAY_0 + std::min<uint8_t>(3, code);
 #endif
 }
+
+#if RETERMINAL_MODEL == 1005
+constexpr uint8_t kMonochromeBayer4[4][4] = {
+    {0, 8, 2, 10},
+    {12, 4, 14, 6},
+    {3, 11, 1, 9},
+    {15, 7, 13, 5},
+};
+
+uint8_t monochromeDitherThreshold(uint32_t rgb) {
+  const uint16_t darkness =
+      static_cast<uint16_t>(255 - calendar_logic::luminance(rgb));
+  return static_cast<uint8_t>(std::min<uint16_t>(16, (darkness + 15) / 16));
+}
+
+bool monochromeDitherPixel(uint32_t rgb, int x, int y) {
+  return kMonochromeBayer4[y & 3][x & 3] <
+         monochromeDitherThreshold(rgb);
+}
+#endif
 
 class ColorDitherer {
  public:
@@ -241,6 +276,13 @@ class ColorDitherer {
 
   void fillRect(EPaper& epaper, int left, int top, int width, int height,
                 uint32_t rgb) {
+#if RETERMINAL_MODEL == 1005
+    const uint8_t threshold = monochromeDitherThreshold(rgb);
+    text_render::fillDitheredRect(
+        epaper, left, top, width, height, config::PANEL_WIDTH,
+        config::PANEL_HEIGHT, PANEL_WHITE, threshold != 0, PANEL_BLACK,
+        threshold);
+#else
     if (!render(rgb, width, height)) {
       warnOnce();
       epaper.fillRect(left, top, width, height, nearestCalendarInk(rgb));
@@ -269,10 +311,25 @@ class ColorDitherer {
       epaper.pushImage(left, top + y, width, 1,
                        reinterpret_cast<uint16_t*>(indices_ + y * rowBytes));
     }
+#endif
   }
 
   void fillCircle(EPaper& epaper, int centerX, int centerY, int radius,
                   uint32_t rgb) {
+#if RETERMINAL_MODEL == 1005
+    const int radiusSquared = radius * radius;
+    for (int y = -radius; y <= radius; ++y) {
+      for (int x = -radius; x <= radius; ++x) {
+        if (x * x + y * y > radiusSquared) continue;
+        const int panelX = centerX + x;
+        const int panelY = centerY + y;
+        epaper.drawPixel(panelX, panelY,
+                         monochromeDitherPixel(rgb, panelX, panelY)
+                             ? PANEL_BLACK
+                             : PANEL_WHITE);
+      }
+    }
+#else
     const int diameter = radius * 2 + 1;
     if (!render(rgb, diameter, diameter)) {
       warnOnce();
@@ -289,6 +346,7 @@ class ColorDitherer {
                          panelInkForDitherCode(indices_[y * diameter + x]));
       }
     }
+#endif
   }
 
   void fillRoundedRect(EPaper& epaper, int left, int top, int width,
@@ -413,7 +471,7 @@ String wind(float kmh) {
   return String(value, 0) + " " + unit;
 }
 
-void drawHeader(EPaper& epaper, time_t now,
+void drawHeader(EPaper& epaper, config::CalendarView view, time_t now,
                 const sensors::Readings& indoor) {
 #if RETERMINAL_MODEL == 1003
   constexpr int height = 132;
@@ -421,6 +479,9 @@ void drawHeader(EPaper& epaper, time_t now,
 #elif RETERMINAL_MODEL == 1004
   constexpr int height = 112;
   constexpr int margin = 26;
+#elif RETERMINAL_MODEL == 1005
+  constexpr int height = calendar_portrait_layout::HEADER_HEIGHT;
+  constexpr int margin = 12;
 #else
   constexpr int height = 64;
   constexpr int margin = 16;
@@ -430,13 +491,38 @@ void drawHeader(EPaper& epaper, time_t now,
   epaper.drawFastHLine(0, height - 1, config::PANEL_WIDTH, PANEL_BLACK);
   epaper.setTextColor(PANEL_BLACK, PANEL_HEADER_BACKGROUND, true);
   selectFont(epaper, FontSize::Medium);
+#if RETERMINAL_MODEL == 1005
+  String heading;
+  if (view == config::CalendarView::Month) {
+    heading = formatDate(now, "%B %Y");
+  } else if (view == config::CalendarView::Week) {
+    String weekDate = formatDate(
+        calendar_logic::startOfWeek(
+            now, calendar_config::runtime::weekStart()),
+        "%e %b");
+    weekDate.trim();
+    heading = "Week of " + weekDate;
+  } else {
+    heading = formatDate(now, "%a, %e %b");
+  }
+  constexpr int headingSurfaceWidth = config::PANEL_WIDTH - 96;
+  constexpr int calendarIconSize = 22;
+#else
+  static_cast<void>(view);
   const String heading = formatDate(now, "%A, %e %B");
   const int calendarIconSize = config::ui(26);
+#endif
   const int calendarIconGap = config::ui(8);
   const int headingWidth = epaper.textWidth(heading);
+#if RETERMINAL_MODEL == 1005
+  const calendar_render_geometry::HeaderGroup headingGroup =
+      calendar_render_geometry::centeredHeaderGroup(
+          headingSurfaceWidth, calendarIconSize, calendarIconGap, headingWidth);
+#else
   const calendar_render_geometry::HeaderGroup headingGroup =
       calendar_render_geometry::centeredHeaderGroup(
           config::PANEL_WIDTH, calendarIconSize, calendarIconGap, headingWidth);
+#endif
   drawCalendarIcon(epaper,
                    headingGroup.iconLeft,
                    height / 2 - calendarIconSize * 7 / 16,
@@ -450,7 +536,11 @@ void drawHeader(EPaper& epaper, time_t now,
   const int terminalWidth = std::max(3, config::ui(5));
   const int batteryX =
       config::PANEL_WIDTH - margin - terminalWidth - batteryWidth;
+#if RETERMINAL_MODEL == 1005
+  const int batteryY = (height - batteryHeight) / 2;
+#else
   const int batteryY = std::max(3, margin / 2);
+#endif
   const int outline = std::max(1, config::ui(1));
   const int terminalHeight = std::max(3, config::ui(5));
   const int batteryPct = indoor.batteryValid ? indoor.batteryPct : -1;
@@ -826,16 +916,29 @@ void drawAgendaCard(EPaper& epaper, ColorDitherer& ditherer,
     const int barHeight = band.height;
     const int radius = std::min(config::ui(8), barHeight / 2);
     const int textPadding = std::max(config::ui(7), radius);
+#if RETERMINAL_MODEL == 1005
+    const int colorStripeWidth = 7;
+    epaper.fillRect(barLeft, barTop, barWidth, barHeight, PANEL_WHITE);
+    epaper.drawRect(barLeft, barTop, barWidth, barHeight, PANEL_BLACK);
+    ditherer.fillRect(epaper, barLeft + 1, barTop + 1, colorStripeWidth,
+                      std::max(1, barHeight - 2), event.colorRgb);
+    const int textLeft = barLeft + colorStripeWidth + textPadding;
+    const int textWidth =
+        std::max(0, barWidth - colorStripeWidth - textPadding * 2);
+    constexpr uint32_t eventInk = PANEL_BLACK;
+#else
     const int textLeft = barLeft + textPadding;
     const int textWidth = barWidth - 2 * textPadding;
     ditherer.fillRoundedRect(epaper, barLeft, barTop, barWidth, barHeight,
                              radius, event.colorRgb);
+    const uint32_t eventInk = eventTextInk(event.colorRgb);
+#endif
 #if RETERMINAL_MODEL == 1001 || RETERMINAL_MODEL == 1002
     selectFont(epaper, FontSize::Tiny);
 #else
     selectFont(epaper, FontSize::Small);
 #endif
-    epaper.setTextColor(eventTextInk(event.colorRgb));
+    epaper.setTextColor(eventInk);
     const int metadataY = barTop + barHeight / 4;
     const int titleY = barTop + barHeight * 3 / 4;
     epaper.setTextDatum(ML_DATUM);
@@ -860,7 +963,7 @@ void drawAgendaCard(EPaper& epaper, ColorDitherer& ditherer,
         event.title, textWidth, calendar_latin_font::Size::Agenda);
     calendar_latin_font::drawLeftMiddle(
         epaper, title, textLeft, titleY, calendar_latin_font::Size::Agenda,
-        eventTextInk(event.colorRgb));
+        eventInk);
     y += rowHeight;
   }
   if (layout.showMore) {
@@ -1103,6 +1206,289 @@ void drawGrid(EPaper& epaper, ColorDitherer& ditherer,
   epaper.setTextDatum(TL_DATUM);
 }
 
+#if RETERMINAL_MODEL == 1005
+calendar_render_geometry::Rect portraitRect(
+    const calendar_portrait_layout::Rect& rect) {
+  return {rect.left, rect.top, rect.width, rect.height};
+}
+
+void drawPortraitEventBand(
+    EPaper& epaper, ColorDitherer& ditherer,
+    const ::calendar::Event& event, int left, int top, int width, int height,
+    const String& label) {
+  constexpr int colorStripeWidth = 7;
+  constexpr int textPadding = 7;
+  epaper.fillRect(left, top, width, height, PANEL_WHITE);
+  epaper.drawRect(left, top, width, height, PANEL_BLACK);
+  ditherer.fillRect(epaper, left + 1, top + 1, colorStripeWidth,
+                    std::max(1, height - 2), event.colorRgb);
+  const int textLeft = left + colorStripeWidth + textPadding;
+  const int textWidth =
+      std::max(0, width - colorStripeWidth - textPadding * 2);
+  const String clipped = calendar_latin_font::ellipsize(
+      std::string(label.c_str()), textWidth,
+      calendar_latin_font::Size::Grid);
+  calendar_latin_font::drawLeftMiddle(
+      epaper, clipped, textLeft, top + height / 2,
+      calendar_latin_font::Size::Grid, PANEL_BLACK);
+}
+
+void drawPortraitToday(EPaper& epaper, ColorDitherer& ditherer,
+                       const ::calendar::Data& data, time_t now,
+                       const sensors::Readings& indoor,
+                       const WeatherData& weather) {
+  BodyGeometry weatherBody{};
+  weatherBody.weatherLeft = calendar_portrait_layout::WEATHER.left;
+  weatherBody.weatherTop = calendar_portrait_layout::WEATHER.top;
+  weatherBody.weatherWidth = calendar_portrait_layout::WEATHER.width;
+  weatherBody.weatherHeight = calendar_portrait_layout::WEATHER.height;
+  drawWeatherCard(epaper, ditherer, weatherBody, weather, indoor);
+
+  const time_t dayStart = calendar_logic::localMidnight(now);
+  const auto& today = calendar_portrait_layout::TODAY;
+  const auto& upcoming = calendar_portrait_layout::UPCOMING;
+  drawAgendaCard(
+      epaper, ditherer,
+      {today.left, today.top, today.width, today.height}, "TODAY",
+      eventStartDate(dayStart), eventsForDay(data, dayStart), dayStart, false);
+  drawAgendaCard(
+      epaper, ditherer,
+      {upcoming.left, upcoming.top, upcoming.width, upcoming.height},
+      "UPCOMING", "", upcomingEvents(data, dayStart), dayStart, true);
+}
+
+void drawPortraitWeek(EPaper& epaper, ColorDitherer& ditherer,
+                      const ::calendar::Data& data,
+                      config::WeekStart weekStart, time_t now) {
+  constexpr int dateColumnWidth = 68;
+  constexpr int bandGap = 4;
+  const time_t weekStartTime = calendar_logic::startOfWeek(now, weekStart);
+
+  for (int index = 0; index < 7; ++index) {
+    const calendar_portrait_layout::Rect row =
+        calendar_portrait_layout::weekRow(index);
+    const time_t day = calendar_logic::addLocalDays(weekStartTime, index);
+    struct tm dayTm = {};
+    localtime_r(&day, &dayTm);
+    const bool today = calendar_logic::sameLocalDate(day, now);
+    const bool weekend = dayTm.tm_wday == 0 || dayTm.tm_wday == 6;
+
+    if (today) {
+      fillTodayCell(epaper, portraitRect(row));
+    } else if (weekend) {
+      ditherer.fillRect(epaper, row.left, row.top, row.width, row.height,
+                        WEEKEND_BACKGROUND_RGB);
+    }
+    if (index > 0) {
+      epaper.drawFastHLine(row.left, row.top, row.width, PANEL_BLACK);
+    }
+    epaper.drawFastVLine(row.left + dateColumnWidth, row.top, row.height,
+                        PANEL_BLACK);
+
+    selectFont(epaper, FontSize::Small);
+    epaper.setTextDatum(MC_DATUM);
+    epaper.setTextColor(PANEL_BLACK);
+    epaper.drawString(weekdayLabel(index, weekStart),
+                      row.left + dateColumnWidth / 2,
+                      row.top + row.height / 3);
+    epaper.drawString(String(dayTm.tm_mday),
+                      row.left + dateColumnWidth / 2,
+                      row.top + row.height * 2 / 3);
+
+    const auto dayEvents = eventsForDay(data, day);
+    const int bandLeft = row.left + dateColumnWidth + 8;
+    const int bandWidth = row.width - dateColumnWidth - 12;
+    const int bandHeight = (row.height - 12 - bandGap) / 2;
+    const int visible = std::min(2, static_cast<int>(dayEvents.size()));
+    for (int eventIndex = 0; eventIndex < visible; ++eventIndex) {
+      const ::calendar::Event& event = *dayEvents[eventIndex];
+      String timeLabel;
+      if (event.allDay) {
+        timeLabel = "All day";
+      } else if (event.start < day) {
+        timeLabel = "Ongoing";
+      } else {
+        timeLabel = formatTime(event.start);
+      }
+      const String label =
+          timeLabel + "  " + String(event.title.c_str());
+      drawPortraitEventBand(
+          epaper, ditherer, event, bandLeft,
+          row.top + 6 + eventIndex * (bandHeight + bandGap), bandWidth,
+          bandHeight, label);
+    }
+    if (static_cast<int>(dayEvents.size()) > visible) {
+      selectFont(epaper, FontSize::Tiny);
+      epaper.setTextDatum(BR_DATUM);
+      epaper.drawString(
+          "+" + String(dayEvents.size() - visible),
+          row.left + dateColumnWidth - 5, row.top + row.height - 4);
+    }
+  }
+  epaper.setTextDatum(TL_DATUM);
+}
+
+void drawPortraitMonth(EPaper& epaper, ColorDitherer& ditherer,
+                       const ::calendar::Data& data,
+                       const ::calendar::Window& window,
+                       config::WeekStart weekStart, time_t now) {
+  const auto& calendar = calendar_portrait_layout::CALENDAR;
+  ditherer.fillRect(epaper, calendar.left, calendar.top, calendar.width,
+                    calendar_portrait_layout::MONTH_HEADER_HEIGHT,
+                    CALENDAR_HEADER_RGB);
+  selectFont(epaper, FontSize::Tiny);
+  epaper.setTextDatum(MC_DATUM);
+  epaper.setTextColor(eventTextInk(CALENDAR_HEADER_RGB));
+  for (int column = 0; column < 7; ++column) {
+    const auto cell = calendar_portrait_layout::monthCell(0, column);
+    epaper.drawString(
+        weekdayLabel(column, weekStart), cell.left + cell.width / 2,
+        calendar.top + calendar_portrait_layout::MONTH_HEADER_HEIGHT / 2);
+  }
+
+  uint32_t calendarBackgroundRgb = 0;
+  const bool haveCalendarBackground =
+      calendar_config::runtime::showSingleCalendarBackground() &&
+      calendar_logic::singleGoogleCalendarColor(data, calendarBackgroundRgb);
+  const uint32_t calendarBackgroundText =
+      eventTextInk(calendarBackgroundRgb);
+  const time_t monthAnchor = calendar_logic::startOfMonth(now);
+  struct tm anchorTm = {};
+  localtime_r(&monthAnchor, &anchorTm);
+
+  for (int rowIndex = 0; rowIndex < 6; ++rowIndex) {
+    for (int column = 0; column < 7; ++column) {
+      const auto cell =
+          calendar_portrait_layout::monthCell(rowIndex, column);
+      const int cellIndex = rowIndex * 7 + column;
+      const time_t day =
+          calendar_logic::addLocalDays(window.start, cellIndex);
+      struct tm dayTm = {};
+      localtime_r(&day, &dayTm);
+      const bool today = calendar_logic::sameLocalDate(day, now);
+      const bool weekend = dayTm.tm_wday == 0 || dayTm.tm_wday == 6;
+      const bool outsideMonth =
+          dayTm.tm_year != anchorTm.tm_year ||
+          dayTm.tm_mon != anchorTm.tm_mon;
+
+      if (haveCalendarBackground) {
+        ditherer.fillRect(epaper, cell.left + 1, cell.top + 1,
+                          cell.width - 1, cell.height - 1,
+                          calendarBackgroundRgb);
+      } else if (weekend) {
+        ditherer.fillRect(epaper, cell.left + 1, cell.top + 1,
+                          cell.width - 1, cell.height - 1,
+                          WEEKEND_BACKGROUND_RGB);
+      }
+      epaper.drawRect(cell.left, cell.top, cell.width, cell.height,
+                      PANEL_BLACK);
+
+      selectFont(epaper, FontSize::Small);
+      epaper.setTextDatum(MC_DATUM);
+      const int dateCenterX = cell.left + cell.width / 2;
+      const int dateCenterY = cell.top + 22;
+      if (today) {
+        epaper.fillCircle(dateCenterX, dateCenterY, 15, PANEL_BLACK);
+        epaper.setTextColor(PANEL_WHITE);
+      } else {
+        epaper.setTextColor(
+            haveCalendarBackground ? calendarBackgroundText : PANEL_BLACK);
+      }
+      String dateLabel = String(dayTm.tm_mday);
+      if (outsideMonth) dateLabel = "(" + dateLabel + ")";
+      epaper.drawString(dateLabel, dateCenterX, dateCenterY);
+
+      const auto dayEvents = eventsForDay(data, day);
+      constexpr int dotRadius = 4;
+      constexpr int dotStep = 12;
+      const int visible =
+          std::min(4, static_cast<int>(dayEvents.size()));
+      const int dotStartX =
+          dateCenterX - (visible - 1) * dotStep / 2;
+      const int dotY = cell.top + cell.height - 14;
+      for (int eventIndex = 0; eventIndex < visible; ++eventIndex) {
+        ditherer.fillCircle(
+            epaper, dotStartX + eventIndex * dotStep, dotY, dotRadius,
+            dayEvents[eventIndex]->colorRgb);
+      }
+      if (static_cast<int>(dayEvents.size()) > visible) {
+        selectFont(epaper, FontSize::Tiny);
+        epaper.setTextColor(
+            haveCalendarBackground ? calendarBackgroundText : PANEL_BLACK);
+        epaper.setTextDatum(BR_DATUM);
+        epaper.drawString(
+            "+" + String(dayEvents.size() - visible),
+            cell.left + cell.width - 3, cell.top + cell.height - 3);
+      }
+    }
+  }
+  epaper.setTextDatum(TL_DATUM);
+}
+
+void drawPortraitFooter(EPaper& epaper, config::CalendarView view,
+                        const String& footer,
+                        const ::calendar::Data& data) {
+  String diagnostics = footer;
+  if (calendar_config::runtime::debugShowStatusBadges()) {
+    if (!diagnostics.isEmpty()) diagnostics += " / ";
+    diagnostics += String(data.events.size()) + " events";
+    if (data.truncated) diagnostics += " (limited)";
+  }
+
+  epaper.fillRect(
+      0, calendar_portrait_layout::DIAGNOSTIC_TOP, config::PANEL_WIDTH,
+      calendar_portrait_layout::NAVIGATION_TOP -
+          calendar_portrait_layout::DIAGNOSTIC_TOP,
+      PANEL_WHITE);
+  if (!diagnostics.isEmpty()) {
+    epaper.setTextSize(1);
+    epaper.setFreeFont(calendar_latin_font::uiFont(10));
+    epaper.setTextColor(PANEL_BLACK);
+    epaper.setTextDatum(MC_DATUM);
+    epaper.drawString(
+        text_render::ellipsize(epaper, diagnostics, config::PANEL_WIDTH - 16),
+        config::PANEL_WIDTH / 2,
+        (calendar_portrait_layout::DIAGNOSTIC_TOP +
+         calendar_portrait_layout::NAVIGATION_TOP) /
+            2);
+  }
+
+  struct NavigationItem {
+    config::CalendarView view;
+    const char* label;
+  };
+  static constexpr NavigationItem kItems[] = {
+      {config::CalendarView::Today, "OK Today"},
+      {config::CalendarView::Week, "UP Week"},
+      {config::CalendarView::Month, "DOWN Month"},
+  };
+  epaper.drawFastHLine(0, calendar_portrait_layout::NAVIGATION_TOP,
+                       config::PANEL_WIDTH, PANEL_BLACK);
+  selectFont(epaper, FontSize::Tiny);
+  epaper.setTextDatum(MC_DATUM);
+  for (int index = 0; index < 3; ++index) {
+    const int left = config::PANEL_WIDTH * index / 3;
+    const int right = config::PANEL_WIDTH * (index + 1) / 3;
+    const bool selected = view == kItems[index].view;
+    if (selected) {
+      epaper.fillRect(
+          left, calendar_portrait_layout::NAVIGATION_TOP, right - left,
+          calendar_portrait_layout::NAVIGATION_HEIGHT, PANEL_BLACK);
+    } else if (index > 0) {
+      epaper.drawFastVLine(
+          left, calendar_portrait_layout::NAVIGATION_TOP,
+          calendar_portrait_layout::NAVIGATION_HEIGHT, PANEL_BLACK);
+    }
+    epaper.setTextColor(selected ? PANEL_WHITE : PANEL_BLACK);
+    epaper.drawString(
+        kItems[index].label, (left + right) / 2,
+        calendar_portrait_layout::NAVIGATION_TOP +
+            calendar_portrait_layout::NAVIGATION_HEIGHT / 2);
+  }
+  epaper.setTextDatum(TL_DATUM);
+}
+#endif
+
 void drawFooter(EPaper& epaper, const String& footer,
                 const ::calendar::Data& data) {
   if (footer.isEmpty() &&
@@ -1243,14 +1629,29 @@ void status(EPaper& epaper, const String& title, const String& detail,
 }
 
 void calendar(EPaper& epaper, const ::calendar::Data& data,
-              const ::calendar::Window& window, config::WeekStart weekStart,
-              time_t now,
+              const ::calendar::Window& window, config::CalendarView view,
+              config::WeekStart weekStart, time_t now,
               const sensors::Readings& indoor, const WeatherData& weather,
               const String& footer) {
   epaper.fillSprite(PANEL_WHITE);
-  drawHeader(epaper, now, indoor);
-  const BodyGeometry body = bodyGeometry();
+  drawHeader(epaper, view, now, indoor);
   ColorDitherer ditherer;
+#if RETERMINAL_MODEL == 1005
+  static_assert(
+      calendar_portrait_layout::fitsPanel(
+          config::PANEL_WIDTH, config::PANEL_HEIGHT),
+      "E1005 Calendar layout must fit the portrait panel");
+  if (view == config::CalendarView::Month) {
+    drawPortraitMonth(epaper, ditherer, data, window, weekStart, now);
+  } else if (view == config::CalendarView::Week) {
+    drawPortraitWeek(epaper, ditherer, data, weekStart, now);
+  } else {
+    drawPortraitToday(epaper, ditherer, data, now, indoor, weather);
+  }
+  drawPortraitFooter(epaper, view, footer, data);
+#else
+  static_cast<void>(view);
+  const BodyGeometry body = bodyGeometry();
   BodyGeometry week = body;
   BodyGeometry month = body;
 #if RETERMINAL_MODEL == 1003
@@ -1277,6 +1678,7 @@ void calendar(EPaper& epaper, const ::calendar::Data& data,
   drawGrid(epaper, ditherer, data, month, window.start, 6, weekStart, now,
            true);
   drawFooter(epaper, footer, data);
+#endif
 }
 
 }  // namespace calendar_render
