@@ -104,6 +104,13 @@ struct Config {
   // a different tab there than it does on /browse.
   const char* navHtml = nullptr;
 
+  // Optional endpoint supplied by an embedding portal for formatting the SD
+  // card. When set, the root file-browser page renders a destructive-action
+  // card with typed confirmation and POSTs to this endpoint. The embedding
+  // portal owns the handler so it can unmount, format, and remount safely.
+  const char* sdFormatEndpoint = nullptr;
+  const char* sdFormatWarning = nullptr;
+
   // --- Optional thumbnail cache -----------------------------------------
   // When both `thumbnailDir` and `thumbnailGenerator` are set, the portal
   // exposes GET /thumbnail?path=/photos/foo.png. Cache lookups return

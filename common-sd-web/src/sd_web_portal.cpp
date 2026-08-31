@@ -673,6 +673,54 @@ String flashHtml() {
   return html;
 }
 
+bool sdFormatAvailable() {
+  return g_config.sdFormatEndpoint && g_config.sdFormatEndpoint[0];
+}
+
+void appendSdFormatSection(String& html) {
+  if (!sdFormatAvailable()) return;
+  html += F(
+      "<section><h2>Erase SD card</h2>"
+      "<p class=\"note\">Reformat the microSD card as a fresh FAT32 volume "
+      "with a new MBR partition table.</p>"
+      "<p class=\"note\"><strong>All files on the card will be lost");
+  if (g_config.sdFormatWarning && g_config.sdFormatWarning[0]) {
+    html += F(" (");
+    html += htmlEscape(g_config.sdFormatWarning);
+    html += ')';
+  }
+  html += F(
+      ".</strong> The card is remounted automatically. This cannot be "
+      "undone.</p>"
+      "<form class=\"row\" id=\"sdFormatForm\">"
+      "<input type=\"text\" id=\"sdFormatConfirm\" autocomplete=\"off\" "
+      "placeholder=\"Type FORMAT to confirm\">"
+      "<button class=\"danger\" type=\"submit\" id=\"sdFormatBtn\" "
+      "data-endpoint=\"");
+  html += htmlEscape(g_config.sdFormatEndpoint);
+  html += F(
+      "\" disabled>Erase SD card</button></form>"
+      "<div class=\"note\" id=\"sdFormatMsg\"></div>"
+      "<script>"
+      "(()=>{const f=document.getElementById('sdFormatForm');"
+      "const i=document.getElementById('sdFormatConfirm');"
+      "const b=document.getElementById('sdFormatBtn');"
+      "const m=document.getElementById('sdFormatMsg');"
+      "i.addEventListener('input',()=>{b.disabled=i.value.trim()!=='FORMAT';});"
+      "f.addEventListener('submit',async e=>{e.preventDefault();"
+      "if(i.value.trim()!=='FORMAT')return;"
+      "b.disabled=true;i.disabled=true;"
+      "m.textContent='Formatting SD card... this may take up to a minute.';"
+      "try{const r=await fetch(b.dataset.endpoint,{method:'POST'});"
+      "const j=await r.json();"
+      "if(!r.ok||!j.ok)throw new Error(j.error||'format failed');"
+      "m.textContent='SD card reformatted. Reloading...';"
+      "setTimeout(()=>{location.href='/browse?path=%2F';},750);"
+      "}catch(x){m.textContent=x.message;i.disabled=false;"
+      "b.disabled=i.value.trim()!=='FORMAT';}});})();"
+      "</script></section>");
+}
+
 // ----- request handlers -----
 
 void handleRoot() {
@@ -704,6 +752,18 @@ void handleBrowse() {
 
   File dir = sd_card::openForRead(path);
   if (!dir) {
+    if (path == "/" && sdFormatAvailable()) {
+      sendPageHeader(F("SD unavailable"), breadcrumb(path));
+      String content = flashHtml();
+      content += F(
+          "<section><h2>Contents</h2>"
+          "<div class=\"empty\">The SD card could not be mounted. "
+          "You can try reformatting it below.</div></section>");
+      appendSdFormatSection(content);
+      sendPageChunk(content);
+      sendPageFooter();
+      return;
+    }
     g_server->sendHeader("Location", "/browse?path=%2F&m=bad");
     g_server->send(302, "text/plain", "");
     return;
@@ -817,7 +877,7 @@ void handleBrowse() {
 
   // Upload + mkdir forms.
   String actions;
-  actions.reserve(1024);
+  actions.reserve(3072);
   actions += F("</section><section><h2>Create folder</h2>");
   actions += F("<form class=\"row\" method=\"post\" action=\"/mkdir\">");
   actions += F("<input type=\"hidden\" name=\"parent\" value=\"");
@@ -834,6 +894,8 @@ void handleBrowse() {
   actions += F("<button>Upload</button></form>");
   actions += F("<div class=\"note\">Uploads are buffered, read back, and verified before replacing an existing file.</div>");
   actions += F("</section>");
+
+  if (path == "/") appendSdFormatSection(actions);
 
   // Reboot back into the viewer (photo-viewer / weather-viewer / etc.).
   // Only shown when the SD portal is embedded inside an app that supplies

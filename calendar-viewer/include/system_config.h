@@ -6,9 +6,10 @@
 #define RETERMINAL_MODEL 1001
 #endif
 
-// This gates only the five-second button gesture; the SD web UI stays enabled.
+// This gates only the optional five-second button gesture; the SD web UI stays
+// enabled. Production builds leave the gesture compiled out by default.
 #ifndef CALENDAR_GREEN_SCREENSHOT_ENABLED
-#define CALENDAR_GREEN_SCREENSHOT_ENABLED 1
+#define CALENDAR_GREEN_SCREENSHOT_ENABLED 0
 #endif
 
 #if RETERMINAL_MODEL < 1001 || RETERMINAL_MODEL > 1004

@@ -267,8 +267,7 @@ for temporary provider failures; no SD card is required.
 | Action from deep sleep | Result |
 | --- | --- |
 | Tap any front button | Refresh calendar and weather |
-| Hold green for 2–5 seconds, then release | Open the configuration portal |
-| Keep holding green for 5 seconds | Save the rendered dashboard to `/screenshot.png` on microSD |
+| Hold green for at least 2 seconds | Open the configuration portal |
 | Wait for the timer | Check for calendar and weather updates |
 
 Button wakes bypass HTTP caches. Scheduled wakes are suppressed during
@@ -287,9 +286,15 @@ failures preserve an existing calendar frame and retry after five minutes.
 Google failures display the API error and retry on the normal configured
 schedule; an unchanged error does not cause another panel refresh.
 
-The five-second screenshot gesture is enabled by default for development. A
-production build can disable only that gesture with
-`-D CALENDAR_GREEN_SCREENSHOT_ENABLED=0`; the SD web UI remains enabled.
+The five-second screenshot gesture is compiled out by default. A development
+build can enable it with `-D CALENDAR_GREEN_SCREENSHOT_ENABLED=1`; holding green
+for five seconds then saves the rendered dashboard to `/screenshot.png`. The
+two-second configuration gesture and SD web UI remain enabled either way.
+
+The **SD** page can browse, upload, download, delete, and create files and
+folders. Its **Erase SD card** section reformats the card as FAT32 after
+`FORMAT` is typed for confirmation. The format control remains available when
+the card has no mountable filesystem so it can be used for recovery.
 
 ## Configuration storage
 
@@ -299,9 +304,9 @@ QWeather values are optional fallbacks for local builds. Never commit real
 credentials.
 
 Google credentials, iCalendar URLs, and calendar data are never written to the
-SD card. A requested screenshot is the only Calendar Viewer file created
-automatically; the SD web UI otherwise changes files only in response to the
-operator.
+SD card. When the optional screenshot gesture is enabled, it writes only
+`/screenshot.png`; the SD web UI otherwise changes files only in response to
+the operator.
 
 The current NVS partition is 20 KiB. Typical Google service-account keys fit
 alongside the app settings, but very large or unusually formatted IAM files

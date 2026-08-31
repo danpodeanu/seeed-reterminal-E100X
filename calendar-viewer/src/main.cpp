@@ -40,7 +40,9 @@
 #include "repo_qr.h"
 #include "rtc_sync.h"
 #include "sensors.h"
+#if CALENDAR_GREEN_SCREENSHOT_ENABLED
 #include "screenshot_png.h"
+#endif
 #include "sd_card.h"
 #include "sd_web_portal.h"
 #include "theme.h"
@@ -575,7 +577,7 @@ void renderPortal() {
         sd_card::formatCard(epaper.getSPIinstance(), config::SD_ROOT, error);
     return sdReady;
   };
-  portal.sdFormatWarning = "screenshots and all other files";
+  portal.sdFormatWarning = "uploaded files and any existing screenshots";
 
   if (!config_portal::begin(portal)) {
     calendar_render::status(epaper, "Configuration unavailable",
@@ -590,6 +592,8 @@ void renderPortal() {
     static String sdHeaderHtml;
     sdHeaderHtml = config_portal::renderHeaderHtml(portal, "sd");
     sdPortal.headerHtml = sdHeaderHtml.c_str();
+    sdPortal.sdFormatEndpoint = "/format-sd.json";
+    sdPortal.sdFormatWarning = portal.sdFormatWarning;
     sd_web_portal::attachRoutes(*server, sdPortal);
   }
 
