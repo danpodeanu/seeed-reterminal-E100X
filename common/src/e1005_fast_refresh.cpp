@@ -19,7 +19,9 @@ namespace {
 constexpr int kDisplayWidth = 480;
 constexpr int kDisplayHeight = 800;
 constexpr int kDisplayStrideBytes = kDisplayHeight / 8;
-constexpr uint32_t kPanelSpiHz = 40000000;
+// The SSD1677 write limit is 20 MHz; Seeed's Sticky driver uses 10 MHz on
+// the SPI bus shared with the SD slot.
+constexpr uint32_t kPanelSpiHz = 10000000;
 constexpr uint32_t kBusyAssertTimeoutUs = 20000;
 constexpr uint32_t kRefreshTimeoutUs = 10000000;
 
@@ -81,7 +83,6 @@ E1005FastRefresh::Result E1005FastRefresh::refresh(
   const NativeRegion native = nativeRegion(clipped);
   const uint8_t internalTemperature = 0x80;
   const uint8_t fastBorderWaveform = 0x80;
-  const uint8_t normalRamComparison = 0x00;
   const uint8_t fastUpdateSequence = 0xFF;
 
   writePanelCommand(0x18, &internalTemperature, 1);
@@ -91,7 +92,6 @@ E1005FastRefresh::Result E1005FastRefresh::refresh(
   setPartialWindow(native);
   writeDisplayPlaneWindow(0x24, nextPlane_, native);
   setPartialWindow(native);
-  writePanelCommand(0x21, &normalRamComparison, 1);
   writePanelCommand(0x22, &fastUpdateSequence, 1);
   const uint32_t panelStartedUs = micros();
   writePanelCommand(0x20);

@@ -79,7 +79,7 @@ constexpr const char* kFrameHashKey = "frame_hash";
 constexpr const char* kFrameKindKey = "frame_kind";
 constexpr const char* kFrameComponentsKey = "frame_parts";
 // Increment when rendering changes without changing the underlying data.
-constexpr uint32_t kCalendarFrameRevision = 26;
+constexpr uint32_t kCalendarFrameRevision = 29;
 
 enum class FrameKind : uint8_t {
   None = 0,
@@ -100,6 +100,10 @@ RTC_DATA_ATTR time_t retainedSelectedDay = 0;
 TwoWire touchWire(1);
 Gt911Touch touch;
 E1005FastRefresh fastRefresh(epaper);
+constexpr uint8_t kSsd1677BorderWaveformCommand = 0x3C;
+constexpr uint8_t kSsd1677FollowLut1 = 0x01;
+constexpr uint8_t kSsd1677DeepSleepCommand = 0x10;
+constexpr uint8_t kSsd1677DeepSleepEnter = 0x03;
 
 struct AwakeButtonState {
   int pin;
@@ -171,7 +175,27 @@ void initializePanelColorMode() {
 #endif
 }
 
+#if RETERMINAL_MODEL == 1005
+void prepareE1005FullRefresh() {
+  epaper.wake();
+  epaper.writecommand(kSsd1677BorderWaveformCommand);
+  epaper.writedata(kSsd1677FollowLut1);
+}
+
+void deepSleepE1005Panel() {
+  epaper.sleep();
+  epaper.writecommand(kSsd1677DeepSleepCommand);
+  epaper.writedata(kSsd1677DeepSleepEnter);
+  delay(100);
+}
+#endif
+
 void refreshPanel() {
+#if RETERMINAL_MODEL == 1005
+  // Seeed_GFX uses a generic SSD1677 border value. The Sticky stock driver
+  // uses LUT1 for full monochrome refreshes.
+  prepareE1005FullRefresh();
+#endif
   panel_watchdog::refresh(epaper);
   framebufferReady = true;
 }
@@ -203,7 +227,10 @@ void powerDownAndSleep(uint64_t sleepSeconds, bool timerWakeEnabled = true) {
     sdReady = false;
   }
 #if RETERMINAL_MODEL == 1005
-  if (panelStarted) epaper.getSPIinstance().end();
+  if (panelStarted) {
+    deepSleepE1005Panel();
+    epaper.getSPIinstance().end();
+  }
   pinMode(PIN_SD_CS, INPUT);
   pinMode(PIN_SD_SCK, INPUT);
   pinMode(PIN_SD_MOSI, INPUT);
@@ -787,9 +814,13 @@ bool fastRefreshRegion(const E1005FastRefresh::Region& region,
 }
 
 void refreshInteractivePage() {
+  const E1005FastRefresh::Region fullPanel = {
+      0, 0, config::PANEL_WIDTH, config::PANEL_HEIGHT};
+  if (fastRefreshRegion(fullPanel, "page")) return;
+
   fastRefresh.end();
   epaper.sleep();
-  LOG.println("[touch] using full refresh for clean page transition");
+  LOG.println("[touch] recovering page transition with a full refresh");
   refreshPanel();
   const E1005FastRefresh::Result result = fastRefresh.begin();
   if (result != E1005FastRefresh::Result::Ok) {

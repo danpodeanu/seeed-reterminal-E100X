@@ -870,9 +870,18 @@ void drawAgendaCard(EPaper& epaper, ColorDitherer& ditherer,
   const int headerIconSize = std::max(10, config::ui(14));
 
   const int contentLeft = card.left + kAgendaMargin;
+#if RETERMINAL_MODEL == 1005
+  // Tiny dark glyphs over a Bayer pattern leave source-direction streaks on
+  // the Sticky panel. A white band preserves the section hierarchy cleanly.
+  epaper.fillRect(card.left, card.top, card.width, headerHeight, PANEL_WHITE);
+  epaper.drawFastHLine(card.left, card.top + headerHeight - 1, card.width,
+                      PANEL_BLACK);
+  constexpr uint32_t headerTextInk = PANEL_BLACK;
+#else
   ditherer.fillRect(epaper, card.left, card.top, card.width, headerHeight,
                    CALENDAR_HEADER_RGB);
   const uint32_t headerTextInk = eventTextInk(CALENDAR_HEADER_RGB);
+#endif
   epaper.setTextColor(headerTextInk);
 #if RETERMINAL_MODEL == 1003 || RETERMINAL_MODEL == 1004
   selectFont(epaper, FontSize::Small);
@@ -1224,6 +1233,14 @@ calendar_render_geometry::Rect portraitRect(
   return {rect.left, rect.top, rect.width, rect.height};
 }
 
+void drawPortraitDottedVLine(EPaper& epaper, int x, int top, int height) {
+  // Avoid long source-direction runs, which the portrait SSD1677 panel can
+  // extend beyond their intended bounds during a refresh.
+  for (int y = top; y < top + height; y += 5) {
+    epaper.drawPixel(x, y, PANEL_BLACK);
+  }
+}
+
 void drawPortraitEventBand(
     EPaper& epaper, ColorDitherer& ditherer,
     const ::calendar::Event& event, int left, int top, int width, int height,
@@ -1296,8 +1313,8 @@ void drawPortraitWeek(EPaper& epaper, ColorDitherer& ditherer,
     if (index > 0) {
       epaper.drawFastHLine(row.left, row.top, row.width, PANEL_BLACK);
     }
-    epaper.drawFastVLine(row.left + dateColumnWidth, row.top, row.height,
-                        PANEL_BLACK);
+    drawPortraitDottedVLine(
+        epaper, row.left + dateColumnWidth, row.top, row.height);
 
     selectFont(epaper, FontSize::Small);
     epaper.setTextDatum(MC_DATUM);
@@ -1347,12 +1364,15 @@ void drawPortraitMonth(EPaper& epaper, ColorDitherer& ditherer,
                        config::WeekStart weekStart, time_t displayDay,
                        time_t now) {
   const auto& calendar = calendar_portrait_layout::CALENDAR;
-  ditherer.fillRect(epaper, calendar.left, calendar.top, calendar.width,
-                    calendar_portrait_layout::MONTH_HEADER_HEIGHT,
-                    CALENDAR_HEADER_RGB);
+  epaper.fillRect(calendar.left, calendar.top, calendar.width,
+                  calendar_portrait_layout::MONTH_HEADER_HEIGHT, PANEL_WHITE);
+  epaper.drawFastHLine(
+      calendar.left,
+      calendar.top + calendar_portrait_layout::MONTH_HEADER_HEIGHT - 1,
+      calendar.width, PANEL_BLACK);
   selectFont(epaper, FontSize::Tiny);
   epaper.setTextDatum(MC_DATUM);
-  epaper.setTextColor(eventTextInk(CALENDAR_HEADER_RGB));
+  epaper.setTextColor(PANEL_BLACK);
   for (int column = 0; column < 7; ++column) {
     const auto cell = calendar_portrait_layout::monthCell(0, column);
     epaper.drawString(
@@ -1396,8 +1416,12 @@ void drawPortraitMonth(EPaper& epaper, ColorDitherer& ditherer,
                           cell.width - 1, cell.height - 1,
                           WEEKEND_BACKGROUND_RGB);
       }
-      epaper.drawRect(cell.left, cell.top, cell.width, cell.height,
-                      PANEL_BLACK);
+      epaper.drawFastHLine(cell.left, cell.top, cell.width, PANEL_BLACK);
+      epaper.drawFastHLine(cell.left, cell.top + cell.height - 1, cell.width,
+                           PANEL_BLACK);
+      drawPortraitDottedVLine(epaper, cell.left, cell.top, cell.height);
+      drawPortraitDottedVLine(
+          epaper, cell.left + cell.width - 1, cell.top, cell.height);
 
       selectFont(epaper, FontSize::Small);
       epaper.setTextDatum(MC_DATUM);
@@ -1482,26 +1506,26 @@ void drawPortraitFooter(EPaper& epaper, config::CalendarView view,
   };
   epaper.drawFastHLine(0, calendar_portrait_layout::NAVIGATION_TOP,
                        config::PANEL_WIDTH, PANEL_BLACK);
+  epaper.fillRect(
+      0, calendar_portrait_layout::NAVIGATION_TOP + 1, config::PANEL_WIDTH,
+      calendar_portrait_layout::NAVIGATION_HEIGHT - 1, PANEL_WHITE);
   selectFont(epaper, FontSize::Tiny);
   epaper.setTextDatum(MC_DATUM);
   for (int index = 0; index < 3; ++index) {
     const int left = config::PANEL_WIDTH * index / 3;
     const int right = config::PANEL_WIDTH * (index + 1) / 3;
     const bool selected = view == kItems[index].view;
-    if (selected) {
-      epaper.fillRect(
-          left, calendar_portrait_layout::NAVIGATION_TOP, right - left,
-          calendar_portrait_layout::NAVIGATION_HEIGHT, PANEL_BLACK);
-    } else if (index > 0) {
-      epaper.drawFastVLine(
-          left, calendar_portrait_layout::NAVIGATION_TOP,
-          calendar_portrait_layout::NAVIGATION_HEIGHT, PANEL_BLACK);
-    }
-    epaper.setTextColor(selected ? PANEL_WHITE : PANEL_BLACK);
+    epaper.setTextColor(PANEL_BLACK);
     epaper.drawString(
         kItems[index].label, (left + right) / 2,
         calendar_portrait_layout::NAVIGATION_TOP +
             calendar_portrait_layout::NAVIGATION_HEIGHT / 2);
+    if (selected) {
+      epaper.fillRect(left + 20,
+                      calendar_portrait_layout::NAVIGATION_TOP +
+                          calendar_portrait_layout::NAVIGATION_HEIGHT - 4,
+                      right - left - 40, 3, PANEL_BLACK);
+    }
   }
   epaper.setTextDatum(TL_DATUM);
 }
