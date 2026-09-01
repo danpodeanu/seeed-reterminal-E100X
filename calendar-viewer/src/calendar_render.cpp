@@ -888,40 +888,9 @@ void drawAgendaCard(EPaper& epaper, ColorDitherer& ditherer,
                     contentLeft + headerIconSize + config::ui(6),
                     card.top + headerHeight / 2);
   if (!headerDetail.isEmpty()) {
-#if RETERMINAL_MODEL == 1005
-    const int detailRight = card.left + card.width - kAgendaMargin;
-    const int detailLeft = detailRight - epaper.textWidth(headerDetail);
-    const int separator = headerDetail.indexOf(' ');
-    const String dayNumber =
-        separator < 0 ? headerDetail : headerDetail.substring(0, separator);
-
-    // Remove only Bayer pixels that visually continue the 16 px digit 1 stem.
-    constexpr int kHeaderBaselineOffset = 7;
-    const int clearTop =
-        card.top + headerHeight / 2 + kHeaderBaselineOffset;
-    const int digitOneWidth = epaper.textWidth("1");
-    const int stemWidth = std::max(1, digitOneWidth / 3);
-    for (unsigned int index = 0; index < dayNumber.length(); ++index) {
-      if (dayNumber[index] != '1') continue;
-      const int digitLeft =
-          detailLeft + epaper.textWidth(dayNumber.substring(0, index));
-      const int stemLeft = digitLeft + digitOneWidth / 2;
-      for (int y = clearTop; y < card.top + headerHeight; ++y) {
-        for (int x = stemLeft; x < stemLeft + stemWidth; ++x) {
-          if (monochromeDitherPixel(CALENDAR_HEADER_RGB, x, y)) {
-            epaper.drawPixel(x, y, PANEL_WHITE);
-          }
-        }
-      }
-    }
-    epaper.setTextDatum(ML_DATUM);
-    epaper.drawString(headerDetail, detailLeft,
-                      card.top + headerHeight / 2);
-#else
     epaper.setTextDatum(MR_DATUM);
     epaper.drawString(headerDetail, card.left + card.width - kAgendaMargin,
                       card.top + headerHeight / 2);
-#endif
   }
   if (events.empty()) {
     selectFont(epaper, FontSize::Tiny);

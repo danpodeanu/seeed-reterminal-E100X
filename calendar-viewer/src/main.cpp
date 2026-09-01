@@ -79,7 +79,7 @@ constexpr const char* kFrameHashKey = "frame_hash";
 constexpr const char* kFrameKindKey = "frame_kind";
 constexpr const char* kFrameComponentsKey = "frame_parts";
 // Increment when rendering changes without changing the underlying data.
-constexpr uint32_t kCalendarFrameRevision = 25;
+constexpr uint32_t kCalendarFrameRevision = 26;
 
 enum class FrameKind : uint8_t {
   None = 0,
@@ -786,9 +786,10 @@ bool fastRefreshRegion(const E1005FastRefresh::Region& region,
   return false;
 }
 
-void recoverInteractiveRefresh() {
+void refreshInteractivePage() {
   fastRefresh.end();
   epaper.sleep();
+  LOG.println("[touch] using full refresh for clean page transition");
   refreshPanel();
   const E1005FastRefresh::Result result = fastRefresh.begin();
   if (result != E1005FastRefresh::Result::Ok) {
@@ -806,11 +807,7 @@ void renderInteractiveCalendar(
       displayDay, sensorReadings, weather, footer);
   framebufferReady = true;
 
-  const E1005FastRefresh::Region fullPanel = {
-      0, 0, config::PANEL_WIDTH, config::PANEL_HEIGHT};
-  if (!fastRefreshRegion(fullPanel, "page")) {
-    recoverInteractiveRefresh();
-  }
+  refreshInteractivePage();
 
   const CalendarFrameFingerprints frame =
       frameFingerprints(data, window, view, weather, footer, now, displayDay);
