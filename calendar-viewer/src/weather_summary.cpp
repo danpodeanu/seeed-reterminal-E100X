@@ -5,9 +5,8 @@
 
 #include "calendar_config_runtime.h"
 #include "calendar_config_schema.h"
+#include "calendar_logic.h"
 #include "config.h"
-#include "local_time.h"
-#include "weather_app_logic.h"
 #include "weather_provider.h"
 
 namespace weather_summary {
@@ -24,8 +23,26 @@ constexpr const char* kIsDay = "w_is_day";
 constexpr const char* kHigh = "w_high";
 constexpr const char* kLow = "w_low";
 constexpr const char* kAlert = "w_alert";
+constexpr const char* kIdentity = "w_config";
 
 }  // namespace
+
+uint64_t cacheIdentity() {
+  calendar_logic::Fingerprint hash;
+  hash.addValue(calendar_config::runtime::weatherProvider());
+  hash.addValue(calendar_config::runtime::latitude());
+  hash.addValue(calendar_config::runtime::longitude());
+  hash.addValue(calendar_config::runtime::nwsAlertsEnabled());
+  if (calendar_config::runtime::weatherProvider() ==
+      config::WeatherProvider::QWeather) {
+    hash.add(std::string(calendar_config::runtime::qweatherHost()));
+    hash.add(std::string(calendar_config::runtime::qweatherProjectId()));
+    hash.add(std::string(calendar_config::runtime::qweatherCredentialId()));
+    hash.add(std::string(calendar_config::runtime::qweatherLang()));
+    hash.addValue(calendar_config::runtime::qweatherAlertsEnabled());
+  }
+  return hash.value();
+}
 
 bool fetch(WeatherData& weather, String& failureReason,
            bool bypassHttpCache) {
@@ -39,8 +56,7 @@ bool fetch(WeatherData& weather, String& failureReason,
       weather, response, failureReason, bypassHttpCache);
 }
 
-bool loadCached(WeatherData& weather, uint64_t maximumAgeSeconds,
-                String& failureReason) {
+bool loadCached(WeatherData& weather, String& failureReason) {
   failureReason = "";
   Preferences prefs;
   if (!prefs.begin(calendar_config::kNamespace, true)) {
@@ -48,11 +64,11 @@ bool loadCached(WeatherData& weather, uint64_t maximumAgeSeconds,
     return false;
   }
   const bool valid = prefs.getBool(kValid, false);
+  const bool matchingIdentity =
+      prefs.getULong64(kIdentity, 0) == cacheIdentity();
   const time_t saved = static_cast<time_t>(prefs.getLong64(kSaved, 0));
-  const bool fresh = valid && app_logic::cachedDataFresh(
-                                  local_time::clockIsValid(), time(nullptr),
-                                  saved, maximumAgeSeconds);
-  if (fresh) {
+  const bool readable = valid && matchingIdentity && saved > 0;
+  if (readable) {
     weather.temperatureC = prefs.getFloat(kTemp, NAN);
     weather.apparentC = prefs.getFloat(kFeels, NAN);
     weather.humidityPct = prefs.getFloat(kHumidity, NAN);
@@ -64,11 +80,13 @@ bool loadCached(WeatherData& weather, uint64_t maximumAgeSeconds,
     weather.alertTitle = prefs.getString(kAlert, "");
   }
   prefs.end();
-  weather.valid = fresh && isfinite(weather.temperatureC) &&
+  weather.valid = readable && isfinite(weather.temperatureC) &&
                   weather.weatherCode >= 0;
   weather.fromCache = weather.valid;
   weather.updateTime = saved;
-  if (!weather.valid) failureReason = "No recent weather summary is stored";
+  if (!weather.valid) {
+    failureReason = "No matching weather summary is stored";
+  }
   return weather.valid;
 }
 
@@ -86,6 +104,7 @@ bool saveCached(const WeatherData& weather, String& failureReason) {
   prefs.putBool(kValid, false);
   const time_t saved = weather.updateTime > 0 ? weather.updateTime : time(nullptr);
   bool stored =
+      prefs.putULong64(kIdentity, cacheIdentity()) > 0 &&
       prefs.putLong64(kSaved, static_cast<int64_t>(saved)) > 0 &&
       prefs.putFloat(kTemp, weather.temperatureC) > 0 &&
       prefs.putFloat(kFeels, weather.apparentC) > 0 &&

@@ -1684,6 +1684,39 @@ void status(EPaper& epaper, const String& title, const String& detail,
   epaper.setTextDatum(TL_DATUM);
 }
 
+void refreshingCalendar(EPaper& epaper, const String& detail,
+                        bool preserveBackground) {
+  if (!preserveBackground) epaper.fillSprite(PANEL_WHITE);
+
+  const int outerMargin = std::max(16, config::ui(20));
+  const int boxWidth =
+      std::min(config::PANEL_WIDTH - outerMargin * 2, config::ui(430));
+  const int boxHeight =
+      std::min(config::PANEL_HEIGHT - outerMargin * 2, config::ui(150));
+  const int left = (config::PANEL_WIDTH - boxWidth) / 2;
+  const int top = (config::PANEL_HEIGHT - boxHeight) / 2;
+  epaper.fillRect(left, top, boxWidth, boxHeight, PANEL_WHITE);
+  epaper.drawRect(left, top, boxWidth, boxHeight, PANEL_BLACK);
+  epaper.drawRect(left + 3, top + 3, boxWidth - 6, boxHeight - 6,
+                  PANEL_BLACK);
+
+  epaper.setTextColor(PANEL_BLACK, PANEL_WHITE, true);
+  epaper.setTextDatum(MC_DATUM);
+  selectFont(epaper, FontSize::Large);
+  epaper.drawString(
+      text_render::ellipsize(epaper, "Refreshing calendar", boxWidth - 40),
+      config::PANEL_WIDTH / 2,
+      top + boxHeight / 2 - config::ui(20));
+  if (!detail.isEmpty()) {
+    selectFont(epaper, FontSize::Small);
+    epaper.drawString(
+        text_render::ellipsize(epaper, detail, boxWidth - 40),
+        config::PANEL_WIDTH / 2,
+        top + boxHeight / 2 + config::ui(24));
+  }
+  epaper.setTextDatum(TL_DATUM);
+}
+
 void calendar(EPaper& epaper, const ::calendar::Data& data,
               const ::calendar::Window& window, config::CalendarView view,
               config::WeekStart weekStart, time_t now,

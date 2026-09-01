@@ -404,6 +404,61 @@ inline constexpr bool containsWindow(const calendar::Window& available,
          available.end >= required.end;
 }
 
+inline time_t latestValidRefreshGateTimestamp(
+    time_t now, time_t lastSuccessfulRefresh,
+    time_t lastRefreshAttempt) {
+  time_t result = 0;
+  if (lastSuccessfulRefresh > 0 &&
+      lastSuccessfulRefresh <= now) {
+    result = lastSuccessfulRefresh;
+  }
+  if (lastRefreshAttempt > result && lastRefreshAttempt <= now) {
+    result = lastRefreshAttempt;
+  }
+  return result;
+}
+
+inline bool networkRefreshGateActive(
+    bool clockValid, time_t now, time_t lastSuccessfulRefresh,
+    time_t lastRefreshAttempt, uint64_t minimumIntervalSeconds) {
+  const time_t gateTimestamp = latestValidRefreshGateTimestamp(
+      now, lastSuccessfulRefresh, lastRefreshAttempt);
+  return clockValid && gateTimestamp > 0 && now >= gateTimestamp &&
+         static_cast<uint64_t>(now - gateTimestamp) <
+             minimumIntervalSeconds;
+}
+
+inline bool calendarCacheFresh(bool clockValid, time_t now,
+                               const calendar::Data& data,
+                               uint64_t maximumAgeSeconds) {
+  return networkRefreshGateActive(
+      clockValid, now, data.fetchedAt, 0, maximumAgeSeconds);
+}
+
+inline bool usableCalendarCache(bool clockValid, time_t now,
+                                const calendar::Data& data,
+                                const calendar::Window& available,
+                                const calendar::Window& required,
+                                uint64_t maximumAgeSeconds) {
+  return calendarCacheFresh(
+             clockValid, now, data, maximumAgeSeconds) &&
+         containsWindow(available, required);
+}
+
+inline bool durableCacheWriteRequired(
+    bool cacheDurable, bool cachedDataAvailable,
+    uint64_t cachedContentFingerprint,
+    uint64_t updatedContentFingerprint, time_t now,
+    time_t durableCacheTimestamp, uint64_t checkpointAgeSeconds) {
+  if (!cacheDurable || !cachedDataAvailable ||
+      cachedContentFingerprint != updatedContentFingerprint) {
+    return true;
+  }
+  return durableCacheTimestamp <= 0 || now < durableCacheTimestamp ||
+         static_cast<uint64_t>(now - durableCacheTimestamp) >=
+             checkpointAgeSeconds;
+}
+
 inline bool overlaps(time_t start, time_t end,
                      time_t windowStart, time_t windowEnd) {
   return start < windowEnd && end > windowStart;

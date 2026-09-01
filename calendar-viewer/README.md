@@ -5,8 +5,9 @@ E1003, E1004, and E1005. It loads a public iCalendar feed or Google calendars,
 renders today's agenda together with week and month calendars, shows indoor
 temperature and humidity plus a weather summary, and then returns to deep sleep.
 
-The device reconnects at the configured interval, but refreshes the e-paper
-panel only when visible calendar, weather, sensor, or date content has changed.
+The device wakes at the configured interval, but calendar and weather APIs are
+checked no more than once every 15 minutes. It refreshes the e-paper panel only
+when visible calendar, weather, sensor, or date content has changed.
 
 ![Calendar Viewer showing week and month calendars, agendas, and weather on a reTerminal E1004](assets/e1004-calendar-screenshot.png)
 
@@ -57,8 +58,8 @@ feature.*
 - DHCP networking, NTP synchronization, PCF8563 clock restoration, quiet
   hours, low-battery handling, and deep sleep.
 - iCalendar URLs, Google IAM credentials, weather credentials, and settings
-  are stored in device NVS. Calendar Viewer does not write credentials or
-  calendar data to the SD card.
+  are stored in device NVS. Recent calendar data is cached in internal flash;
+  credentials and calendar data are never written to the SD card.
 
 ## Supported hardware
 
@@ -100,10 +101,9 @@ and settings QR codes. Scan both codes, then save the Wi-Fi, calendar, and
 weather settings.
 
 After the configured device restarts, it displays **Connecting to
-&lt;Wi-Fi name&gt;** while it connects and synchronizes the clock, calendar,
-and weather. Later cold boots show the same progress screen; ordinary
-deep-sleep wakes leave the existing calendar visible until refreshed data is
-ready.
+&lt;Wi-Fi name&gt;** while it connects and synchronizes the clock. A centered
+**Refreshing calendar** box is shown only while calendar or weather providers
+are actually being queried. Cache-only deep-sleep wakes do not start Wi-Fi.
 
 To reopen the portal later, wake the sleeping device while holding the green
 button (OK on E1005) for at least two seconds, then release it before five
@@ -272,13 +272,14 @@ Timed entries in the Today agenda show both their start and end times.
 Open-Meteo is the default and needs only latitude, longitude, and a location
 name. QWeather uses the same Ed25519 credentials and settings as Weather
 Viewer. Temperature and wind units are configurable. Weather is cached in NVS
-for temporary provider failures; no SD card is required.
+for the 15-minute refresh gate and temporary provider failures; no SD card is
+required.
 
 ## Controls and refresh behavior
 
 | Action | Result |
 | --- | --- |
-| Tap any front button on E1001-E1004 | Refresh calendar and weather |
+| Tap any front button on E1001-E1004 | Wake and show the latest cached data |
 | Tap OK on E1005 | Return to the actual current day in Today |
 | Tap UP on E1005 | Move back one day, week, or month in the active view |
 | Tap DOWN on E1005 | Move forward one day, week, or month in the active view |
@@ -287,15 +288,23 @@ for temporary provider failures; no SD card is required.
 | Hold green, or OK on E1005, for at least 2 seconds | Open the configuration portal |
 | Wait for the timer | Check for calendar and weather updates |
 
-Button wakes bypass HTTP caches. Scheduled wakes are suppressed during
-configured quiet hours. After an E1005 cold boot or button wake, touch remains
-active until five minutes have elapsed without input. The bottom bar then
-confirms that the device is sleeping and names the buttons that wake it; timer
-wakes do not hold the device awake for touch input.
+Calendar and weather results remain fresh for 15 minutes across deep sleep, so
+shorter configured wake intervals and repeated button navigation do not repeat
+provider requests. Failed provider attempts use the same gate rather than
+retrying more frequently. Scheduled wakes are suppressed during configured
+quiet hours. After an E1005 cold boot or button wake, touch remains active until
+five minutes have elapsed without input. The bottom bar then confirms that the
+device is sleeping and names the buttons that wake it; timer wakes do not hold
+the device awake for touch input.
 
 Calendar data for nearby periods is prefetched while E1005 interaction is
-active. Browsing beyond that in-memory window reconnects only long enough to
-load the requested period, then turns Wi-Fi back off.
+active. Navigation within that window never refetches truncated data. Browsing
+beyond it waits until the 15-minute refresh gate opens, then reconnects only
+long enough to load the requested period and turns Wi-Fi back off.
+
+Successful refresh times are retained in RTC memory. Internal-flash calendar
+and weather caches are rewritten only when visible provider data changes or at
+a six-hour durable checkpoint, limiting flash wear.
 
 After a successful fetch, Calendar Viewer compares the visible date window,
 event data and colors, weather summary, power, and render-affecting

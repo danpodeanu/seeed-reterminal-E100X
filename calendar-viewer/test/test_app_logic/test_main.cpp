@@ -234,6 +234,74 @@ void test_e1005_navigation_windows_buffer_adjacent_periods() {
           config::WeekStart::Monday)));
 }
 
+void test_calendar_network_cache_uses_a_strict_fifteen_minute_ttl() {
+  calendar::Data data;
+  data.fetchedAt = 1000;
+  constexpr uint64_t fifteenMinutes = 15 * 60;
+
+  TEST_ASSERT_TRUE(calendar_logic::calendarCacheFresh(
+      true, 1000 + fifteenMinutes - 1, data, fifteenMinutes));
+  TEST_ASSERT_FALSE(calendar_logic::calendarCacheFresh(
+      true, 1000 + fifteenMinutes, data, fifteenMinutes));
+  TEST_ASSERT_FALSE(calendar_logic::calendarCacheFresh(
+      false, 1000, data, fifteenMinutes));
+  TEST_ASSERT_FALSE(calendar_logic::calendarCacheFresh(
+      true, 999, data, fifteenMinutes));
+  data.fetchedAt = 0;
+  TEST_ASSERT_FALSE(calendar_logic::calendarCacheFresh(
+      true, 1000, data, fifteenMinutes));
+}
+
+void test_failed_provider_attempt_also_closes_the_refresh_gate() {
+  constexpr uint64_t fifteenMinutes = 15 * 60;
+  constexpr time_t staleSuccess = 1000;
+  constexpr time_t failedAttempt = 2000;
+
+  TEST_ASSERT_TRUE(calendar_logic::networkRefreshGateActive(
+      true, failedAttempt + fifteenMinutes - 1, staleSuccess,
+      failedAttempt, fifteenMinutes));
+  TEST_ASSERT_FALSE(calendar_logic::networkRefreshGateActive(
+      true, failedAttempt + fifteenMinutes, staleSuccess,
+      failedAttempt, fifteenMinutes));
+
+  TEST_ASSERT_EQUAL_INT64(
+      staleSuccess,
+      calendar_logic::latestValidRefreshGateTimestamp(
+          1100, staleSuccess, 2000));
+  TEST_ASSERT_TRUE(calendar_logic::networkRefreshGateActive(
+      true, 1100, staleSuccess, 2000, fifteenMinutes));
+}
+
+void test_truncated_calendar_cache_is_reused_when_it_covers_the_view() {
+  calendar::Data data;
+  data.fetchedAt = 1000;
+  data.truncated = true;
+  const calendar::Window available{100, 500};
+  const calendar::Window covered{200, 300};
+  const calendar::Window outside{450, 550};
+
+  TEST_ASSERT_TRUE(calendar_logic::usableCalendarCache(
+      true, 1100, data, available, covered, 15 * 60));
+  TEST_ASSERT_FALSE(calendar_logic::usableCalendarCache(
+      true, 1100, data, available, outside, 15 * 60));
+}
+
+void test_flash_cache_writes_only_for_changes_and_durable_checkpoints() {
+  constexpr time_t savedAt = 1000;
+  constexpr uint64_t sixHours = 6 * 60 * 60;
+
+  TEST_ASSERT_FALSE(calendar_logic::durableCacheWriteRequired(
+      true, true, 42, 42, savedAt + sixHours - 1, savedAt, sixHours));
+  TEST_ASSERT_TRUE(calendar_logic::durableCacheWriteRequired(
+      true, true, 42, 43, savedAt + 60, savedAt, sixHours));
+  TEST_ASSERT_TRUE(calendar_logic::durableCacheWriteRequired(
+      true, true, 42, 42, savedAt + sixHours, savedAt, sixHours));
+  TEST_ASSERT_TRUE(calendar_logic::durableCacheWriteRequired(
+      false, true, 42, 42, savedAt + 60, savedAt, sixHours));
+  TEST_ASSERT_TRUE(calendar_logic::durableCacheWriteRequired(
+      true, false, 42, 42, savedAt + 60, savedAt, sixHours));
+}
+
 void test_initial_connection_status_is_limited_to_configured_cold_boots() {
   TEST_ASSERT_TRUE(
       calendar_logic::shouldShowInitialConnectionStatus(true, false));
@@ -1355,6 +1423,11 @@ int main(int, char**) {
   RUN_TEST(test_primary_button_hold_classification);
   RUN_TEST(test_e1005_buttons_navigate_the_active_calendar_period);
   RUN_TEST(test_e1005_navigation_windows_buffer_adjacent_periods);
+  RUN_TEST(test_calendar_network_cache_uses_a_strict_fifteen_minute_ttl);
+  RUN_TEST(test_failed_provider_attempt_also_closes_the_refresh_gate);
+  RUN_TEST(test_truncated_calendar_cache_is_reused_when_it_covers_the_view);
+  RUN_TEST(
+      test_flash_cache_writes_only_for_changes_and_durable_checkpoints);
   RUN_TEST(
       test_initial_connection_status_is_limited_to_configured_cold_boots);
   RUN_TEST(

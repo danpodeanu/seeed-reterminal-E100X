@@ -18,6 +18,9 @@ void connectionStatus(EPaper& epaper, const String& title,
 void status(EPaper& epaper, const String& title, const String& detail,
             const String& footer = "");
 
+void refreshingCalendar(EPaper& epaper, const String& detail,
+                        bool preserveBackground);
+
 void calendar(EPaper& epaper, const ::calendar::Data& data,
               const ::calendar::Window& window, config::CalendarView view,
               config::WeekStart weekStart, time_t now,

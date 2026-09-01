@@ -7,6 +7,7 @@
 #include <Adafruit_SHT4x.h>
 #include <driver/rtc_io.h>
 #include <esp_sleep.h>
+#include <algorithm>
 #include <climits>
 #include <math.h>
 #include <time.h>
@@ -15,6 +16,7 @@
 #include "app_logger.h"
 #include "app_logic.h"
 #include "board_pins.h"
+#include "calendar_cache.h"
 #include "calendar_config_runtime.h"
 #include "calendar_config_schema.h"
 #include "calendar_latin_font.h"
@@ -80,6 +82,7 @@ constexpr const char* kFrameKindKey = "frame_kind";
 constexpr const char* kFrameComponentsKey = "frame_parts";
 // Increment when rendering changes without changing the underlying data.
 constexpr uint32_t kCalendarFrameRevision = 39;
+constexpr uint32_t kCalendarCacheSemanticsRevision = 1;
 
 enum class FrameKind : uint8_t {
   None = 0,
@@ -93,6 +96,14 @@ usb_screen_capture::Server usbScreenCapture;
 Adafruit_SHT4x sht4;
 sensors::Readings sensorReadings;
 RTC_DATA_ATTR time_t lastNtpSyncEpoch = 0;
+RTC_DATA_ATTR time_t lastCalendarNetworkRefreshEpoch = 0;
+RTC_DATA_ATTR uint64_t lastCalendarNetworkRefreshIdentity = 0;
+RTC_DATA_ATTR time_t lastCalendarNetworkAttemptEpoch = 0;
+RTC_DATA_ATTR uint64_t lastCalendarNetworkAttemptIdentity = 0;
+RTC_DATA_ATTR time_t lastWeatherNetworkRefreshEpoch = 0;
+RTC_DATA_ATTR uint64_t lastWeatherNetworkRefreshIdentity = 0;
+RTC_DATA_ATTR time_t lastWeatherNetworkAttemptEpoch = 0;
+RTC_DATA_ATTR uint64_t lastWeatherNetworkAttemptIdentity = 0;
 #if RETERMINAL_MODEL == 1005
 RTC_DATA_ATTR uint8_t retainedCalendarView =
     static_cast<uint8_t>(config::CalendarView::Today);
@@ -125,6 +136,8 @@ bool panelStarted = false;
 bool framebufferReady = false;
 bool sdReady = false;
 bool screenshotRequested = false;
+bool calendarCacheDurable = false;
+bool weatherCacheDurable = false;
 
 #if RETERMINAL_MODEL == 1003
 float panelWaveformTemperatureC() {
@@ -219,6 +232,16 @@ void refreshPanel() {
 #endif
   panel_watchdog::refresh(epaper);
   framebufferReady = true;
+}
+
+void showRefreshingCalendar(const String& detail, bool preserveBackground) {
+  const bool canPreserveBackground = preserveBackground && framebufferReady;
+  beginPanel();
+  initializePanelColorMode();
+  calendar_render::refreshingCalendar(
+      epaper, detail, canPreserveBackground);
+  framebufferReady = true;
+  refreshPanel();
 }
 
 bool saveRequestedScreenshot() {
@@ -678,6 +701,53 @@ uint64_t statusFingerprint(const String& title, const String& detail,
   return hash.value();
 }
 
+uint64_t calendarCacheIdentity() {
+  calendar_logic::Fingerprint hash;
+  hash.addValue(kCalendarCacheSemanticsRevision);
+  const config::CalendarProvider provider =
+      calendar_config::runtime::calendarProvider();
+  hash.addValue(provider);
+  hash.add(std::string(calendar_config::runtime::timezone()));
+  if (provider == config::CalendarProvider::Google) {
+    hash.add(std::string(calendar_config::runtime::googleCalendarIds()));
+    hash.add(std::string(calendar_config::runtime::googleDelegatedUser()));
+    const String account = google_credentials::configuredEmail();
+    hash.add(std::string(account.c_str()));
+  } else {
+    hash.add(std::string(calendar_config::runtime::icalUrl()));
+  }
+  return hash.value();
+}
+
+uint64_t calendarCacheContentFingerprint(
+    const calendar::Data& data, const calendar::Window& window) {
+  calendar_logic::Fingerprint hash;
+  hash.addValue(calendar_logic::dataFingerprint(data, window));
+  hash.add(std::string(data.sourceLabel));
+  hash.addValue(data.truncated);
+  return hash.value();
+}
+
+uint64_t weatherCacheContentFingerprint(const WeatherData& weather) {
+  calendar_logic::Fingerprint hash;
+  addRoundedWeather(hash, weather);
+  return hash.value();
+}
+
+String refreshingDetail(bool calendarRefresh, bool weatherRefresh) {
+  if (calendarRefresh && weatherRefresh) {
+    return "Updating calendar and weather";
+  }
+  return calendarRefresh ? "Downloading calendar updates"
+                         : "Updating weather";
+}
+
+bool networkCacheFresh(time_t now, time_t refreshedAt) {
+  return calendar_logic::networkRefreshGateActive(
+      local_time::clockIsValid(), now, refreshedAt, 0,
+      config::NETWORK_CACHE_MAX_AGE_SECONDS);
+}
+
 bool fetchConfiguredCalendar(
     const calendar::Window& window, calendar::Data& data,
     String& failure, bool bypassHttpCache) {
@@ -690,6 +760,8 @@ bool fetchConfiguredCalendar(
 }
 
 #if RETERMINAL_MODEL == 1005
+void refreshInteractivePage();
+
 config::CalendarView viewForNavigationIndex(int index) {
   switch (index) {
     case 1:
@@ -743,18 +815,39 @@ bool pollAwakeButton(calendar_logic::CalendarNavigation& navigation,
 
 bool fetchInteractiveCalendarData(
     config::CalendarView view, time_t displayDay,
-    calendar::Data& data, calendar::Window& availableWindow) {
+    calendar::Data& data, calendar::Window& availableWindow,
+    bool& refreshStatusDisplayed) {
+  refreshStatusDisplayed = false;
   const calendar::Window required = calendar_logic::visibleDataWindow(
       view, displayDay, calendar_config::runtime::weekStart());
   const bool bufferedRangeContainsVisible =
       calendar_logic::containsWindow(availableWindow, required);
-  if (bufferedRangeContainsVisible && !data.truncated) return true;
+  if (bufferedRangeContainsVisible) return true;
 
-  calendar::Window requested =
-      bufferedRangeContainsVisible
-          ? required
-          : calendar_logic::interactiveDataWindow(
-                view, displayDay, calendar_config::runtime::weekStart());
+  const time_t now = time(nullptr);
+  const uint64_t identity = calendarCacheIdentity();
+  const time_t recentAttempt =
+      lastCalendarNetworkAttemptIdentity == identity
+          ? lastCalendarNetworkAttemptEpoch
+          : 0;
+  const time_t refreshGateTimestamp =
+      calendar_logic::latestValidRefreshGateTimestamp(
+          now, data.fetchedAt, recentAttempt);
+  if (networkCacheFresh(now, refreshGateTimestamp)) {
+    const uint64_t ageSeconds =
+        static_cast<uint64_t>(now - refreshGateTimestamp);
+    const uint64_t waitSeconds =
+        config::NETWORK_CACHE_MAX_AGE_SECONDS - ageSeconds;
+    LOG.printf(
+        "[buttons] requested date is outside the cached range; next network "
+        "refresh is available in %llu second(s)\n",
+        static_cast<unsigned long long>(waitSeconds));
+    hardware::beep();
+    return false;
+  }
+
+  calendar::Window requested = calendar_logic::interactiveDataWindow(
+      view, displayDay, calendar_config::runtime::weekStart());
   LOG.printf("[buttons] loading calendar data for %s navigation\n",
              calendar_logic::calendarViewName(view));
 
@@ -776,8 +869,18 @@ bool fetchInteractiveCalendarData(
         "[buttons] warning: could not disable modem sleep for navigation");
   }
 
+  calendar_render::refreshingCalendar(
+      epaper, "Downloading calendar updates", true);
+  framebufferReady = true;
+  refreshInteractivePage();
+  refreshStatusDisplayed = true;
+
+  const uint64_t previousContent =
+      calendarCacheContentFingerprint(data, availableWindow);
   calendar::Data updated;
   String calendarFailure;
+  lastCalendarNetworkAttemptEpoch = time(nullptr);
+  lastCalendarNetworkAttemptIdentity = identity;
   const bool fetched = fetchConfiguredCalendar(
       requested, updated, calendarFailure, true);
   if (fetched && updated.truncated &&
@@ -803,6 +906,31 @@ bool fetchInteractiveCalendarData(
                calendarFailure.c_str());
     hardware::beep();
     return false;
+  }
+
+  const uint64_t updatedContent =
+      calendarCacheContentFingerprint(updated, requested);
+  const bool cacheChanged =
+      !calendarCacheDurable || previousContent != updatedContent;
+  bool cacheReady = calendarCacheDurable && !cacheChanged;
+  if (cacheChanged) {
+    String cacheFailure;
+    cacheReady = calendar_cache::save(
+        identity, updated, requested, cacheFailure);
+    calendarCacheDurable = cacheReady;
+    if (!cacheReady) {
+      LOG.printf("[cache] calendar save skipped: %s\n",
+                 cacheFailure.c_str());
+    }
+  } else {
+    LOG.println("[cache] calendar content unchanged; flash write skipped");
+  }
+  if (cacheReady) {
+    lastCalendarNetworkRefreshEpoch = updated.fetchedAt;
+    lastCalendarNetworkRefreshIdentity = identity;
+  } else {
+    lastCalendarNetworkRefreshEpoch = 0;
+    lastCalendarNetworkRefreshIdentity = 0;
   }
 
   data = std::move(updated);
@@ -844,10 +972,16 @@ bool applyInteractiveSelection(
     const calendar_logic::CalendarSelection& selection,
     const char* inputName) {
   if (selection.view == view && selection.day == displayDay) return true;
-  if (!fetchInteractiveCalendarData(
-          selection.view, selection.day, data, window)) {
-    return false;
-  }
+    bool refreshStatusDisplayed = false;
+    if (!fetchInteractiveCalendarData(
+            selection.view, selection.day, data, window,
+            refreshStatusDisplayed)) {
+      if (refreshStatusDisplayed) {
+        renderInteractiveCalendar(
+            data, window, view, now, displayDay, weather, footer);
+      }
+      return false;
+    }
 
   LOG.printf("[input] %s -> %s\n", inputName,
              calendar_logic::calendarViewName(selection.view));
@@ -1366,7 +1500,233 @@ void setup() {
     return;
   }
 
-  if (showInitialConnectionStatus) {
+  time_t now = 0;
+  config::CalendarView activeCalendarView = config::CalendarView::Today;
+  time_t displayDay = 0;
+  calendar::Window requestedWindow;
+  calendar::Window visibleWindow;
+  calendar::Window window;
+#if RETERMINAL_MODEL == 1005
+  calendar_logic::CalendarNavigation wakeNavigation =
+      calendar_logic::CalendarNavigation::None;
+  if (todaySelected) {
+    wakeNavigation = calendar_logic::CalendarNavigation::Today;
+  } else if (rightPressed) {
+    wakeNavigation = calendar_logic::CalendarNavigation::Previous;
+  } else if (leftPressed) {
+    wakeNavigation = calendar_logic::CalendarNavigation::Next;
+  }
+#endif
+
+  bool selectionInitialized = false;
+  auto initializeCalendarSelection = [&](time_t referenceNow) {
+    now = referenceNow;
+    activeCalendarView = config::CalendarView::Today;
+    displayDay = calendar_logic::localMidnight(referenceNow);
+#if RETERMINAL_MODEL == 1005
+    const calendar_logic::CalendarSelection wakeSelection =
+        calendar_logic::navigateCalendar(
+            static_cast<config::CalendarView>(retainedCalendarView),
+            retainedSelectedDay, referenceNow, wakeNavigation);
+    activeCalendarView = wakeSelection.view;
+    displayDay = wakeSelection.day;
+    requestedWindow = calendar_logic::interactiveDataWindow(
+        activeCalendarView, displayDay,
+        calendar_config::runtime::weekStart());
+    visibleWindow = calendar_logic::visibleDataWindow(
+        activeCalendarView, displayDay,
+        calendar_config::runtime::weekStart());
+    LOG.printf(
+        "[view] %s (OK=today, UP=previous, DOWN=next)\n",
+        calendar_logic::calendarViewName(activeCalendarView));
+#else
+    requestedWindow = calendar_logic::dashboardWindow(
+        referenceNow, calendar_config::runtime::weekStart());
+    visibleWindow = requestedWindow;
+#endif
+    window = requestedWindow;
+    selectionInitialized = true;
+  };
+
+  calendar::Data calendarData;
+  bool calendarCacheAvailable = false;
+  time_t calendarCacheSavedAt = 0;
+  time_t calendarLastRefreshAt = 0;
+  const uint64_t configuredCalendarCacheIdentity =
+      calendarCacheIdentity();
+  WeatherData weather;
+  bool weatherCacheAvailable = false;
+  time_t weatherCacheSavedAt = 0;
+  time_t weatherLastRefreshAt = 0;
+  const uint64_t configuredWeatherCacheIdentity =
+      weather_summary::cacheIdentity();
+
+  auto loadCacheState = [&]() {
+    calendarData = {};
+    calendarCacheAvailable = false;
+    calendarCacheSavedAt = 0;
+    calendarLastRefreshAt = 0;
+    weather = {};
+    weatherCacheAvailable = false;
+    weatherCacheSavedAt = 0;
+    weatherLastRefreshAt = 0;
+    window = requestedWindow;
+
+    calendar::Data cachedCalendar;
+    calendar::Window cachedWindow;
+    String cacheFailure;
+    if (calendar_cache::load(
+            configuredCalendarCacheIdentity,
+            cachedCalendar, cachedWindow, cacheFailure)) {
+      calendarCacheDurable = true;
+      calendarCacheSavedAt = cachedCalendar.fetchedAt;
+      if (lastCalendarNetworkRefreshIdentity ==
+              configuredCalendarCacheIdentity &&
+          lastCalendarNetworkRefreshEpoch >= cachedCalendar.fetchedAt &&
+          now >= lastCalendarNetworkRefreshEpoch) {
+        cachedCalendar.fetchedAt = lastCalendarNetworkRefreshEpoch;
+      }
+      calendarLastRefreshAt = cachedCalendar.fetchedAt;
+      const bool recentEnoughForFallback =
+          app_logic::cachedDataFresh(
+              true, now, calendarLastRefreshAt,
+              config::CALENDAR_FAILURE_CACHE_MAX_AGE_SECONDS);
+#if RETERMINAL_MODEL == 1005
+      const time_t recentCalendarAttempt =
+          lastCalendarNetworkAttemptIdentity ==
+                  configuredCalendarCacheIdentity
+              ? lastCalendarNetworkAttemptEpoch
+              : 0;
+      const time_t calendarGateTimestamp =
+          calendar_logic::latestValidRefreshGateTimestamp(
+              now, calendarLastRefreshAt, recentCalendarAttempt);
+      if (recentEnoughForFallback &&
+          networkCacheFresh(now, calendarGateTimestamp) &&
+          !calendar_logic::containsWindow(cachedWindow, visibleWindow) &&
+          wakeNavigation != calendar_logic::CalendarNavigation::None) {
+        LOG.println(
+            "[cache] selected date is outside the fresh cache; "
+            "keeping the previous selection");
+        wakeNavigation = calendar_logic::CalendarNavigation::None;
+        initializeCalendarSelection(now);
+        hardware::beep();
+      }
+#endif
+      if (recentEnoughForFallback &&
+          calendar_logic::containsWindow(cachedWindow, visibleWindow)) {
+        calendarData = std::move(cachedCalendar);
+        window = cachedWindow;
+        calendarCacheAvailable = true;
+        LOG.printf("[cache] loaded calendar data (%u event(s))\n",
+                   static_cast<unsigned>(calendarData.events.size()));
+      } else {
+        LOG.println(recentEnoughForFallback
+                        ? "[cache] stored calendar does not cover the "
+                          "selected date"
+                        : "[cache] stored calendar is too old for fallback");
+      }
+    } else {
+      LOG.printf("[cache] calendar unavailable: %s\n",
+                 cacheFailure.c_str());
+    }
+
+    WeatherData cachedWeather;
+    if (weather_summary::loadCached(cachedWeather, cacheFailure)) {
+      weatherCacheDurable = true;
+      weatherCacheSavedAt = cachedWeather.updateTime;
+      if (lastWeatherNetworkRefreshIdentity ==
+              configuredWeatherCacheIdentity &&
+          lastWeatherNetworkRefreshEpoch >= cachedWeather.updateTime &&
+          now >= lastWeatherNetworkRefreshEpoch) {
+        cachedWeather.updateTime = lastWeatherNetworkRefreshEpoch;
+      }
+      weatherLastRefreshAt = cachedWeather.updateTime;
+      if (app_logic::cachedDataFresh(
+              true, now, weatherLastRefreshAt,
+              config::WEATHER_CACHE_MAX_AGE_SECONDS)) {
+        weather = std::move(cachedWeather);
+        weatherCacheAvailable = true;
+        LOG.println("[cache] loaded weather summary");
+      } else {
+        LOG.println("[cache] stored weather is too old for fallback");
+      }
+    } else {
+      LOG.printf("[cache] weather unavailable: %s\n",
+                 cacheFailure.c_str());
+    }
+  };
+
+  if (local_time::clockIsValid()) {
+    initializeCalendarSelection(time(nullptr));
+    loadCacheState();
+  }
+
+  time_t calendarAttemptAt =
+      lastCalendarNetworkAttemptIdentity ==
+              configuredCalendarCacheIdentity
+          ? lastCalendarNetworkAttemptEpoch
+          : 0;
+  time_t weatherAttemptAt =
+      lastWeatherNetworkAttemptIdentity ==
+              configuredWeatherCacheIdentity
+          ? lastWeatherNetworkAttemptEpoch
+          : 0;
+  bool calendarTimestampFresh =
+      selectionInitialized &&
+      networkCacheFresh(now, calendarLastRefreshAt);
+  bool calendarAttemptFresh =
+      selectionInitialized &&
+      networkCacheFresh(now, calendarAttemptAt);
+  bool weatherCacheFresh =
+      selectionInitialized && weatherCacheAvailable &&
+      networkCacheFresh(now, weatherLastRefreshAt);
+  bool weatherAttemptFresh =
+      selectionInitialized &&
+      networkCacheFresh(now, weatherAttemptAt);
+  time_t calendarGateTimestamp =
+      calendar_logic::latestValidRefreshGateTimestamp(
+          now, calendarLastRefreshAt, calendarAttemptAt);
+  bool calendarDisplayDeferred =
+      selectionInitialized &&
+      (calendarTimestampFresh || calendarAttemptFresh) &&
+      !calendarCacheAvailable;
+  const bool networkNeeded =
+      ntpDue || !selectionInitialized ||
+      (!calendarTimestampFresh && !calendarAttemptFresh) ||
+      (!weatherCacheFresh && !weatherAttemptFresh);
+
+  auto deferFreshOutOfRangeCalendar = [&]() {
+    const uint64_t ageSeconds =
+        static_cast<uint64_t>(now - calendarGateTimestamp);
+    const uint64_t waitSeconds =
+        config::NETWORK_CACHE_MAX_AGE_SECONDS - ageSeconds;
+    const uint64_t waitMinutes = (waitSeconds + 59) / 60;
+    LOG.printf(
+        "[cache] selected date is outside the fresh calendar cache; "
+        "deferring provider access for %llu second(s)\n",
+        static_cast<unsigned long long>(waitSeconds));
+
+    uint64_t previousHash = 0;
+    FrameKind previousKind = FrameKind::None;
+    if (!framebufferReady &&
+        loadFrameState(previousHash, previousKind) &&
+        isPreservableCalendarFrame(previousKind)) {
+      powerDownAndSleep(waitSeconds);
+      return;
+    }
+    showStatusAndSleep(
+        "Calendar cache active",
+        "The selected date will load in " + String(waitMinutes) +
+            (waitMinutes == 1 ? " minute." : " minutes."),
+        waitSeconds);
+  };
+
+  if (calendarDisplayDeferred && !ntpDue) {
+    deferFreshOutOfRangeCalendar();
+    return;
+  }
+
+  if (showInitialConnectionStatus && networkNeeded) {
     const String stationMac = wifi_sta::stationMacAddress();
     const String deviceInfo =
 #if RETERMINAL_MODEL == 1005
@@ -1386,36 +1746,49 @@ void setup() {
         connectionDetail, deviceInfo,
         String("From sleep, hold ") + PRIMARY_BUTTON_LABEL +
             " for 2 seconds to configure");
+    framebufferReady = true;
     refreshPanel();
   }
 
   String networkFailure;
-  const bool connected =
-      wifi_sta::connectStation(calendar_wifi::ssid(), calendar_wifi::password(),
-                               config::WIFI_TIMEOUT_MS, &networkFailure)
-          .connected;
-  if (!connected) {
-    uint64_t previousHash = 0;
-    FrameKind previousKind = FrameKind::None;
-    if (loadFrameState(previousHash, previousKind) &&
-        isPreservableCalendarFrame(previousKind)) {
-      LOG.printf("[wifi] %s; preserving existing panel\n",
+  bool connected = false;
+  bool networkRefreshFailed = false;
+  if (networkNeeded) {
+    connected =
+        wifi_sta::connectStation(
+            calendar_wifi::ssid(), calendar_wifi::password(),
+            config::WIFI_TIMEOUT_MS, &networkFailure)
+            .connected;
+    if (!connected) {
+      if (!selectionInitialized || !calendarCacheAvailable) {
+        uint64_t previousHash = 0;
+        FrameKind previousKind = FrameKind::None;
+        if (loadFrameState(previousHash, previousKind) &&
+            isPreservableCalendarFrame(previousKind)) {
+          LOG.printf("[wifi] %s; preserving existing panel\n",
+                     networkFailure.c_str());
+          powerDownAndSleep(config::FAILURE_RETRY_SECONDS);
+        } else {
+          showStatusAndSleep("Wi-Fi unavailable", networkFailure,
+                             config::FAILURE_RETRY_SECONDS);
+        }
+        return;
+      }
+      LOG.printf("[wifi] %s; continuing with cached data\n",
                  networkFailure.c_str());
-      powerDownAndSleep(config::FAILURE_RETRY_SECONDS);
+      networkRefreshFailed = true;
+    } else if (!WiFi.setSleep(false)) {
+      LOG.println(
+          "[wifi] warning: could not disable modem sleep for calendar refresh");
     } else {
-      showStatusAndSleep("Wi-Fi unavailable", networkFailure,
-                         config::FAILURE_RETRY_SECONDS);
+      LOG.println("[wifi] modem sleep disabled for calendar refresh");
     }
-    return;
-  }
-  if (!WiFi.setSleep(false)) {
-    LOG.println(
-        "[wifi] warning: could not disable modem sleep for calendar refresh");
   } else {
-    LOG.println("[wifi] modem sleep disabled for calendar refresh");
+    LOG.println(
+        "[cache] provider refresh gates are active; Wi-Fi skipped");
   }
 
-  if (ntpDue) {
+  if (connected && ntpDue) {
     ntp::synchronizeAndPersist(
         calendar_config::runtime::timezone(),
         calendar_config::runtime::ntpPrimary(),
@@ -1423,6 +1796,10 @@ void setup() {
         config::NTP_DHCP_TIMEOUT_MS, config::NTP_SYNC_TIMEOUT_MS,
         &lastNtpSyncEpoch);
     applyRuntimeTimeSettings();
+    if (local_time::clockIsValid()) {
+      initializeCalendarSelection(time(nullptr));
+      loadCacheState();
+    }
   }
   if (!local_time::clockIsValid()) {
     wifi_sta::disable();
@@ -1448,91 +1825,221 @@ void setup() {
     powerDownAndSleep(quiet_hours::secondsUntilEnd(localNow));
     return;
   }
-
-  const time_t now = time(nullptr);
-  config::CalendarView activeCalendarView = config::CalendarView::Today;
-  time_t displayDay = calendar_logic::localMidnight(now);
-  calendar::Window window;
-#if RETERMINAL_MODEL == 1005
-  calendar_logic::CalendarNavigation wakeNavigation =
-      calendar_logic::CalendarNavigation::None;
-  if (todaySelected) {
-    wakeNavigation = calendar_logic::CalendarNavigation::Today;
-  } else if (rightPressed) {
-    wakeNavigation = calendar_logic::CalendarNavigation::Previous;
-  } else if (leftPressed) {
-    wakeNavigation = calendar_logic::CalendarNavigation::Next;
+  if (!selectionInitialized) {
+    initializeCalendarSelection(time(nullptr));
+    loadCacheState();
+  } else {
+    now = time(nullptr);
   }
-  const calendar_logic::CalendarSelection wakeSelection =
-      calendar_logic::navigateCalendar(
-          static_cast<config::CalendarView>(retainedCalendarView),
-          retainedSelectedDay, now, wakeNavigation);
-  activeCalendarView = wakeSelection.view;
-  displayDay = wakeSelection.day;
-  retainedCalendarView = static_cast<uint8_t>(activeCalendarView);
-  retainedSelectedDay = displayDay;
-  window = coldBoot || buttonWake
-               ? calendar_logic::interactiveDataWindow(
-                     activeCalendarView, displayDay,
-                     calendar_config::runtime::weekStart())
-               : calendar_logic::visibleDataWindow(
-                     activeCalendarView, displayDay,
-                     calendar_config::runtime::weekStart());
-  LOG.printf(
-      "[view] %s (OK=today, UP=previous, DOWN=next)\n",
-      calendar_logic::calendarViewName(activeCalendarView));
-#else
-  window = calendar_logic::dashboardWindow(
-      now, calendar_config::runtime::weekStart());
-#endif
-  calendar::Data calendarData;
+
+  calendarAttemptAt =
+      lastCalendarNetworkAttemptIdentity ==
+              configuredCalendarCacheIdentity
+          ? lastCalendarNetworkAttemptEpoch
+          : 0;
+  weatherAttemptAt =
+      lastWeatherNetworkAttemptIdentity ==
+              configuredWeatherCacheIdentity
+          ? lastWeatherNetworkAttemptEpoch
+          : 0;
+  calendarTimestampFresh =
+      networkCacheFresh(now, calendarLastRefreshAt);
+  calendarAttemptFresh =
+      networkCacheFresh(now, calendarAttemptAt);
+  weatherCacheFresh =
+      weatherCacheAvailable &&
+      networkCacheFresh(now, weatherLastRefreshAt);
+  weatherAttemptFresh =
+      networkCacheFresh(now, weatherAttemptAt);
+  calendarGateTimestamp =
+      calendar_logic::latestValidRefreshGateTimestamp(
+          now, calendarLastRefreshAt, calendarAttemptAt);
+  calendarDisplayDeferred =
+      (calendarTimestampFresh || calendarAttemptFresh) &&
+      !calendarCacheAvailable;
+  if (calendarDisplayDeferred) {
+    wifi_sta::disable();
+    deferFreshOutOfRangeCalendar();
+    return;
+  }
+  const bool calendarRefreshNeeded = !calendarTimestampFresh;
+  const bool weatherRefreshNeeded = !weatherCacheFresh;
+  const bool actualCalendarRefresh =
+      connected && calendarRefreshNeeded && !calendarAttemptFresh;
+  const bool actualWeatherRefresh =
+      connected && weatherRefreshNeeded && !weatherAttemptFresh;
+  bool refreshStatusDisplayed = false;
+  if (actualCalendarRefresh || actualWeatherRefresh) {
+    uint64_t existingFrameHash = 0;
+    FrameKind existingFrameKind = FrameKind::None;
+    const bool existingCalendarIsOnlyFallback =
+        !calendarCacheAvailable && !framebufferReady &&
+        loadFrameState(existingFrameHash, existingFrameKind) &&
+        isPreservableCalendarFrame(existingFrameKind);
+    if (existingCalendarIsOnlyFallback) {
+      LOG.println(
+          "[display] refresh box skipped to preserve the only calendar "
+          "fallback");
+    } else {
+      showRefreshingCalendar(
+          refreshingDetail(actualCalendarRefresh, actualWeatherRefresh),
+          false);
+      refreshStatusDisplayed = true;
+    }
+  }
+
   String calendarFailure;
-  const bool calendarUpdated = fetchConfiguredCalendar(
-      window, calendarData, calendarFailure, buttonWake);
+  bool calendarUpdated = calendarCacheAvailable;
+  if (actualCalendarRefresh) {
+    const uint64_t previousContent =
+        calendarCacheAvailable
+            ? calendarCacheContentFingerprint(calendarData, window)
+            : 0;
+    calendar::Data updated;
+    calendar::Window updatedWindow = requestedWindow;
+    lastCalendarNetworkAttemptEpoch = time(nullptr);
+    lastCalendarNetworkAttemptIdentity =
+        configuredCalendarCacheIdentity;
+    bool fetched = fetchConfiguredCalendar(
+        updatedWindow, updated, calendarFailure, true);
 #if RETERMINAL_MODEL == 1005
-  if (calendarUpdated && calendarData.truncated) {
-    const calendar::Window visibleWindow =
-        calendar_logic::visibleDataWindow(
-            activeCalendarView, displayDay,
-            calendar_config::runtime::weekStart());
-    if (window.start != visibleWindow.start ||
-        window.end != visibleWindow.end) {
+    if (fetched && updated.truncated &&
+        (updatedWindow.start != visibleWindow.start ||
+         updatedWindow.end != visibleWindow.end)) {
       LOG.println(
           "[calendar] buffered range was limited; retrying the visible period");
       calendar::Data visibleData;
       String visibleFailure;
       if (fetchConfiguredCalendar(
-              visibleWindow, visibleData, visibleFailure, buttonWake)) {
-        calendarData = std::move(visibleData);
-        window = visibleWindow;
+              visibleWindow, visibleData, visibleFailure, true)) {
+        updated = std::move(visibleData);
+        updatedWindow = visibleWindow;
       } else {
         LOG.printf(
             "[calendar] visible-period retry failed; using limited buffer: %s\n",
             visibleFailure.c_str());
       }
     }
-  }
 #endif
-
-  WeatherData weather;
-  String weatherFailure;
-  const bool weatherUpdated =
-      weather_summary::fetch(weather, weatherFailure, buttonWake);
-  if (weatherUpdated) {
-    String cacheFailure;
-    if (!weather_summary::saveCached(weather, cacheFailure)) {
-      LOG.printf("[weather] cache save skipped: %s\n", cacheFailure.c_str());
+    if (fetched) {
+      const uint64_t updatedContent =
+          calendarCacheContentFingerprint(updated, updatedWindow);
+      const bool cacheWriteNeeded =
+          calendar_logic::durableCacheWriteRequired(
+              calendarCacheDurable, calendarCacheAvailable,
+              previousContent, updatedContent, now, calendarCacheSavedAt,
+              config::CALENDAR_FAILURE_CACHE_MAX_AGE_SECONDS);
+      bool cacheReady = calendarCacheDurable && !cacheWriteNeeded;
+      if (cacheWriteNeeded) {
+        String cacheFailure;
+        cacheReady = calendar_cache::save(
+            configuredCalendarCacheIdentity, updated, updatedWindow,
+            cacheFailure);
+        calendarCacheDurable = cacheReady;
+        if (cacheReady) {
+          LOG.println("[cache] saved calendar data to internal flash");
+        } else {
+          LOG.printf("[cache] calendar save skipped: %s\n",
+                     cacheFailure.c_str());
+        }
+      } else {
+        LOG.println(
+            "[cache] calendar content unchanged; flash write skipped");
+      }
+      if (cacheReady) {
+        lastCalendarNetworkRefreshEpoch = updated.fetchedAt;
+        lastCalendarNetworkRefreshIdentity =
+            configuredCalendarCacheIdentity;
+      } else {
+        lastCalendarNetworkRefreshEpoch = 0;
+        lastCalendarNetworkRefreshIdentity = 0;
+      }
+      calendarData = std::move(updated);
+      window = updatedWindow;
+      calendarUpdated = true;
+    } else if (calendarCacheAvailable) {
+      LOG.printf(
+          "[calendar] live update failed: %s; using cached calendar\n",
+          calendarFailure.c_str());
+      networkRefreshFailed = true;
     }
-  } else {
-    String cacheFailure;
-    if (!weather_summary::loadCached(
-            weather, config::WEATHER_CACHE_MAX_AGE_SECONDS, cacheFailure)) {
-      LOG.printf("[weather] unavailable: %s; %s\n", weatherFailure.c_str(),
-                 cacheFailure.c_str());
+  } else if (calendarRefreshNeeded) {
+    calendarFailure =
+        networkFailure.isEmpty() ? "Network refresh is unavailable"
+                                 : networkFailure;
+    if (calendarCacheAvailable) {
+      LOG.println("[calendar] using cached calendar until Wi-Fi recovers");
+      networkRefreshFailed = true;
+    }
+  }
+
+  String weatherFailure;
+  if (actualWeatherRefresh) {
+    const uint64_t previousContent =
+        weatherCacheAvailable
+            ? weatherCacheContentFingerprint(weather)
+            : 0;
+    WeatherData updated;
+    lastWeatherNetworkAttemptEpoch = time(nullptr);
+    lastWeatherNetworkAttemptIdentity =
+        configuredWeatherCacheIdentity;
+    if (weather_summary::fetch(updated, weatherFailure, true)) {
+      const time_t refreshedAt = time(nullptr);
+      updated.updateTime = refreshedAt;
+      const uint64_t updatedContent =
+          weatherCacheContentFingerprint(updated);
+      const bool cacheWriteNeeded =
+          calendar_logic::durableCacheWriteRequired(
+              weatherCacheDurable, weatherCacheAvailable,
+              previousContent, updatedContent, refreshedAt,
+              weatherCacheSavedAt,
+              config::WEATHER_CACHE_MAX_AGE_SECONDS);
+      bool cacheReady = weatherCacheDurable && !cacheWriteNeeded;
+      if (cacheWriteNeeded) {
+        String cacheFailure;
+        cacheReady = weather_summary::saveCached(
+            updated, cacheFailure);
+        weatherCacheDurable = cacheReady;
+        if (!cacheReady) {
+          LOG.printf("[weather] cache save skipped: %s\n",
+                     cacheFailure.c_str());
+        }
+      } else {
+        LOG.println(
+            "[cache] weather content unchanged; flash write skipped");
+      }
+      if (cacheReady) {
+        lastWeatherNetworkRefreshEpoch = refreshedAt;
+        lastWeatherNetworkRefreshIdentity =
+            configuredWeatherCacheIdentity;
+      } else {
+        lastWeatherNetworkRefreshEpoch = 0;
+        lastWeatherNetworkRefreshIdentity = 0;
+      }
+      weather = std::move(updated);
+      weatherCacheAvailable = true;
     } else {
-      LOG.printf("[weather] live update failed: %s; using NVS cache\n",
+      if (weatherCacheAvailable) {
+        LOG.printf(
+            "[weather] live update failed: %s; using NVS cache\n",
+            weatherFailure.c_str());
+      } else {
+        LOG.printf("[weather] unavailable: %s\n",
+                   weatherFailure.c_str());
+      }
+      networkRefreshFailed = true;
+    }
+  } else if (weatherRefreshNeeded) {
+    weatherFailure =
+        networkFailure.isEmpty() ? "Network refresh is unavailable"
+                                 : networkFailure;
+    if (weatherCacheAvailable) {
+      LOG.println("[weather] using cached weather until Wi-Fi recovers");
+    } else {
+      LOG.printf("[weather] unavailable: %s\n",
                  weatherFailure.c_str());
     }
+    networkRefreshFailed = true;
   }
   wifi_sta::disable();
 
@@ -1548,7 +2055,8 @@ void setup() {
 
     uint64_t previousHash = 0;
     FrameKind previousKind = FrameKind::None;
-    if (loadFrameState(previousHash, previousKind) &&
+    if (!refreshStatusDisplayed &&
+        loadFrameState(previousHash, previousKind) &&
         isPreservableCalendarFrame(previousKind)) {
       LOG.printf("[calendar] %s; preserving existing panel\n",
                  calendarFailure.c_str());
@@ -1559,6 +2067,11 @@ void setup() {
     }
     return;
   }
+
+#if RETERMINAL_MODEL == 1005
+  retainedCalendarView = static_cast<uint8_t>(activeCalendarView);
+  retainedSelectedDay = displayDay;
+#endif
 
   String footer;
   if (calendar_config::runtime::debugShowStatusBadges()) {
@@ -1590,15 +2103,19 @@ void setup() {
           ? calendar_logic::changedFrameComponents(previousComponents,
                                                   nextFrame.components)
           : 0;
-  const bool changed = calendar_logic::shouldRefreshCalendarFrame(
+  const bool contentChanged = calendar_logic::shouldRefreshCalendarFrame(
       havePreviousFrame, previousKind == FrameKind::Calendar, previousHash,
       nextFrame.combined, componentChanges);
-  if (changed || screenshotRequested) {
-    if (changed) {
+  const bool refreshRequired = contentChanged || refreshStatusDisplayed;
+  if (refreshRequired || screenshotRequested) {
+    if (contentChanged) {
       logCalendarFrameChanges(
           havePreviousFrame, previousKind, havePreviousComponents,
           previousComponents, nextFrame.components, activeCalendarView,
           componentChanges, calendarData, weather, now);
+    } else if (refreshStatusDisplayed) {
+      LOG.println(
+          "[display] restoring unchanged calendar after refresh status");
     }
     beginPanel();
     initializePanelColorMode();
@@ -1608,11 +2125,13 @@ void setup() {
         weather, footer);
     framebufferReady = true;
     const bool screenshotSaved = saveRequestedScreenshot();
-    if (changed) {
+    if (refreshRequired) {
       refreshPanel();
-      if (!saveFrameState(nextFrame.combined, FrameKind::Calendar,
+      if ((contentChanged || !havePreviousComponents) &&
+          !saveFrameState(nextFrame.combined, FrameKind::Calendar,
                           &nextFrame.components)) {
-        LOG.println("[display] warning: frame fingerprint was not saved");
+        LOG.println(
+            "[display] warning: frame fingerprint was not saved");
       }
       LOG.println("[display] refresh complete");
     } else {
@@ -1642,10 +2161,15 @@ void setup() {
 #if RETERMINAL_MODEL == 1005
   if (coldBoot || buttonWake) {
     runTouchSession(calendarData, window, activeCalendarView, now, displayDay,
-                    weather, footer, changed);
+                    weather, footer, refreshRequired);
   }
 #endif
-  powerDownAndSleep(scheduledSleepSeconds(localNow));
+  uint64_t sleepSeconds = scheduledSleepSeconds(localNow);
+  if (networkRefreshFailed) {
+    sleepSeconds =
+        std::min(sleepSeconds, config::FAILURE_RETRY_SECONDS);
+  }
+  powerDownAndSleep(sleepSeconds);
 }
 
 void loop() {
