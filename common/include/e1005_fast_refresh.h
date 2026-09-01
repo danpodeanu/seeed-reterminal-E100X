@@ -5,9 +5,8 @@
 
 class EPaper;
 
-// Stateful SSD1677 differential refresh for the portrait E1005. Call begin()
-// after a full EPaper::update(), mutate the display framebuffer, then refresh()
-// the logical rectangle that changed.
+// SSD1677 refresh support for the portrait E1005. The differential path uses
+// begin()/refresh(); the Gray4 waveform path consumes the same 1-bpp buffer.
 class E1005FastRefresh {
  public:
   struct Region {
@@ -43,6 +42,9 @@ class E1005FastRefresh {
 
   Result begin();
   Result refresh(const Region& region, Timing& timing);
+  // Drives a monochrome framebuffer through Seeed's factory Gray4 waveform.
+  // This avoids SSD1677 source-direction streaks without changing the renderer.
+  Result refreshWithGray4Waveform(Timing& timing);
   void end();
 
   bool ready() const { return ready_; }
@@ -71,6 +73,7 @@ class E1005FastRefresh {
                          size_t length = 0);
   void writeDisplayPlaneWindow(uint8_t command, const uint8_t* data,
                                const NativeRegion& region);
+  void writeBinaryGray4Plane(uint8_t command, const uint8_t* framebuffer);
   void setPartialWindow(const NativeRegion& region);
   void seedBaseline(const uint8_t* plane);
 };

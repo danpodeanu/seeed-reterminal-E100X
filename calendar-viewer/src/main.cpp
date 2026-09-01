@@ -79,7 +79,7 @@ constexpr const char* kFrameHashKey = "frame_hash";
 constexpr const char* kFrameKindKey = "frame_kind";
 constexpr const char* kFrameComponentsKey = "frame_parts";
 // Increment when rendering changes without changing the underlying data.
-constexpr uint32_t kCalendarFrameRevision = 29;
+constexpr uint32_t kCalendarFrameRevision = 39;
 
 enum class FrameKind : uint8_t {
   None = 0,
@@ -192,9 +192,30 @@ void deepSleepE1005Panel() {
 
 void refreshPanel() {
 #if RETERMINAL_MODEL == 1005
-  // Seeed_GFX uses a generic SSD1677 border value. The Sticky stock driver
-  // uses LUT1 for full monochrome refreshes.
-  prepareE1005FullRefresh();
+  if (epaper.getColorDepth() == 1) {
+    // Sticky's monochrome OTP waveforms can extend specific source-direction
+    // pixel patterns into streaks. Drive the same binary image through the
+    // panel's factory Gray4 endpoints instead.
+    E1005FastRefresh::Timing timing;
+    const E1005FastRefresh::Result result =
+        fastRefresh.refreshWithGray4Waveform(timing);
+    if (result == E1005FastRefresh::Result::Ok) {
+      LOG.printf(
+          "[panel] Gray4 OTP refresh=%lu ms "
+          "(prepare=%lu transfer=%lu panel=%lu ms)\n",
+          static_cast<unsigned long>(timing.totalUs / 1000U),
+          static_cast<unsigned long>(timing.prepareUs / 1000U),
+          static_cast<unsigned long>(timing.transferUs / 1000U),
+          static_cast<unsigned long>(timing.panelUs / 1000U));
+      framebufferReady = true;
+      return;
+    }
+    LOG.printf("[panel] clean full refresh failed: %s; using stock refresh\n",
+               E1005FastRefresh::resultMessage(result));
+    // Seeed_GFX uses a generic SSD1677 border value. The Sticky stock driver
+    // uses LUT1 for full monochrome refreshes.
+    prepareE1005FullRefresh();
+  }
 #endif
   panel_watchdog::refresh(epaper);
   framebufferReady = true;
@@ -789,44 +810,10 @@ bool fetchInteractiveCalendarData(
   return true;
 }
 
-bool fastRefreshRegion(const E1005FastRefresh::Region& region,
-                       const char* reason) {
-  if (!fastRefresh.ready()) return false;
-
-  E1005FastRefresh::Timing timing;
-  const E1005FastRefresh::Result result =
-      fastRefresh.refresh(region, timing);
-  if (result == E1005FastRefresh::Result::Ok) {
-    LOG.printf(
-        "[touch] %s refresh=%lu ms "
-        "(prepare=%lu transfer=%lu panel=%lu reseed=%lu ms)\n",
-        reason, static_cast<unsigned long>(timing.totalUs / 1000U),
-        static_cast<unsigned long>(timing.prepareUs / 1000U),
-        static_cast<unsigned long>(timing.transferUs / 1000U),
-        static_cast<unsigned long>(timing.panelUs / 1000U),
-        static_cast<unsigned long>(timing.reseedUs / 1000U));
-    return true;
-  }
-
-  LOG.printf("[touch] %s fast refresh failed: %s\n", reason,
-             E1005FastRefresh::resultMessage(result));
-  return false;
-}
-
 void refreshInteractivePage() {
-  const E1005FastRefresh::Region fullPanel = {
-      0, 0, config::PANEL_WIDTH, config::PANEL_HEIGHT};
-  if (fastRefreshRegion(fullPanel, "page")) return;
-
   fastRefresh.end();
   epaper.sleep();
-  LOG.println("[touch] recovering page transition with a full refresh");
   refreshPanel();
-  const E1005FastRefresh::Result result = fastRefresh.begin();
-  if (result != E1005FastRefresh::Result::Ok) {
-    LOG.printf("[touch] fast refresh unavailable after full refresh: %s\n",
-               E1005FastRefresh::resultMessage(result));
-  }
 }
 
 void renderInteractiveCalendar(
@@ -873,14 +860,9 @@ bool applyInteractiveSelection(
 
 void renderTouchSleepMessage() {
   calendar_render::sleepStatus(epaper);
-  const E1005FastRefresh::Region navigation = {
-      0, calendar_portrait_layout::NAVIGATION_TOP, config::PANEL_WIDTH,
-      calendar_portrait_layout::NAVIGATION_HEIGHT};
-  if (!fastRefreshRegion(navigation, "sleep message")) {
-    fastRefresh.end();
-    epaper.sleep();
-    refreshPanel();
-  }
+  fastRefresh.end();
+  epaper.sleep();
+  refreshPanel();
   if (!saveFrameState(
           statusFingerprint(
               "Sleeping",
@@ -906,8 +888,8 @@ void runTouchSession(
   }
   if (!framebufferMatchesPanel) {
     LOG.println(
-        "[touch] refreshing current page to establish the fast-refresh "
-        "baseline");
+        "[touch] refreshing current page because the framebuffer differs "
+        "from the panel");
     refreshPanel();
     const CalendarFrameFingerprints frame = frameFingerprints(
         data, window, view, weather, footer, now, displayDay);
@@ -917,11 +899,6 @@ void runTouchSession(
     }
   }
 
-  const E1005FastRefresh::Result refreshResult = fastRefresh.begin();
-  if (refreshResult != E1005FastRefresh::Result::Ok) {
-    LOG.printf("[touch] fast refresh unavailable: %s; using full refreshes\n",
-               E1005FastRefresh::resultMessage(refreshResult));
-  }
   const bool touchReady = touch.begin(touchWire);
   if (!touchReady) {
     LOG.println(

@@ -129,6 +129,63 @@ E1005FastRefresh::Result E1005FastRefresh::refresh(
   return Result::Ok;
 }
 
+E1005FastRefresh::Result
+E1005FastRefresh::refreshWithGray4Waveform(Timing& timing) {
+  timing = {};
+  end();
+
+  const auto* framebuffer =
+      static_cast<const uint8_t*>(display_.getPointer());
+  if (!framebuffer) return Result::NoFramebuffer;
+
+  const uint32_t refreshStartedUs = micros();
+  timing.prepareUs = micros() - refreshStartedUs;
+
+  display_.wake();
+  const uint8_t grayBorderWaveform = 0x00;
+  const uint8_t internalTemperature = 0x80;
+  const uint8_t grayWaveformTemperature[] = {0x67, 0x00};
+  const uint8_t grayUpdateSequence = 0xD7;
+  const NativeRegion fullPanel = {0, 0, kDisplayHeight, kDisplayWidth};
+
+  writePanelCommand(0x3C, &grayBorderWaveform, 1);
+  writePanelCommand(0x18, &internalTemperature, 1);
+  writePanelCommand(0x1A, grayWaveformTemperature,
+                    sizeof(grayWaveformTemperature));
+  setPartialWindow(fullPanel);
+  writeBinaryGray4Plane(0x24, framebuffer);
+  setPartialWindow(fullPanel);
+  writeBinaryGray4Plane(0x26, framebuffer);
+  writePanelCommand(0x22, &grayUpdateSequence, 1);
+  const uint32_t panelStartedUs = micros();
+  writePanelCommand(0x20);
+  timing.transferUs = micros() - refreshStartedUs - timing.prepareUs;
+
+  while (digitalRead(TFT_BUSY) == LOW &&
+         micros() - panelStartedUs < kBusyAssertTimeoutUs) {
+    delayMicroseconds(50);
+  }
+  if (digitalRead(TFT_BUSY) == LOW) {
+    timing.panelUs = micros() - panelStartedUs;
+    timing.totalUs = micros() - refreshStartedUs;
+    return Result::BusyNotAsserted;
+  }
+
+  while (digitalRead(TFT_BUSY) == HIGH) {
+    if (micros() - panelStartedUs >= kRefreshTimeoutUs) {
+      timing.panelUs = micros() - panelStartedUs;
+      timing.totalUs = micros() - refreshStartedUs;
+      return Result::TimedOut;
+    }
+    delay(1);
+  }
+
+  timing.panelUs = micros() - panelStartedUs;
+  timing.totalUs = micros() - refreshStartedUs;
+  display_.sleep();
+  return Result::Ok;
+}
+
 void E1005FastRefresh::end() {
   ready_ = false;
   free(previousPlane_);
@@ -225,6 +282,31 @@ void E1005FastRefresh::writeDisplayPlaneWindow(
   for (int row = region.top; row < region.top + region.height; ++row) {
     panelSpi.writeBytes(data + row * kDisplayStrideBytes + leftByte,
                         rowBytes);
+  }
+  digitalWrite(TFT_CS, HIGH);
+  digitalWrite(TFT_DC, HIGH);
+  panelSpi.endTransaction();
+}
+
+void E1005FastRefresh::writeBinaryGray4Plane(
+    uint8_t command, const uint8_t* framebuffer) {
+  uint8_t rowBuffer[kDisplayStrideBytes];
+  SPIClass& panelSpi = display_.getSPIinstance();
+  panelSpi.beginTransaction(SPISettings(kPanelSpiHz, MSBFIRST, SPI_MODE0));
+  digitalWrite(board::PIN_SD_CS, HIGH);
+  digitalWrite(TFT_CS, LOW);
+  digitalWrite(TFT_DC, LOW);
+  panelSpi.transfer(command);
+  digitalWrite(TFT_DC, HIGH);
+  for (int row = 0; row < kDisplayWidth; ++row) {
+    const uint8_t* source = framebuffer + row * kDisplayStrideBytes;
+    for (int column = kDisplayStrideBytes - 1; column >= 0; --column) {
+      // The 1-bpp buffer stores white as 1; Seeed's Gray4 endpoint encoding
+      // stores white as 00 and black as 11 across the two controller planes.
+      rowBuffer[kDisplayStrideBytes - 1 - column] =
+          static_cast<uint8_t>(~reverseBits(source[column]));
+    }
+    panelSpi.writeBytes(rowBuffer, sizeof(rowBuffer));
   }
   digitalWrite(TFT_CS, HIGH);
   digitalWrite(TFT_DC, HIGH);
