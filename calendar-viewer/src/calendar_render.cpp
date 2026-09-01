@@ -895,12 +895,25 @@ void drawAgendaCard(EPaper& epaper, ColorDitherer& ditherer,
     const String dayNumber =
         separator < 0 ? headerDetail : headerDetail.substring(0, separator);
 
-    // Prevent the monochrome header dither from continuing narrow digit stems.
+    // Remove only Bayer pixels that visually continue the 16 px digit 1 stem.
     constexpr int kHeaderBaselineOffset = 7;
     const int clearTop =
         card.top + headerHeight / 2 + kHeaderBaselineOffset;
-    epaper.fillRect(detailLeft, clearTop, epaper.textWidth(dayNumber),
-                    card.top + headerHeight - clearTop, PANEL_WHITE);
+    const int digitOneWidth = epaper.textWidth("1");
+    const int stemWidth = std::max(1, digitOneWidth / 3);
+    for (unsigned int index = 0; index < dayNumber.length(); ++index) {
+      if (dayNumber[index] != '1') continue;
+      const int digitLeft =
+          detailLeft + epaper.textWidth(dayNumber.substring(0, index));
+      const int stemLeft = digitLeft + digitOneWidth / 2;
+      for (int y = clearTop; y < card.top + headerHeight; ++y) {
+        for (int x = stemLeft; x < stemLeft + stemWidth; ++x) {
+          if (monochromeDitherPixel(CALENDAR_HEADER_RGB, x, y)) {
+            epaper.drawPixel(x, y, PANEL_WHITE);
+          }
+        }
+      }
+    }
     epaper.setTextDatum(ML_DATUM);
     epaper.drawString(headerDetail, detailLeft,
                       card.top + headerHeight / 2);

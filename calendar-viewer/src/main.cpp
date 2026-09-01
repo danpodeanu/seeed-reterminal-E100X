@@ -79,7 +79,7 @@ constexpr const char* kFrameHashKey = "frame_hash";
 constexpr const char* kFrameKindKey = "frame_kind";
 constexpr const char* kFrameComponentsKey = "frame_parts";
 // Increment when rendering changes without changing the underlying data.
-constexpr uint32_t kCalendarFrameRevision = 24;
+constexpr uint32_t kCalendarFrameRevision = 25;
 
 enum class FrameKind : uint8_t {
   None = 0,
