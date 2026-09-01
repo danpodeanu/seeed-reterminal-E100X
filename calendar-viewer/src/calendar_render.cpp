@@ -888,9 +888,27 @@ void drawAgendaCard(EPaper& epaper, ColorDitherer& ditherer,
                     contentLeft + headerIconSize + config::ui(6),
                     card.top + headerHeight / 2);
   if (!headerDetail.isEmpty()) {
+#if RETERMINAL_MODEL == 1005
+    const int detailRight = card.left + card.width - kAgendaMargin;
+    const int detailLeft = detailRight - epaper.textWidth(headerDetail);
+    const int separator = headerDetail.indexOf(' ');
+    const String dayNumber =
+        separator < 0 ? headerDetail : headerDetail.substring(0, separator);
+
+    // Prevent the monochrome header dither from continuing narrow digit stems.
+    constexpr int kHeaderBaselineOffset = 7;
+    const int clearTop =
+        card.top + headerHeight / 2 + kHeaderBaselineOffset;
+    epaper.fillRect(detailLeft, clearTop, epaper.textWidth(dayNumber),
+                    card.top + headerHeight - clearTop, PANEL_WHITE);
+    epaper.setTextDatum(ML_DATUM);
+    epaper.drawString(headerDetail, detailLeft,
+                      card.top + headerHeight / 2);
+#else
     epaper.setTextDatum(MR_DATUM);
     epaper.drawString(headerDetail, card.left + card.width - kAgendaMargin,
                       card.top + headerHeight / 2);
+#endif
   }
   if (events.empty()) {
     selectFont(epaper, FontSize::Tiny);
