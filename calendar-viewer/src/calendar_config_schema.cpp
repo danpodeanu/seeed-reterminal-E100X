@@ -15,6 +15,10 @@ const char* const kWeatherProviderValues[] = {"OpenMeteo", "QWeather", nullptr};
 const char* const kTempUnitValues[] = {"Celsius", "Fahrenheit", nullptr};
 const char* const kWindUnitValues[] = {
     "KilometresPerHour", "MilesPerHour", nullptr};
+#if RETERMINAL_MODEL == 1005
+const char* const kE1005PowerModeValues[] = {
+    "Deep sleep battery saver", "Always on", nullptr};
+#endif
 
 const Field kCalendarFields[] = {
     {kKeyCalendarProvider, "Calendar source",
@@ -44,9 +48,15 @@ const Field kPresentationFields[] = {
 };
 
 const Field kRefreshFields[] = {
+#if RETERMINAL_MODEL == 1005
+    {kKeySleepSeconds, "Always-on update interval (s)",
+     "Scheduled calendar/weather checks in Always on mode. Ignored by the button-only battery saver. Range 900..21600.",
+     FieldType::Int, "900", nullptr, 900, 21600, nullptr},
+#else
     {kKeySleepSeconds, "Sleep between updates (s)",
      "Wake, reconnect, and check calendar/weather data. Range 60..21600.",
      FieldType::Int, "900", nullptr, 60, 21600, nullptr},
+#endif
     {kKeyTimezone, "Timezone",
      "Pick a region or choose Custom (POSIX) and enter a POSIX TZ string.",
      FieldType::Timezone, "GMT0BST,M3.5.0/1,M10.5.0/2", nullptr, 0, 64,
@@ -113,6 +123,12 @@ const Field kQweatherFields[] = {
 };
 
 const Field kDeviceFields[] = {
+#if RETERMINAL_MODEL == 1005
+    {kKeyE1005PowerMode, "Power mode",
+     "Battery saver sleeps after five minutes without input and wakes only from a front button. Always on remains interactive and checks for updates on schedule.",
+     FieldType::Enum, "Deep sleep battery saver",
+     kE1005PowerModeValues, 0, 0, nullptr},
+#endif
     {kKeyLowBatteryWarn, "Show low-battery warning",
      "Show a recharge screen below 5% when a battery reading is available.",
      FieldType::Bool, "true", nullptr, 0, 0, nullptr},

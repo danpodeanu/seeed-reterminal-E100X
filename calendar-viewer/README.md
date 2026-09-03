@@ -3,11 +3,12 @@
 A low-power calendar dashboard for the Seeed Studio reTerminal E1001, E1002,
 E1003, E1004, and E1005. It loads a public iCalendar feed or Google calendars,
 renders today's agenda together with week and month calendars, shows indoor
-temperature and humidity plus a weather summary, and then returns to deep sleep.
+temperature and humidity plus a weather summary, and supports scheduled or
+button-only low-power operation.
 
-The device wakes at the configured interval, but calendar and weather APIs are
-checked no more than once every 15 minutes. It refreshes the e-paper panel only
-when visible calendar, weather, sensor, or date content has changed.
+Calendar and weather APIs are checked no more than once every 15 minutes. The
+e-paper panel refreshes only when visible calendar, weather, sensor, or date
+content has changed.
 
 ![Calendar Viewer showing week and month calendars, agendas, and weather on a reTerminal E1004](assets/e1004-calendar-screenshot.png)
 
@@ -37,6 +38,10 @@ feature.*
   page backward or forward by one day, week, or month. While awake, the bottom
   tabs switch pages and tapping a Week row or Month cell opens Today for that
   date. The selected page and date remain active for scheduled refreshes.
+- E1005 power mode defaults to **Deep sleep battery saver**: after five minutes
+  without input it displays a button-wake message, enters deep sleep, disables
+  timer wakeups, and wakes only from OK, UP, or DOWN. **Always on** keeps touch
+  and buttons active and checks for updates at the configured interval.
 - A wall-planner layout uses open column gutters, weekday/date labels inside
   the week cells, a light-blue weekday header above date-only month cells,
   horizontal week separators, rounded event bands, and clean white agenda and
@@ -107,8 +112,9 @@ are actually being queried. Cache-only deep-sleep wakes do not start Wi-Fi.
 
 To reopen the portal later, wake the sleeping device while holding the green
 button (OK on E1005) for at least two seconds, then release it before five
-seconds. Press it again to leave the portal after saving. The **SD** tab exposes
-the inserted microSD card through the same web UI.
+seconds. In E1005 Always on mode, hold OK for two seconds while the calendar is
+interactive. Press it again to leave the portal after saving. The **SD** tab
+exposes the inserted microSD card through the same web UI.
 
 ### 3. Configure a calendar source
 
@@ -286,16 +292,21 @@ required.
 | Tap an E1005 bottom tab while awake | Switch directly to Today, Week, or Month |
 | Tap an E1005 Week row or Month date while awake | Open Today for the selected date |
 | Hold green, or OK on E1005, for at least 2 seconds | Open the configuration portal |
-| Wait for the timer | Check for calendar and weather updates |
+| Wait for the timer | Check for updates on E1001-E1004 or in E1005 Always on mode |
 
 Calendar and weather results remain fresh for 15 minutes across deep sleep, so
 shorter configured wake intervals and repeated button navigation do not repeat
 provider requests. Failed provider attempts use the same gate rather than
 retrying more frequently. Scheduled wakes are suppressed during configured
-quiet hours. After an E1005 cold boot or button wake, touch remains active until
-five minutes have elapsed without input. The bottom bar then confirms that the
-device is sleeping and names the buttons that wake it; timer wakes do not hold
-the device awake for touch input.
+quiet hours on E1001-E1004.
+
+E1005 defaults to **Deep sleep battery saver**. A cold boot or button wake
+remains interactive until five minutes have elapsed without input; the bottom
+bar then confirms that the device is sleeping and names the wake buttons.
+Automatic timer wake is disabled in this mode. **Always on** never enters deep
+sleep during normal operation, ignores quiet-hour sleep suppression, remains
+interactive, and starts an update cycle at the configured interval. Its update
+interval has a 15-minute minimum.
 
 Calendar data for nearby periods is prefetched while E1005 interaction is
 active. Navigation within that window never refetches truncated data. Browsing
@@ -318,9 +329,10 @@ Before a changed frame is refreshed, the serial log identifies each changed
 component and reports useful current values. The plain-white diagnostic
 `Google checked` footer is updated whenever another component causes a refresh,
 but its timestamp never triggers a refresh by itself. iCalendar download
-failures preserve an existing calendar frame and retry after five minutes.
-Google failures display the API error and retry on the normal configured
-schedule; an unchanged error does not cause another panel refresh.
+failures preserve an existing calendar frame. E1005 battery saver waits for a
+button after errors; scheduled modes retry without bypassing the 15-minute
+provider-attempt gate. Google failures display the API error; an unchanged error
+does not cause another panel refresh.
 
 The five-second screenshot gesture is compiled out by default. A development
 build can enable it with `-D CALENDAR_GREEN_SCREENSHOT_ENABLED=1`; holding green

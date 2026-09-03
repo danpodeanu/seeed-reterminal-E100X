@@ -16,6 +16,7 @@ constexpr const char* kKeyTimeFormat = "time_format";
 constexpr const char* kKeyShowSingleCalendarBackground = "single_cal_bg";
 
 constexpr const char* kKeySleepSeconds = "sleep_secs";
+constexpr const char* kKeyE1005PowerMode = "power_mode";
 constexpr const char* kKeyTimezone = "timezone";
 constexpr const char* kKeyQuietEnabled = "quiet_on";
 constexpr const char* kKeyQuietStartHour = "quiet_sh";

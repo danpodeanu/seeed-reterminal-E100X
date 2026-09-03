@@ -19,6 +19,7 @@ struct Cache {
       config::SHOW_SINGLE_CALENDAR_BACKGROUND;
 
   uint64_t sleepSeconds = config::SLEEP_SECONDS;
+  config::E1005PowerMode e1005PowerMode = config::E1005_POWER_MODE;
   String timezone = config::TIMEZONE;
   bool quietHoursEnabled = config::QUIET_HOURS_ENABLED;
   uint8_t quietStartHour = config::QUIET_START_HOUR;
@@ -82,6 +83,12 @@ config::TimeFormat parseTimeFormat(const String& value) {
                              : config::TimeFormat::TwelveHour;
 }
 
+config::E1005PowerMode parseE1005PowerMode(const String& value) {
+  return value == "Always on"
+             ? config::E1005PowerMode::AlwaysOn
+             : config::E1005PowerMode::DeepSleepBatterySaver;
+}
+
 config::WeatherProvider parseWeatherProvider(const String& value) {
   return value == "QWeather" ? config::WeatherProvider::QWeather
                               : config::WeatherProvider::OpenMeteo;
@@ -119,6 +126,11 @@ void load() {
 
   g_cache.sleepSeconds = static_cast<uint64_t>(
       config_portal::storage::getInt(prefs, kSchema, kKeySleepSeconds));
+#if RETERMINAL_MODEL == 1005
+  g_cache.e1005PowerMode = parseE1005PowerMode(
+      config_portal::storage::getString(
+          prefs, kSchema, kKeyE1005PowerMode));
+#endif
   g_cache.timezone =
       config_portal::storage::getString(prefs, kSchema, kKeyTimezone);
   g_cache.quietHoursEnabled =
@@ -182,6 +194,9 @@ bool showSingleCalendarBackground() {
 }
 
 uint64_t sleepSeconds() { return g_cache.sleepSeconds; }
+config::E1005PowerMode e1005PowerMode() {
+  return g_cache.e1005PowerMode;
+}
 const char* timezone() { return g_cache.timezone.c_str(); }
 bool quietHoursEnabled() { return g_cache.quietHoursEnabled; }
 uint8_t quietStartHour() { return g_cache.quietStartHour; }

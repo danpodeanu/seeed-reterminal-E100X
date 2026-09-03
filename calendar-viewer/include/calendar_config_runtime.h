@@ -19,6 +19,7 @@ config::TimeFormat timeFormat();
 bool showSingleCalendarBackground();
 
 uint64_t sleepSeconds();
+config::E1005PowerMode e1005PowerMode();
 const char* timezone();
 bool quietHoursEnabled();
 uint8_t quietStartHour();

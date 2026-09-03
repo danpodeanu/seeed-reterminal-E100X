@@ -302,6 +302,17 @@ void test_flash_cache_writes_only_for_changes_and_durable_checkpoints() {
       true, false, 42, 42, savedAt + 60, savedAt, sixHours));
 }
 
+void test_e1005_power_modes_control_timer_wake_and_update_floor() {
+  TEST_ASSERT_FALSE(calendar_logic::e1005TimerWakeEnabled(
+      config::E1005PowerMode::DeepSleepBatterySaver));
+  TEST_ASSERT_TRUE(calendar_logic::e1005TimerWakeEnabled(
+      config::E1005PowerMode::AlwaysOn));
+  TEST_ASSERT_EQUAL_UINT64(
+      900, calendar_logic::e1005AlwaysOnUpdateSeconds(15, 900));
+  TEST_ASSERT_EQUAL_UINT64(
+      3600, calendar_logic::e1005AlwaysOnUpdateSeconds(3600, 900));
+}
+
 void test_initial_connection_status_is_limited_to_configured_cold_boots() {
   TEST_ASSERT_TRUE(
       calendar_logic::shouldShowInitialConnectionStatus(true, false));
@@ -1428,6 +1439,8 @@ int main(int, char**) {
   RUN_TEST(test_truncated_calendar_cache_is_reused_when_it_covers_the_view);
   RUN_TEST(
       test_flash_cache_writes_only_for_changes_and_durable_checkpoints);
+  RUN_TEST(
+      test_e1005_power_modes_control_timer_wake_and_update_floor);
   RUN_TEST(
       test_initial_connection_status_is_limited_to_configured_cold_boots);
   RUN_TEST(

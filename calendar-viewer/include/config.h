@@ -30,6 +30,8 @@ constexpr char GOOGLE_CALENDAR_IDS[] = "";
 constexpr char GOOGLE_DELEGATED_USER[] = "";
 
 constexpr uint64_t SLEEP_SECONDS = 15ULL * 60ULL;
+constexpr E1005PowerMode E1005_POWER_MODE =
+    E1005PowerMode::DeepSleepBatterySaver;
 constexpr char TIMEZONE[] = "GMT0BST,M3.5.0/1,M10.5.0/2";
 constexpr bool QUIET_HOURS_ENABLED = true;
 constexpr uint8_t QUIET_START_HOUR = 1;

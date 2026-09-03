@@ -404,6 +404,18 @@ inline constexpr bool containsWindow(const calendar::Window& available,
          available.end >= required.end;
 }
 
+inline constexpr bool e1005TimerWakeEnabled(
+    config::E1005PowerMode mode) {
+  return mode == config::E1005PowerMode::AlwaysOn;
+}
+
+inline constexpr uint64_t e1005AlwaysOnUpdateSeconds(
+    uint64_t configuredSeconds, uint64_t minimumSeconds) {
+  return configuredSeconds < minimumSeconds
+             ? minimumSeconds
+             : configuredSeconds;
+}
+
 inline time_t latestValidRefreshGateTimestamp(
     time_t now, time_t lastSuccessfulRefresh,
     time_t lastRefreshAttempt) {

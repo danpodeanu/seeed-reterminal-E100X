@@ -23,4 +23,9 @@ enum class TimeFormat {
   TwentyFourHour,
 };
 
+enum class E1005PowerMode {
+  DeepSleepBatterySaver,
+  AlwaysOn,
+};
+
 }  // namespace config

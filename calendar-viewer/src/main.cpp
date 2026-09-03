@@ -7,6 +7,7 @@
 #include <Adafruit_SHT4x.h>
 #include <driver/rtc_io.h>
 #include <esp_sleep.h>
+#include <esp_system.h>
 #include <algorithm>
 #include <climits>
 #include <math.h>
@@ -95,6 +96,58 @@ EPaper epaper;
 usb_screen_capture::Server usbScreenCapture;
 Adafruit_SHT4x sht4;
 sensors::Readings sensorReadings;
+#if RETERMINAL_MODEL == 1005
+constexpr uint64_t kRetainedStateMagic = UINT64_C(0x43414C504F575201);
+struct RetainedState {
+  uint64_t magic;
+  uint64_t inverseMagic;
+  time_t lastNtpSyncEpoch;
+  time_t lastCalendarNetworkRefreshEpoch;
+  uint64_t lastCalendarNetworkRefreshIdentity;
+  time_t lastCalendarNetworkAttemptEpoch;
+  uint64_t lastCalendarNetworkAttemptIdentity;
+  time_t lastWeatherNetworkRefreshEpoch;
+  uint64_t lastWeatherNetworkRefreshIdentity;
+  time_t lastWeatherNetworkAttemptEpoch;
+  uint64_t lastWeatherNetworkAttemptIdentity;
+  time_t selectedDay;
+  uint8_t calendarView;
+  bool openPortalOnRestart;
+};
+RTC_NOINIT_ATTR RetainedState retainedState;
+time_t& lastNtpSyncEpoch = retainedState.lastNtpSyncEpoch;
+time_t& lastCalendarNetworkRefreshEpoch =
+    retainedState.lastCalendarNetworkRefreshEpoch;
+uint64_t& lastCalendarNetworkRefreshIdentity =
+    retainedState.lastCalendarNetworkRefreshIdentity;
+time_t& lastCalendarNetworkAttemptEpoch =
+    retainedState.lastCalendarNetworkAttemptEpoch;
+uint64_t& lastCalendarNetworkAttemptIdentity =
+    retainedState.lastCalendarNetworkAttemptIdentity;
+time_t& lastWeatherNetworkRefreshEpoch =
+    retainedState.lastWeatherNetworkRefreshEpoch;
+uint64_t& lastWeatherNetworkRefreshIdentity =
+    retainedState.lastWeatherNetworkRefreshIdentity;
+time_t& lastWeatherNetworkAttemptEpoch =
+    retainedState.lastWeatherNetworkAttemptEpoch;
+uint64_t& lastWeatherNetworkAttemptIdentity =
+    retainedState.lastWeatherNetworkAttemptIdentity;
+uint8_t& retainedCalendarView = retainedState.calendarView;
+time_t& retainedSelectedDay = retainedState.selectedDay;
+
+bool retainedStateValid() {
+  return retainedState.magic == kRetainedStateMagic &&
+         retainedState.inverseMagic == ~kRetainedStateMagic;
+}
+
+void resetRetainedState() {
+  retainedState = {};
+  retainedState.magic = kRetainedStateMagic;
+  retainedState.inverseMagic = ~kRetainedStateMagic;
+  retainedCalendarView =
+      static_cast<uint8_t>(config::CalendarView::Today);
+}
+#else
 RTC_DATA_ATTR time_t lastNtpSyncEpoch = 0;
 RTC_DATA_ATTR time_t lastCalendarNetworkRefreshEpoch = 0;
 RTC_DATA_ATTR uint64_t lastCalendarNetworkRefreshIdentity = 0;
@@ -104,10 +157,8 @@ RTC_DATA_ATTR time_t lastWeatherNetworkRefreshEpoch = 0;
 RTC_DATA_ATTR uint64_t lastWeatherNetworkRefreshIdentity = 0;
 RTC_DATA_ATTR time_t lastWeatherNetworkAttemptEpoch = 0;
 RTC_DATA_ATTR uint64_t lastWeatherNetworkAttemptIdentity = 0;
+#endif
 #if RETERMINAL_MODEL == 1005
-RTC_DATA_ATTR uint8_t retainedCalendarView =
-    static_cast<uint8_t>(config::CalendarView::Today);
-RTC_DATA_ATTR time_t retainedSelectedDay = 0;
 TwoWire touchWire(1);
 Gt911Touch touch;
 E1005FastRefresh fastRefresh(epaper);
@@ -264,7 +315,70 @@ bool saveRequestedScreenshot() {
   return saved;
 }
 
-void powerDownAndSleep(uint64_t sleepSeconds, bool timerWakeEnabled = true) {
+void powerDownAndSleep(uint64_t sleepSeconds, bool timerWakeEnabled = true,
+                       bool forceDeepSleep = false) {
+#if RETERMINAL_MODEL == 1005
+  const bool alwaysOn =
+      calendar_config::runtime::e1005PowerMode() ==
+      config::E1005PowerMode::AlwaysOn;
+  if (alwaysOn && !forceDeepSleep) {
+    wifi_sta::disable();
+    if (sdReady) {
+      SD.end();
+      sdReady = false;
+    }
+    pinMode(PIN_BUTTON_GREEN, INPUT_PULLUP);
+    pinMode(PIN_BUTTON_RIGHT, INPUT_PULLUP);
+    pinMode(PIN_BUTTON_LEFT, INPUT_PULLUP);
+    const uint64_t requestedWaitMs = sleepSeconds * 1000ULL;
+    const uint32_t waitMs = static_cast<uint32_t>(
+        std::min<uint64_t>(requestedWaitMs, UINT32_MAX));
+    const uint32_t waitStartedAt = millis();
+    uint32_t greenHoldStartedAt = 0;
+    bool greenHoldActive = false;
+    LOG.printf(
+        "[always-on] retaining display; retrying viewer cycle in %llu "
+        "second(s)\n",
+        static_cast<unsigned long long>(sleepSeconds));
+    LOG.flush();
+    hardware::setStatusLed(false);
+    while (static_cast<uint32_t>(millis() - waitStartedAt) < waitMs) {
+      const uint32_t loopNow = millis();
+      if (digitalRead(PIN_BUTTON_GREEN) == LOW) {
+        if (!greenHoldActive) {
+          greenHoldActive = true;
+          greenHoldStartedAt = loopNow;
+        } else if (static_cast<uint32_t>(
+                       loopNow - greenHoldStartedAt) >=
+                   calendar_logic::kConfigPortalHoldMs) {
+          retainedState.openPortalOnRestart = true;
+          hardware::beep();
+          break;
+        }
+      } else if (greenHoldActive) {
+        hardware::beep();
+        break;
+      }
+      if (digitalRead(PIN_BUTTON_RIGHT) == LOW ||
+          digitalRead(PIN_BUTTON_LEFT) == LOW) {
+        hardware::beep();
+        break;
+      }
+      if (framebufferReady) {
+        usbScreenCapture.poll(
+            epaper, config::PANEL_WIDTH, config::PANEL_HEIGHT);
+      }
+      delay(100);
+    }
+    ESP.restart();
+    return;
+  }
+  if (forceDeepSleep) timerWakeEnabled = false;
+  timerWakeEnabled =
+      timerWakeEnabled &&
+      calendar_logic::e1005TimerWakeEnabled(
+          calendar_config::runtime::e1005PowerMode());
+#endif
   wifi_sta::disable();
   if (sdReady) {
     SD.end();
@@ -800,12 +914,19 @@ bool pollAwakeButton(calendar_logic::CalendarNavigation& navigation,
 
     button.stableLevel = level;
     if (level == HIGH) {
+      const bool wasPressed = !button.armed;
       button.armed = true;
+      if (button.pin == PIN_BUTTON_GREEN && wasPressed) {
+        navigation = button.navigation;
+        name = button.name;
+        return true;
+      }
       continue;
     }
     if (!button.armed) continue;
 
     button.armed = false;
+    if (button.pin == PIN_BUTTON_GREEN) continue;
     navigation = button.navigation;
     name = button.name;
     return true;
@@ -1007,11 +1128,17 @@ void renderTouchSleepMessage() {
   }
 }
 
-void runTouchSession(
+enum class InteractiveSessionExit {
+  Inactivity,
+  ScheduledRefresh,
+  Configuration,
+};
+
+InteractiveSessionExit runTouchSession(
     calendar::Data& data, calendar::Window& window,
     config::CalendarView& view, time_t now, time_t& displayDay,
     const WeatherData& weather, const String& footer,
-    bool framebufferMatchesPanel) {
+    bool alwaysOn) {
   if (!framebufferReady) {
     beginPanel();
     initializePanelColorMode();
@@ -1019,18 +1146,6 @@ void runTouchSession(
         epaper, data, window, view, calendar_config::runtime::weekStart(), now,
         displayDay, sensorReadings, weather, footer);
     framebufferReady = true;
-  }
-  if (!framebufferMatchesPanel) {
-    LOG.println(
-        "[touch] refreshing current page because the framebuffer differs "
-        "from the panel");
-    refreshPanel();
-    const CalendarFrameFingerprints frame = frameFingerprints(
-        data, window, view, weather, footer, now, displayDay);
-    if (!saveFrameState(frame.combined, FrameKind::Calendar,
-                        &frame.components)) {
-      LOG.println("[touch] warning: refreshed baseline state was not saved");
-    }
   }
 
   const bool touchReady = touch.begin(touchWire);
@@ -1040,14 +1155,45 @@ void runTouchSession(
   }
   initializeAwakeButtons();
 
-  LOG.printf("[input] %s; sleeping after %lu seconds without input\n",
-             touchReady ? "touch and buttons ready" : "buttons ready",
-             static_cast<unsigned long>(
-                 config::TOUCH_INACTIVITY_SLEEP_MS / 1000U));
+  const uint64_t updateSeconds =
+      calendar_logic::e1005AlwaysOnUpdateSeconds(
+          calendar_config::runtime::sleepSeconds(),
+          config::NETWORK_CACHE_MAX_AGE_SECONDS);
+  const uint32_t updateIntervalMs =
+      static_cast<uint32_t>(updateSeconds * 1000ULL);
+  if (alwaysOn) {
+    LOG.printf(
+        "[input] %s in always-on mode; next scheduled update in %llu "
+        "second(s)\n",
+        touchReady ? "touch and buttons ready" : "buttons ready",
+        static_cast<unsigned long long>(updateSeconds));
+  } else {
+    LOG.printf("[input] %s; sleeping after %lu seconds without input\n",
+               touchReady ? "touch and buttons ready" : "buttons ready",
+               static_cast<unsigned long>(
+                   config::TOUCH_INACTIVITY_SLEEP_MS / 1000U));
+  }
+
+  const uint32_t sessionStartedAt = millis();
   uint32_t lastActivityAt = millis();
+  uint32_t configureHoldStartedAt = 0;
+  bool configureHoldActive = false;
   bool touchActive = false;
-  while (static_cast<uint32_t>(millis() - lastActivityAt) <
-         config::TOUCH_INACTIVITY_SLEEP_MS) {
+  InteractiveSessionExit exit = InteractiveSessionExit::Inactivity;
+  while (true) {
+    const uint32_t loopNow = millis();
+    if (alwaysOn &&
+        static_cast<uint32_t>(loopNow - sessionStartedAt) >=
+            updateIntervalMs) {
+      exit = InteractiveSessionExit::ScheduledRefresh;
+      break;
+    }
+    if (!alwaysOn &&
+        static_cast<uint32_t>(loopNow - lastActivityAt) >=
+            config::TOUCH_INACTIVITY_SLEEP_MS) {
+      break;
+    }
+
     usbScreenCapture.poll(epaper, config::PANEL_WIDTH, config::PANEL_HEIGHT);
 
     if (touchReady) {
@@ -1112,13 +1258,32 @@ void runTouchSession(
           data, window, view, inputNow, displayDay, weather, footer,
           selection, buttonName);
     }
+
+    if (digitalRead(PIN_BUTTON_GREEN) == LOW) {
+      lastActivityAt = millis();
+      if (!configureHoldActive) {
+        configureHoldActive = true;
+        configureHoldStartedAt = millis();
+      } else if (static_cast<uint32_t>(
+                     millis() - configureHoldStartedAt) >=
+                 calendar_logic::kConfigPortalHoldMs) {
+        hardware::beep();
+        exit = InteractiveSessionExit::Configuration;
+        break;
+      }
+    } else {
+      configureHoldActive = false;
+    }
     delay(20);
   }
 
-  LOG.println("[touch] inactivity timeout; entering deep sleep");
-  renderTouchSleepMessage();
+  if (exit == InteractiveSessionExit::Inactivity) {
+    LOG.println("[touch] inactivity timeout; entering deep sleep");
+    renderTouchSleepMessage();
+  }
   touch.end();
   fastRefresh.end();
+  return exit;
 }
 #endif
 
@@ -1193,9 +1358,24 @@ void renderPortal() {
   portal.sdFormatWarning = "uploaded files and any existing screenshots";
 
   if (!config_portal::begin(portal)) {
-    calendar_render::status(epaper, "Configuration unavailable",
-                            "Could not start the settings access point.");
+    const String title = "Configuration unavailable";
+    const String detail = "Could not start the settings access point.";
+    String footer;
+#if RETERMINAL_MODEL == 1005
+    footer = calendar_config::runtime::e1005PowerMode() ==
+                     config::E1005PowerMode::DeepSleepBatterySaver
+                 ? "Sleeping - press OK, UP, or DOWN to wake"
+                 : "Hold OK for 2 seconds to configure";
+#endif
+    calendar_render::status(epaper, title, detail, footer);
+    framebufferReady = true;
     refreshPanel();
+    if (!saveFrameState(
+            statusFingerprint(title, detail, footer),
+            FrameKind::Status)) {
+      LOG.println(
+          "[display] warning: configuration-error state was not saved");
+    }
     powerDownAndSleep(config::FAILURE_RETRY_SECONDS);
     return;
   }
@@ -1360,8 +1540,16 @@ uint64_t scheduledSleepSeconds(const struct tm& localNow) {
 }
 
 void showStatusAndSleep(const String& title, const String& detail,
-                        uint64_t sleepSeconds) {
-  const String footer = portalHint();
+                        uint64_t sleepSeconds,
+                        bool forceDeepSleep = false) {
+  String footer = portalHint();
+#if RETERMINAL_MODEL == 1005
+  if (forceDeepSleep ||
+      calendar_config::runtime::e1005PowerMode() ==
+          config::E1005PowerMode::DeepSleepBatterySaver) {
+    footer = "Sleeping - press OK, UP, or DOWN to wake";
+  }
+#endif
   const uint64_t nextHash = statusFingerprint(title, detail, footer);
   uint64_t previousHash = 0;
   FrameKind previousKind = FrameKind::None;
@@ -1381,7 +1569,7 @@ void showStatusAndSleep(const String& title, const String& detail,
       }
     }
   }
-  powerDownAndSleep(sleepSeconds);
+  powerDownAndSleep(sleepSeconds, true, forceDeepSleep);
 }
 
 }  // namespace
@@ -1395,11 +1583,35 @@ void setup() {
   calendar_config::runtime::load();
   calendar_wifi::load();
   applyRuntimeTimeSettings();
+#if RETERMINAL_MODEL == 1005
+  const bool e1005AlwaysOn =
+      calendar_config::runtime::e1005PowerMode() ==
+      config::E1005PowerMode::AlwaysOn;
+#else
+  constexpr bool e1005AlwaysOn = false;
+#endif
 
   const esp_sleep_wakeup_cause_t wakeCause =
       esp_sleep_get_wakeup_cause();
+#if RETERMINAL_MODEL == 1005
+  const bool softwareRestart =
+      wakeCause == ESP_SLEEP_WAKEUP_UNDEFINED &&
+      esp_reset_reason() == ESP_RST_SW;
+  const bool coldBoot =
+      wakeCause == ESP_SLEEP_WAKEUP_UNDEFINED && !softwareRestart;
+#else
+  constexpr bool softwareRestart = false;
   const bool coldBoot = wakeCause == ESP_SLEEP_WAKEUP_UNDEFINED;
+#endif
   const bool buttonWake = wakeCause == ESP_SLEEP_WAKEUP_EXT1;
+#if RETERMINAL_MODEL == 1005
+  if (coldBoot || !retainedStateValid()) resetRetainedState();
+  const bool retainedPortalRequest =
+      softwareRestart && retainedState.openPortalOnRestart;
+  retainedState.openPortalOnRestart = false;
+#else
+  constexpr bool retainedPortalRequest = false;
+#endif
   if (coldBoot) {
     invalidateFrameState();
 #if RETERMINAL_MODEL == 1005
@@ -1444,8 +1656,10 @@ void setup() {
           provider, calendar_config::runtime::icalUrl(),
           googleCredentialsConfigured);
   const bool portalRequested =
+      retainedPortalRequest ||
       gesture == calendar_logic::PrimaryButtonAction::Portal ||
-      (coldBoot && (noWifi || noCalendarProvider));
+      ((coldBoot || softwareRestart) &&
+       (noWifi || noCalendarProvider));
   const bool showInitialConnectionStatus =
       calendar_logic::shouldShowInitialConnectionStatus(
           coldBoot, portalRequested);
@@ -1474,6 +1688,11 @@ void setup() {
   }
   LOG.printf("[boot] Calendar Viewer %s / %s / fw %s\n",
              MODEL_NAME, COLOR_MODE_NAME, board::FIRMWARE_VERSION);
+#if RETERMINAL_MODEL == 1005
+  LOG.printf(
+      "[power] mode=%s\n",
+      e1005AlwaysOn ? "always on" : "deep sleep battery saver");
+#endif
 
   rtc_sync::restoreSystemClock();
   struct tm localNow = {};
@@ -1481,7 +1700,8 @@ void setup() {
       config::DEBUG_FORCE_NTP ||
       local_time::refreshDue(coldBoot, lastNtpSyncEpoch,
                              config::NTP_REFRESH_SECONDS);
-  if (!buttonWake && !ntpDue && local_time::localClock(localNow) &&
+  if (!e1005AlwaysOn && !softwareRestart && !buttonWake && !ntpDue &&
+      local_time::localClock(localNow) &&
       quiet_hours::active(localNow)) {
     powerDownAndSleep(quiet_hours::secondsUntilEnd(localNow));
     return;
@@ -1496,7 +1716,7 @@ void setup() {
                               sensorReadings.batteryPct)) {
     showStatusAndSleep("Please recharge",
                        "Plug in USB-C, then press a button to retry.",
-                       calendar_config::runtime::sleepSeconds());
+                       calendar_config::runtime::sleepSeconds(), true);
     return;
   }
 
@@ -1819,7 +2039,8 @@ void setup() {
   }
 
   local_time::localClock(localNow);
-  if (calendar_logic::suppressPostSyncForQuietHours(
+  if (!e1005AlwaysOn && !softwareRestart &&
+      calendar_logic::suppressPostSyncForQuietHours(
           coldBoot, buttonWake, quiet_hours::active(localNow))) {
     wifi_sta::disable();
     powerDownAndSleep(quiet_hours::secondsUntilEnd(localNow));
@@ -2047,9 +2268,15 @@ void setup() {
     if (provider == config::CalendarProvider::Google) {
       LOG.printf("[google] update failed; displaying error: %s\n",
                  calendarFailure.c_str());
+      const uint64_t retrySeconds =
+          e1005AlwaysOn
+              ? calendar_logic::e1005AlwaysOnUpdateSeconds(
+                    calendar_config::runtime::sleepSeconds(),
+                    config::NETWORK_CACHE_MAX_AGE_SECONDS)
+              : scheduledSleepSeconds(localNow);
       showStatusAndSleep("Google Calendar error",
                          googleFailureForDisplay(calendarFailure),
-                         scheduledSleepSeconds(localNow));
+                         retrySeconds);
       return;
     }
 
@@ -2159,9 +2386,34 @@ void setup() {
   }
 
 #if RETERMINAL_MODEL == 1005
-  if (coldBoot || buttonWake) {
-    runTouchSession(calendarData, window, activeCalendarView, now, displayDay,
-                    weather, footer, refreshRequired);
+  const bool interactiveWake =
+      coldBoot || buttonWake || softwareRestart || e1005AlwaysOn;
+  if (interactiveWake) {
+    const InteractiveSessionExit sessionExit =
+        runTouchSession(calendarData, window, activeCalendarView, now,
+                        displayDay, weather, footer, e1005AlwaysOn);
+    if (sessionExit == InteractiveSessionExit::Configuration) {
+      renderPortal();
+      return;
+    }
+    if (sessionExit == InteractiveSessionExit::ScheduledRefresh) {
+      LOG.println("[always-on] scheduled update; restarting viewer cycle");
+      LOG.flush();
+      delay(100);
+      ESP.restart();
+      return;
+    }
+  } else if (!e1005AlwaysOn) {
+    if (!framebufferReady) {
+      beginPanel();
+      initializePanelColorMode();
+      calendar_render::calendar(
+          epaper, calendarData, window, activeCalendarView,
+          calendar_config::runtime::weekStart(), now, displayDay,
+          sensorReadings, weather, footer);
+      framebufferReady = true;
+    }
+    renderTouchSleepMessage();
   }
 #endif
   uint64_t sleepSeconds = scheduledSleepSeconds(localNow);
