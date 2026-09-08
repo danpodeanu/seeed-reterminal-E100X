@@ -1,14 +1,13 @@
 #pragma once
 
-// Guard E1003 panel refreshes against incomplete frames. The controller uses
-// the sensed panel temperature, one 4bpp upload, and one GC16. POWER_SEQ brings
-// the bias rails up before the waveform and leaves them time to settle, while
-// the ESP32 runs at lower frequency to preserve battery-side current margin.
-// The rails are explicitly sequenced off after LUT-idle completion.
+// Guard E1003 Gray16 refreshes against incomplete frames. Battery-only
+// low-voltage updates use POWER_SEQ precharge and a lower ESP32 frequency to
+// preserve current margin. Monochrome and externally powered/high-voltage
+// updates retain the stock sequence.
 // Earlier INIT and white-GC16 preclean experiments both produced inverted or
 // corrupted battery-powered frames.
-// Monochrome status screens use the same explicit bias sequence around their
-// 1-bpp GC16 update so VCOM setup never has to leave the panel rails enabled.
+// Monochrome status screens keep using update(), whose 1-bpp driver path
+// performs its own completion wait.
 //
 // The guard is a no-op on other panels: E1001/E1002/E1004/E1005 haven't
 // exhibited the freeze in field use, and the fast paths on those
@@ -183,13 +182,9 @@ struct VoltageTrace {
 
 template <typename Panel>
 inline void triggerWaveform(Panel& panel, uint16_t width, uint16_t height,
-                            uint16_t mode, bool oneBpp) {
-  if (oneBpp) {
-    panel.tconDisplayArea1bpp(0, 0, width, height, mode, 0x00, 0xFF);
-  } else {
-    panel.tconDisplayArea(0, 0, width, height, mode);
-    panel.tconWaitForDisplayReady();
-  }
+                            uint16_t mode) {
+  panel.tconDisplayArea(0, 0, width, height, mode);
+  panel.tconWaitForDisplayReady();
 }
 
 template <typename Panel>
@@ -197,15 +192,12 @@ inline void runDirectWaveform(Panel& panel, uint16_t width, uint16_t height,
                               uint16_t mode, const char* name,
                               uint16_t vcomMv,
                               uint16_t waveformTemperatureC,
-                              const charger::Status& power, bool oneBpp) {
+                              const charger::Status& power) {
   VoltageTrace voltage;
   voltage.begin();
-  e1003_panel_power::setBiasPower(panel, true);
   const uint32_t startedAt = millis();
-  triggerWaveform(panel, width, height, mode, oneBpp);
+  triggerWaveform(panel, width, height, mode);
   const uint32_t durationMs = millis() - startedAt;
-  e1003_panel_power::setBiasPower(panel, false);
-  delay(e1003_panel_power::kBiasDischargeMs);
   voltage.finish(vcomMv, mode, name, durationMs, waveformTemperatureC, power,
                  static_cast<uint16_t>(getCpuFrequencyMhz()), 0);
   LOG.printf(
@@ -218,7 +210,7 @@ inline void runStagedWaveform(Panel& panel, uint16_t width, uint16_t height,
                              uint16_t mode, const char* name,
                              uint16_t vcomMv,
                              uint16_t waveformTemperatureC,
-                             const charger::Status& power, bool oneBpp) {
+                             const charger::Status& power) {
   VoltageTrace voltage;
   voltage.begin();
   const uint32_t stagedAt = millis();
@@ -244,7 +236,7 @@ inline void runStagedWaveform(Panel& panel, uint16_t width, uint16_t height,
   voltage.checkpoint();
 
   const uint32_t waveformStartedAt = millis();
-  triggerWaveform(panel, width, height, mode, oneBpp);
+  triggerWaveform(panel, width, height, mode);
   const uint32_t waveformDurationMs = millis() - waveformStartedAt;
   voltage.checkpoint();
 
@@ -281,10 +273,13 @@ inline void runStagedWaveform(Panel& panel, uint16_t width, uint16_t height,
 template <typename Panel>
 inline void refreshPanel(Panel& panel) {
   reportRetainedTraceOnce();
+  if (panel.getColorDepth() != 4) {
+    panel.update();
+    return;
+  }
 
   const uint16_t width = static_cast<uint16_t>(panel.width());
   const uint16_t height = static_cast<uint16_t>(panel.height());
-  const bool oneBpp = panel.getColorDepth() != 4;
   const auto* framebuffer =
       static_cast<const uint8_t*>(panel.getPointer());
 
@@ -300,6 +295,9 @@ inline void refreshPanel(Panel& panel) {
                                                                 : "battery")
                    : "unknown");
   }
+  const bool useStagedRefresh =
+      batteryValid && batteryMv < kStagedRefreshThresholdMv &&
+      (!power.valid || power.state == charger::State::Disconnected);
 
   LOG.println("[panel] E1003 waking controller");
   panel.wake();
@@ -322,42 +320,34 @@ inline void refreshPanel(Panel& panel) {
         "[panel] WARNING: E1003 waveform temperature is outside panel range");
   }
 
-  panel.tconWaitForDisplayReady();
-  panel.setTconWindowsData(0, 0, width - 1, height - 1);
-  if (oneBpp) {
+  if (useStagedRefresh) {
     LOG.println(
-        "[panel] E1003 uploading 1bpp image for sequenced GC16 refresh");
-    panel.tconLoad1bppImage(framebuffer, 0, 0, width, height, false);
-  } else {
-    constexpr uint16_t kOneBppModeRegister = 0x113A;
-    panel.tconWriteReg(
-        kOneBppModeRegister,
-        panel.tconReadReg(kOneBppModeRegister) &
-            ~(static_cast<uint16_t>(1) << 2));
-    LOG.println(
-        "[panel] E1003 uploading 4bpp image for sequenced GC16 refresh");
-    panel.tconLoadImage(framebuffer, 0, 0, width, height, false);
+        "[panel] E1003 staging GC16: powering bias off before image upload");
+    e1003_panel_power::setBiasPower(panel, false);
+    delay(e1003_panel_power::kBiasDischargeMs);
   }
-  const bool useStagedRefresh =
-      batteryValid && batteryMv < kStagedRefreshThresholdMv &&
-      (!power.valid || power.state == charger::State::Disconnected);
+
+  constexpr uint16_t kOneBppModeRegister = 0x113A;
+  panel.tconWaitForDisplayReady();
+  panel.tconWriteReg(
+      kOneBppModeRegister,
+      panel.tconReadReg(kOneBppModeRegister) & ~(static_cast<uint16_t>(1) << 2));
+  panel.setTconWindowsData(0, 0, width - 1, height - 1);
+  LOG.println("[panel] E1003 uploading 4bpp image for single GC16 refresh");
+  panel.tconLoadImage(framebuffer, 0, 0, width, height, false);
   LOG.printf("[panel] E1003 GC16 power strategy=%s (threshold=%lu.%03luV)\n",
              useStagedRefresh ? "staged" : "direct",
              static_cast<unsigned long>(kStagedRefreshThresholdMv / 1000),
              static_cast<unsigned long>(kStagedRefreshThresholdMv % 1000));
   if (useStagedRefresh) {
     runStagedWaveform(panel, width, height, 0x02, "GC16", vcomMv,
-                      waveformTemperatureC, power, oneBpp);
+                      waveformTemperatureC, power);
   } else {
     runDirectWaveform(panel, width, height, 0x02, "GC16", vcomMv,
-                      waveformTemperatureC, power, oneBpp);
+                      waveformTemperatureC, power);
   }
-  // The stock 1-bpp path enters SLEEP directly. STANDBY followed by SLEEP
-  // leaves this controller unable to service the later same-boot Gray16 wake.
-  if (!oneBpp) {
-    panel.tconStandby();
-    delay(10);
-  }
+  panel.tconStandby();
+  delay(10);
   panel.sleep();
 }
 
