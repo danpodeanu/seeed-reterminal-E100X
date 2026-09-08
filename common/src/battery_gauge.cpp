@@ -28,12 +28,27 @@ bool readBq27220Word(uint8_t reg, uint16_t& value) {
 }  // namespace
 
 float percentForVoltage(float voltage) {
+#if RETERMINAL_MODEL == 1003
+  // Five-percent samples from Seeed's E1003 production discharge curve.
+  // The old generic curve overstated a 3.68 V cell by about eleven points,
+  // hiding how close low-battery refreshes were to the panel's power limit.
+  static constexpr float volts[] = {
+      3.2040f, 3.4016f, 3.4916f, 3.5498f, 3.5969f, 3.6396f,
+      3.6821f, 3.7270f, 3.7724f, 3.8138f, 3.8493f, 3.8797f,
+      3.9050f, 3.9279f, 3.9493f, 3.9709f, 3.9939f, 4.0206f,
+      4.0509f, 4.0809f, 4.1100f};
+  static constexpr float percents[] = {
+      0.0f,  5.0f,  10.0f, 15.0f, 20.0f, 25.0f, 30.0f,
+      35.0f, 40.0f, 45.0f, 50.0f, 55.0f, 60.0f, 65.0f,
+      70.0f, 75.0f, 80.0f, 85.0f, 90.0f, 95.0f, 100.0f};
+#else
   static constexpr float volts[] = {
       3.27f, 3.30f, 3.41f, 3.49f, 3.58f, 3.68f,
       3.75f, 3.80f, 3.85f, 3.91f, 3.96f, 4.15f};
   static constexpr float percents[] = {
       0.0f, 5.0f, 10.0f, 20.0f, 30.0f, 40.0f,
       50.0f, 60.0f, 70.0f, 80.0f, 90.0f, 100.0f};
+#endif
   constexpr size_t count = sizeof(volts) / sizeof(volts[0]);
   if (voltage <= volts[0]) return 0.0f;
   if (voltage >= volts[count - 1]) return 100.0f;

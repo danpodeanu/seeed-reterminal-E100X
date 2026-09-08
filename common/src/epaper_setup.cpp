@@ -72,6 +72,11 @@ void resetPanelPower() {
   gpio_hold_dis(controllerEnable);
   releasePanelSignalHolds();
 
+  // DISPLAY_AREA finishes before the TPS651851 output capacitors have
+  // necessarily completed their specified discharge interval. Keep the
+  // IT8951 and bias input alive long enough for its sequencer to finish before
+  // resetting the controller or cutting GPIO11.
+  delay(kPanelDischargeMs);
   quiescePanelSignals();
   pinMode(board::PIN_PANEL_BIAS_ENABLE, OUTPUT);
   pinMode(board::PIN_PANEL_CONTROLLER_ENABLE, OUTPUT);

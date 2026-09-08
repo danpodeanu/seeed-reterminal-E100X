@@ -8,14 +8,14 @@
 // address 0x6A alongside the PCF8563 RTC (0x51) and the SHT4x sensor
 // (0x44), so no new bus needs to be brought up.
 //
-// One `readSy6974b()` call performs a single register read (~1 ms on a
-// present chip, ~50 ms timeout on an absent one). Callers use the result
-// only for a "connected to power" UI hint, so any failure is reported as
-// `valid = false` and treated as "unknown" instead of a hard error.
+// One `readSy6974b()` call reads the status registers (~2 ms on a present
+// chip, ~50 ms timeout on an absent one). Callers use the result only for
+// power telemetry, so any failure is reported as `valid = false` and treated
+// as "unknown" instead of a hard error.
 namespace charger {
 
-// State inferred from the SY6974B SYSTEM_STATUS register (0x08) PG_STAT
-// bit. `Unknown` is returned when the chip does not ACK -- either the
+// State inferred from the SY6974B INPUT_STATUS register (0x0A) BUS_GD bit.
+// `Unknown` is returned when the chip does not ACK -- either the
 // board revision predates the SY6974B swap (older E1001/E1002 shipped
 // with ETA6003, which is not I2C-addressable) or the bus was not
 // brought up.
@@ -28,6 +28,10 @@ enum class State {
 struct Status {
   State state = State::Unknown;
   bool valid = false;
+  bool minimumSystemVoltageActive = false;
+  uint8_t address = 0;
+  uint8_t systemStatus = 0;
+  uint8_t inputStatus = 0;
 };
 
 // Read the SY6974B once. Requires `hardware::ensureI2cBus()` to succeed;

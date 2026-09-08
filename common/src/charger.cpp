@@ -11,13 +11,16 @@ namespace {
 
 // SY6974B-family chargers appear at either 0x6A or 0x6B depending on the
 // exact part variant Seeed populated on a given board revision. Both
-// share the same 12-register map (0x00..0x0B), including PG_STAT at
-// register 0x08 bit 2. We probe both addresses on the first wake and
-// remember the winner in RTC memory so later wakes skip straight to it.
+// share the same 12-register map (0x00..0x0B). Seeed's driver uses BUS_GD
+// at register 0x0A bit 7 for cable presence; register 0x08 also exposes
+// VSYS_STAT at bit 0. We probe both addresses on the first wake and remember
+// the winner in RTC memory so later wakes skip straight to it.
 constexpr uint8_t SY6974B_ADDR_PRIMARY = 0x6A;
 constexpr uint8_t SY6974B_ADDR_ALT = 0x6B;
 constexpr uint8_t REG_SYSTEM_STATUS = 0x08;
-constexpr uint8_t BIT_PG_STAT = 0x04;  // bit 2
+constexpr uint8_t REG_INPUT_STATUS = 0x0A;
+constexpr uint8_t BIT_VSYS_STAT = 0x01;
+constexpr uint8_t BIT_BUS_GD = 0x80;
 
 // 0 means "not resolved yet"; any other value is a cached I2C address.
 // Deep-sleep wakes preserve this so we do not repeat the probe every
@@ -39,10 +42,11 @@ bool readRegister(uint8_t address, uint8_t reg, uint8_t& value) {
   return true;
 }
 
-// Try to read SYSTEM_STATUS from the given address. Returns true and
-// sets `value` when the chip ACKs.
-bool tryRead(uint8_t address, uint8_t& value) {
-  return readRegister(address, REG_SYSTEM_STATUS, value);
+// Read both status bytes so a partially responding device is never reported
+// as a valid charger.
+bool tryRead(uint8_t address, uint8_t& systemStatus, uint8_t& inputStatus) {
+  return readRegister(address, REG_SYSTEM_STATUS, systemStatus) &&
+         readRegister(address, REG_INPUT_STATUS, inputStatus);
 }
 
 }  // namespace
@@ -52,10 +56,11 @@ Status readSy6974b() {
   if (!hardware::ensureI2cBus()) return status;
 
   uint8_t sysStatus = 0;
+  uint8_t inputStatus = 0;
   uint8_t hitAddress = 0;
 
   if (cachedAddress != 0) {
-    if (tryRead(cachedAddress, sysStatus)) {
+    if (tryRead(cachedAddress, sysStatus, inputStatus)) {
       hitAddress = cachedAddress;
     } else {
       // Cached address stopped responding -- reprobe from scratch.
@@ -63,9 +68,9 @@ Status readSy6974b() {
     }
   }
   if (hitAddress == 0) {
-    if (tryRead(SY6974B_ADDR_PRIMARY, sysStatus)) {
+    if (tryRead(SY6974B_ADDR_PRIMARY, sysStatus, inputStatus)) {
       hitAddress = SY6974B_ADDR_PRIMARY;
-    } else if (tryRead(SY6974B_ADDR_ALT, sysStatus)) {
+    } else if (tryRead(SY6974B_ADDR_ALT, sysStatus, inputStatus)) {
       hitAddress = SY6974B_ADDR_ALT;
     }
     if (hitAddress != 0) {
@@ -89,11 +94,18 @@ Status readSy6974b() {
   }
 
   status.valid = true;
-  status.state = (sysStatus & BIT_PG_STAT) ? State::Connected
-                                           : State::Disconnected;
-  LOG.printf("[charger] SY6974B @0x%02X status=0x%02X external_power=%s\n",
-             hitAddress, sysStatus,
-             status.state == State::Connected ? "yes" : "no");
+  status.address = hitAddress;
+  status.systemStatus = sysStatus;
+  status.inputStatus = inputStatus;
+  status.minimumSystemVoltageActive = (sysStatus & BIT_VSYS_STAT) != 0;
+  status.state = (inputStatus & BIT_BUS_GD) ? State::Connected
+                                            : State::Disconnected;
+  LOG.printf(
+      "[charger] SY6974B @0x%02X status=0x%02X input=0x%02X "
+      "external_power=%s vsys_min=%s\n",
+      hitAddress, sysStatus, inputStatus,
+      status.state == State::Connected ? "yes" : "no",
+      status.minimumSystemVoltageActive ? "active" : "inactive");
   return status;
 }
 

@@ -3,6 +3,7 @@
 #include <SPI.h>
 
 #include "app_logger.h"
+#include "e1003_panel_power.h"
 #include "panel_traits.h"
 
 // Bring-up glue that every consumer of the reTerminal e-paper stack uses.
@@ -78,6 +79,12 @@ void begin(EPaper& epaper) {
         static_cast<unsigned>(kExpectedVcomMv),
         static_cast<unsigned>(panel_traits::E1003_VCOM_SET_SELECTOR));
   }
+  // IT8951 VCOM programming can leave the TPS651851 bias domain enabled.
+  // Turn it off explicitly so image decoding does not hold the high-voltage
+  // rails up for seconds, then start the eventual refresh from a known state.
+  e1003_panel_power::setBiasPower(epaper, false);
+  delay(e1003_panel_power::kBiasDischargeMs);
+  LOG.println("[panel] E1003 bias rails off after VCOM programming");
 #endif
   epaper.setRotation(panel_traits::DISPLAY_ROTATION);
   finalize(epaper.getSPIinstance());
