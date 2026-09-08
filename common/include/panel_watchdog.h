@@ -301,7 +301,9 @@ inline void refreshPanel(Panel& panel) {
                    : "unknown");
   }
 
+  LOG.println("[panel] E1003 waking controller");
   panel.wake();
+  LOG.println("[panel] E1003 controller awake; reading profile");
   const uint16_t waveformTemperatureC = panel.getTconTemp();
   const uint16_t vcomMv = panel.getTconVcom();
   LOG.printf(
@@ -350,8 +352,12 @@ inline void refreshPanel(Panel& panel) {
     runDirectWaveform(panel, width, height, 0x02, "GC16", vcomMv,
                       waveformTemperatureC, power, oneBpp);
   }
-  panel.tconStandby();
-  delay(10);
+  // The stock 1-bpp path enters SLEEP directly. STANDBY followed by SLEEP
+  // leaves this controller unable to service the later same-boot Gray16 wake.
+  if (!oneBpp) {
+    panel.tconStandby();
+    delay(10);
+  }
   panel.sleep();
 }
 
