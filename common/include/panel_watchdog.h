@@ -1,8 +1,9 @@
 #pragma once
 
-// Guard E1003 Gray16 refreshes against incomplete frames. Battery-only
-// low-voltage updates use POWER_SEQ precharge and a lower ESP32 frequency to
-// preserve current margin. Monochrome and externally powered/high-voltage
+// Guard E1003 Gray16 refreshes against incomplete frames. Low-voltage updates
+// use POWER_SEQ precharge, a lower ESP32 frequency, and a conservative minimum
+// bias-on interval to preserve current margin and avoid cutting panel power
+// before the physical waveform has finished. Monochrome and higher-voltage
 // updates retain the stock sequence.
 // Earlier INIT and white-GC16 preclean experiments both produced inverted or
 // corrupted battery-powered frames.
@@ -28,6 +29,7 @@ namespace panel_watchdog {
 constexpr uint32_t kRetainedTraceMagic = 0xE1003B52;
 constexpr uint32_t kRefreshCpuMhz = 80;
 constexpr uint32_t kStagedRefreshThresholdMv = 3800;
+constexpr uint32_t kGc16MinimumPowerOnMs = 5000;
 
 struct RetainedVoltageTrace {
   uint32_t magic;
@@ -237,6 +239,15 @@ inline void runStagedWaveform(Panel& panel, uint16_t width, uint16_t height,
 
   const uint32_t waveformStartedAt = millis();
   triggerWaveform(panel, width, height, mode);
+  const uint32_t controllerWaitMs = millis() - waveformStartedAt;
+  if (controllerWaitMs < kGc16MinimumPowerOnMs) {
+    LOG.printf(
+        "[panel] E1003 %s controller wait=%lums; holding bias for "
+        "%lums total\n",
+        name, static_cast<unsigned long>(controllerWaitMs),
+        static_cast<unsigned long>(kGc16MinimumPowerOnMs));
+    delay(kGc16MinimumPowerOnMs - controllerWaitMs);
+  }
   const uint32_t waveformDurationMs = millis() - waveformStartedAt;
   voltage.checkpoint();
 
@@ -296,8 +307,7 @@ inline void refreshPanel(Panel& panel) {
                    : "unknown");
   }
   const bool useStagedRefresh =
-      batteryValid && batteryMv < kStagedRefreshThresholdMv &&
-      (!power.valid || power.state == charger::State::Disconnected);
+      batteryValid && batteryMv < kStagedRefreshThresholdMv;
 
   LOG.println("[panel] E1003 waking controller");
   panel.wake();
