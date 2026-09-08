@@ -1,10 +1,10 @@
 #pragma once
 
 // Guard E1003 Gray16 refreshes against incomplete frames. Low-voltage updates
-// use POWER_SEQ precharge, a lower ESP32 frequency, and a conservative minimum
-// bias-on interval to preserve current margin and avoid cutting panel power
-// before the physical waveform has finished. Monochrome and higher-voltage
-// updates retain the stock sequence.
+// use POWER_SEQ precharge, a lower ESP32 frequency, two vertical GC16 segments,
+// and a conservative minimum bias-on interval to reduce instantaneous
+// source-driver load and avoid cutting panel power before the physical waveform
+// has finished. Monochrome and higher-voltage updates retain the stock sequence.
 // Earlier INIT and white-GC16 preclean experiments both produced inverted or
 // corrupted battery-powered frames.
 // Monochrome status screens keep using update(), whose 1-bpp driver path
@@ -30,6 +30,7 @@ constexpr uint32_t kRetainedTraceMagic = 0xE1003B52;
 constexpr uint32_t kRefreshCpuMhz = 80;
 constexpr uint32_t kStagedRefreshThresholdMv = 3800;
 constexpr uint32_t kGc16MinimumPowerOnMs = 5000;
+constexpr uint16_t kLowVoltageGc16Segments = 2;
 
 struct RetainedVoltageTrace {
   uint32_t magic;
@@ -184,8 +185,8 @@ struct VoltageTrace {
 
 template <typename Panel>
 inline void triggerWaveform(Panel& panel, uint16_t width, uint16_t height,
-                            uint16_t mode) {
-  panel.tconDisplayArea(0, 0, width, height, mode);
+                            uint16_t mode, uint16_t x = 0) {
+  panel.tconDisplayArea(x, 0, width, height, mode);
   panel.tconWaitForDisplayReady();
 }
 
@@ -238,18 +239,31 @@ inline void runStagedWaveform(Panel& panel, uint16_t width, uint16_t height,
   voltage.checkpoint();
 
   const uint32_t waveformStartedAt = millis();
-  triggerWaveform(panel, width, height, mode);
-  const uint32_t controllerWaitMs = millis() - waveformStartedAt;
-  if (controllerWaitMs < kGc16MinimumPowerOnMs) {
+  const uint16_t segmentWidth = width / kLowVoltageGc16Segments;
+  for (uint16_t segment = 0; segment < kLowVoltageGc16Segments; ++segment) {
+    const uint16_t x = segment * segmentWidth;
+    const uint16_t currentWidth =
+        segment + 1 == kLowVoltageGc16Segments ? width - x : segmentWidth;
     LOG.printf(
-        "[panel] E1003 %s controller wait=%lums; holding bias for "
-        "%lums total\n",
-        name, static_cast<unsigned long>(controllerWaitMs),
-        static_cast<unsigned long>(kGc16MinimumPowerOnMs));
-    delay(kGc16MinimumPowerOnMs - controllerWaitMs);
+        "[panel] E1003 %s low-voltage segment %u/%u x=%u width=%u\n",
+        name, static_cast<unsigned>(segment + 1),
+        static_cast<unsigned>(kLowVoltageGc16Segments),
+        static_cast<unsigned>(x), static_cast<unsigned>(currentWidth));
+    const uint32_t segmentStartedAt = millis();
+    triggerWaveform(panel, currentWidth, height, mode, x);
+    const uint32_t controllerWaitMs = millis() - segmentStartedAt;
+    if (controllerWaitMs < kGc16MinimumPowerOnMs) {
+      LOG.printf(
+          "[panel] E1003 %s segment %u controller wait=%lums; "
+          "holding bias for %lums total\n",
+          name, static_cast<unsigned>(segment + 1),
+          static_cast<unsigned long>(controllerWaitMs),
+          static_cast<unsigned long>(kGc16MinimumPowerOnMs));
+      delay(kGc16MinimumPowerOnMs - controllerWaitMs);
+    }
+    voltage.checkpoint();
   }
   const uint32_t waveformDurationMs = millis() - waveformStartedAt;
-  voltage.checkpoint();
 
   e1003_panel_power::setBiasPower(panel, false);
   delay(e1003_panel_power::kBiasDischargeMs);
@@ -369,7 +383,7 @@ inline void refreshPanel(Panel& panel) {
 // that returns something other than ESP_OK is treated as a soft error
 // - we still run the refresh so a WDT hiccup can never brick a wake.
 template <typename Panel>
-inline void refresh(Panel& panel, uint32_t timeoutSeconds = 20) {
+inline void refresh(Panel& panel, uint32_t timeoutSeconds = 35) {
   const esp_task_wdt_config_t cfg = {
       /*timeout_ms=*/timeoutSeconds * 1000U,
       /*idle_core_mask=*/0,        // don't monitor idle tasks
