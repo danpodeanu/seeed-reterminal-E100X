@@ -5,21 +5,50 @@ runner's journal and running stats from Supabase `dashboard()` RPC and
 renders a portrait dashboard (week summary, recent runs, type breakdown,
 history bar chart) on the 480x800 monochrome e-paper panel.
 
-## Setup
+## Flashing
 
-1. Copy `include/secrets.h.example` to `include/secrets.h` and fill in your
-   WiFi credentials and Supabase anon key.
-2. Copy the smooth font files from `fonts/sans_bold_*.vlw` to the root of
-   the SD card under `/fonts/`. These are needed to render Norwegian text
-   (søndag, løp, æøå) correctly. Without them the app falls back to ASCII
-   GFX bitmap fonts (dagnavn vil vises uten æøå).
-3. Build for the E1005:
+This repo builds firmware in GitHub Actions (Linux, no local toolchain
+required) and uploads the binary as a downloadable artifact. Download it
+from the Actions tab on the PR, unzip it, then flash with `esptool.py`.
+
+### Prerequisites
 
 ```bash
-pio run -e reterminal_e1005
-pio run -e reterminal_e1005 -t upload
-pio device monitor -e reterminal_e1005
+pip3 install esptool pyserial
 ```
+
+`esptool.py` is a pure-Python flashing tool — it does not trigger macOS
+XProtect (unlike the ESP32 cross-compiler that PlatformIO downloads).
+
+### Flash
+
+1. Download the `firmware-reterminal_e1005` artifact from the latest
+   successful GitHub Actions run on the PR, and unzip it.
+2. Put the E1005 in bootloader mode: hold the BOOT button, press RESET,
+   release BOOT.
+3. Find the serial port:
+
+```bash
+ls /dev/cu.usbmodem*
+```
+
+4. Flash (replace `/dev/cu.usbmodemXXXX` with your port):
+
+```bash
+esptool.py --chip esp32s3 --port /dev/cu.usbmodemXXXX \
+  --baud 460800 write_flash -z \
+  0x0 bootloader.bin \
+  0x10000 firmware.bin \
+  0x8000 partitions.bin
+```
+
+5. Press RESET to boot. The device connects to WiFi, fetches the
+   dashboard, renders it, and sleeps.
+
+### SD card (for æøå rendering)
+
+Copy `fonts/sans_bold_*.vlw` to `/fonts/` on the SD card. Without these the
+app falls back to ASCII GFX bitmap fonts (dagnavn vises uten æøå).
 
 ## Behaviour
 
