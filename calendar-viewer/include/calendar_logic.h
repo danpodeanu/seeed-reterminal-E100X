@@ -222,6 +222,11 @@ inline constexpr bool shouldShowInitialConnectionStatus(
   return coldBoot && !portalRequested;
 }
 
+inline constexpr bool shouldShowProviderRefreshStatus(
+    bool interactiveDevice, bool calendarRefresh, bool weatherRefresh) {
+  return interactiveDevice && (calendarRefresh || weatherRefresh);
+}
+
 inline constexpr bool suppressPostSyncForQuietHours(
     bool coldBoot, bool buttonWake, bool quietHoursActive) {
   return !coldBoot && !buttonWake && quietHoursActive;

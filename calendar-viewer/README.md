@@ -107,8 +107,10 @@ weather settings.
 
 After the configured device restarts, it displays **Connecting to
 &lt;Wi-Fi name&gt;** while it connects and synchronizes the clock. A centered
-**Refreshing calendar** box is shown only while calendar or weather providers
-are actually being queried. Cache-only deep-sleep wakes do not start Wi-Fi.
+**Refreshing calendar** box is shown on interactive E1005 devices only while
+calendar or weather providers are actually being queried. E1001-E1004 retain
+the current calendar while fetching and redraw only when the resulting display
+changes. Cache-only deep-sleep wakes do not start Wi-Fi.
 
 To reopen the portal later, wake the sleeping device while holding the green
 button (OK on E1005) for at least two seconds, then release it before five

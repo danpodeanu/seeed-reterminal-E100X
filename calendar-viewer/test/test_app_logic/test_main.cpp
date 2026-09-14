@@ -322,6 +322,17 @@ void test_initial_connection_status_is_limited_to_configured_cold_boots() {
       calendar_logic::shouldShowInitialConnectionStatus(false, false));
 }
 
+void test_provider_refresh_status_is_limited_to_interactive_devices() {
+  TEST_ASSERT_TRUE(calendar_logic::shouldShowProviderRefreshStatus(
+      true, true, false));
+  TEST_ASSERT_TRUE(calendar_logic::shouldShowProviderRefreshStatus(
+      true, false, true));
+  TEST_ASSERT_FALSE(calendar_logic::shouldShowProviderRefreshStatus(
+      true, false, false));
+  TEST_ASSERT_FALSE(calendar_logic::shouldShowProviderRefreshStatus(
+      false, true, true));
+}
+
 void test_post_sync_quiet_hours_do_not_leave_cold_boot_status_visible() {
   TEST_ASSERT_FALSE(
       calendar_logic::suppressPostSyncForQuietHours(true, false, true));
@@ -1461,6 +1472,8 @@ int main(int, char**) {
       test_e1005_power_modes_control_timer_wake_and_update_floor);
   RUN_TEST(
       test_initial_connection_status_is_limited_to_configured_cold_boots);
+  RUN_TEST(
+      test_provider_refresh_status_is_limited_to_interactive_devices);
   RUN_TEST(
       test_post_sync_quiet_hours_do_not_leave_cold_boot_status_visible);
   RUN_TEST(test_display_windows_respect_week_start_and_month_grid);

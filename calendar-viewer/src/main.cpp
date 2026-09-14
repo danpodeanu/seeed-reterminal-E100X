@@ -1946,6 +1946,7 @@ void setup() {
     return;
   }
 
+  bool transientStatusDisplayed = false;
   if (showInitialConnectionStatus && networkNeeded) {
     const String stationMac = wifi_sta::stationMacAddress();
     const String deviceInfo =
@@ -1968,6 +1969,7 @@ void setup() {
             " for 2 seconds to configure");
     framebufferReady = true;
     refreshPanel();
+    transientStatusDisplayed = true;
   }
 
   String networkFailure;
@@ -2089,8 +2091,9 @@ void setup() {
       connected && calendarRefreshNeeded && !calendarAttemptFresh;
   const bool actualWeatherRefresh =
       connected && weatherRefreshNeeded && !weatherAttemptFresh;
-  bool refreshStatusDisplayed = false;
-  if (actualCalendarRefresh || actualWeatherRefresh) {
+  if (calendar_logic::shouldShowProviderRefreshStatus(
+          RETERMINAL_MODEL == 1005, actualCalendarRefresh,
+          actualWeatherRefresh)) {
     uint64_t existingFrameHash = 0;
     FrameKind existingFrameKind = FrameKind::None;
     const bool existingCalendarIsOnlyFallback =
@@ -2105,8 +2108,12 @@ void setup() {
       showRefreshingCalendar(
           refreshingDetail(actualCalendarRefresh, actualWeatherRefresh),
           false);
-      refreshStatusDisplayed = true;
+      transientStatusDisplayed = true;
     }
+  } else if (actualCalendarRefresh || actualWeatherRefresh) {
+    LOG.println(
+        "[display] provider refresh running in background; current calendar "
+        "retained");
   }
 
   String calendarFailure;
@@ -2282,7 +2289,7 @@ void setup() {
 
     uint64_t previousHash = 0;
     FrameKind previousKind = FrameKind::None;
-    if (!refreshStatusDisplayed &&
+    if (!transientStatusDisplayed &&
         loadFrameState(previousHash, previousKind) &&
         isPreservableCalendarFrame(previousKind)) {
       LOG.printf("[calendar] %s; preserving existing panel\n",
@@ -2333,16 +2340,16 @@ void setup() {
   const bool contentChanged = calendar_logic::shouldRefreshCalendarFrame(
       havePreviousFrame, previousKind == FrameKind::Calendar, previousHash,
       nextFrame.combined, componentChanges);
-  const bool refreshRequired = contentChanged || refreshStatusDisplayed;
+  const bool refreshRequired = contentChanged || transientStatusDisplayed;
   if (refreshRequired || screenshotRequested) {
     if (contentChanged) {
       logCalendarFrameChanges(
           havePreviousFrame, previousKind, havePreviousComponents,
           previousComponents, nextFrame.components, activeCalendarView,
           componentChanges, calendarData, weather, now);
-    } else if (refreshStatusDisplayed) {
+    } else if (transientStatusDisplayed) {
       LOG.println(
-          "[display] restoring unchanged calendar after refresh status");
+          "[display] restoring unchanged calendar after transient status");
     }
     beginPanel();
     initializePanelColorMode();
