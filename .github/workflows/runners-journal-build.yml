@@ -55,3 +55,14 @@ jobs:
 
       - name: Build
         run: pio run -e "${{ matrix.environment }}"
+
+      - name: Upload firmware artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: firmware-${{ matrix.environment }}
+          path: |
+            runners-journal/.pio/build/${{ matrix.environment }}/firmware.bin
+            runners-journal/.pio/build/${{ matrix.environment }}/bootloader.bin
+            runners-journal/.pio/build/${{ matrix.environment }}/partitions.bin
+          if-no-files-found: error
+          retention-days: 14
