@@ -19,6 +19,12 @@ struct HeaderGroup {
   int textLeft = 0;
 };
 
+struct GridEventLayout {
+  int lineHeight = 0;
+  int eventCapacity = 0;
+  bool compact = false;
+};
+
 inline HeaderGroup centeredHeaderGroup(int surfaceWidth, int iconWidth,
                                        int gap, int textWidth) {
   HeaderGroup result;
@@ -44,6 +50,35 @@ inline Rect gridCellInterior(int left, int top, int width, int height,
 inline int gridDayLabelTop(int cellTop, int baseOffset, int weekOffset,
                            bool monthView) {
   return cellTop + baseOffset + (monthView ? 0 : weekOffset);
+}
+
+inline GridEventLayout gridEventLayout(int eventCount, int availableHeight,
+                                       int preferredLineHeight,
+                                       int minimumLineHeight) {
+  GridEventLayout result;
+  if (eventCount <= 0 || availableHeight <= 0 ||
+      preferredLineHeight <= 0 || minimumLineHeight <= 0) {
+    return result;
+  }
+
+  result.lineHeight = preferredLineHeight;
+  const int standardCapacity =
+      std::min(eventCount, availableHeight / preferredLineHeight);
+  if (eventCount == 2 && standardCapacity == 1) {
+    const int compactLineHeight = availableHeight / 2;
+    if (compactLineHeight >= minimumLineHeight) {
+      result.lineHeight = compactLineHeight;
+      result.eventCapacity = 2;
+      result.compact = true;
+      return result;
+    }
+  }
+
+  result.eventCapacity = standardCapacity;
+  if (eventCount > standardCapacity && standardCapacity > 1) {
+    --result.eventCapacity;
+  }
+  return result;
 }
 
 inline Rect agendaBand(int cardLeft, int rowTop, int cardWidth, int rowHeight,

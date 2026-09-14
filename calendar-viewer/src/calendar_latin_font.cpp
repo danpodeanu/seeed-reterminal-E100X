@@ -137,6 +137,11 @@ int textWidth(const String& text, Size size) {
   return cursor > rightEdge ? cursor : rightEdge;
 }
 
+int textHeight(Size size) {
+  const FontData& font = fontData(size);
+  return font.ascent + font.descent;
+}
+
 String ellipsize(const std::string& text, int maximumWidth, Size size) {
   String fitted = text_render::displayText(String(text.c_str()));
   if (textWidth(fitted, size) <= maximumWidth) return fitted;

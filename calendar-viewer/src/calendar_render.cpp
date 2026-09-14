@@ -1136,7 +1136,7 @@ void drawGrid(EPaper& epaper, ColorDitherer& ditherer,
 #else
           32;
 #endif
-      const int lineHeight =
+      const int preferredLineHeight =
 #if RETERMINAL_MODEL == 1003
           46;
 #elif RETERMINAL_MODEL == 1004
@@ -1144,9 +1144,15 @@ void drawGrid(EPaper& epaper, ColorDitherer& ditherer,
 #else
           23;
 #endif
-      const int capacity = std::max(
-          0, (cellHeight - (eventY - y) - 4) / lineHeight);
-      if (capacity == 0) {
+      const int availableEventHeight =
+          std::max(0, cellHeight - (eventY - y) - 4);
+      const calendar_render_geometry::GridEventLayout eventLayout =
+          calendar_render_geometry::gridEventLayout(
+              static_cast<int>(dayEvents.size()), availableEventHeight,
+              preferredLineHeight,
+              calendar_latin_font::textHeight(
+                  calendar_latin_font::Size::Grid));
+      if (eventLayout.eventCapacity == 0) {
         const int dotSize =
 #if RETERMINAL_MODEL == 1003
             10;
@@ -1179,18 +1185,19 @@ void drawGrid(EPaper& epaper, ColorDitherer& ditherer,
         continue;
       }
       int shown = 0;
-      int eventCapacity = capacity;
-      if (static_cast<int>(dayEvents.size()) > capacity && capacity > 1) {
-        --eventCapacity;
-      }
+      const int lineHeight = eventLayout.lineHeight;
+      const int eventCapacity = eventLayout.eventCapacity;
       for (const ::calendar::Event* event : dayEvents) {
         if (shown >= eventCapacity) break;
         const int barInset = cellInset + config::ui(2);
-        const int verticalGap = std::max(1, config::ui(2));
+        const int verticalGap =
+            eventLayout.compact ? 0 : std::max(1, config::ui(2));
         const int barLeft = x + barInset;
         const int barTop = eventY + verticalGap;
         const int barWidth = cellWidth - barInset * 2;
-        const int barHeight = lineHeight - verticalGap * 2;
+        const int barHeight = eventLayout.compact
+                                  ? std::max(1, lineHeight - 1)
+                                  : lineHeight - verticalGap * 2;
         const int radius = std::min(config::ui(5), barHeight / 2);
         const int textPadding = std::max(config::ui(5), radius);
         const int textX = barLeft + textPadding;
