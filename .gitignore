@@ -15,5 +15,3 @@ screenshot-*.png
 !xkcd-viewer/include/secrets.h
 !weather-viewer/include/secrets.h
 !photo-viewer/include/secrets.h
-
-!runners-journal/include/secrets.h

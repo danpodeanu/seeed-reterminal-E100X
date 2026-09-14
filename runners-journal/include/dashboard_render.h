@@ -289,7 +289,9 @@ inline void renderDashboard(EPaper& epaper, SmoothFont& font,
     }
     if (maxKm <= 0.0f) maxKm = 1.0f;
     const int chartTop = y;
-    const int chartBottom = config::PANEL_HEIGHT - MARGIN;
+    // Reserve 20px below the bars for the week labels so they don't clip
+    // off the bottom of the 800px panel.
+    const int chartBottom = config::PANEL_HEIGHT - MARGIN - 20;
     const int chartH = chartBottom - chartTop;
     if (chartH > 20) {
       const int n = static_cast<int>(data.historikk.size());
@@ -301,7 +303,6 @@ inline void renderDashboard(EPaper& epaper, SmoothFont& font,
         const int bx = MARGIN + i * slotW + barGap;
         const int bw = slotW - 2 * barGap;
         epaper.fillRect(bx, chartBottom - barH, bw, barH, INK);
-        font.load(FontSize::Tiny);
         drawText(epaper, font, h.uke, bx, chartBottom + 2, FontSize::Tiny);
       }
     }
