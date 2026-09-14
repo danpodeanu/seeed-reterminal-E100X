@@ -8,6 +8,7 @@
 #include <cstring>
 #include <utility>
 
+#include "app_logger.h"
 #include "config.h"
 
 namespace calendar_cache {
@@ -24,7 +25,37 @@ bool ensureMounted(String& failureReason) {
   static bool mounted = false;
   if (!attempted) {
     attempted = true;
-    mounted = SPIFFS.begin(true);
+    uint32_t startedAt = millis();
+    LOG.println("[cache] mounting internal SPIFFS calendar store");
+    LOG.flush();
+    mounted = SPIFFS.begin(false);
+    LOG.printf("[cache] SPIFFS mount %s after %lu ms\n",
+               mounted ? "succeeded" : "failed",
+               static_cast<unsigned long>(millis() - startedAt));
+
+    if (!mounted) {
+      LOG.println(
+          "[cache] SPIFFS mount failed; formatting internal calendar store");
+      LOG.flush();
+      startedAt = millis();
+      const bool formatted = SPIFFS.format();
+      LOG.printf("[cache] SPIFFS format %s after %lu ms\n",
+                 formatted ? "succeeded" : "failed",
+                 static_cast<unsigned long>(millis() - startedAt));
+      if (formatted) {
+        startedAt = millis();
+        mounted = SPIFFS.begin(false);
+        LOG.printf("[cache] SPIFFS remount %s after %lu ms\n",
+                   mounted ? "succeeded" : "failed",
+                   static_cast<unsigned long>(millis() - startedAt));
+      }
+    }
+
+    if (mounted) {
+      LOG.printf("[cache] SPIFFS usage=%u/%u bytes\n",
+                 static_cast<unsigned>(SPIFFS.usedBytes()),
+                 static_cast<unsigned>(SPIFFS.totalBytes()));
+    }
   }
   if (!mounted) failureReason = "Could not mount the internal calendar cache";
   return mounted;
