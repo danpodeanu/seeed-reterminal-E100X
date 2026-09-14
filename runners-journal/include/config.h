@@ -15,6 +15,6 @@ constexpr uint32_t HTTP_TIMEOUT_MS = 30ULL * 1000ULL;
 
 constexpr size_t MAX_DASHBOARD_BODY_BYTES = 64ULL * 1024ULL;
 
-#include "system_config.h"
-
 }  // namespace config
+
+#include "system_config.h"

@@ -10,6 +10,7 @@
 #include "dashboard_fetch.h"
 #include "dashboard_parse.h"
 #include "dashboard_render.h"
+#include "board_pins.h"
 #include "epaper_setup.h"
 #include "hardware.h"
 #include "panel_traits.h"
@@ -112,7 +113,7 @@ void setup() {
   const uint64_t wakePins =
       (cause == ESP_SLEEP_WAKEUP_EXT1) ? esp_sleep_get_ext1_wakeup_status() : 0;
 
-  LOG.begin(115200);
+  LOG.begin(115200, SERIAL_8N1, board::PIN_LOG_RX, board::PIN_LOG_TX);
   wake_report::logWakeEvent(cause, wakePins, true);
 
   // Mount SD early so the smooth font is available for the dashboard.
