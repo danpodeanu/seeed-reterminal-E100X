@@ -2,13 +2,17 @@
 
 #include <ArduinoJson.h>
 #include <FS.h>
+#include <Preferences.h>
 #include <SPIFFS.h>
+#include <esp_partition.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <utility>
 
 #include "app_logger.h"
+#include "calendar_config_schema.h"
 #include "config.h"
 
 namespace calendar_cache {
@@ -18,7 +22,62 @@ constexpr uint32_t kSchemaVersion = 1;
 constexpr const char* kCachePath = "/calendar-cache.json";
 constexpr const char* kTemporaryPath = "/calendar-cache.tmp";
 constexpr const char* kBackupPath = "/calendar-cache.bak";
+constexpr const char* kFilesystemInitializedKey = "cache_fs_init";
 constexpr size_t kMaximumStringBytes = 8192;
+
+enum class PartitionState {
+  Erased,
+  ContainsData,
+  Unavailable,
+};
+
+bool filesystemInitializedMarker() {
+  Preferences prefs;
+  if (!prefs.begin(calendar_config::kNamespace, true)) {
+    LOG.println(
+        "[cache] warning: SPIFFS initialization marker is unavailable");
+    return true;
+  }
+  const bool initialized =
+      prefs.getBool(kFilesystemInitializedKey, false);
+  prefs.end();
+  return initialized;
+}
+
+void markFilesystemInitialized() {
+  Preferences prefs;
+  if (!prefs.begin(calendar_config::kNamespace, false)) {
+    LOG.println(
+        "[cache] warning: could not open SPIFFS initialization marker");
+    return;
+  }
+  if (!prefs.getBool(kFilesystemInitializedKey, false) &&
+      prefs.putBool(kFilesystemInitializedKey, true) == 0) {
+    LOG.println(
+        "[cache] warning: could not save SPIFFS initialization marker");
+  }
+  prefs.end();
+}
+
+PartitionState inspectPartition() {
+  const esp_partition_t* partition = esp_partition_find_first(
+      ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_SPIFFS, nullptr);
+  if (partition == nullptr) return PartitionState::Unavailable;
+
+  uint8_t buffer[1024];
+  for (size_t offset = 0; offset < partition->size;
+       offset += sizeof(buffer)) {
+    const size_t bytes = std::min(
+        sizeof(buffer), static_cast<size_t>(partition->size - offset));
+    if (esp_partition_read(partition, offset, buffer, bytes) != ESP_OK) {
+      return PartitionState::Unavailable;
+    }
+    for (size_t index = 0; index < bytes; ++index) {
+      if (buffer[index] != 0xFF) return PartitionState::ContainsData;
+    }
+  }
+  return PartitionState::Erased;
+}
 
 bool ensureMounted(String& failureReason) {
   static bool attempted = false;
@@ -34,24 +93,58 @@ bool ensureMounted(String& failureReason) {
                static_cast<unsigned long>(millis() - startedAt));
 
     if (!mounted) {
-      LOG.println(
-          "[cache] SPIFFS mount failed; formatting internal calendar store");
+      LOG.println("[cache] retrying SPIFFS mount without formatting");
       LOG.flush();
+      delay(50);
       startedAt = millis();
-      const bool formatted = SPIFFS.format();
-      LOG.printf("[cache] SPIFFS format %s after %lu ms\n",
-                 formatted ? "succeeded" : "failed",
+      mounted = SPIFFS.begin(false);
+      LOG.printf("[cache] SPIFFS retry %s after %lu ms\n",
+                 mounted ? "succeeded" : "failed",
                  static_cast<unsigned long>(millis() - startedAt));
-      if (formatted) {
+    }
+
+    if (!mounted) {
+      const bool initialized = filesystemInitializedMarker();
+      startedAt = millis();
+      const PartitionState partitionState = inspectPartition();
+      const char* partitionLabel =
+          partitionState == PartitionState::Erased
+              ? "erased"
+              : partitionState == PartitionState::ContainsData
+                    ? "contains-data"
+                    : "unavailable";
+      LOG.printf(
+          "[cache] SPIFFS recovery state: initialized=%s partition=%s "
+          "inspection=%lu ms\n",
+          initialized ? "yes" : "no", partitionLabel,
+          static_cast<unsigned long>(millis() - startedAt));
+
+      if (!initialized && partitionState == PartitionState::Erased) {
+        LOG.println(
+            "[cache] SPIFFS is uninitialized and erased; creating calendar "
+            "store");
+        LOG.flush();
         startedAt = millis();
-        mounted = SPIFFS.begin(false);
-        LOG.printf("[cache] SPIFFS remount %s after %lu ms\n",
-                   mounted ? "succeeded" : "failed",
+        const bool formatted = SPIFFS.format();
+        LOG.printf("[cache] SPIFFS format %s after %lu ms\n",
+                   formatted ? "succeeded" : "failed",
                    static_cast<unsigned long>(millis() - startedAt));
+        if (formatted) {
+          startedAt = millis();
+          mounted = SPIFFS.begin(false);
+          LOG.printf("[cache] SPIFFS remount %s after %lu ms\n",
+                     mounted ? "succeeded" : "failed",
+                     static_cast<unsigned long>(millis() - startedAt));
+        }
+      } else {
+        LOG.println(
+            "[cache] SPIFFS will not be formatted; calendar cache disabled "
+            "for this boot");
       }
     }
 
     if (mounted) {
+      markFilesystemInitialized();
       LOG.printf("[cache] SPIFFS usage=%u/%u bytes\n",
                  static_cast<unsigned>(SPIFFS.usedBytes()),
                  static_cast<unsigned>(SPIFFS.totalBytes()));
