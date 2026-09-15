@@ -15,6 +15,10 @@ constexpr uint32_t HTTP_TIMEOUT_MS = 30ULL * 1000ULL;
 
 constexpr size_t MAX_DASHBOARD_BODY_BYTES = 64ULL * 1024ULL;
 
+// How long the paging view stays interactive before timing out and
+// returning to deep sleep (5 minutes of button inactivity).
+constexpr uint32_t PAGING_TIMEOUT_MS = 5ULL * 60ULL * 1000ULL;
+
 }  // namespace config
 
 #include "system_config.h"
