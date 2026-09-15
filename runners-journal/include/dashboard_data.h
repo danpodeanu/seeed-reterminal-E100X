@@ -24,6 +24,7 @@ struct YearSummary {
 struct HistoryEntry {
   String uke;
   float km = 0.0f;
+  bool naa = false;
 };
 
 struct TypeEntry {

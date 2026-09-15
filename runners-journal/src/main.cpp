@@ -47,6 +47,9 @@ void beginPanel() {
 #endif
   epaper_setup::begin(epaper);
   epaper.setRotation(config::PANEL_ROTATION);
+#if RETERMINAL_MODEL == 1005
+  epaper.initGrayMode(GRAY_LEVEL4);
+#endif
   panelStarted = true;
 }
 

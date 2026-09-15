@@ -19,8 +19,10 @@
 
 namespace dashboard_render {
 
-constexpr uint16_t INK = 0x0000;      // panel black
-constexpr uint16_t PAPER = 0xFFFF;   // panel white
+constexpr uint16_t INK = TFT_GRAY_0;        // svart
+constexpr uint16_t PAPER = TFT_GRAY_3;   // hvit
+constexpr uint16_t INK_SECONDARY = TFT_GRAY_1;  // morkkegraa
+constexpr uint16_t INK_FAINT = TFT_GRAY_2;      // lysegraa
 
 constexpr int MARGIN = 16;
 constexpr int LINE_GAP = 6;
@@ -183,6 +185,10 @@ inline void drawRule(TFT_eSPI& epaper, int y) {
   epaper.drawFastHLine(MARGIN, y, config::PANEL_WIDTH - 2 * MARGIN, INK);
 }
 
+inline void drawHairline(TFT_eSPI& epaper, int y) {
+  epaper.drawFastHLine(MARGIN, y, config::PANEL_WIDTH - 2 * MARGIN, INK_FAINT);
+}
+
 inline void drawHeader(TFT_eSPI& epaper, SmoothFont& font,
                        const String& title, const String& oppdatert) {
   int y = MARGIN;
@@ -251,7 +257,7 @@ inline void renderUke(EPaper& epaper, SmoothFont& font,
              config::PANEL_WIDTH - MARGIN - gw, y + 34, FontSize::Small);
   }
   y += 60 + LINE_GAP * 2;
-  drawRule(epaper, y);
+  drawHairline(epaper, y);
   y += LINE_GAP * 2;
 
   // Stats row: total tid + elevation + mot forrige.
@@ -265,7 +271,7 @@ inline void renderUke(EPaper& epaper, SmoothFont& font,
   drawText(epaper, font, "vs forrige", MARGIN, y, FontSize::Small);
   drawRight(epaper, font, data.uke.mot_forrige_km + " km", y, FontSize::Small);
   y += textHeight(epaper, font) + LINE_GAP;
-  drawRule(epaper, y);
+  drawHairline(epaper, y);
   y += LINE_GAP * 2;
 
   // Type breakdown.
@@ -282,7 +288,7 @@ inline void renderUke(EPaper& epaper, SmoothFont& font,
     y += textHeight(epaper, font) + LINE_GAP;
   }
   y += LINE_GAP;
-  drawRule(epaper, y);
+  drawHairline(epaper, y);
   y += LINE_GAP * 2;
 
   // History bar chart (weekly km).
@@ -307,7 +313,7 @@ inline void renderUke(EPaper& epaper, SmoothFont& font,
         const int barH = static_cast<int>(chartH * (h.km / maxKm));
         const int bx = MARGIN + i * slotW + barGap;
         const int bw = slotW - 2 * barGap;
-        epaper.fillRect(bx, chartBottom - barH, bw, barH, INK);
+        epaper.fillRect(bx, chartBottom - barH, bw, barH, h.naa ? INK : INK_SECONDARY);
         drawText(epaper, font, h.uke, bx, chartBottom + 2, FontSize::Tiny);
       }
     }
@@ -335,7 +341,7 @@ inline void renderAar(EPaper& epaper, SmoothFont& font,
              FontSize::Medium);
   }
   y += 60 + LINE_GAP * 2;
-  drawRule(epaper, y);
+  drawHairline(epaper, y);
   y += LINE_GAP * 2;
 
   // History bar chart (weekly km) — taller on this screen since there
@@ -361,7 +367,7 @@ inline void renderAar(EPaper& epaper, SmoothFont& font,
         const int barH = static_cast<int>(chartH * (h.km / maxKm));
         const int bx = MARGIN + i * slotW + barGap;
         const int bw = slotW - 2 * barGap;
-        epaper.fillRect(bx, chartBottom - barH, bw, barH, INK);
+        epaper.fillRect(bx, chartBottom - barH, bw, barH, h.naa ? INK : INK_SECONDARY);
         font.load(FontSize::Tiny);
         drawText(epaper, font, h.uke, bx, chartBottom + 2, FontSize::Tiny);
       }
@@ -398,7 +404,7 @@ inline void renderSiste(EPaper& epaper, SmoothFont& font,
 
     // Separator between runs (except after last).
     if (i + 1 < runsToShow) {
-      drawRule(epaper, y);
+      drawHairline(epaper, y);
       y += LINE_GAP * 2;
     }
   }
@@ -472,7 +478,7 @@ inline void renderJournal(EPaper& epaper, SmoothFont& font,
     }
     y += LINE_GAP;
     if (i + 1 < toShow) {
-      drawRule(epaper, y);
+      drawHairline(epaper, y);
       y += LINE_GAP * 2;
     }
   }

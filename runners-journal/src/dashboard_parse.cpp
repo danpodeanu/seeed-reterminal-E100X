@@ -25,6 +25,7 @@ void parseHistorikk(const JsonArray& arr, std::vector<HistoryEntry>& out) {
     HistoryEntry e;
     e.uke = o["uke"] | "";
     e.km = o["km"] | 0.0f;
+    e.naa = o["naa"] | false;
     out.push_back(std::move(e));
   }
 }
