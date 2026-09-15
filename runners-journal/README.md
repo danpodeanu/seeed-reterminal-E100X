@@ -53,9 +53,25 @@ app falls back to ASCII GFX bitmap fonts (dagnavn vises uten æøå).
 ## Behaviour
 
 On each wake the device connects to WiFi, calls `dashboard()`, parses the
-JSON, renders the dashboard, commits the frame to the panel, then enters
-deep sleep for `neste_oppvakning_s` seconds (server-scheduled wake times:
-06/12/18/22 Europe/Oslo). On WiFi/fetch/parse failure it renders a status
-screen and sleeps for the fallback interval (6 h).
+JSON, and renders a portrait dashboard.
+
+**Timer wake (06/12/18/22 Europe/Oslo):** renders the Uke (week) screen,
+then enters deep sleep until the next scheduled wake. A button press
+during the sleep interval also wakes the device.
+
+**Button wake (any front button):** enters the paging view. UP/DOWN
+navigates between four screens; OK/power returns to deep sleep. The
+paging view times out after 5 minutes of inactivity.
+
+### Screens (knapp-navigert paging)
+
+1. **Uke** — total km, goal %, type breakdown, elevation, time,
+   week-over-week delta, history bar chart.
+2. **År** — total km this year + weekly history bar chart.
+3. **Siste løp** — last 5 runs with km, pace, and elevation.
+4. **Journal** — last 5 runs with notes.
+
+On WiFi/fetch/parse failure it renders a status screen and sleeps for
+the fallback interval (6 h).
 
 License: GPL-2.0 (inherited from upstream danpodeanu/seeed-reterminal-E100X).
