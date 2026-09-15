@@ -12,6 +12,9 @@ void parseWeek(const JsonObject& o, WeekSummary& w) {
   w.antall = o["antall"] | 0;
   w.maal_pct = o["maal_pct"] | 0;
   w.mot_forrige_km = o["mot_forrige_km"] | "";
+  w.total_tid_s = o["total_tid_s"] | 0u;
+  w.total_tid = o["total_tid"] | "";
+  w.elevation_m = o["elevation_m"] | 0;
 }
 
 void parseHistorikk(const JsonArray& arr, std::vector<HistoryEntry>& out) {
@@ -49,6 +52,7 @@ void parseSisteLop(const JsonArray& arr, std::vector<RunEntry>& out) {
     e.type = o["type"] | "";
     e.km = o["km"] | 0.0f;
     e.pace = o["pace"] | "";
+    e.elevation_m = o["elevation_m"] | 0;
     out.push_back(std::move(e));
   }
 }
@@ -85,6 +89,11 @@ bool parse(const String& body, DashboardData& out) {
 
   const JsonObject ukeObj = root["uke"];
   if (!ukeObj.isNull()) parseWeek(ukeObj, out.uke);
+
+  const JsonObject aarObj = root["aar"];
+  if (!aarObj.isNull()) {
+    out.aar.total_km = aarObj["total_km"] | 0.0f;
+  }
 
   const JsonArray historikk = root["historikk"];
   if (!historikk.isNull()) parseHistorikk(historikk, out.historikk);
